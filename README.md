@@ -125,6 +125,18 @@ A downstream application may instead provide its own interface and use the Assem
 
 The API and MCP server must not duplicate document logic. Both call the core operation layer.
 
+## Technology
+
+The engine is implemented in **Rust** and ships as a single static binary with no runtime dependencies, targeting Windows, Linux, and macOS on both x86_64 and ARM64. It was chosen for minimal resource use, deterministic rendering, and zero-friction deployment — including small home-lab hardware.
+
+- Document model: `serde`, with a language-neutral JSON Schema generated via `schemars`
+- Rendering: SVG-first, rasterized with `resvg`/`tiny-skia` — pure Rust, using only explicitly provided font files, so output is reproducible across operating systems and CPU architectures
+- API: embedded Rust crate first, HTTP (`axum`) planned
+- MCP: official Rust SDK, stdio transport first
+- Reference UI: web-based (TypeScript), served as static assets by the same binary
+
+The full decision record, including rejected alternatives, is in [PRD.md](PRD.md) §16.1.
+
 ## Project boundaries
 
 Assemblash is a generic open-source engine. Downstream projects may maintain private:

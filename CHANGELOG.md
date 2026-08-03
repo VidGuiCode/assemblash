@@ -17,6 +17,15 @@ schema change is always noted explicitly.
 - Repository hygiene: `.gitignore`, `.gitattributes`, `.editorconfig`, issue and
   pull request templates.
 
+### Decided
+
+- License: Apache-2.0 (PRD decision 16.11).
+- Versioning: SemVer releases with an independent integer document
+  `schemaVersion` (PRD decision 16.13).
+- Implementation stack: Rust single-binary engine; SVG-first rendering via
+  `resvg`/`tiny-skia`; embedded-then-HTTP API; MCP over stdio
+  (PRD decisions 16.1, 16.2, 16.5, 16.6 — full rationale in PRD §16.1).
+
 ### Notes
 
 - No implementation yet. Nothing here is usable software.

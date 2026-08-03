@@ -699,24 +699,34 @@ Potential deliverables:
 
 ## 14. Technical direction
 
-The implementation language is not fixed by this PRD. The chosen stack MUST support:
+The implementation stack is **Rust** — decided 2026-08-03; the full rationale
+and rejected alternatives are recorded in §16.1. The requirements the stack
+was selected against:
 
-- browser-compatible rendering or a reliable renderer;
+- a reliable, deterministic renderer;
 - typed document schemas;
 - local HTTP or embedded operation access;
 - MCP server implementation;
 - PNG export;
 - testable serialization;
-- Windows and Linux development.
+- Windows, Linux, and macOS support on both x86_64 and ARM64;
+- minimal resource use and single-binary deployment.
 
-The implementation SHOULD evaluate:
+Summary of the chosen direction (details in §16.1):
 
-- an SVG-first renderer for text and vector fidelity;
-- a canvas library for interactive transforms;
-- a shared TypeScript schema if the reference UI and server use the same language;
-- a separate adapter for existing Python/SVG generation workflows where useful.
+- Rust core, shipping as one static binary;
+- `serde` document model with JSON Schema generated via `schemars` — the
+  document format stays language-neutral;
+- SVG-first rendering rasterized with `resvg`/`tiny-skia` (pure Rust,
+  explicit font files only, no system-font dependency);
+- embedded (crate) interface first, `axum` HTTP layer in Phase 2;
+- MCP over stdio via the official Rust SDK;
+- web-based reference UI (TypeScript) served as static assets by the same
+  binary, with UI types generated from the JSON Schema;
+- Python and other languages remain welcome as adapter implementations
+  against the API.
 
-The project MUST avoid selecting a dependency solely because it offers a visually impressive demo. License terms, serialization behavior, export reliability, testability, and agent access are more important.
+The project MUST avoid selecting a dependency solely because it offers a visually impressive demo. License terms, serialization behavior, export reliability, testability, and agent access are more important. Every renderer-level dependency must pass the Phase 0 determinism gate (§16.1) before the project depends on it.
 
 ---
 
@@ -764,12 +774,12 @@ The project MUST avoid selecting a dependency solely because it offers a visuall
 
 These decisions should be resolved before implementation reaches the first public release:
 
-1. TypeScript-only core or a language-neutral API with multiple implementations?
-2. SVG-first, HTML/canvas, or hybrid renderer?
+1. ~~TypeScript-only core or a language-neutral API with multiple implementations?~~ **Resolved:** Rust core with a language-neutral JSON Schema document format (see §16.1).
+2. ~~SVG-first, HTML/canvas, or hybrid renderer?~~ **Resolved:** SVG-first, rasterized with resvg (see §16.1).
 3. Which canvas library, if any, should power the reference UI?
 4. Directory-based JSON documents only, or a packaged `.assemblash` file?
-5. Which local API transport: embedded library, HTTP, or both?
-6. Which MCP transport should the reference server support first?
+5. ~~Which local API transport: embedded library, HTTP, or both?~~ **Resolved:** embedded (core crate) first, HTTP via axum in Phase 2 (see §16.1).
+6. ~~Which MCP transport should the reference server support first?~~ **Resolved:** stdio first (see §16.1).
 7. How should fonts be resolved and reported?
 8. What image formats are supported in the first release?
 9. Which operations are atomic transactions?
@@ -785,6 +795,53 @@ These decisions should be resolved before implementation reaches the first publi
 the explicit patent grant and the §5 contribution clause, which suit a generic
 engine intended to be embedded by downstream applications. Dependency licenses
 must be rechecked against Apache-2.0 as the stack is selected (R8).
+
+**Implementation stack (decisions 1, 2, 5, 6 — resolved 2026-08-03):**
+
+The maintainer set three deciding criteria: lowest possible resource use,
+the easiest possible deployment, and first-class support for x86_64 and ARM64
+across Windows, Linux, and macOS. Single-maintainer iteration speed was
+explicitly deprioritized.
+
+- **Language: Rust.** The engine ships as one static binary (target ~8–15 MB,
+  ~5–10 MB idle memory, millisecond startup) with no runtime, no package
+  manager, and no system dependencies to install. Cross-compilation to
+  x86_64 and aarch64 is native.
+- **Document model:** `serde`-based, with JSON Schema generated via `schemars`,
+  so the document format remains language-neutral even though the reference
+  implementation is Rust. TypeScript types for the reference UI are generated
+  from the JSON Schema.
+- **Renderer: SVG-first.** The document renders to SVG through a pure
+  function, then rasterizes to PNG with `resvg`/`tiny-skia`. This stack is
+  pure Rust — including text shaping (`rustybuzz`) — and uses only explicitly
+  provided font files, never system fonts. This is what makes deterministic,
+  bit-comparable output across operating systems and CPU architectures
+  achievable (NFR-3): there is no platform-specific code path in the rendering
+  pipeline. SVG export (FR-11) falls out of the intermediate format.
+- **Local API:** the core crate is the embedded interface; a thin HTTP layer
+  (`axum`) follows in Phase 2. Both call the same operation layer (§7.2).
+- **MCP:** the official Rust MCP SDK, stdio transport first; HTTP transport
+  may follow.
+- **Reference UI:** web-based (TypeScript) as always intended, shipped as
+  static assets served by the same binary. The UI is a client of the API like
+  any downstream application (§7.1).
+
+Considered and rejected: **TypeScript/Node** (best iteration speed and MCP
+maturity, but a ~100 MB runtime, roughly an order of magnitude more idle
+memory, and per-platform native-binding artifacts — the weakest fit for the
+resource and portability criteria); **Go** (equal single-binary story, but no
+production-grade pure-Go SVG renderer or text shaper — CGo bindings would
+forfeit exactly the painless cross-compilation being optimized for);
+**headless-browser rendering** (output varies across browser versions,
+violating NFR-3, and is heavyweight to deploy).
+
+Accepted trade-offs, recorded deliberately: slower per-feature development,
+Rust compile times, a smaller contributor pool, and a type-generation step
+for the UI instead of a shared TypeScript import. The renderer choice must be
+revalidated at the Phase 0 gate: cross-platform output equivalence, correct
+shaping of non-Latin text, and correct rasterization of at least one blend
+mode and one filter. The named fallback if resvg fails the gate is
+`skia-canvas`-class Skia bindings, re-run through the same gate.
 
 **Versioning policy (decision 13, resolved 2026-08-03):**
 

@@ -41,8 +41,9 @@ If `.ai/` is absent in your checkout, create it; it is intentionally untracked.
   summaries: report what you actually executed, and say plainly what you
   skipped.
 - **Do not resolve an open decision as a side effect.** [PRD §16](PRD.md) lists
-  the unresolved ones — stack, renderer, transports, versioning policy. Draft
-  options in `.ai/decisions/` and let the maintainer choose.
+  which decisions are still open (resolved ones are marked there, with the
+  rationale in §16.1 — the stack is Rust). Draft options for open ones in
+  `.ai/decisions/` and let the maintainer choose.
 - **Do not run `git init`, create remotes, commit, or push unless asked.**
 - **Check changes against the PRD invariants** before proposing them —
   one operation layer, determinism, reversibility, protected layers, the
