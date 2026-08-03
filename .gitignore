@@ -36,6 +36,13 @@ config.local.*
 /tmp/
 /temp/
 
+# --- Rust -------------------------------------------------------------------
+# Build output. Cargo.lock IS committed: this workspace ships a binary, and
+# determinism (NFR-1) starts with a pinned dependency graph.
+/target/
+**/*.rs.bk
+*.pdb
+
 # --- Node / TypeScript ------------------------------------------------------
 node_modules/
 dist/

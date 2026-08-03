@@ -1,0 +1,6 @@
+[toolchain]
+# Pinned: same compiler everywhere is the first requirement of deterministic
+# output (NFR-1). Bumping this is a deliberate change, verified on the full
+# CI matrix.
+channel = "1.92.0"
+components = ["rustfmt", "clippy"]

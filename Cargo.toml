@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/assemblash-core",
+    "crates/assemblash-renderer",
+    "crates/assemblash-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+license = "Apache-2.0"
+repository = "https://github.com/VidGuiCode/assemblash"
+authors = ["VidGuiCode"]
+
+[workspace.dependencies]
+assemblash-core = { path = "crates/assemblash-core", version = "0.1.0" }
+assemblash-renderer = { path = "crates/assemblash-renderer", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# Structured errors, never panics, is a product requirement (NFR-4).
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+
+[profile.release]
+# One small static binary is the deployment story (PRD §14).
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

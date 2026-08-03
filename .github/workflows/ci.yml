@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
 jobs:
   hygiene:
     name: Repository hygiene
@@ -48,24 +52,53 @@ jobs:
             exit 1
           fi
 
-  # ---------------------------------------------------------------------------
-  # Phase 0 (PRD §13) adds the implementation. Once the stack is chosen
-  # (open decision §16.1), add build/lint/test jobs here. The test matrix must
-  # cover Windows and Linux (NFR-2), and tests must pass with no cloud provider
-  # and no paid API (NFR-5).
-  #
-  #  test:
-  #    name: Test (${{ matrix.os }})
-  #    runs-on: ${{ matrix.os }}
-  #    strategy:
-  #      fail-fast: false
-  #      matrix:
-  #        os: [ubuntu-latest, windows-latest]
-  #    steps:
-  #      - uses: actions/checkout@v4
-  #      - ...toolchain setup...
-  #      - run: <install>
-  #      - run: <lint>
-  #      - run: <test>
-  #      - run: <end-to-end smoke test>
-  # ---------------------------------------------------------------------------
+  lint:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  deny:
+    name: Dependency licenses and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Automates PRD R8: license allowlist, advisories, source allowlist.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  test:
+    # Determinism is the product: the same code must build and pass on every
+    # supported target from the first commit (NFR-1, NFR-2).
+    name: Test (${{ matrix.target-name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target-name: linux-aarch64
+          - os: windows-latest
+            target-name: windows-x86_64
+          - os: windows-11-arm
+            target-name: windows-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target-name }}
+      - run: cargo build --workspace --all-targets
+      - run: cargo test --workspace

@@ -1,0 +1,15 @@
+[package]
+name = "assemblash-renderer"
+description = "Deterministic document rendering: Assemblash document to SVG to PNG"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+assemblash-core.workspace = true
+
+[lints]
+workspace = true
