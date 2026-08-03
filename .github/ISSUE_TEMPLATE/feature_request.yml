@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a capability for the engine or an adapter.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing: check `PRD.md` §4 (non-goals) and §16 (open decisions).
+        Assemblash is deliberately smaller than a full design tool.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is blocked or unreasonably hard today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+      description: What should exist, and how would a human, a script, and an agent each use it?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: placement
+    attributes:
+      label: Where does this belong?
+      description: The core stays generic; product-specific behavior belongs in an adapter.
+      options:
+        - Generic engine (core / API / MCP)
+        - Optional adapter
+        - Reference UI only
+        - Not sure — needs discussion
+    validations:
+      required: true
+
+  - type: input
+    id: requirement
+    attributes:
+      label: Related PRD requirement
+      placeholder: "e.g. FR-7, NFR-3, use case C — or 'none, this is new scope'"
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Effect on project constraints
+      description: |
+        Does it affect determinism, undo/reversibility, protected layers, the
+        filesystem boundary, the document schema, or offline operation?
+        Does it add a dependency? If so, name the dependency's license.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

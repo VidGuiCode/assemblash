@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Required community files are present
+        run: |
+          missing=0
+          for f in README.md PRD.md AGENTS.md LICENSE NOTICE CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md CHANGELOG.md .gitignore .gitattributes; do
+            if [ ! -f "$f" ]; then
+              echo "::error file=$f::required file is missing"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: No private or generated content committed
+        run: |
+          # PRD R5: private brand kits, credentials, and customer content must
+          # never reach the public repository.
+          bad=$(git ls-files | grep -Ei '(^|/)(private|brand|brandkits|customer-assets|downstream)/|(^|/)\.env($|\.)|\.(pem|key|p12|pfx)$|(^|/)node_modules/' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::files that must not be committed were found:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: No AI working directory committed
+        run: |
+          # .ai/ is local-only scratch space for agent handoffs, roadmaps, notes.
+          bad=$(git ls-files | grep -E '^\.ai/' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::.ai/ is local-only and must stay untracked:"
+            echo "$bad"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Phase 0 (PRD §13) adds the implementation. Once the stack is chosen
+  # (open decision §16.1), add build/lint/test jobs here. The test matrix must
+  # cover Windows and Linux (NFR-2), and tests must pass with no cloud provider
+  # and no paid API (NFR-5).
+  #
+  #  test:
+  #    name: Test (${{ matrix.os }})
+  #    runs-on: ${{ matrix.os }}
+  #    strategy:
+  #      fail-fast: false
+  #      matrix:
+  #        os: [ubuntu-latest, windows-latest]
+  #    steps:
+  #      - uses: actions/checkout@v4
+  #      - ...toolchain setup...
+  #      - run: <install>
+  #      - run: <lint>
+  #      - run: <test>
+  #      - run: <end-to-end smoke test>
+  # ---------------------------------------------------------------------------

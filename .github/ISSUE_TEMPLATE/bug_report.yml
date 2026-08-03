@@ -1,0 +1,83 @@
+name: Bug report
+description: Something implemented does not behave as documented.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Assemblash is pre-alpha. Please check first that the behavior is actually
+        implemented — a feature described in `PRD.md` is a plan, not a promise.
+
+        **Do not report security issues here.** See `SECURITY.md`.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Document model / schema
+        - Core operations
+        - Renderer
+        - Export (PNG/SVG)
+        - Persistence (save/load)
+        - Local API
+        - MCP server
+        - Reference UI
+        - Adapter
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what occurred instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Include the smallest document, API call, or MCP tool call that triggers it.
+        Please redact any private or customer content before pasting.
+      placeholder: |
+        1. Create a document with ...
+        2. Apply operation ...
+        3. Export ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: document
+    attributes:
+      label: Minimal document or request (optional)
+      description: A trimmed `document.json`, API request, or MCP tool call. Neutral content only.
+      render: json
+
+  - type: textarea
+    id: errors
+    attributes:
+      label: Error output
+      description: Structured error responses, logs, or stack traces.
+      render: shell
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "e.g. Windows 11, Node 22.3.0, commit abc1234"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true
+        - label: I have removed any private, brand, or customer content from this report.
+          required: true

@@ -1,0 +1,105 @@
+# --- Secrets and local configuration ---------------------------------------
+# Never commit credentials, provider keys, or downstream deployment config.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+credentials.*
+config.local.*
+
+# --- AI / local working directory -------------------------------------------
+# Handoffs, roadmaps, goals, decision drafts, research notes. Local only —
+# never published. See .ai/README.md.
+/.ai/
+
+# --- Private / downstream content ------------------------------------------
+# The public engine must stay neutral (see PRD R5). Keep brand kits, customer
+# assets, and downstream templates out of this repository.
+/private/
+/brand/
+/brandkits/
+/customer-assets/
+/downstream/
+
+# --- Assemblash runtime output ---------------------------------------------
+# Generated documents, previews, exports, and asset caches.
+/out/
+/output/
+/exports/
+/previews/
+/renders/
+/.assemblash-cache/
+/tmp/
+/temp/
+
+# --- Node / TypeScript ------------------------------------------------------
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+.vite/
+coverage/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# --- Python (optional adapters / scripts) -----------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- Editors and tooling ----------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+.idea/
+*.swp
+*.swo
+
+# --- Agent tool config ------------------------------------------------------
+# AGENTS.md is committed on purpose (shared project rules). Tool-specific
+# pointer files and per-machine tool state are not.
+/CLAUDE.md
+/GEMINI.md
+/.cursorrules
+.claude/settings.local.json
+.claude/shell-snapshots/
+.claude/todos/
+.codex/
+.cursor/
+.aider*
+.gemini/
+
+# --- Operating system -------------------------------------------------------
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Nextcloud / ownCloud sync artifacts ------------------------------------
+# This working copy lives inside a synced folder; keep sync debris out of git.
+*.~lock*
+*_conflict-*
+*(conflicted copy*)*
+.nextcloudsync.log
+.owncloudsync.log
+._sync_*.db
+.sync_*.db*
+.sync_*.db-*
