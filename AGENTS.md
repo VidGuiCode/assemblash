@@ -22,8 +22,9 @@ definition only.
 ## Where working notes go
 
 Handoffs, roadmaps, goals, decision drafts, and research notes belong in
-**`.ai/`**, which is gitignored and local to each working copy. See
-[.ai/README.md](.ai/README.md) for the layout.
+**`.ai/`**, which is gitignored and local to each working copy — it is never
+part of this repository, so you will not find it on GitHub. In a working copy
+that has one, `.ai/README.md` documents the layout.
 
 - **Do not create plans, notes, or session summaries at the repository root.**
 - Read `.ai/handoffs/` (most recent first) and `.ai/goals/` when starting.
@@ -32,7 +33,9 @@ Handoffs, roadmaps, goals, decision drafts, and research notes belong in
 - Never cite or quote `.ai/` content in commit messages, issues, pull requests,
   or any committed file — it does not exist for anyone else.
 
-If `.ai/` is absent in your checkout, create it; it is intentionally untracked.
+If `.ai/` is absent in your checkout, create it (a `README.md` describing the
+subfolders, plus `handoffs/`, `goals/`, `decisions/`, `roadmap/`, `skills/`,
+`research/`, `notes/`, `scratch/`); it is intentionally untracked.
 
 ## Rules
 
