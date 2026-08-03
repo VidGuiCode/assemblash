@@ -774,10 +774,30 @@ These decisions should be resolved before implementation reaches the first publi
 8. What image formats are supported in the first release?
 9. Which operations are atomic transactions?
 10. What is the minimum audit/history format?
-11. Which open-source license fits the dependency graph and contribution goals?
+11. ~~Which open-source license fits the dependency graph and contribution goals?~~ **Resolved:** Apache-2.0 (see §16.1 below).
 12. Should optional provider adapters live in this repository or separate repositories?
-13. What versioning policy applies to the document schema and API?
+13. ~~What versioning policy applies to the document schema and API?~~ **Resolved:** see §16.1 below.
 14. What security profile is required for home-lab deployment?
+
+### 16.1 Resolved decisions
+
+**License (decision 11, resolved 2026-08-03):** Apache License 2.0. Chosen for
+the explicit patent grant and the §5 contribution clause, which suit a generic
+engine intended to be embedded by downstream applications. Dependency licenses
+must be rechecked against Apache-2.0 as the stack is selected (R8).
+
+**Versioning policy (decision 13, resolved 2026-08-03):**
+
+- Releases use Semantic Versioning `MAJOR.MINOR.PATCH` (for example `v0.2.350`
+  or `v0.12.2`). Pre-1.0, MINOR may include breaking changes, as SemVer allows.
+- The document `schemaVersion` is an **independent integer**, decoupled from
+  the release version. An application release may or may not introduce a new
+  schema version; a schema change always increments `schemaVersion` and MUST
+  ship with a migration path (FR-9).
+- Every export records both the renderer/application version and the document
+  schema version (FR-11).
+- The public API is versioned with the application release; breaking API
+  changes after 1.0 require a MAJOR increment.
 
 ---
 

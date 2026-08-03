@@ -101,6 +101,14 @@ documentation and an example (PRD NFR-7).
 Do not document a capability as supported until it is implemented and verified.
 The README's claims are held to the same rule.
 
+## Versioning
+
+Releases follow [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
+The document `schemaVersion` is an independent integer: a schema change always
+increments it and must ship with a migration path, regardless of the release
+version. If your change touches the document schema, say so in the PR and
+include the migration. See PRD §16.1 for the full policy.
+
 ## Commit and PR conventions
 
 - Write commit messages in the imperative mood: "add group transform
