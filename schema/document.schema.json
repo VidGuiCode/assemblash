@@ -1,0 +1,427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Document",
+  "description": "A whole document: canvas, imported assets, and the layer stack.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "description": "Schema version of this document, independent of the release version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "id": {
+      "description": "Stable id, `doc_<ULID>`.",
+      "$ref": "#/$defs/DocumentId"
+    },
+    "name": {
+      "description": "Human-facing name. Not an identifier.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "canvas": {
+      "description": "Canvas the layers are composed on.",
+      "$ref": "#/$defs/Canvas"
+    },
+    "assets": {
+      "description": "Assets imported into the project, referenced by image layers.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Asset"
+      },
+      "default": []
+    },
+    "layers": {
+      "description": "Layers, bottom first: array order is z-order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Layer"
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "canvas"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "DocumentId": {
+      "description": "Identifier of a document.",
+      "type": "string"
+    },
+    "Canvas": {
+      "description": "The fixed-size surface layers are composed on.",
+      "type": "object",
+      "properties": {
+        "width": {
+          "description": "Width in pixels; must be positive and finite.",
+          "type": "number",
+          "format": "double"
+        },
+        "height": {
+          "description": "Height in pixels; must be positive and finite.",
+          "type": "number",
+          "format": "double"
+        },
+        "background": {
+          "description": "Background fill. `None` means transparent.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "additionalProperties": true
+    },
+    "Color": {
+      "description": "An sRGB colour, `#rrggbb` or `#rrggbbaa`.\n\nStored as written so a document round-trips exactly; validation checks the\nshape and [`Color::to_rgba`] parses it.",
+      "type": "string"
+    },
+    "Asset": {
+      "description": "An imported file living under the project's `assets/` directory.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Stable id, `asset_<ULID>`.",
+          "$ref": "#/$defs/AssetId"
+        },
+        "path": {
+          "description": "Path relative to the project's `assets/` directory, `/`-separated.",
+          "type": "string"
+        },
+        "hash": {
+          "description": "Content hash of the file, `sha256:<hex>`. Detects silent edits.",
+          "type": "string"
+        },
+        "mediaType": {
+          "description": "Media type, e.g. `image/png`.",
+          "type": "string"
+        },
+        "width": {
+          "description": "Pixel width, when known.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "height": {
+          "description": "Pixel height, when known.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "hash",
+        "mediaType"
+      ],
+      "additionalProperties": true
+    },
+    "AssetId": {
+      "description": "Identifier of an imported asset.",
+      "type": "string"
+    },
+    "Layer": {
+      "description": "One layer: the properties every layer has, plus its kind-specific payload.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Stable id, `layer_<ULID>`.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "name": {
+          "description": "Human-facing name. Not an identifier.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transform": {
+          "description": "Placement in the parent's coordinate space.",
+          "$ref": "#/$defs/Transform"
+        },
+        "opacity": {
+          "description": "Opacity from 0 (invisible) to 1 (opaque).",
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        },
+        "visible": {
+          "description": "Whether the layer is rendered at all.",
+          "type": "boolean",
+          "default": true
+        },
+        "locked": {
+          "description": "Whether editing tools should refuse to move this layer.",
+          "type": "boolean",
+          "default": false
+        },
+        "blendMode": {
+          "description": "Reserved (v0.5): only `normal` is rendered today; other values\nround-trip but do not yet change output.",
+          "$ref": "#/$defs/BlendMode",
+          "default": "normal"
+        },
+        "effects": {
+          "description": "Reserved (v1.x effect stack): preserved verbatim, never interpreted.",
+          "type": "array",
+          "items": true,
+          "default": []
+        },
+        "constraints": {
+          "description": "Reserved (layout constraints): preserved verbatim, never interpreted."
+        }
+      },
+      "required": [
+        "id",
+        "transform"
+      ],
+      "oneOf": [
+        {
+          "description": "A run of text in a single style.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "text"
+            }
+          },
+          "$ref": "#/$defs/TextLayer",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "An imported image.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "image"
+            }
+          },
+          "$ref": "#/$defs/ImageLayer",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A container transforming its children as a unit.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "group"
+            }
+          },
+          "$ref": "#/$defs/GroupLayer",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "LayerId": {
+      "description": "Identifier of a layer.",
+      "type": "string"
+    },
+    "Transform": {
+      "description": "Position, size, and rotation of a layer in its parent's coordinate space.",
+      "type": "object",
+      "properties": {
+        "x": {
+          "description": "Left edge.",
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "description": "Top edge.",
+          "type": "number",
+          "format": "double"
+        },
+        "width": {
+          "description": "Box width; must be finite and not negative.",
+          "type": "number",
+          "format": "double"
+        },
+        "height": {
+          "description": "Box height; must be finite and not negative.",
+          "type": "number",
+          "format": "double"
+        },
+        "rotation": {
+          "description": "Clockwise rotation in degrees about the box centre.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "additionalProperties": true
+    },
+    "BlendMode": {
+      "description": "How a layer composites onto what is beneath it.\n\nReserved beyond `Normal` until v0.5: other values round-trip but render as\n`Normal` today.",
+      "oneOf": [
+        {
+          "description": "Plain source-over compositing.",
+          "type": "string",
+          "const": "normal"
+        },
+        {
+          "description": "Reserved (v0.5).",
+          "type": "string",
+          "const": "multiply"
+        },
+        {
+          "description": "Reserved (v0.5).",
+          "type": "string",
+          "const": "screen"
+        }
+      ]
+    },
+    "TextAlign": {
+      "description": "Horizontal text alignment inside the layer box.",
+      "oneOf": [
+        {
+          "description": "Aligned to the left edge.",
+          "type": "string",
+          "const": "left"
+        },
+        {
+          "description": "Centred horizontally.",
+          "type": "string",
+          "const": "center"
+        },
+        {
+          "description": "Aligned to the right edge.",
+          "type": "string",
+          "const": "right"
+        }
+      ]
+    },
+    "TextLayer": {
+      "description": "Text content and its single style. Per-run styling arrives in v2.0.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "The text. `\\n` starts a new line.",
+          "type": "string"
+        },
+        "fontFamily": {
+          "description": "Font family name, resolved against the caller's font set.",
+          "type": "string"
+        },
+        "fontSize": {
+          "description": "Font size in pixels; must be positive and finite.",
+          "type": "number",
+          "format": "double"
+        },
+        "color": {
+          "description": "Fill colour.",
+          "$ref": "#/$defs/Color",
+          "default": "#000000"
+        },
+        "align": {
+          "description": "Horizontal alignment within the layer box.",
+          "$ref": "#/$defs/TextAlign",
+          "default": "left"
+        },
+        "lineHeight": {
+          "description": "Line height as a multiple of the font size.",
+          "type": "number",
+          "format": "double",
+          "default": 1.2
+        },
+        "runs": {
+          "description": "Reserved (v2.0 styled runs): preserved verbatim, never interpreted.",
+          "type": "array",
+          "items": true,
+          "default": []
+        }
+      },
+      "required": [
+        "text",
+        "fontFamily",
+        "fontSize"
+      ],
+      "additionalProperties": true
+    },
+    "ImageFit": {
+      "description": "How an image is scaled into its box.",
+      "oneOf": [
+        {
+          "description": "Stretch to the box, ignoring aspect ratio.",
+          "type": "string",
+          "const": "fill"
+        },
+        {
+          "description": "Scale down to fit inside the box, keeping aspect ratio.",
+          "type": "string",
+          "const": "contain"
+        },
+        {
+          "description": "Scale to cover the box, keeping aspect ratio, cropping the overflow.",
+          "type": "string",
+          "const": "cover"
+        }
+      ]
+    },
+    "ImageLayer": {
+      "description": "A reference to an imported asset, drawn into the layer box.",
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "Id of an asset in the document's `assets` list.",
+          "$ref": "#/$defs/AssetId"
+        },
+        "fit": {
+          "description": "How the image fills its box.",
+          "$ref": "#/$defs/ImageFit",
+          "default": "fill"
+        }
+      },
+      "required": [
+        "asset"
+      ],
+      "additionalProperties": true
+    },
+    "GroupLayer": {
+      "description": "A group of layers, transformed as a unit.",
+      "type": "object",
+      "properties": {
+        "children": {
+          "description": "Children, bottom first, positioned relative to the group.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Layer"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

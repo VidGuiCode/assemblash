@@ -9,6 +9,18 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+schemars = "1.2.2"
+serde = { version = "1.0.229", features = ["derive"] }
+# preserve_order: unknown nested objects keep their key order on the way back
+# out. float_roundtrip: without it, parsing a float can land on a different
+# f64 than the one written — a saved-then-reloaded document would render
+# differently, which breaks the determinism the product is built on (NFR-1).
+serde_json = { version = "1.0.151", features = ["preserve_order", "float_roundtrip"] }
+thiserror = "2.0.19"
+ulid = "3.0.0"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+proptest = "1.11.0"
