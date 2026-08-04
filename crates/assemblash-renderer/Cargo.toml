@@ -10,7 +10,12 @@ authors.workspace = true
 
 [dependencies]
 assemblash-core.workspace = true
+png = "0.18.1"
+resvg = "0.48.1"
 thiserror = "2.0.19"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+png = "0.18.1"

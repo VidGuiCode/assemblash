@@ -37,4 +37,34 @@ pub enum RenderError {
     /// A colour that validation would have rejected reached the renderer.
     #[error("invalid color {0}")]
     InvalidColor(String),
+
+    /// A font file could not be read.
+    #[error("reading font {path}: {source}")]
+    FontFile {
+        /// File involved.
+        path: std::path::PathBuf,
+        /// Underlying cause.
+        source: std::io::Error,
+    },
+
+    /// The SVG handed to the rasterizer could not be parsed.
+    #[error("the SVG could not be parsed: {0}")]
+    MalformedSvg(String),
+
+    /// A render scale that is zero, negative, or not a number.
+    #[error("render scale must be a positive finite number, got {0}")]
+    InvalidScale(f32),
+
+    /// The requested pixel size cannot be allocated.
+    #[error("cannot rasterize {width}x{height} pixels")]
+    CanvasTooLarge {
+        /// Requested width.
+        width: u32,
+        /// Requested height.
+        height: u32,
+    },
+
+    /// The PNG encoder or decoder refused the data.
+    #[error("PNG encoding failed: {0}")]
+    PngEncoding(String),
 }

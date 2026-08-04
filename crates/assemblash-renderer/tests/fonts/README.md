@@ -1,0 +1,31 @@
+# Test fonts
+
+Subsets of Noto fonts, used as fixtures so that rendering tests depend only on
+files in this repository — never on a font installed on the machine running
+them. Determinism (NFR-1) is meaningless if the font can vary.
+
+| File | Upstream | Covers |
+| ---- | -------- | ------ |
+| `NotoSans-Subset.ttf` | [notofonts/latin-greek-cyrillic](https://github.com/notofonts/notofonts.github.io), `NotoSans-Regular.ttf` | ASCII plus combining diacritics |
+| `NotoSansArabic-Subset.ttf` | [notofonts/arabic](https://github.com/notofonts/notofonts.github.io), `NotoSansArabic-Regular.ttf` | the Arabic sample strings |
+| `NotoSansJP-Subset.ttf` | [google/fonts](https://github.com/google/fonts/tree/main/ofl/notosansjp), `NotoSansJP[wght].ttf` instanced at `wght=400` | the Japanese sample strings |
+
+Each file is a subset of the upstream release covering only the characters the
+tests use — 67 KB in total instead of about 10 MB. Layout features are kept
+(`--layout-features='*'`), so shaping behaviour such as Arabic joining is
+preserved.
+
+## Licence
+
+The Noto fonts are licensed under the SIL Open Font License 1.1, included here
+as `OFL.txt`. The upstream copyright notices carry no Reserved Font Name, so
+these subsets keep the original family names.
+
+## Rebuilding
+
+`subset.py` regenerates the subsets. It expects the upstream files in the
+working directory:
+
+```sh
+python subset.py
+```
