@@ -248,7 +248,77 @@ pub fn check_before_parsing(source: &str) -> Result<(), SvgImportError> {
     if source.contains("<!DOCTYPE") || source.contains("<!doctype") {
         return Err(SvgImportError::DoctypeDeclared);
     }
+    // Depth is checked here, by scanning the text, rather than while walking
+    // the parsed tree — because the parser is what dies first. A few hundred
+    // bytes of nested `<g>` elements overflows the stack inside
+    // `roxmltree::Document::parse`, and a stack overflow aborts the process:
+    // no error type can report it and no caller can recover from it. The only
+    // defence is never to hand the parser a file that deep.
+    if max_nesting_depth(source) > MAX_DEPTH {
+        return Err(SvgImportError::TooDeep);
+    }
     Ok(())
+}
+
+/// Upper bound on how deeply the markup nests, from a scan of the text.
+///
+/// Deliberately approximate: it does not validate the XML, it only refuses to
+/// be surprised by it. Quoted attribute values are tracked so that a `>`
+/// inside one does not end a tag early.
+fn max_nesting_depth(source: &str) -> usize {
+    let bytes = source.as_bytes();
+    let mut depth: usize = 0;
+    let mut deepest = 0;
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] != b'<' {
+            index += 1;
+            continue;
+        }
+
+        match bytes.get(index + 1) {
+            // A closing tag.
+            Some(b'/') => {
+                depth = depth.saturating_sub(1);
+                index = end_of_tag(bytes, index);
+            }
+            // A comment, CDATA, or processing instruction: no nesting.
+            Some(b'!' | b'?') => index = end_of_tag(bytes, index),
+            _ => {
+                let end = end_of_tag(bytes, index);
+                // `<tag/>` opens and closes at once.
+                let self_closing = end > 0 && bytes.get(end - 1) == Some(&b'/');
+                if !self_closing {
+                    depth += 1;
+                    deepest = deepest.max(depth);
+                }
+                index = end;
+            }
+        }
+        index += 1;
+    }
+
+    deepest
+}
+
+/// Index of the `>` that ends the tag starting at `start`, or the end of the
+/// input.
+fn end_of_tag(bytes: &[u8], start: usize) -> usize {
+    let mut quote: Option<u8> = None;
+    let mut index = start + 1;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        match quote {
+            Some(open) if byte == open => quote = None,
+            Some(_) => {}
+            None if byte == b'"' || byte == b'\'' => quote = Some(byte),
+            None if byte == b'>' => return index,
+            None => {}
+        }
+        index += 1;
+    }
+    bytes.len()
 }
 
 /// Rewrites an SVG as the subset of itself that is safe to embed.
@@ -500,6 +570,41 @@ mod tests {
             sanitize("<svg><unclosed>"),
             Err(SvgImportError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn nesting_depth_is_measured_without_parsing() {
+        assert_eq!(max_nesting_depth("<svg><g><rect/></g></svg>"), 2);
+        assert_eq!(max_nesting_depth("<svg/>"), 0);
+        assert_eq!(max_nesting_depth("<a><b/></a><c><d><e/></d></c>"), 2);
+        // A `>` inside an attribute value must not end the tag early.
+        assert_eq!(max_nesting_depth(r#"<svg title="a > b"><g/></svg>"#), 1);
+        // Comments and declarations do not nest.
+        assert_eq!(
+            max_nesting_depth("<?xml version=\"1.0\"?><!-- <g> --><svg/>"),
+            0
+        );
+    }
+
+    #[test]
+    fn deep_nesting_is_refused_before_the_parser_sees_it() {
+        // The parser overflows the stack on input this deep, and a stack
+        // overflow aborts the process — so this check has to happen first.
+        let deep = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{}{}</svg>",
+            "<g>".repeat(200),
+            "</g>".repeat(200)
+        );
+        assert_eq!(check_before_parsing(&deep), Err(SvgImportError::TooDeep));
+        assert_eq!(sanitize(&deep), Err(SvgImportError::TooDeep));
+
+        // Ordinary nesting is unaffected.
+        let shallow = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{}{}</svg>",
+            "<g>".repeat(10),
+            "</g>".repeat(10)
+        );
+        assert!(sanitize(&shallow).is_ok());
     }
 
     #[test]
