@@ -10,6 +10,64 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-04
+
+History and the safety core. Every mutation is now recorded, reversible, and
+refusable.
+
+Document `schemaVersion`: **1** (unchanged — `version`, `protected`, and
+`readOnly` are additive with defaults, and documents written by 0.1.0 and
+0.2.0 still load unchanged).
+
+### Added
+
+- Append-only journal at `history/journal.jsonl`: one JSON object per line,
+  recording the operation, the actor kind (`human`, `agent`, `script`,
+  `adapter`), a timestamp, and the layers touched (PRD §10.5). It is never
+  rewritten, so it stays greppable and cannot be quietly revised.
+- Undo and redo, across restarts. Rebuilding a state takes the nearest
+  snapshot and replays operations forward, reusing the ids the journal
+  recorded — which is what makes undo byte-identical rather than merely
+  equivalent.
+- Transaction ids on every entry, so a write can be undone by id (FR-13).
+- `Session`: opening a project takes a lock file, checks expected versions
+  (PRD §10.3), and orders writes so a crash cannot lose work.
+- Document `version`, incremented per mutation. A caller that passes the
+  version it last read gets a structured conflict instead of overwriting work
+  it never saw.
+- Layer `protected` and `readOnly` flags (PRD §10.2), enforced in the
+  operation layer. Deleting a group is refused if any layer inside it is
+  protected.
+- `assemblash undo`, `redo`, `history`, and `unlock`; `--actor`,
+  `--actor-name`, and `--expect-version` on the editing commands.
+
+### Verified
+
+- **Apply then undo produces a byte-identical document**, including after
+  closing and reopening the project, and for arbitrary-length histories.
+- **A protected layer rejects every mutation** — delete, move, resize,
+  rotate, rename, show/hide, lock, group, reorder — and the document is
+  unchanged after each refusal (MVP criterion 11).
+- **A process killed mid-write recovers cleanly**, on Windows and Linux,
+  x86_64 and aarch64. The test aborts a real `assemblash` process at an exact
+  point in the write path — after the journal append, and between writing the
+  temporary document file and renaming it — then reopens the project and
+  checks nothing was lost or corrupted.
+
+### Notes
+
+- There is deliberately **no operation to set `protected` or `readOnly`**. An
+  agent that could unprotect a layer is an agent that is not held by
+  protection at all; the flags are set in the document, and later by an
+  authorized surface.
+- Opening a project reconciles against the document's recorded version rather
+  than by comparing content, so editing `document.json` by hand remains
+  supported (FR-9). Hand edits are not in the journal, so they are not part of
+  undo.
+- Asset import is not undoable: reversing a file copy would mean deciding
+  whether to delete the user's file.
+- `select` is still not implemented — 13 of the 14 operations FR-7 lists.
+
 ## [0.2.0] — 2026-08-04
 
 The full layer model. Every mutation of a document now goes through one
