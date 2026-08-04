@@ -16,6 +16,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 # f64 than the one written — a saved-then-reloaded document would render
 # differently, which breaks the determinism the product is built on (NFR-1).
 serde_json = { version = "1.0.151", features = ["preserve_order", "float_roundtrip"] }
+sha2 = "0.11.0"
 thiserror = "2.0.19"
 ulid = "3.0.0"
 
@@ -24,3 +25,4 @@ workspace = true
 
 [dev-dependencies]
 proptest = "1.11.0"
+tempfile = "3.27.0"
