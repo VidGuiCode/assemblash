@@ -104,6 +104,8 @@ dependencies = [
  "assemblash-core",
  "png",
  "resvg",
+ "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
