@@ -388,6 +388,9 @@ fn layout_commands_align_and_report_through_the_binary() {
     // The layout change is in the audit trail, and undoable like anything else.
     let history = run(&["history", project_arg]);
     assert!(history.contains("layout-test"), "{history}");
+    // The audit trail names the operation, rather than calling everything it
+    // does not recognise "operation".
+    assert!(history.contains("align"), "{history}");
     run(&["undo", project_arg]);
     let after_undo = run(&["show", project_arg]);
     let restored: serde_json::Value = serde_json::from_str(&after_undo).unwrap();

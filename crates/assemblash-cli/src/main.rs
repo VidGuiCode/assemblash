@@ -830,6 +830,12 @@ fn operation_name(operation: &Operation) -> &'static str {
         Operation::SetVisible { .. } => "setVisible",
         Operation::SetLocked { .. } => "setLocked",
         Operation::Rename { .. } => "rename",
+        Operation::Align { .. } => "align",
+        Operation::CenterOnCanvas { .. } => "centerOnCanvas",
+        Operation::Distribute { .. } => "distribute",
+        Operation::SnapTo { .. } => "snapTo",
+        // Operation is non-exhaustive, so history written by a newer build
+        // still lists rather than refusing to print.
         _ => "operation",
     }
 }

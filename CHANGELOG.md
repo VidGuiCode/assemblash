@@ -10,6 +10,15 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-08-04
+
+### Fixed
+
+- `assemblash history` printed `operation` for the layout operations instead
+  of naming them. The audit trail is meant to say what was done, so a fallback
+  label for operations the printer had not been taught about defeated the
+  point. Found by using the released 0.4.0 binary.
+
 ## [0.4.0] — 2026-08-04
 
 Layout operations. Typed geometry an agent can use instead of guessing at
