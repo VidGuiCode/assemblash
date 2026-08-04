@@ -72,7 +72,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "assemblash-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assemblash-core",
  "assemblash-renderer",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proptest",
  "roxmltree 0.21.1",
@@ -100,7 +100,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-renderer"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assemblash-core",
  "png",

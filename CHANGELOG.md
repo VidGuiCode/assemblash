@@ -10,6 +10,53 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-04
+
+Layout operations. Typed geometry an agent can use instead of guessing at
+positions (R2).
+
+Document `schemaVersion`: **1** (unchanged — this milestone adds operations,
+not fields).
+
+### Added
+
+- `Align` (left, right, top, bottom, centre horizontally, centre vertically),
+  `CenterOnCanvas`, `Distribute`, and `SnapTo`, applied through the operation
+  layer like everything else: validated, journalled, and undoable.
+- `get_bounding_box` and `find_overlaps` as read-only queries returning data.
+  They are not operations and are not journalled.
+- `assemblash align`, `center`, `distribute`, `snap`, `bounds`, and
+  `overlaps`.
+- Bounding boxes now account for rotation, by taking the extent of a layer's
+  rotated corners. Grouping uses the same maths, so wrapping a tilted layer no
+  longer produces a container too small to hold it — the approximation 0.2
+  left behind with a note.
+
+### Verified
+
+- Aligning is idempotent, is deterministic across identical documents, and
+  never changes a width, a height, or a rotation.
+- Centring puts the set's bounding box on the canvas centre and keeps the
+  layers' positions relative to each other.
+- Distributing leaves equal gaps whatever order the ids arrive in.
+- `find_overlaps` agrees with a brute-force check, is symmetric, and never
+  reports a layer against itself.
+- Every layout operation undoes to a byte-identical document.
+
+### Notes
+
+- Three behaviours the property tests forced, each documented where it lives:
+  movements below a billionth of a pixel are not movements (otherwise
+  aligning twice never settles); distribution measures its span from the
+  extent of all the layers, not the first and last in sorted order; and gaps
+  are never negative, so layers that do not fit end up touching rather than
+  being reordered.
+- A layer inside a **rotated** group is refused with a typed error rather than
+  placed wrongly. This build composes translations; a position quietly wrong
+  by a few degrees would be worse than saying no.
+- Layout operations take explicit `ids` lists and do not use a selection.
+  `select` remains unimplemented — 13 of the 14 operations FR-7 lists.
+
 ## [0.3.0] — 2026-08-04
 
 History and the safety core. Every mutation is now recorded, reversible, and
