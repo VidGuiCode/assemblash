@@ -227,7 +227,11 @@ pub(super) struct Bounds {
     pub(super) height: f64,
 }
 
-/// Bounding box of a set of layers, by their unrotated boxes.
+/// Bounding box of a set of layers, by the extent they actually occupy.
+///
+/// A rotated layer is boxed by its rotated corners, not by its unrotated
+/// rectangle — otherwise grouping a tilted layer would produce a container
+/// too small to hold it.
 pub(super) fn bounding_box(layers: &[Layer]) -> Bounds {
     let mut left = f64::INFINITY;
     let mut top = f64::INFINITY;
@@ -235,10 +239,11 @@ pub(super) fn bounding_box(layers: &[Layer]) -> Bounds {
     let mut bottom = f64::NEG_INFINITY;
     for layer in layers {
         let t = &layer.transform;
-        left = left.min(t.x);
-        top = top.min(t.y);
-        right = right.max(t.x + t.width);
-        bottom = bottom.max(t.y + t.height);
+        let extent = crate::layout::rotated_bounds(t.x, t.y, t.width, t.height, t.rotation);
+        left = left.min(extent.x);
+        top = top.min(extent.y);
+        right = right.max(extent.right());
+        bottom = bottom.max(extent.bottom());
     }
     if !left.is_finite() {
         return Bounds {

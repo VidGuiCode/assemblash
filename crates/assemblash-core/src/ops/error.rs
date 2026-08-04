@@ -107,6 +107,10 @@ pub enum OpError {
         operation: &'static str,
     },
 
+    /// A layout question could not be answered.
+    #[error(transparent)]
+    Layout(#[from] crate::layout::LayoutError),
+
     /// The result would not have been a valid document.
     #[error(transparent)]
     Invalid(#[from] ValidationErrors),

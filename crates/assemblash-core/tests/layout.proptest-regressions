@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ffda84d082390191417a41d2c15ca74a7c20cf3b54057cfc2c98a69d09519981 # shrinks to boxes = [(0.0, 0.0, 1.0, 1.0), (396.1026621098363, 0.0, 114.25047981463585, 1.0)], edge = CenterHorizontal
+cc 846d2d92b4e0b94916d7f2f680d5a284b77a4df8bae2fd28fe959520ce4fbe9b # shrinks to boxes = [(564.5624213783269, 1.0), (564.9077653611776, 1.0), (546.3573970910984, 44.874234057602735)]
+cc a44292c76863d01730ab2d9bfd130a130817c1cd86471f5d833d5fead57d88d3 # shrinks to boxes = [(597.7975989865458, 78.39324980662802), (552.6015568165468, 1.0), (560.3746256705842, 78.86436612344689)]

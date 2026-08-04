@@ -329,3 +329,81 @@ fn an_svg_with_a_doctype_is_refused() {
         0
     );
 }
+
+#[test]
+fn layout_commands_align_and_report_through_the_binary() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("layout");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "1000", "--height", "1000"]);
+
+    let mut ids = Vec::new();
+    for (x, y) in [(100.0, 10.0), (30.0, 200.0), (400.0, 500.0)] {
+        ids.push(
+            run(&[
+                "add-text",
+                project_arg,
+                "--text",
+                "x",
+                "--font",
+                "Noto Sans",
+                "--x",
+                &x.to_string(),
+                "--y",
+                &y.to_string(),
+                "--width",
+                "80",
+                "--height",
+                "40",
+            ])
+            .trim()
+            .to_owned(),
+        );
+    }
+
+    // Before aligning, the three sit at different left edges.
+    let before = run(&["bounds", project_arg]);
+    assert_eq!(before.split_whitespace().next(), Some("30"), "{before}");
+
+    let moved = run(&[
+        "align",
+        project_arg,
+        "--layer",
+        &ids.join(","),
+        "--edge",
+        "left",
+        "--actor",
+        "agent",
+        "--actor-name",
+        "layout-test",
+    ]);
+    assert_eq!(moved.lines().count(), 2, "one layer was already aligned");
+
+    let shown = run(&["show", project_arg]);
+    let document: serde_json::Value = serde_json::from_str(&shown).unwrap();
+    for layer in document["layers"].as_array().unwrap() {
+        assert_eq!(layer["transform"]["x"], 30.0, "{layer}");
+    }
+
+    // The layout change is in the audit trail, and undoable like anything else.
+    let history = run(&["history", project_arg]);
+    assert!(history.contains("layout-test"), "{history}");
+    run(&["undo", project_arg]);
+    let after_undo = run(&["show", project_arg]);
+    let restored: serde_json::Value = serde_json::from_str(&after_undo).unwrap();
+    assert_eq!(restored["layers"][0]["transform"]["x"], 100.0);
+
+    // Overlap reporting: two layers put on top of each other are found.
+    run(&["center", project_arg, "--layer", &ids[0], "--axis", "both"]);
+    run(&["center", project_arg, "--layer", &ids[1], "--axis", "both"]);
+    let overlaps = run(&["overlaps", project_arg]);
+    // The two centred layers are now on top of each other. Others may overlap
+    // them too — the check is that this pair is reported, not how many pairs
+    // the layout happens to produce.
+    assert!(
+        overlaps
+            .lines()
+            .any(|line| line.contains(&ids[0]) && line.contains(&ids[1])),
+        "{overlaps}"
+    );
+}

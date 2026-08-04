@@ -484,6 +484,60 @@ fn force_unlock_clears_a_lock_left_behind() {
     Session::open(dir.path(), Some(3)).unwrap();
 }
 
+/// The v0.3 guarantee has to hold for the operations added in v0.4 too.
+#[test]
+fn layout_operations_undo_to_a_byte_identical_document() {
+    use assemblash_core::ops::{AlignEdge, Axis};
+
+    let mut project = Project::new();
+    let a = project.apply(new_text("one"))[0].clone();
+    let b = project.apply(new_text("two"))[0].clone();
+    project
+        .session
+        .apply(
+            &Operation::Move {
+                id: b.clone(),
+                dx: 137.0,
+                dy: 61.0,
+            },
+            &human(),
+            Some(3),
+            None,
+            &mut project.ids,
+        )
+        .unwrap();
+
+    for operation in [
+        Operation::Align {
+            ids: vec![a.clone(), b.clone()],
+            edge: AlignEdge::Left,
+        },
+        Operation::CenterOnCanvas {
+            ids: vec![a.clone(), b.clone()],
+            axis: Axis::Both,
+        },
+        Operation::Distribute {
+            ids: vec![a.clone(), b.clone()],
+            axis: Axis::Horizontal,
+        },
+    ] {
+        let before = project.document_bytes();
+        project
+            .session
+            .apply(&operation, &human(), Some(4), None, &mut project.ids)
+            .unwrap();
+        project
+            .session
+            .undo(&human(), Some(5), &mut project.ids)
+            .unwrap();
+        assert_eq!(
+            project.document_bytes(),
+            before,
+            "{operation:?} did not undo cleanly"
+        );
+    }
+}
+
 proptest! {
     /// Undo is exact however long the history is, and whatever mix of edits
     /// went into it.

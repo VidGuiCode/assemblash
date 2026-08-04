@@ -14,6 +14,7 @@ pub mod document;
 pub mod error;
 pub mod history;
 pub mod ids;
+pub mod layout;
 pub mod ops;
 pub mod schema;
 pub mod session;
@@ -28,6 +29,7 @@ pub use document::{
 pub use error::{ValidationError, ValidationErrors};
 pub use history::{Actor, ActorKind, History, HistoryError};
 pub use ids::{AssetId, DocumentId, IdSource, LayerId, SequentialIdSource, UlidIdSource};
+pub use layout::{bounding_box, find_overlaps, LayoutError, Rect};
 pub use ops::{apply, dry_run, OpError, Operation};
 pub use session::{Session, SessionError};
 pub use storage::{load, save, StorageError};

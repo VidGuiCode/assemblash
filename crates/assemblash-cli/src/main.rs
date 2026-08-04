@@ -13,7 +13,10 @@ use std::process::ExitCode;
 use assemblash_core::document::{ImageFit, TextAlign, Transform};
 use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::UlidIdSource;
-use assemblash_core::ops::{CreateLayer, LayerPosition, NewLayerKind, OpOutcome, Operation};
+use assemblash_core::layout;
+use assemblash_core::ops::{
+    AlignEdge, Axis, CreateLayer, LayerPosition, NewLayerKind, OpOutcome, Operation, SnapTarget,
+};
 use assemblash_core::session::{self, Session, SessionError};
 use assemblash_core::storage::{self, StorageError};
 use assemblash_core::{Color, Document};
@@ -165,6 +168,83 @@ enum Command {
         project: PathBuf,
     },
 
+    /// Lines layers up on an edge or centre line.
+    Align {
+        /// Project directory.
+        project: PathBuf,
+        /// Layers to line up. Repeat the flag, or pass a comma-separated list.
+        #[arg(long = "layer", required = true, value_delimiter = ',')]
+        layers: Vec<String>,
+        /// Which edge or centre line.
+        #[arg(long, value_enum)]
+        edge: EdgeArg,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Moves layers, as one group, onto the centre of the canvas.
+    Center {
+        /// Project directory.
+        project: PathBuf,
+        /// Layers to move.
+        #[arg(long = "layer", required = true, value_delimiter = ',')]
+        layers: Vec<String>,
+        /// Which axis to centre on.
+        #[arg(long, value_enum, default_value_t = AxisArg::Both)]
+        axis: AxisArg,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Spreads layers out with equal gaps.
+    Distribute {
+        /// Project directory.
+        project: PathBuf,
+        /// Layers to spread out.
+        #[arg(long = "layer", required = true, value_delimiter = ',')]
+        layers: Vec<String>,
+        /// Which axis to spread along.
+        #[arg(long, value_enum, default_value_t = AxisArg::Horizontal)]
+        axis: AxisArg,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Moves one layer against an edge of another layer, or of the canvas.
+    Snap {
+        /// Project directory.
+        project: PathBuf,
+        /// Layer to move.
+        #[arg(long)]
+        layer: String,
+        /// Layer to snap against. Snaps to the canvas if omitted.
+        #[arg(long)]
+        to: Option<String>,
+        /// Which edge.
+        #[arg(long, value_enum)]
+        edge: EdgeArg,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Prints the bounding box of the given layers, or of the whole document.
+    Bounds {
+        /// Project directory.
+        project: PathBuf,
+        /// Layers to measure. All of them if omitted.
+        #[arg(long = "layer", value_delimiter = ',')]
+        layers: Vec<String>,
+    },
+
+    /// Prints every pair of layers whose boxes overlap.
+    Overlaps {
+        /// Project directory.
+        project: PathBuf,
+        /// Layers to check. All of them if omitted.
+        #[arg(long = "layer", value_delimiter = ',')]
+        layers: Vec<String>,
+    },
+
     /// Removes a lock left behind by a process that is gone.
     ///
     /// This build cannot tell a crashed process from a slow one, so clearing
@@ -202,6 +282,46 @@ impl ActorArgs {
         match &self.actor_name {
             Some(name) => Actor::named(kind, name),
             None => Actor::new(kind),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum EdgeArg {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    CenterHorizontal,
+    CenterVertical,
+}
+
+impl From<EdgeArg> for AlignEdge {
+    fn from(edge: EdgeArg) -> Self {
+        match edge {
+            EdgeArg::Left => Self::Left,
+            EdgeArg::Right => Self::Right,
+            EdgeArg::Top => Self::Top,
+            EdgeArg::Bottom => Self::Bottom,
+            EdgeArg::CenterHorizontal => Self::CenterHorizontal,
+            EdgeArg::CenterVertical => Self::CenterVertical,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AxisArg {
+    Horizontal,
+    Vertical,
+    Both,
+}
+
+impl From<AxisArg> for Axis {
+    fn from(axis: AxisArg) -> Self {
+        match axis {
+            AxisArg::Horizontal => Self::Horizontal,
+            AxisArg::Vertical => Self::Vertical,
+            AxisArg::Both => Self::Both,
         }
     }
 }
@@ -518,6 +638,107 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
+        Command::Align {
+            project,
+            layers,
+            edge,
+            who,
+        } => {
+            let mut session = open_session(&project)?;
+            run_layout(
+                &mut session,
+                Operation::Align {
+                    ids: layer_ids(&layers),
+                    edge: edge.into(),
+                },
+                &who,
+            )
+        }
+
+        Command::Center {
+            project,
+            layers,
+            axis,
+            who,
+        } => {
+            let mut session = open_session(&project)?;
+            run_layout(
+                &mut session,
+                Operation::CenterOnCanvas {
+                    ids: layer_ids(&layers),
+                    axis: axis.into(),
+                },
+                &who,
+            )
+        }
+
+        Command::Distribute {
+            project,
+            layers,
+            axis,
+            who,
+        } => {
+            let mut session = open_session(&project)?;
+            run_layout(
+                &mut session,
+                Operation::Distribute {
+                    ids: layer_ids(&layers),
+                    axis: axis.into(),
+                },
+                &who,
+            )
+        }
+
+        Command::Snap {
+            project,
+            layer,
+            to,
+            edge,
+            who,
+        } => {
+            let mut session = open_session(&project)?;
+            let target = match to {
+                Some(other) => SnapTarget::Layer {
+                    id: assemblash_core::LayerId::new(other),
+                    edge: edge.into(),
+                },
+                None => SnapTarget::Canvas { edge: edge.into() },
+            };
+            run_layout(
+                &mut session,
+                Operation::SnapTo {
+                    id: assemblash_core::LayerId::new(layer),
+                    target,
+                },
+                &who,
+            )
+        }
+
+        Command::Bounds { project, layers } => {
+            let session = Session::open_read_only(&project)?;
+            let ids = chosen_or_all(session.document(), &layers);
+            let bounds = layout::bounding_box(session.document(), &ids)
+                .map_err(assemblash_core::ops::OpError::from)
+                .map_err(SessionError::from)?;
+            println!(
+                "{} {} {} {}",
+                bounds.x, bounds.y, bounds.width, bounds.height
+            );
+            Ok(())
+        }
+
+        Command::Overlaps { project, layers } => {
+            let session = Session::open_read_only(&project)?;
+            let ids = chosen_or_all(session.document(), &layers);
+            let overlaps = layout::find_overlaps(session.document(), &ids)
+                .map_err(assemblash_core::ops::OpError::from)
+                .map_err(SessionError::from)?;
+            for (first, second) in overlaps {
+                println!("{first}\t{second}");
+            }
+            Ok(())
+        }
+
         Command::Unlock { project } => {
             if session::force_unlock(&project)? {
                 println!("lock removed");
@@ -526,6 +747,40 @@ fn run(command: Command) -> Result<(), CliError> {
             }
             Ok(())
         }
+    }
+}
+
+/// Applies a layout operation and reports which layers actually moved.
+fn run_layout(
+    session: &mut Session,
+    operation: Operation,
+    who: &ActorArgs,
+) -> Result<(), CliError> {
+    let (outcome, _) = session.apply(
+        &operation,
+        &who.actor(),
+        now_millis(),
+        who.expect_version,
+        &mut UlidIdSource,
+    )?;
+    for id in &outcome.changed {
+        println!("{id}");
+    }
+    Ok(())
+}
+
+fn layer_ids(raw: &[String]) -> Vec<assemblash_core::LayerId> {
+    raw.iter()
+        .map(|id| assemblash_core::LayerId::new(id.clone()))
+        .collect()
+}
+
+/// The layers named, or every layer in the document when none were.
+fn chosen_or_all(document: &Document, raw: &[String]) -> Vec<assemblash_core::LayerId> {
+    if raw.is_empty() {
+        layout::all_layer_ids(document)
+    } else {
+        layer_ids(raw)
     }
 }
 

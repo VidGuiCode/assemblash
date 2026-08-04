@@ -21,6 +21,7 @@
 
 mod edits;
 mod error;
+mod layout_ops;
 mod requests;
 mod tree;
 
@@ -28,6 +29,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use error::OpError;
+pub use layout_ops::{AlignEdge, Axis, SnapTarget};
 pub use requests::{CreateLayer, LayerPosition, NewLayerKind, UpdateLayer};
 
 use crate::document::{Document, LayerKind};
@@ -121,6 +123,42 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
+
+    /// Lines the given layers up on an edge or a centre line.
+    ///
+    /// Takes explicit ids rather than acting on a selection: what an agent
+    /// asked for should be legible in the journal afterwards.
+    Align {
+        /// Layers to line up.
+        ids: Vec<LayerId>,
+        /// Which edge or centre line.
+        edge: AlignEdge,
+    },
+
+    /// Moves the given layers, as one group, onto the centre of the canvas.
+    CenterOnCanvas {
+        /// Layers to move.
+        ids: Vec<LayerId>,
+        /// Which axis to centre on.
+        axis: Axis,
+    },
+
+    /// Spreads the given layers out with equal gaps.
+    Distribute {
+        /// Layers to spread out.
+        ids: Vec<LayerId>,
+        /// Which axis to spread along.
+        axis: Axis,
+    },
+
+    /// Moves one layer so it sits against an edge of another layer or of the
+    /// canvas.
+    SnapTo {
+        /// Layer to move.
+        id: LayerId,
+        /// What to snap it against.
+        target: SnapTarget,
+    },
 }
 
 /// What an operation did, beyond changing the document.
@@ -213,6 +251,16 @@ pub fn apply(
                 ..UpdateLayer::new(id.clone())
             },
         ),
+        Operation::Align { ids: members, edge } => {
+            layout_ops::align(&mut candidate, members, *edge)
+        }
+        Operation::CenterOnCanvas { ids: members, axis } => {
+            layout_ops::center_on_canvas(&mut candidate, members, *axis)
+        }
+        Operation::Distribute { ids: members, axis } => {
+            layout_ops::distribute(&mut candidate, members, *axis)
+        }
+        Operation::SnapTo { id, target } => layout_ops::snap_to(&mut candidate, id, target),
         Operation::Rename { id, name } => update(
             &mut candidate,
             &UpdateLayer {

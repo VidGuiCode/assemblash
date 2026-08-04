@@ -101,8 +101,8 @@ pub(super) fn group(
 
     // The group's box is the bounding box of what it holds, and the children
     // are re-based onto it, so grouping does not move anything on the canvas.
-    // Rotated children are boxed by their unrotated extent; exact rotated
-    // bounds are v0.4 layout work.
+    // Rotated children are boxed by the extent they actually occupy — the
+    // unrotated approximation this used to make was noted as v0.4 work.
     let bounds = tree::bounding_box(&children);
     for child in &mut children {
         child.transform.x -= bounds.x;
