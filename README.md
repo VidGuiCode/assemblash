@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** Pre-alpha — v0.1.0, the Phase 0 spike, is released and runs. Most of the product described below does not exist yet.
+**Status:** Pre-alpha — v0.5.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, and deterministic PNG export. There is no HTTP API, no MCP server, and no user interface yet. See [Current project status](#current-project-status) for exactly what has been run.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -66,7 +66,6 @@ The MCP server is planned as an adapter over the same API used by the UI. Initia
 
 - `get_document_state`
 - `get_canvas_preview`
-- `get_selection`
 - `validate_document`
 - `add_text_layer`
 - `add_image_layer`
@@ -220,32 +219,41 @@ The dependency graph must be rechecked against this license once an implementati
 
 ## Current project status
 
-**v0.1.0 — the Phase 0 vertical slice.** What exists and has been run:
+**v0.5.0.** What exists and has been run:
 
-1. create a document;
-2. add text and image layers;
-3. save and reload the document (a directory: `document.json` plus `assets/`);
-4. render SVG;
-5. export PNG.
+1. **Documents** — canvas, assets, and a nested tree of text, image, SVG, and group layers, saved as `document.json` plus `assets/`. Unknown fields survive a load-and-save cycle. Hand-editing the file is supported.
+2. **Operations** — thirteen typed operations (create, update, delete, duplicate, move, resize, rotate, reorder, group, ungroup, show/hide, lock/unlock, rename), each validated and applied transactionally: a refused operation leaves the document exactly as it was.
+3. **Layout** — align, centre on canvas, distribute, snap, bounding boxes, and overlap detection, all rotation-aware and taking explicit layer-id lists.
+4. **History and safety** — an append-only journal, undo and redo across restarts that produce a byte-identical document, protected and read-only layers, file locking, and expected-version conflict checks.
+5. **Fonts** — a local store where every file is pinned by the hash of its own bytes, importing TTF, OTF, collections, WOFF, and WOFF2, with a one-time installer for a pinned set of OFL families. The system font list is never consulted; a font the store does not have is an error, never a substitution.
+6. **Rendering** — document to SVG as a pure function, then to PNG through resvg, with `normal`, `multiply`, and `screen` blend modes.
 
-What does not exist yet: the local HTTP API, the MCP server, undo and history, the reference UI, layout operations, the font store, blend modes, and effects. Everything above this section describes where the project is going, not what it does today.
+What does not exist yet: the local HTTP API, the MCP server, the reference UI, effects, styled text runs, and templates. Everything above this section describes where the project is going, not what it does today.
 
-The Phase 0 renderer gate passed on Windows and Linux, x86_64 and aarch64: the same document plus the same font files produces bit-identical PNGs on every one of those targets. macOS is not built or tested yet.
+The renderer gate passes on Windows and Linux, x86_64 and aarch64: the same document plus the same font files produces bit-identical PNGs on every one of those targets. macOS is not built or tested yet.
 
 ### Trying it
 
 Binaries for those four targets are attached to each [release](https://github.com/VidGuiCode/assemblash/releases). To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.1.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.5.0 assemblash-cli
 ```
 
-Then, with a font file of your own — the engine never uses installed system fonts, so you must name one:
+The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:
+
+```sh
+assemblash font install "Noto Sans" --font-store ~/assemblash-fonts
+```
+
+Then compose and export:
 
 ```sh
 assemblash new ./poster --width 800 --height 400 --background '#f6f4ef'
 assemblash add-text ./poster --text "Hello" --font "Noto Sans" --size 64 --x 40 --y 40 --width 720 --height 120
-assemblash export ./poster --out poster.png --font /path/to/NotoSans-Regular.ttf
+assemblash export ./poster --out poster.png --font-store ~/assemblash-fonts
 ```
+
+`--font /path/to/Some.ttf` and `--font-dir /path/to/fonts` work too, for a font you already have on disk.
 
 The project does not claim to support a feature until it has been implemented and run.

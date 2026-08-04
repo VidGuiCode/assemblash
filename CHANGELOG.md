@@ -10,6 +10,75 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-05
+
+Fonts and render depth. The document has been reproducible since 0.1.0, but a
+document is only half the input to a render — this release pins the other half.
+
+Document `schemaVersion`: **1** (unchanged — `blendMode` has been in the schema
+since 0.1.0; this release renders it, and widens what it accepts).
+
+### Added
+
+- **Font store**: a directory where every font file is named by the hash of its
+  own bytes, with an `index.json` recording family, style, weight, hash,
+  provenance, and licence. `verify` re-hashes everything and names the file that
+  changed — a font swapped behind the engine's back would otherwise change the
+  pixels without changing any document.
+- TTF, OTF, TrueType collections, WOFF, and WOFF2 import. Web fonts are
+  decompressed on the way in and the *decompressed* bytes are what is stored and
+  hashed, so nothing decompresses anything while rendering.
+- **One-time installer** for a pinned set of OFL families. What may be installed
+  is a manifest committed in this repository, pinned to one commit of the
+  upstream font project and to the sha256 of each file; a download that does not
+  match is refused rather than stored. It runs only when asked — rendering never
+  reaches the network, and fonts already installed keep working with none.
+- Blend modes `normal`, `multiply`, and `screen` are rendered. A group whose
+  child blends is isolated, so a blend does not reach past the group it is in.
+- `assemblash font add`, `list`, `install`, `verify`, `licenses`, and `remove`;
+  `--font-store` on `render` and `export`, also readable from
+  `ASSEMBLASH_FONT_STORE`.
+
+### Changed
+
+- **The first text baseline now sits one ascent below the layer box, read from
+  the font file** — 0.1.0 used one whole font size everywhere, which was
+  consistent but not typography. Every rendered image moves slightly; the gate
+  goldens were regenerated deliberately and the images reviewed.
+- `render` and `export` refuse a document that uses text when no fonts are
+  named, rather than falling back to the old placement rule. Two commands that
+  place text differently depending on how they were called is worse than one
+  that insists on being told.
+- A `blendMode` this build does not render — `overlay`, say, from a later
+  version — now loads and round-trips verbatim instead of failing to parse. It
+  composites normally and is never handed to the renderer.
+- `cargo-deny` allows `CDLA-Permissive-2.0`, which covers the Mozilla CA root
+  certificate data the installer needs to verify an HTTPS download.
+
+### Verified
+
+- The same document plus the same font bytes hash to the same PNG on Windows
+  and Linux, x86_64 and aarch64.
+- A family the store does not have is a structured error at every level — store,
+  renderer, and command line — and never a substitution.
+- Installing verifies the manifest's hash: a tampered download is refused and
+  nothing is written.
+- Multiply and screen composite correctly through the whole path from
+  `blendMode` to pixels, and an isolated group contains its child's blend.
+- The store's index is byte-identical whatever order fonts were imported in.
+
+### Notes
+
+- No font binaries ship inside the executable. The deployment story is one small
+  static binary, font files are megabytes each, and a sha256 in a committed
+  manifest pins them at least as tightly as embedding would.
+- The store has no default location yet; it is named explicitly. The workspace
+  in 0.6.0 gives it a home.
+- FR-7 is **complete at thirteen operations**. `select` is not the fourteenth
+  and never was: selection is a client concern, not document state, and the PRD
+  was amended accordingly. Earlier entries in this file that say "13 of 14"
+  describe what was known at the time.
+
 ## [0.4.1] — 2026-08-04
 
 ### Fixed

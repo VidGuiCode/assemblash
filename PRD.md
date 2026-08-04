@@ -414,10 +414,13 @@ Initial MCP capabilities MUST be divided into:
 
 - inspect document;
 - list layers;
-- get selection;
 - retrieve preview;
 - validate document;
 - read text and metadata.
+
+(This list originally included "get selection". Removed 2026-08-05 to follow
+the FR-7 amendment: selection is a client concern, so an MCP session holds its
+own and there is nothing on the server to read.)
 
 #### Mutating
 

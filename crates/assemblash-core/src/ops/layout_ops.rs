@@ -1,10 +1,9 @@
 //! The layout operations: align, centre, distribute, snap.
 //!
 //! All of them take an explicit list of layer ids. None of them refer to a
-//! selection — partly because whether selection belongs to the document is
-//! still an open decision, and partly because "align these three" is a thing
-//! the history journal can record and a person can audit later, while "align
-//! the selection" is not.
+//! selection: selection belongs to each client, not to the document (PRD
+//! FR-7), and "align these three" is a thing the history journal can record
+//! and a person can audit later, while "align the selection" is not.
 //!
 //! They move layers and never resize or rotate them. An agent asking to tidy
 //! a layout should not discover that its text got wider.
