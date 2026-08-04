@@ -20,8 +20,10 @@ use assemblash_core::ops::{
 use assemblash_core::session::{self, Session, SessionError};
 use assemblash_core::storage::{self, StorageError};
 use assemblash_core::{Color, Document};
+use assemblash_renderer::install::{self, HttpFetcher, InstallError, Manifest};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
-use assemblash_renderer::{doc_to_svg, svg_to_pixmap, FontSet};
+use assemblash_renderer::store::{FontStore, FontStoreError};
+use assemblash_renderer::{doc_to_svg, svg_to_pixmap};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
@@ -245,6 +247,10 @@ enum Command {
         layers: Vec<String>,
     },
 
+    /// Manages the local font store.
+    #[command(subcommand)]
+    Font(FontCommand),
+
     /// Removes a lock left behind by a process that is gone.
     ///
     /// This build cannot tell a crashed process from a slow one, so clearing
@@ -253,6 +259,87 @@ enum Command {
         /// Project directory.
         project: PathBuf,
     },
+}
+
+/// The font store: a directory of hash-pinned font files.
+///
+/// The store has no default location in this build. The workspace (v0.6) is
+/// what gives it a home; until then it is named explicitly, which also keeps
+/// scripted and containerised runs honest about which fonts they used.
+#[derive(Debug, Subcommand)]
+enum FontCommand {
+    /// Imports a font file into the store.
+    ///
+    /// TTF, OTF, TrueType collections, WOFF, and WOFF2. Web fonts are
+    /// decompressed on the way in, so nothing has to decompress anything while
+    /// rendering.
+    Add {
+        /// Font file to import.
+        file: PathBuf,
+        /// Licence to record against it, e.g. `OFL-1.1`.
+        #[arg(long)]
+        license: Option<String>,
+        #[command(flatten)]
+        store: StoreArgs,
+    },
+
+    /// Lists what the store holds.
+    List {
+        /// Print every face rather than one line per family.
+        #[arg(long)]
+        faces: bool,
+        #[command(flatten)]
+        store: StoreArgs,
+    },
+
+    /// Downloads a font named in the bundled manifest, once, and verifies it.
+    ///
+    /// This is the only thing in Assemblash that uses the network, and it does
+    /// so only when asked. Rendering never does, and fonts already installed
+    /// keep working with no network at all.
+    Install {
+        /// Family to install. Omit to install a whole pack.
+        family: Option<String>,
+        /// Pack to install instead of a single family.
+        #[arg(long)]
+        pack: Option<String>,
+        /// List what could be installed, and download nothing.
+        ///
+        /// The list comes from the manifest compiled into this binary, so it
+        /// needs neither a store nor a network.
+        #[arg(long)]
+        list: bool,
+        /// Directory holding the font store. Required unless `--list`.
+        #[arg(long = "font-store", env = "ASSEMBLASH_FONT_STORE")]
+        font_store: Option<PathBuf>,
+    },
+
+    /// Re-hashes every file in the store and reports the first that changed.
+    Verify {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
+
+    /// Prints the licence recorded for each font in the store.
+    Licenses {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
+
+    /// Removes a family and any file it was the last user of.
+    Remove {
+        /// Family to remove.
+        family: String,
+        #[command(flatten)]
+        store: StoreArgs,
+    },
+}
+
+#[derive(Debug, Args)]
+struct StoreArgs {
+    /// Directory holding the font store.
+    #[arg(long = "font-store", env = "ASSEMBLASH_FONT_STORE")]
+    font_store: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -379,6 +466,19 @@ struct FontArgs {
     /// Font file to load. Repeatable.
     #[arg(long = "font")]
     font_files: Vec<PathBuf>,
+    /// Font store to resolve the document's families against.
+    ///
+    /// Only the families the document actually names are loaded, so adding an
+    /// unrelated font to the store cannot change an existing document's
+    /// pixels.
+    #[arg(long = "font-store", env = "ASSEMBLASH_FONT_STORE")]
+    font_store: Option<PathBuf>,
+}
+
+impl FontArgs {
+    fn names_nothing(&self) -> bool {
+        self.font_dirs.is_empty() && self.font_files.is_empty() && self.font_store.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -434,6 +534,16 @@ enum CliError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Session(#[from] SessionError),
+    #[error(transparent)]
+    FontStore(#[from] FontStoreError),
+    #[error(transparent)]
+    Install(#[from] InstallError),
+    #[error("this document uses text, so name its fonts: --font, --font-dir, or --font-store")]
+    NoFonts,
+    #[error("say which font to install: a family name, or --pack")]
+    InstallTarget,
+    #[error("say where the font store is: --font-store")]
+    NoStore,
 }
 
 fn run(command: Command) -> Result<(), CliError> {
@@ -557,14 +667,8 @@ fn run(command: Command) -> Result<(), CliError> {
         } => {
             let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assets::data_uris(&document, &project)?;
-            let font_set = match load_fonts(&fonts)? {
-                Some(loaded) => loaded.font_set().clone(),
-                // Nothing to check against, so anything the document asks for
-                // is allowed through; rasterization would still need real
-                // files.
-                None => FontSet::unchecked(),
-            };
-            let svg = doc_to_svg(&document, &font_set, &hrefs)?;
+            let loaded = load_fonts(&fonts, &document)?;
+            let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
             write_file(&out, svg.as_bytes())?;
             Ok(())
         }
@@ -578,7 +682,7 @@ fn run(command: Command) -> Result<(), CliError> {
         } => {
             let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assets::data_uris(&document, &project)?;
-            let loaded = load_fonts(&fonts)?.unwrap_or_else(|| LoadedFonts::from_bytes([]));
+            let loaded = load_fonts(&fonts, &document)?;
             let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
             let pixmap = svg_to_pixmap(&svg, &loaded, scale)?;
             let mut metadata = PngMetadata::for_document(&document);
@@ -739,6 +843,8 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
+        Command::Font(command) => run_font(command),
+
         Command::Unlock { project } => {
             if session::force_unlock(&project)? {
                 println!("lock removed");
@@ -894,16 +1000,167 @@ fn print_created(outcome: &OpOutcome) {
     }
 }
 
-fn load_fonts(args: &FontArgs) -> Result<Option<LoadedFonts>, CliError> {
-    if args.font_dirs.is_empty() && args.font_files.is_empty() {
-        return Ok(None);
+/// Every font family the document asks for, sorted and deduplicated.
+fn families_used(document: &Document) -> Vec<String> {
+    let mut families = std::collections::BTreeSet::new();
+    document.walk_layers(&mut |layer| {
+        if let assemblash_core::document::LayerKind::Text(text) = &layer.kind {
+            families.insert(text.font_family.clone());
+        }
+    });
+    families.into_iter().collect()
+}
+
+/// Resolves the fonts a render may use, from files, directories, and a store.
+///
+/// The store contributes exactly the families the document names: a render
+/// must not change because something unrelated was installed afterwards.
+fn load_fonts(args: &FontArgs, document: &Document) -> Result<LoadedFonts, CliError> {
+    // A document with text but no fonts named used to render anyway, placing
+    // the first baseline one whole font size below the box top instead of one
+    // ascent. Rather than have two placements depending on how the command was
+    // called, a document that needs a font has to be told where it is.
+    if args.names_nothing() && !families_used(document).is_empty() {
+        return Err(CliError::NoFonts);
     }
+
     let mut paths = args.font_files.clone();
     for directory in &args.font_dirs {
         paths.extend(font_files_in(directory)?);
     }
+
+    if let Some(directory) = &args.font_store {
+        let store = FontStore::open(directory)?;
+        // Families already covered by an explicit file are not looked up, so
+        // naming a file for a family the store also has is not an error.
+        let explicit = LoadedFonts::from_files(paths.clone())?;
+        let wanted: Vec<String> = families_used(document)
+            .into_iter()
+            .filter(|family| !explicit.font_set().contains(family))
+            .collect();
+        for family in &wanted {
+            if !store.has_family(family) {
+                return Err(CliError::FontStore(FontStoreError::UnknownFamily {
+                    family: family.clone(),
+                    path: directory.clone(),
+                }));
+            }
+        }
+        for record in store.records() {
+            if wanted.iter().any(|family| family == &record.family) {
+                paths.push(store.file_path(&record.file));
+            }
+        }
+    }
+
+    // Sorted, so font resolution — and therefore the pixels — does not depend
+    // on the order the arguments happened to arrive in.
     paths.sort();
-    Ok(Some(LoadedFonts::from_files(paths)?))
+    paths.dedup();
+    Ok(LoadedFonts::from_files(paths)?)
+}
+
+fn open_store(args: &StoreArgs) -> Result<FontStore, CliError> {
+    Ok(FontStore::open(&args.font_store)?)
+}
+
+fn run_font(command: FontCommand) -> Result<(), CliError> {
+    match command {
+        FontCommand::Add {
+            file,
+            license,
+            store,
+        } => {
+            let mut store = open_store(&store)?;
+            for record in store.import_file(&file, None, license)? {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    record.family, record.style, record.weight, record.file
+                );
+            }
+            Ok(())
+        }
+
+        FontCommand::List { faces, store } => {
+            let store = open_store(&store)?;
+            if faces {
+                for record in store.records() {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        record.family, record.style, record.weight, record.hash, record.file
+                    );
+                }
+            } else {
+                for family in store.families() {
+                    println!("{family}");
+                }
+            }
+            Ok(())
+        }
+
+        FontCommand::Install {
+            family,
+            pack,
+            list,
+            font_store,
+        } => {
+            let manifest = Manifest::bundled()?;
+            if list {
+                for entry in &manifest.families {
+                    println!(
+                        "{}\t{}\t{}",
+                        entry.name,
+                        entry.license,
+                        entry.packs.join(",")
+                    );
+                }
+                return Ok(());
+            }
+
+            let Some(directory) = font_store else {
+                return Err(CliError::NoStore);
+            };
+            let mut store = FontStore::open(directory)?;
+            let fetcher = HttpFetcher;
+            let installed = match (&family, &pack) {
+                (Some(family), None) => {
+                    install::install_family(&mut store, &manifest, family, &fetcher)?
+                }
+                (None, Some(pack)) => install::install_pack(&mut store, &manifest, pack, &fetcher)?,
+                _ => return Err(CliError::InstallTarget),
+            };
+            for record in installed {
+                println!("{}\t{}", record.family, record.hash);
+            }
+            Ok(())
+        }
+
+        FontCommand::Verify { store } => {
+            open_store(&store)?.verify()?;
+            println!("every font matches its recorded hash");
+            Ok(())
+        }
+
+        FontCommand::Licenses { store } => {
+            let store = open_store(&store)?;
+            for record in store.records() {
+                println!(
+                    "{}\t{}\t{}",
+                    record.family,
+                    record.license.as_deref().unwrap_or("unrecorded"),
+                    record.source.as_deref().unwrap_or("unrecorded"),
+                );
+            }
+            Ok(())
+        }
+
+        FontCommand::Remove { family, store } => {
+            let mut store = open_store(&store)?;
+            let removed = store.remove_family(&family)?;
+            println!("{removed}");
+            Ok(())
+        }
+    }
 }
 
 fn write_file(path: &Path, bytes: &[u8]) -> Result<(), CliError> {

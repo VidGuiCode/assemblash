@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "source": "https://github.com/google/fonts",
+  "commit": "2796410152d4f9524b68ed46e69c1b60f8e0f7c3",
+  "urlPrefix": "https://raw.githubusercontent.com/google/fonts/",
+  "families": [
+    {
+      "name": "Noto Sans",
+      "path": "ofl/notosans/NotoSans[wdth,wght].ttf",
+      "sha256": "sha256:bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+      "bytes": 2049096,
+      "license": "OFL-1.1",
+      "packs": ["default"]
+    },
+    {
+      "name": "Noto Serif",
+      "path": "ofl/notoserif/NotoSerif[wdth,wght].ttf",
+      "sha256": "sha256:4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
+      "bytes": 1887192,
+      "license": "OFL-1.1",
+      "packs": ["default"]
+    },
+    {
+      "name": "Noto Sans Mono",
+      "path": "ofl/notosansmono/NotoSansMono[wdth,wght].ttf",
+      "sha256": "sha256:2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
+      "bytes": 1708408,
+      "license": "OFL-1.1",
+      "packs": ["default"]
+    },
+    {
+      "name": "Noto Sans Arabic",
+      "path": "ofl/notosansarabic/NotoSansArabic[wdth,wght].ttf",
+      "sha256": "sha256:63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e",
+      "bytes": 844676,
+      "license": "OFL-1.1",
+      "packs": []
+    },
+    {
+      "name": "Noto Sans JP",
+      "path": "ofl/notosansjp/NotoSansJP[wght].ttf",
+      "sha256": "sha256:c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f",
+      "bytes": 9589900,
+      "license": "OFL-1.1",
+      "packs": []
+    }
+  ]
+}

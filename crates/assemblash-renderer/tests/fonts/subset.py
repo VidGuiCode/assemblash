@@ -65,6 +65,16 @@ def rename(path, family):
     font.save(path)
 
 
+def reflavour():
+    """Writes the WOFF and WOFF2 copies the font-store import tests read."""
+    for flavor in ("woff", "woff2"):
+        font = TTFont("NotoSans-Subset.ttf")
+        font.flavor = flavor
+        destination = f"NotoSans-Subset.{flavor}"
+        font.save(destination)
+        print("wrote", destination)
+
+
 def main():
     instance_japanese()
     for source, destination, text, family in JOBS:
@@ -86,6 +96,7 @@ def main():
         if family:
             rename(destination, family)
         print("wrote", destination)
+    reflavour()
 
 
 if __name__ == "__main__":

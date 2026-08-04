@@ -12,7 +12,18 @@ authors.workspace = true
 assemblash-core.workspace = true
 png = "0.18.1"
 resvg = "0.48.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+sha2 = "0.11.0"
+# The same font parser usvg itself reads metadata with, so the metrics this
+# crate measures a face by cannot disagree with the ones the renderer uses.
+skrifa = "0.44.0"
 thiserror = "2.0.19"
+# The font installer, and nothing else, reaches the network. Rendering never
+# does (roadmap guardrail), and everything already installed works offline.
+ureq = "3.3.0"
+# WOFF/WOFF2 are decompressed at import, never on the render path.
+wuff = { version = "0.2.8", default-features = false, features = ["brotli", "z"] }
 
 [lints]
 workspace = true

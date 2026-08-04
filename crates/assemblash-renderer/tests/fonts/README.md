@@ -9,11 +9,17 @@ them. Determinism (NFR-1) is meaningless if the font can vary.
 | `NotoSans-Subset.ttf` | [notofonts/latin-greek-cyrillic](https://github.com/notofonts/notofonts.github.io), `NotoSans-Regular.ttf` | ASCII plus combining diacritics |
 | `NotoSansArabic-Subset.ttf` | [notofonts/arabic](https://github.com/notofonts/notofonts.github.io), `NotoSansArabic-Regular.ttf` | the Arabic sample strings |
 | `NotoSansJP-Subset.ttf` | [google/fonts](https://github.com/google/fonts/tree/main/ofl/notosansjp), `NotoSansJP[wght].ttf` instanced at `wght=400` | the Japanese sample strings |
+| `NotoSans-Subset.woff` | `NotoSans-Subset.ttf`, re-flavoured | WOFF import |
+| `NotoSans-Subset.woff2` | `NotoSans-Subset.ttf`, re-flavoured | WOFF2 import |
 
 Each file is a subset of the upstream release covering only the characters the
 tests use — 67 KB in total instead of about 10 MB. Layout features are kept
 (`--layout-features='*'`), so shaping behaviour such as Arabic joining is
 preserved.
+
+The two web-font files are the same subset in a compressed container. They
+exist so the store's import path can be tested on real WOFF and WOFF2 bytes;
+`font_files_in` ignores those extensions, so no rendering test picks them up.
 
 ## Licence
 

@@ -25,6 +25,12 @@ allow = [
     "Zlib",
     "Unicode-3.0",
     "CC0-1.0",
+    # Covers the Mozilla CA root certificate bundle (webpki-roots), which the
+    # font installer needs to verify an HTTPS download. It licenses *data*
+    # rather than code, is permissive, and carries no copyleft or attribution
+    # obligation beyond keeping the notice — compatible with redistributing
+    # this project under Apache-2.0 (R8).
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 

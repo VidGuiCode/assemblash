@@ -410,3 +410,118 @@ fn layout_commands_align_and_report_through_the_binary() {
         "{overlaps}"
     );
 }
+
+#[test]
+fn the_font_store_is_driven_from_the_command_line() {
+    let workspace = tempfile::tempdir().unwrap();
+    let store = workspace.path().join("fonts");
+    let store_arg = store.to_str().unwrap();
+    let font = font_dir().join("NotoSans-Subset.ttf");
+
+    let added = run(&[
+        "font",
+        "add",
+        font.to_str().unwrap(),
+        "--license",
+        "OFL-1.1",
+        "--font-store",
+        store_arg,
+    ]);
+    assert!(added.contains("Noto Sans"), "{added}");
+
+    let families = run(&["font", "list", "--font-store", store_arg]);
+    assert_eq!(families.trim(), "Noto Sans");
+
+    let faces = run(&["font", "list", "--faces", "--font-store", store_arg]);
+    assert!(faces.contains("sha256:"), "{faces}");
+
+    let licenses = run(&["font", "licenses", "--font-store", store_arg]);
+    assert!(licenses.contains("OFL-1.1"), "{licenses}");
+
+    assert!(run(&["font", "verify", "--font-store", store_arg]).contains("matches"));
+
+    // What could be installed, without touching the network.
+    let installable = run(&["font", "install", "--list"]);
+    assert!(installable.contains("Noto Sans"), "{installable}");
+
+    // A project that renders through the store, and one that asks for a family
+    // the store does not have.
+    let project = workspace.path().join("poster");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "300", "--height", "120"]);
+    run(&[
+        "add-text",
+        project_arg,
+        "--text",
+        "stored",
+        "--font",
+        "Noto Sans",
+        "--size",
+        "32",
+        "--x",
+        "10",
+        "--y",
+        "10",
+        "--width",
+        "280",
+        "--height",
+        "60",
+    ]);
+
+    let png = workspace.path().join("out.png");
+    run(&[
+        "export",
+        project_arg,
+        "--out",
+        png.to_str().unwrap(),
+        "--font-store",
+        store_arg,
+    ]);
+    assert!(png.is_file());
+
+    // Naming no fonts at all is refused rather than quietly placing text by a
+    // different rule.
+    let error = run_failing(&["export", project_arg, "--out", png.to_str().unwrap()]);
+    assert!(error.contains("name its fonts"), "{error}");
+
+    // A family the store does not have is a structured refusal, never a
+    // substitution.
+    let other = workspace.path().join("other");
+    let other_arg = other.to_str().unwrap();
+    run(&["new", other_arg, "--width", "300", "--height", "120"]);
+    run(&[
+        "add-text",
+        other_arg,
+        "--text",
+        "missing",
+        "--font",
+        "Helvetica Neue",
+        "--size",
+        "32",
+        "--x",
+        "10",
+        "--y",
+        "10",
+        "--width",
+        "280",
+        "--height",
+        "60",
+    ]);
+    let error = run_failing(&[
+        "export",
+        other_arg,
+        "--out",
+        png.to_str().unwrap(),
+        "--font-store",
+        store_arg,
+    ]);
+    assert!(error.contains("Helvetica Neue"), "{error}");
+    assert!(error.contains("font store"), "{error}");
+
+    // Removing takes the file with it.
+    assert_eq!(
+        run(&["font", "remove", "Noto Sans", "--font-store", store_arg]).trim(),
+        "1"
+    );
+    assert_eq!(run(&["font", "list", "--font-store", store_arg]).trim(), "");
+}
