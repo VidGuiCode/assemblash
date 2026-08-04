@@ -7,7 +7,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use assemblash_core::document::{ImageFit, Layer, LayerKind, TextAlign, Transform};
+use assemblash_core::document::{
+    BlendMode, GroupLayer, ImageFit, Layer, LayerKind, TextAlign, Transform,
+};
 use assemblash_core::ids::AssetId;
 use assemblash_core::{validate, Color, Document};
 
@@ -96,18 +98,21 @@ fn write_layer(
                 out,
                 "{pad}<text x=\"{x}\" y=\"{y}\" font-family=\"{family}\" \
                  font-size=\"{size}\" fill=\"{fill}\" text-anchor=\"{anchor}\"\
-                 {opacity}{rotation}>",
+                 {opacity}{rotation}{blend}>",
                 x = number(x),
-                // The first baseline sits one line below the box top. Real
-                // ascent metrics arrive with the font store (v0.5); until then
-                // this is the same on every platform, which is what matters.
-                y = number(t.y + text.font_size),
+                // The first baseline sits one ascent below the box top, taken
+                // from the font file itself. The ascent is measured by
+                // whoever loaded the fonts and arrives in `fonts`, so this
+                // stays a pure function and two machines with the same font
+                // files agree to the last decimal.
+                y = number(t.y + text.font_size * fonts.ascent_ratio(&text.font_family)),
                 family = attribute(&text.font_family),
                 size = number(text.font_size),
                 fill = color(&text.color)?,
                 anchor = anchor,
                 opacity = opacity_attribute(layer.opacity),
                 rotation = rotation_attribute(t),
+                blend = blend_attribute(layer),
             );
 
             for (index, line) in text.text.split('\n').enumerate() {
@@ -154,7 +159,7 @@ fn write_layer(
             let _ = writeln!(
                 out,
                 "{pad}<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
-                 preserveAspectRatio=\"{preserve}\" href=\"{href}\"{opacity}{rotation}/>",
+                 preserveAspectRatio=\"{preserve}\" href=\"{href}\"{opacity}{rotation}{blend}/>",
                 x = number(t.x),
                 y = number(t.y),
                 w = number(t.width),
@@ -163,16 +168,18 @@ fn write_layer(
                 href = attribute(href),
                 opacity = opacity_attribute(layer.opacity),
                 rotation = rotation_attribute(t),
+                blend = blend_attribute(layer),
             );
         }
 
         LayerKind::Group(group) => {
             let _ = writeln!(
                 out,
-                "{pad}<g transform=\"translate({x} {y})\"{opacity}>",
+                "{pad}<g transform=\"translate({x} {y})\"{opacity}{style}>",
                 x = number(t.x),
                 y = number(t.y),
                 opacity = opacity_attribute(layer.opacity),
+                style = group_style(layer, group),
             );
             // A rotated group rotates its children as a unit, about its own
             // centre, so the rotation wraps the children rather than sitting
@@ -204,6 +211,48 @@ fn write_layer(
     }
 
     Ok(())
+}
+
+/// A `mix-blend-mode` for a layer that asks for one this build renders.
+///
+/// A mode this build does not render produces nothing, so the layer composites
+/// normally — the same thing every build did before v0.5, and the value itself
+/// is still preserved in the document.
+fn blend_attribute(layer: &Layer) -> String {
+    match &layer.blend_mode {
+        BlendMode::Multiply | BlendMode::Screen => {
+            format!(" style=\"mix-blend-mode:{}\"", layer.blend_mode.as_str())
+        }
+        BlendMode::Normal | BlendMode::Other(_) => String::new(),
+    }
+}
+
+/// The `style` of a group element: its own blend mode, and isolation.
+///
+/// A group that holds a blending child isolates, so the child blends with what
+/// is inside the group and not with the whole page behind it — which is what a
+/// group means everywhere else. Isolation is emitted only when some child
+/// actually blends: an isolated group is composited through an offscreen
+/// buffer, and there is no reason to make every existing document pay for it.
+/// Nested groups apply the same rule to themselves, so a blend never escapes
+/// more than one level by accident.
+fn group_style(layer: &Layer, group: &GroupLayer) -> String {
+    let mut parts = Vec::new();
+    if matches!(layer.blend_mode, BlendMode::Multiply | BlendMode::Screen) {
+        parts.push(format!("mix-blend-mode:{}", layer.blend_mode.as_str()));
+    }
+    if group
+        .children
+        .iter()
+        .any(|child| matches!(child.blend_mode, BlendMode::Multiply | BlendMode::Screen))
+    {
+        parts.push("isolation:isolate".to_owned());
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" style=\"{}\"", parts.join(";"))
+    }
 }
 
 fn opacity_attribute(opacity: f64) -> String {

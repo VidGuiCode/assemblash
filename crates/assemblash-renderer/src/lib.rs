@@ -6,12 +6,16 @@
 
 pub mod error;
 pub mod fonts;
+pub mod install;
 pub mod raster;
+pub mod store;
 pub mod svg;
 
 pub use error::RenderError;
-pub use fonts::FontSet;
+pub use fonts::{FontMetrics, FontSet};
+pub use install::{FontFetcher, HttpFetcher, InstallError, Manifest};
 pub use raster::{document_to_png, pixmap_to_png, svg_to_pixmap, LoadedFonts, PngMetadata};
+pub use store::{FontRecord, FontStore, FontStoreError};
 pub use svg::{doc_to_svg, AssetHrefs};
 
 /// Version of the rendering pipeline, recorded in exported image metadata

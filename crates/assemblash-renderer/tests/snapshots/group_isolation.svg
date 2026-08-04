@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <g transform="translate(10 10)" style="mix-blend-mode:multiply;isolation:isolate">
+    <image x="0" y="0" width="50" height="50" preserveAspectRatio="none" href="assets/logo.png" style="mix-blend-mode:screen"/>
+  </g>
+  <g transform="translate(150 10)">
+    <image x="0" y="0" width="50" height="50" preserveAspectRatio="none" href="assets/logo.png"/>
+  </g>
+</svg>

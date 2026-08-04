@@ -9,9 +9,11 @@
 
 use std::path::PathBuf;
 
-use assemblash_core::document::{Extras, TextAlign, TextLayer, Transform};
-use assemblash_core::ids::{LayerId, SequentialIdSource};
-use assemblash_core::{Color, Document, Layer, LayerKind};
+use assemblash_core::document::{
+    BlendMode, Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
+};
+use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
+use assemblash_core::{Asset, Color, Document, Layer, LayerKind};
 use assemblash_renderer::raster::{font_files_in, read_png_metadata, LoadedFonts, PngMetadata};
 use assemblash_renderer::{doc_to_svg, document_to_png, svg_to_pixmap, AssetHrefs};
 
@@ -50,6 +52,45 @@ fn decode(png_bytes: &[u8]) -> (u32, u32, Vec<u8>) {
     let info = reader.next_frame(&mut buffer).unwrap();
     buffer.truncate(info.buffer_size());
     (info.width, info.height, buffer)
+}
+
+/// A 1x1 opaque PNG of one colour, for a layer that is a flat rectangle.
+fn solid_png(color: &Color) -> Vec<u8> {
+    let rgba = color.to_rgba().unwrap();
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 1, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&rgba).unwrap();
+    }
+    out
+}
+
+const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = chunk.get(1).copied().map_or(0, u32::from);
+        let b2 = chunk.get(2).copied().map_or(0, u32::from);
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[(triple >> 18) as usize & 0x3F] as char);
+        out.push(ALPHABET[(triple >> 12) as usize & 0x3F] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(triple >> 6) as usize & 0x3F] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[triple as usize & 0x3F] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 fn dark_pixel_count(rgba: &[u8]) -> usize {
@@ -202,6 +243,121 @@ fn non_latin_scripts_rasterize() {
             "{family} drew nothing for {text:?}"
         );
     }
+}
+
+/// Two overlapping opaque squares, the upper one blending, as a document.
+///
+/// Built from image layers rather than hand-written SVG so the test exercises
+/// the whole path a real document takes — the value in `blendMode`, through
+/// `doc_to_svg`, into resvg.
+fn blend_document(mode: BlendMode) -> (Document, AssetHrefs) {
+    let mut doc = Document::new(&mut SequentialIdSource::new(), 100.0, 100.0);
+    doc.canvas.background = Some(Color::new("#ffffff"));
+
+    let mut hrefs = AssetHrefs::new();
+    for (index, (color, blend)) in [
+        (Color::new("#ff0000"), BlendMode::Normal),
+        (Color::new("#0000ff"), mode),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let asset_id = AssetId::new(format!("asset_{}", index + 1));
+        doc.assets.push(Asset {
+            id: asset_id.clone(),
+            path: format!("{index}.png"),
+            hash: assemblash_core::storage::hash_bytes(&solid_png(&color)),
+            media_type: "image/png".to_owned(),
+            width: Some(1),
+            height: Some(1),
+            extra: Extras::new(),
+        });
+        hrefs.insert(
+            asset_id.clone(),
+            format!("data:image/png;base64,{}", base64(&solid_png(&color))),
+        );
+
+        let mut layer = Layer::new(
+            LayerId::new(format!("layer_{}", index + 1)),
+            Transform::new(
+                10.0 + 30.0 * index as f64,
+                10.0 + 30.0 * index as f64,
+                60.0,
+                60.0,
+            ),
+            LayerKind::Image(ImageLayer {
+                asset: asset_id,
+                fit: ImageFit::Fill,
+                extra: Extras::new(),
+            }),
+        );
+        layer.blend_mode = blend;
+        doc.layers.push(layer);
+    }
+
+    (doc, hrefs)
+}
+
+#[test]
+fn multiply_and_screen_actually_composite() {
+    let fonts = fonts();
+
+    let cases = [
+        // Red under blue, unblended: the overlap is plain blue.
+        (BlendMode::Normal, [0, 0, 255]),
+        // Multiply: red × blue leaves nothing lit.
+        (BlendMode::Multiply, [0, 0, 0]),
+        // Screen: red + blue is magenta.
+        (BlendMode::Screen, [255, 0, 255]),
+        // A mode this build does not render composites as normal, and the
+        // renderer is never handed a value it might not understand.
+        (BlendMode::Other("overlay".to_owned()), [0, 0, 255]),
+    ];
+
+    for (mode, expected) in cases {
+        let (doc, hrefs) = blend_document(mode.clone());
+        let png_bytes =
+            document_to_png(&doc, &fonts, &hrefs, 1.0, &PngMetadata::for_document(&doc)).unwrap();
+        let (width, _, rgba) = decode(&png_bytes);
+        let at = |x: u32, y: u32| {
+            let start = ((y * width + x) * 4) as usize;
+            [rgba[start], rgba[start + 1], rgba[start + 2]]
+        };
+        // The lower square never blends, so it is the same in every case;
+        // the upper square's own colour depends on the mode and the white
+        // canvas behind it, so only the overlap is worth pinning.
+        assert_eq!(at(20, 20), [255, 0, 0], "{mode:?}: red square");
+        assert_eq!(at(50, 50), expected, "{mode:?}: the overlap");
+    }
+}
+
+#[test]
+fn a_blending_child_does_not_reach_past_its_group() {
+    let fonts = fonts();
+
+    // The same blue square, screened, but wrapped in a group. Isolation means
+    // it screens against what is inside the group — nothing — so the red
+    // square underneath is untouched and the overlap stays blue.
+    let (mut doc, hrefs) = blend_document(BlendMode::Screen);
+    let blending = doc.layers.pop().unwrap();
+    doc.layers.push(Layer::new(
+        LayerId::new("layer_group"),
+        Transform::new(0.0, 0.0, 100.0, 100.0),
+        LayerKind::Group(GroupLayer {
+            children: vec![blending],
+            extra: Extras::new(),
+        }),
+    ));
+
+    let png_bytes =
+        document_to_png(&doc, &fonts, &hrefs, 1.0, &PngMetadata::for_document(&doc)).unwrap();
+    let (width, _, rgba) = decode(&png_bytes);
+    let start = ((50 * width + 50) * 4) as usize;
+    assert_eq!(
+        [rgba[start], rgba[start + 1], rgba[start + 2]],
+        [0, 0, 255],
+        "the group should have contained the blend"
+    );
 }
 
 #[test]

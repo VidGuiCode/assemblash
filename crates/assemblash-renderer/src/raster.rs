@@ -63,14 +63,23 @@ impl LoadedFonts {
     }
 
     fn from_database(database: usvg::fontdb::Database) -> Self {
-        let families = FontSet::new(
-            database
-                .faces()
-                .flat_map(|face| face.families.iter().map(|(name, _)| name.clone())),
-        );
+        // Measured here, once, so `doc_to_svg` can stay a pure function of the
+        // document and the font set. A face whose metrics cannot be read still
+        // contributes its family name: the family exists, so a document naming
+        // it is not "missing font", and the baseline falls back rather than
+        // the whole render failing.
+        let mut faces = Vec::new();
+        for face in database.faces() {
+            let metrics = database
+                .with_face_data(face.id, crate::fonts::read_metrics)
+                .flatten();
+            for (name, _) in &face.families {
+                faces.push((name.clone(), metrics));
+            }
+        }
         Self {
             database: Arc::new(database),
-            families,
+            families: FontSet::measured(faces),
         }
     }
 

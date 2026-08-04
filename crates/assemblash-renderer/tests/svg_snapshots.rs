@@ -15,11 +15,11 @@
 use std::path::PathBuf;
 
 use assemblash_core::document::{
-    Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
+    BlendMode, Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
 };
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::{Asset, Color, Document, Layer, LayerKind};
-use assemblash_renderer::{doc_to_svg, AssetHrefs, FontSet};
+use assemblash_renderer::{doc_to_svg, AssetHrefs, FontMetrics, FontSet};
 
 fn fonts() -> FontSet {
     FontSet::new(["Inter", "Noto Sans"])
@@ -237,6 +237,113 @@ fn nested_groups_and_rotated_group() {
 
     let svg = doc_to_svg(&doc, &fonts(), &hrefs()).unwrap();
     assert_snapshot("nested_groups", &svg);
+}
+
+#[test]
+fn blend_modes_reach_the_output() {
+    let mut doc = document(300.0, 300.0);
+    doc.assets.push(asset());
+
+    for (index, mode) in [
+        BlendMode::Normal,
+        BlendMode::Multiply,
+        BlendMode::Screen,
+        // A mode from a later version: preserved in the document, and
+        // deliberately not emitted, so it composites normally rather than
+        // being handed to the renderer as something it may not support.
+        BlendMode::Other("overlay".to_owned()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut layer = image(
+            &format!("layer_{index}"),
+            Transform::new(10.0, 10.0 + 60.0 * index as f64, 100.0, 50.0),
+            ImageFit::Fill,
+        );
+        layer.blend_mode = mode;
+        doc.layers.push(layer);
+    }
+
+    let svg = doc_to_svg(&doc, &fonts(), &hrefs()).unwrap();
+    assert_eq!(svg.matches("mix-blend-mode").count(), 2, "{svg}");
+    assert!(!svg.contains("overlay"), "{svg}");
+    assert_snapshot("blend_modes", &svg);
+}
+
+#[test]
+fn a_group_isolates_only_when_a_child_blends() {
+    let mut doc = document(300.0, 300.0);
+    doc.assets.push(asset());
+
+    let mut blending = image(
+        "layer_blending",
+        Transform::new(0.0, 0.0, 50.0, 50.0),
+        ImageFit::Fill,
+    );
+    blending.blend_mode = BlendMode::Screen;
+
+    let mut with_blend = Layer::new(
+        LayerId::new("layer_group_isolated"),
+        Transform::new(10.0, 10.0, 100.0, 100.0),
+        LayerKind::Group(GroupLayer {
+            children: vec![blending],
+            extra: Extras::new(),
+        }),
+    );
+    with_blend.blend_mode = BlendMode::Multiply;
+
+    let plain = Layer::new(
+        LayerId::new("layer_group_plain"),
+        Transform::new(150.0, 10.0, 100.0, 100.0),
+        LayerKind::Group(GroupLayer {
+            children: vec![image(
+                "layer_plain_child",
+                Transform::new(0.0, 0.0, 50.0, 50.0),
+                ImageFit::Fill,
+            )],
+            extra: Extras::new(),
+        }),
+    );
+
+    doc.layers.push(with_blend);
+    doc.layers.push(plain);
+
+    let svg = doc_to_svg(&doc, &fonts(), &hrefs()).unwrap();
+    assert_eq!(svg.matches("isolation:isolate").count(), 1, "{svg}");
+    assert_snapshot("group_isolation", &svg);
+}
+
+#[test]
+fn the_first_baseline_comes_from_the_fonts_ascent() {
+    let mut doc = document(300.0, 100.0);
+    doc.layers.push(text(
+        "layer_1",
+        Transform::new(0.0, 10.0, 300.0, 40.0),
+        "measured",
+    ));
+
+    let measured = FontSet::measured([(
+        "Inter",
+        Some(FontMetrics {
+            units_per_em: 1000.0,
+            ascender: 750.0,
+            descender: -250.0,
+            line_gap: 0.0,
+        }),
+    )]);
+
+    // 10 (box top) + 24 (font size) * 0.75 (ascent) = 28.
+    let svg = doc_to_svg(&doc, &measured, &AssetHrefs::new()).unwrap();
+    assert!(svg.contains("y=\"28\""), "{svg}");
+
+    // A set nobody measured keeps the pre-0.5 rule: 10 + 24 = 34. Only
+    // callers that never resolved fonts see this, and they are previewing
+    // structure rather than producing final pixels.
+    let unmeasured = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    assert!(unmeasured.contains("y=\"34\""), "{unmeasured}");
+
+    assert_snapshot("measured_baseline", &svg);
 }
 
 #[test]
