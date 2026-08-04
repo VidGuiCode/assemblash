@@ -363,18 +363,41 @@ pub struct GroupLayer {
 
 /// How a layer composites onto what is beneath it.
 ///
-/// Reserved beyond `Normal` until v0.5: other values round-trip but render as
-/// `Normal` today.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+/// `normal`, `multiply`, and `screen` are rendered. The remaining CSS blend
+/// modes arrive in v1.x; until then a document that names one keeps the name
+/// verbatim — [`BlendMode::Other`] — and renders as `Normal`. Losing the value
+/// would mean a document written by a newer build came back damaged, which is
+/// the one thing the schema's round-trip promise rules out.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum BlendMode {
     /// Plain source-over compositing.
     #[default]
     Normal,
-    /// Reserved (v0.5).
+    /// Darkens: multiplies the two colours.
     Multiply,
-    /// Reserved (v0.5).
+    /// Lightens: the inverse of multiplying the inverses.
     Screen,
+    /// A mode this build does not render, preserved as written.
+    #[serde(untagged)]
+    Other(String),
+}
+
+impl BlendMode {
+    /// Whether this build composites with this mode rather than ignoring it.
+    pub fn is_rendered(&self) -> bool {
+        matches!(self, Self::Normal | Self::Multiply | Self::Screen)
+    }
+
+    /// The mode as it is written in the document.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Normal => "normal",
+            Self::Multiply => "multiply",
+            Self::Screen => "screen",
+            Self::Other(raw) => raw,
+        }
+    }
 }
 
 /// Horizontal text alignment inside the layer box.

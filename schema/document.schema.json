@@ -314,22 +314,26 @@
       "additionalProperties": true
     },
     "BlendMode": {
-      "description": "How a layer composites onto what is beneath it.\n\nReserved beyond `Normal` until v0.5: other values round-trip but render as\n`Normal` today.",
-      "oneOf": [
+      "description": "How a layer composites onto what is beneath it.\n\n`normal`, `multiply`, and `screen` are rendered. The remaining CSS blend\nmodes arrive in v1.x; until then a document that names one keeps the name\nverbatim — [`BlendMode::Other`] — and renders as `Normal`. Losing the value\nwould mean a document written by a newer build came back damaged, which is\nthe one thing the schema's round-trip promise rules out.",
+      "anyOf": [
         {
           "description": "Plain source-over compositing.",
           "type": "string",
           "const": "normal"
         },
         {
-          "description": "Reserved (v0.5).",
+          "description": "Darkens: multiplies the two colours.",
           "type": "string",
           "const": "multiply"
         },
         {
-          "description": "Reserved (v0.5).",
+          "description": "Lightens: the inverse of multiplying the inverses.",
           "type": "string",
           "const": "screen"
+        },
+        {
+          "description": "A mode this build does not render, preserved as written.",
+          "type": "string"
         }
       ]
     },
