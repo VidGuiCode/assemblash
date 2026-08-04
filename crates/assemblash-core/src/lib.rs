@@ -13,6 +13,7 @@
 pub mod document;
 pub mod error;
 pub mod ids;
+pub mod ops;
 pub mod schema;
 pub mod storage;
 pub mod validate;
@@ -23,6 +24,7 @@ pub use document::{
 };
 pub use error::{ValidationError, ValidationErrors};
 pub use ids::{AssetId, DocumentId, IdSource, LayerId, SequentialIdSource, UlidIdSource};
+pub use ops::{apply, dry_run, OpError, Operation};
 pub use storage::{load, save, StorageError};
 pub use validate::validate;
 

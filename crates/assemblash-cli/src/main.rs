@@ -10,10 +10,11 @@ mod assets;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use assemblash_core::document::{Extras, ImageFit, ImageLayer, TextAlign, TextLayer, Transform};
+use assemblash_core::document::{ImageFit, TextAlign, Transform};
 use assemblash_core::ids::UlidIdSource;
+use assemblash_core::ops::{self, CreateLayer, LayerPosition, NewLayerKind, OpError, Operation};
 use assemblash_core::storage::{self, StorageError};
-use assemblash_core::{Color, Document, Layer, LayerId, LayerKind};
+use assemblash_core::{Color, Document};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
 use assemblash_renderer::{doc_to_svg, svg_to_pixmap, FontSet};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -195,6 +196,8 @@ enum CliError {
     ProjectExists { path: PathBuf },
     #[error("serialising the document: {0}")]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Operation(#[from] OpError),
 }
 
 fn run(command: Command) -> Result<(), CliError> {
@@ -227,9 +230,9 @@ fn run(command: Command) -> Result<(), CliError> {
             box_,
         } => {
             let mut document = storage::load(&project)?;
-            let layer = build_layer(
-                &box_,
-                LayerKind::Text(TextLayer {
+            let outcome = apply(
+                &mut document,
+                NewLayerKind::Text {
                     text,
                     font_family: font,
                     font_size: size,
@@ -240,14 +243,11 @@ fn run(command: Command) -> Result<(), CliError> {
                         Align::Right => TextAlign::Right,
                     },
                     line_height: 1.2,
-                    runs: Vec::new(),
-                    extra: Extras::new(),
-                }),
-            );
-            let id = layer.id.clone();
-            document.layers.push(layer);
+                },
+                &box_,
+            )?;
             storage::save(&document, &project)?;
-            println!("{id}");
+            print_created(&outcome);
             Ok(())
         }
 
@@ -259,23 +259,22 @@ fn run(command: Command) -> Result<(), CliError> {
         } => {
             let mut document = storage::load(&project)?;
             let asset = storage::import_asset(&project, &file, &mut UlidIdSource)?;
-            let layer = build_layer(
-                &box_,
-                LayerKind::Image(ImageLayer {
-                    asset: asset.id.clone(),
+            let asset_id = asset.id.clone();
+            document.assets.push(asset);
+            let outcome = apply(
+                &mut document,
+                NewLayerKind::Image {
+                    asset: asset_id,
                     fit: match fit {
                         Fit::Fill => ImageFit::Fill,
                         Fit::Contain => ImageFit::Contain,
                         Fit::Cover => ImageFit::Cover,
                     },
-                    extra: Extras::new(),
-                }),
-            );
-            let id = layer.id.clone();
-            document.assets.push(asset);
-            document.layers.push(layer);
+                },
+                &box_,
+            )?;
             storage::save(&document, &project)?;
-            println!("{id}");
+            print_created(&outcome);
             Ok(())
         }
 
@@ -325,18 +324,45 @@ fn run(command: Command) -> Result<(), CliError> {
     }
 }
 
-fn build_layer(box_: &BoxArgs, kind: LayerKind) -> Layer {
-    let mut layer = Layer::new(
-        LayerId::generate(&mut UlidIdSource),
-        Transform {
+/// Adds a layer through the operation layer.
+///
+/// The CLI does not touch `document.layers` itself: every transport goes
+/// through the same operations (PRD §7.2), so that validation, and later
+/// history and permissions, cannot be bypassed by one of them.
+fn apply(
+    document: &mut Document,
+    kind: NewLayerKind,
+    box_: &BoxArgs,
+) -> Result<ops::OpOutcome, OpError> {
+    let operation = Operation::Create(CreateLayer {
+        position: LayerPosition::Root { index: None },
+        transform: Transform {
             rotation: box_.rotation,
             ..Transform::new(box_.x, box_.y, box_.width, box_.height)
         },
+        name: box_.layer_name.clone(),
         kind,
-    );
-    layer.opacity = box_.opacity;
-    layer.name = box_.layer_name.clone();
-    layer
+    });
+    let outcome = ops::apply(document, &operation, &mut UlidIdSource)?;
+
+    // Opacity is not part of creating a layer, so it is a second operation on
+    // the layer that was just made.
+    if box_.opacity != 1.0 {
+        if let Some(id) = outcome.created.first() {
+            let set_opacity = ops::UpdateLayer {
+                opacity: Some(box_.opacity),
+                ..ops::UpdateLayer::new(id.clone())
+            };
+            ops::apply(document, &Operation::Update(set_opacity), &mut UlidIdSource)?;
+        }
+    }
+    Ok(outcome)
+}
+
+fn print_created(outcome: &ops::OpOutcome) {
+    for id in &outcome.created {
+        println!("{id}");
+    }
 }
 
 fn load_fonts(args: &FontArgs) -> Result<Option<LoadedFonts>, CliError> {
