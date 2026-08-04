@@ -16,11 +16,12 @@ pub mod ids;
 pub mod ops;
 pub mod schema;
 pub mod storage;
+pub mod svg_import;
 pub mod validate;
 
 pub use document::{
     Asset, BlendMode, Canvas, Color, Document, Extras, GroupLayer, ImageFit, ImageLayer, Layer,
-    LayerKind, TextAlign, TextLayer, Transform,
+    LayerKind, SvgLayer, TextAlign, TextLayer, Transform,
 };
 pub use error::{ValidationError, ValidationErrors};
 pub use ids::{AssetId, DocumentId, IdSource, LayerId, SequentialIdSource, UlidIdSource};

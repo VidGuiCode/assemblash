@@ -89,6 +89,22 @@ pub enum StorageError {
         actual: String,
     },
 
+    /// An imported SVG could not be made safe.
+    #[error("cannot import {path}: {source}")]
+    UnsafeSvg {
+        /// The file that was to be imported.
+        path: PathBuf,
+        /// What was wrong with it.
+        source: crate::svg_import::SvgImportError,
+    },
+
+    /// An imported file is not valid UTF-8 where text was expected.
+    #[error("cannot import {path}: an SVG must be text")]
+    NotText {
+        /// The file that was to be imported.
+        path: PathBuf,
+    },
+
     /// An import source has no usable file extension.
     #[error("cannot import {path}: a file extension is required to record the media type")]
     UnknownAssetType {
@@ -212,8 +228,44 @@ pub fn import_asset(
     source_file: &Path,
     ids: &mut dyn IdSource,
 ) -> Result<Asset, StorageError> {
-    let bytes =
+    import_asset_reporting(project_dir, source_file, ids).map(|(asset, _)| asset)
+}
+
+/// Imports an asset and also reports what an SVG sanitiser removed.
+///
+/// Callers that can tell a user "three external references were stripped from
+/// that logo" should use this one; the rest can use [`import_asset`].
+pub fn import_asset_reporting(
+    project_dir: &Path,
+    source_file: &Path,
+    ids: &mut dyn IdSource,
+) -> Result<(Asset, Option<crate::svg_import::SvgImportReport>), StorageError> {
+    let mut bytes =
         std::fs::read(source_file).map_err(|e| StorageError::io("reading", source_file, e))?;
+    let mut import_report = None;
+
+    let is_svg = source_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+    if is_svg {
+        // Sanitised before it is stored, not when it is rendered: that way
+        // everything under assets/ is safe by construction, and no future
+        // reader has to remember to check (PRD §10.1).
+        let source = String::from_utf8(bytes).map_err(|_| StorageError::NotText {
+            path: source_file.to_path_buf(),
+        })?;
+        let (clean, report) =
+            crate::svg_import::sanitize(&source).map_err(|source| StorageError::UnsafeSvg {
+                path: source_file.to_path_buf(),
+                source,
+            })?;
+        bytes = clean.into_bytes();
+        import_report = Some(report);
+    }
+
+    // Hashed after sanitising, so the recorded hash is the hash of what is
+    // actually stored.
     let hash = hash_bytes(&bytes);
 
     let extension = source_file
@@ -234,15 +286,18 @@ pub fn import_asset(
     std::fs::write(&destination, &bytes)
         .map_err(|e| StorageError::io("writing", &destination, e))?;
 
-    Ok(Asset {
-        id: AssetId::generate(ids),
-        path: relative,
-        hash,
-        media_type: media_type_for(&extension).to_owned(),
-        width: None,
-        height: None,
-        extra: Extras::new(),
-    })
+    Ok((
+        Asset {
+            id: AssetId::generate(ids),
+            path: relative,
+            hash,
+            media_type: media_type_for(&extension).to_owned(),
+            width: None,
+            height: None,
+            extra: Extras::new(),
+        },
+        import_report,
+    ))
 }
 
 /// Removes asset files under `assets/` that no image layer refers to.

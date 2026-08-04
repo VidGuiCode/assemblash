@@ -83,6 +83,23 @@ enum Command {
         box_: BoxArgs,
     },
 
+    /// Imports an SVG file and appends a vector layer for it.
+    ///
+    /// The file is sanitised on the way in: scripts, event handlers, and
+    /// references to anything outside the file are removed.
+    AddSvg {
+        /// Project directory.
+        project: PathBuf,
+        /// SVG file to import. It is copied into the project.
+        #[arg(long)]
+        file: PathBuf,
+        /// How the graphic fills its box.
+        #[arg(long, value_enum, default_value_t = Fit::Contain)]
+        fit: Fit,
+        #[command(flatten)]
+        box_: BoxArgs,
+    },
+
     /// Writes the document as SVG.
     Render {
         /// Project directory.
@@ -274,6 +291,52 @@ fn run(command: Command) -> Result<(), CliError> {
                 &box_,
             )?;
             storage::save(&document, &project)?;
+            print_created(&outcome);
+            Ok(())
+        }
+
+        Command::AddSvg {
+            project,
+            file,
+            fit,
+            box_,
+        } => {
+            let mut document = storage::load(&project)?;
+            let (asset, report) =
+                storage::import_asset_reporting(&project, &file, &mut UlidIdSource)?;
+            let asset_id = asset.id.clone();
+            document.assets.push(asset);
+            let outcome = apply(
+                &mut document,
+                NewLayerKind::Svg {
+                    asset: asset_id,
+                    fit: match fit {
+                        Fit::Fill => ImageFit::Fill,
+                        Fit::Contain => ImageFit::Contain,
+                        Fit::Cover => ImageFit::Cover,
+                    },
+                },
+                &box_,
+            )?;
+            storage::save(&document, &project)?;
+
+            // Say what was taken out. Silently altering someone's artwork
+            // would be worse than refusing it.
+            if let Some(report) = report.filter(|r| !r.is_clean()) {
+                for (label, items) in [
+                    ("elements", &report.removed_elements),
+                    ("attributes", &report.removed_attributes),
+                    ("external references", &report.removed_references),
+                ] {
+                    if !items.is_empty() {
+                        eprintln!(
+                            "removed unsafe {label}: {}",
+                            items.iter().cloned().collect::<Vec<_>>().join(", ")
+                        );
+                    }
+                }
+            }
+
             print_created(&outcome);
             Ok(())
         }

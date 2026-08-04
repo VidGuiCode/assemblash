@@ -72,6 +72,14 @@ pub enum NewLayerKind {
     },
     /// An empty group.
     Group,
+    /// A vector graphic layer referencing an imported SVG asset.
+    Svg {
+        /// The asset to draw.
+        asset: AssetId,
+        /// How it fills its box.
+        #[serde(default)]
+        fit: ImageFit,
+    },
 }
 
 fn default_line_height() -> f64 {
@@ -137,6 +145,18 @@ impl CreateLayer {
                 children: Vec::new(),
                 extra: Extras::new(),
             }),
+            NewLayerKind::Svg { asset, fit } => {
+                if !document.assets.iter().any(|a| &a.id == asset) {
+                    return Err(OpError::NoSuchAsset {
+                        asset: asset.clone(),
+                    });
+                }
+                LayerKind::Svg(crate::document::SvgLayer {
+                    asset: asset.clone(),
+                    fit: *fit,
+                    extra: Extras::new(),
+                })
+            }
         };
 
         let mut layer = Layer::new(LayerId::generate(ids), self.transform.clone(), kind);
@@ -276,6 +296,14 @@ impl UpdateLayer {
                     image.fit = value;
                 }
             }
+            LayerKind::Svg(svg) => {
+                if let Some(property) = self.first_text_property() {
+                    return Err(wrong_kind(&layer.id, kind_name, property));
+                }
+                if let Some(value) = self.fit {
+                    svg.fit = value;
+                }
+            }
             LayerKind::Group(_) => {
                 if let Some(property) = self.first_text_property() {
                     return Err(wrong_kind(&layer.id, kind_name, property));
@@ -308,6 +336,7 @@ fn kind_name(kind: &LayerKind) -> &'static str {
         LayerKind::Text(_) => "text",
         LayerKind::Image(_) => "image",
         LayerKind::Group(_) => "group",
+        LayerKind::Svg(_) => "svg",
     }
 }
 

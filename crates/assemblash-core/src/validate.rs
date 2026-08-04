@@ -159,6 +159,14 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
                 });
             }
         }
+        LayerKind::Svg(svg) => {
+            if !known_assets.contains(&svg.asset) {
+                errors.push(ValidationError::DanglingAssetRef {
+                    layer: layer.id.clone(),
+                    asset: svg.asset.clone(),
+                });
+            }
+        }
         // Children are visited by the caller's walk; nothing group-specific
         // to check beyond what every layer gets.
         LayerKind::Group(_) => {}

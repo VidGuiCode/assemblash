@@ -5,7 +5,7 @@
 //! lose a field by being opened and saved, nothing downstream (history,
 //! undo, agent edits) can be trusted.
 
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
 
@@ -248,4 +248,59 @@ proptest! {
         // twice cannot churn the diff.
         prop_assert_eq!(json, serde_json::to_string(&parsed).unwrap());
     }
+}
+
+/// A document written by v0.1.0 — before the SVG layer kind existed — must
+/// still load unchanged. That is what lets `schemaVersion` stay at 1: the
+/// new layer kind is additive, so no migration is owed.
+#[test]
+fn a_v0_1_0_document_still_loads() {
+    let json = r##"{
+      "schemaVersion": 1,
+      "id": "doc_01JZZZZZZZZZZZZZZZZZZZZZZZ",
+      "name": "Poster",
+      "canvas": { "width": 400.0, "height": 300.0, "background": "#ffffff" },
+      "assets": [{
+        "id": "asset_01JZZZZZZZZZZZZZZZZZZZZZZZ",
+        "path": "logo.png",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "mediaType": "image/png"
+      }],
+      "layers": [
+        {
+          "id": "layer_01JZZZZZZZZZZZZZZZZZZZZZZ1",
+          "transform": { "x": 20.0, "y": 20.0, "width": 360.0, "height": 120.0, "rotation": 0.0 },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "Hello",
+          "fontFamily": "Noto Sans",
+          "fontSize": 36.0,
+          "color": "#000000",
+          "align": "left",
+          "lineHeight": 1.2,
+          "runs": []
+        },
+        {
+          "id": "layer_01JZZZZZZZZZZZZZZZZZZZZZZ2",
+          "transform": { "x": 20.0, "y": 160.0, "width": 120.0, "height": 120.0, "rotation": 0.0 },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "image",
+          "asset": "asset_01JZZZZZZZZZZZZZZZZZZZZZZZ",
+          "fit": "cover"
+        }
+      ]
+    }"##;
+
+    let document: Document = serde_json::from_str(json).expect("a v0.1.0 document still parses");
+    validate(&document).expect("and is still valid");
+    assert_eq!(document.layers.len(), 2);
+    assert_eq!(document.schema_version, SCHEMA_VERSION);
 }

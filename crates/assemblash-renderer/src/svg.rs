@@ -128,15 +128,24 @@ fn write_layer(
             out.push_str("</text>\n");
         }
 
-        LayerKind::Image(image) => {
+        // An SVG layer draws exactly like an image layer: usvg reads a nested
+        // SVG through the same <image> element, and the asset was sanitised
+        // at import, so nothing here has to treat it as untrusted markup.
+        LayerKind::Image(_) | LayerKind::Svg(_) => {
+            let (asset_id, fit) = match &layer.kind {
+                LayerKind::Image(image) => (&image.asset, image.fit),
+                LayerKind::Svg(svg) => (&svg.asset, svg.fit),
+                _ => unreachable!("matched on image or svg above"),
+            };
+
             let href = assets
-                .get(&image.asset)
+                .get(asset_id)
                 .ok_or_else(|| RenderError::UnresolvedAsset {
                     layer: layer.id.clone(),
-                    asset: image.asset.clone(),
+                    asset: asset_id.clone(),
                 })?;
 
-            let preserve = match image.fit {
+            let preserve = match fit {
                 ImageFit::Fill => "none",
                 ImageFit::Contain => "xMidYMid meet",
                 ImageFit::Cover => "xMidYMid slice",

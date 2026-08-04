@@ -88,6 +88,7 @@ name = "assemblash-core"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "roxmltree 0.21.1",
  "schemars",
  "serde",
  "serde_json",

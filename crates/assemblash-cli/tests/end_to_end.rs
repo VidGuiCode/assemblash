@@ -229,3 +229,103 @@ fn opening_a_directory_that_is_not_a_project_is_refused() {
     let stderr = run_failing(&["show", workspace.path().to_str().unwrap()]);
     assert!(stderr.contains("is not an Assemblash project"), "{stderr}");
 }
+
+#[test]
+fn an_imported_svg_is_sanitised_and_still_renders() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("vector");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "200"]);
+
+    let hostile = workspace.path().join("logo.svg");
+    std::fs::write(
+        &hostile,
+        concat!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\" ",
+            "onload=\"steal()\">",
+            "<script>fetch('https://example.com')</script>",
+            "<image href=\"https://example.com/tracker.png\" width=\"1\" height=\"1\"/>",
+            "<circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"#3355ff\"/>",
+            "</svg>",
+        ),
+    )
+    .unwrap();
+
+    run(&[
+        "add-svg",
+        project_arg,
+        "--file",
+        hostile.to_str().unwrap(),
+        "--x",
+        "20",
+        "--y",
+        "20",
+        "--width",
+        "160",
+        "--height",
+        "160",
+    ]);
+
+    // What was stored must be safe: this is the invariant the whole import
+    // path exists to hold.
+    let assets = std::fs::read_dir(project.join("assets")).unwrap();
+    let mut checked = 0;
+    for entry in assets {
+        let stored = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        assert!(!stored.contains("script"), "{stored}");
+        assert!(!stored.contains("onload"), "{stored}");
+        assert!(!stored.contains("example.com"), "{stored}");
+        assert!(stored.contains("<circle"), "the drawing survived: {stored}");
+        checked += 1;
+    }
+    assert_eq!(checked, 1);
+
+    // And it still renders.
+    let png_path = workspace.path().join("vector.png");
+    run(&[
+        "export",
+        project_arg,
+        "--out",
+        png_path.to_str().unwrap(),
+        "--font-dir",
+        font_dir().to_str().unwrap(),
+    ]);
+    let png_bytes = std::fs::read(&png_path).unwrap();
+    let decoder = png::Decoder::new(std::io::Cursor::new(&png_bytes));
+    let mut reader = decoder.read_info().unwrap();
+    let mut buffer = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buffer).unwrap();
+    buffer.truncate(info.buffer_size());
+
+    let blue = buffer
+        .chunks_exact(4)
+        .filter(|p| p[3] > 128 && p[2] > 200 && p[0] < 120)
+        .count();
+    assert!(
+        blue > 1000,
+        "the circle should have been drawn, found {blue} blue pixels"
+    );
+}
+
+#[test]
+fn an_svg_with_a_doctype_is_refused() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg]);
+
+    let bomb = workspace.path().join("bomb.svg");
+    std::fs::write(
+        &bomb,
+        "<!DOCTYPE svg [<!ENTITY a \"aaaaaaaaaa\">]><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    )
+    .unwrap();
+
+    let stderr = run_failing(&["add-svg", project_arg, "--file", bomb.to_str().unwrap()]);
+    assert!(stderr.contains("DOCTYPE"), "{stderr}");
+    // Nothing was stored.
+    assert_eq!(
+        std::fs::read_dir(project.join("assets")).unwrap().count(),
+        0
+    );
+}

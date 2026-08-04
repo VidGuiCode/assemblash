@@ -236,6 +236,20 @@
           "required": [
             "type"
           ]
+        },
+        {
+          "description": "An imported vector graphic, drawn into the layer box.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "svg"
+            }
+          },
+          "$ref": "#/$defs/SvgLayer",
+          "required": [
+            "type"
+          ]
         }
       ]
     },
@@ -421,6 +435,25 @@
           "default": []
         }
       },
+      "additionalProperties": true
+    },
+    "SvgLayer": {
+      "description": "A reference to an imported SVG asset, drawn into the layer box.\n\nSeparate from [`ImageLayer`] because an SVG is vector: it scales without\nloss, and it went through the import sanitiser (`crate::svg_import`) before\nit was stored. Nothing in a project's `assets/` directory carries scripts\nor external references.",
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "Id of an asset in the document's `assets` list.",
+          "$ref": "#/$defs/AssetId"
+        },
+        "fit": {
+          "description": "How the graphic fills its box.",
+          "$ref": "#/$defs/ImageFit",
+          "default": "fill"
+        }
+      },
+      "required": [
+        "asset"
+      ],
       "additionalProperties": true
     }
   }

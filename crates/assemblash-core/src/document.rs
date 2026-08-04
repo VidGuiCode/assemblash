@@ -252,6 +252,8 @@ pub enum LayerKind {
     Image(ImageLayer),
     /// A container transforming its children as a unit.
     Group(GroupLayer),
+    /// An imported vector graphic, drawn into the layer box.
+    Svg(SvgLayer),
 }
 
 /// Text content and its single style. Per-run styling arrives in v2.0.
@@ -296,6 +298,26 @@ pub struct ImageLayer {
     /// Id of an asset in the document's `assets` list.
     pub asset: AssetId,
     /// How the image fills its box.
+    #[serde(default)]
+    pub fit: ImageFit,
+    /// Keys this build does not know about, preserved verbatim. See
+    /// [`TextLayer::extra`].
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// A reference to an imported SVG asset, drawn into the layer box.
+///
+/// Separate from [`ImageLayer`] because an SVG is vector: it scales without
+/// loss, and it went through the import sanitiser (`crate::svg_import`) before
+/// it was stored. Nothing in a project's `assets/` directory carries scripts
+/// or external references.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SvgLayer {
+    /// Id of an asset in the document's `assets` list.
+    pub asset: AssetId,
+    /// How the graphic fills its box.
     #[serde(default)]
     pub fit: ImageFit,
     /// Keys this build does not know about, preserved verbatim. See
