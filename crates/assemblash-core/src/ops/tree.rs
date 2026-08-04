@@ -5,7 +5,7 @@
 //! operation cannot quietly forget about groups.
 
 use crate::document::{Document, Layer, LayerKind};
-use crate::ids::LayerId;
+use crate::ids::{IdSource, LayerId};
 use crate::ops::error::OpError;
 use crate::ops::requests::LayerPosition;
 
@@ -105,5 +105,153 @@ pub(super) fn collect_ids(layers: &[Layer], out: &mut Vec<LayerId>) {
         if let LayerKind::Group(group) = &layer.kind {
             collect_ids(&group.children, out);
         }
+    }
+}
+
+/// Gives every layer in a subtree a fresh id, recording them in order.
+pub(super) fn reassign_ids(layer: &mut Layer, ids: &mut dyn IdSource, out: &mut Vec<LayerId>) {
+    layer.id = LayerId::generate(ids);
+    out.push(layer.id.clone());
+    if let LayerKind::Group(group) = &mut layer.kind {
+        for child in &mut group.children {
+            reassign_ids(child, ids, out);
+        }
+    }
+}
+
+/// The id of a layer's parent group, or `None` if it sits at the top level.
+pub(super) fn parent_of(document: &Document, id: &LayerId) -> Option<LayerId> {
+    fn search(layers: &[Layer], id: &LayerId, current: Option<&LayerId>) -> Option<LayerId> {
+        for layer in layers {
+            if &layer.id == id {
+                return current.cloned();
+            }
+            if let LayerKind::Group(group) = &layer.kind {
+                if let Some(found) = search(&group.children, id, Some(&layer.id)) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    search(&document.layers, id, None)
+}
+
+/// Index of a layer among its siblings, or the end of the list if it is not
+/// found.
+pub(super) fn index_of(document: &Document, parent: &Option<LayerId>, id: &LayerId) -> usize {
+    let siblings = match parent {
+        None => &document.layers,
+        Some(parent) => match find(document, parent) {
+            Some(Layer {
+                kind: LayerKind::Group(group),
+                ..
+            }) => &group.children,
+            _ => return 0,
+        },
+    };
+    siblings
+        .iter()
+        .position(|layer| &layer.id == id)
+        .unwrap_or(siblings.len())
+}
+
+/// A position addressing an index inside a parent, or at the top level.
+pub(super) fn position_in(parent: Option<LayerId>, index: usize) -> LayerPosition {
+    match parent {
+        Some(parent) => LayerPosition::In {
+            parent,
+            index: Some(index),
+        },
+        None => LayerPosition::Root { index: Some(index) },
+    }
+}
+
+/// The position directly above a layer — where a duplicate belongs.
+pub(super) fn position_above(document: &Document, id: &LayerId) -> Result<LayerPosition, OpError> {
+    if find(document, id).is_none() {
+        return Err(OpError::NoSuchLayer { id: id.clone() });
+    }
+    let parent = parent_of(document, id);
+    Ok(position_in(
+        parent.clone(),
+        index_of(document, &parent, id) + 1,
+    ))
+}
+
+/// Whether `candidate` sits somewhere inside `ancestor`.
+pub(super) fn is_descendant(document: &Document, ancestor: &LayerId, candidate: &LayerId) -> bool {
+    let Some(layer) = find(document, ancestor) else {
+        return false;
+    };
+    let LayerKind::Group(group) = &layer.kind else {
+        return false;
+    };
+    let mut ids = Vec::new();
+    collect_ids(&group.children, &mut ids);
+    ids.contains(candidate)
+}
+
+/// The parent every one of these layers shares, or an error if they are not
+/// siblings.
+pub(super) fn common_parent(
+    document: &Document,
+    ids: &[LayerId],
+) -> Result<Option<LayerId>, OpError> {
+    let mut parents = ids.iter().map(|id| parent_of(document, id));
+    let first = parents.next().flatten();
+    let same = {
+        let first = first.clone();
+        ids.iter()
+            .all(|id| parent_of(document, id) == first.clone())
+    };
+    if same {
+        Ok(first)
+    } else {
+        Err(OpError::NotSiblings {
+            ids: ids
+                .iter()
+                .map(LayerId::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
+        })
+    }
+}
+
+/// The box that contains all of these layers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Bounds {
+    pub(super) x: f64,
+    pub(super) y: f64,
+    pub(super) width: f64,
+    pub(super) height: f64,
+}
+
+/// Bounding box of a set of layers, by their unrotated boxes.
+pub(super) fn bounding_box(layers: &[Layer]) -> Bounds {
+    let mut left = f64::INFINITY;
+    let mut top = f64::INFINITY;
+    let mut right = f64::NEG_INFINITY;
+    let mut bottom = f64::NEG_INFINITY;
+    for layer in layers {
+        let t = &layer.transform;
+        left = left.min(t.x);
+        top = top.min(t.y);
+        right = right.max(t.x + t.width);
+        bottom = bottom.max(t.y + t.height);
+    }
+    if !left.is_finite() {
+        return Bounds {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
+    }
+    Bounds {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
     }
 }

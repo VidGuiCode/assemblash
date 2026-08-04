@@ -61,6 +61,36 @@ pub enum OpError {
         property: &'static str,
     },
 
+    /// A layer was asked to be moved inside itself or its own descendant.
+    #[error("layer {id} cannot be placed inside itself")]
+    WouldCycle {
+        /// The layer being moved.
+        id: LayerId,
+    },
+
+    /// Grouping was asked for with layers that do not share a parent.
+    #[error("layers must share a parent to be grouped: {ids}")]
+    NotSiblings {
+        /// The ids that were asked for, comma separated.
+        ids: String,
+    },
+
+    /// Ungrouping would change what the picture looks like.
+    #[error("group {id} has {property} applied, so ungrouping would change the image")]
+    UngroupWouldChangeAppearance {
+        /// The group in question.
+        id: LayerId,
+        /// What is in the way — `rotation` or `opacity`.
+        property: &'static str,
+    },
+
+    /// An operation was given an empty list of layers.
+    #[error("{operation} needs at least one layer")]
+    NothingToDo {
+        /// The operation that was asked for.
+        operation: &'static str,
+    },
+
     /// The result would not have been a valid document.
     #[error(transparent)]
     Invalid(#[from] ValidationErrors),

@@ -19,6 +19,7 @@
 //! which is a few hundred kilobytes of JSON-shaped data; correctness is worth
 //! more than that here, and undo in v0.3 needs the same guarantee anyway.
 
+mod edits;
 mod error;
 mod requests;
 mod tree;
@@ -46,6 +47,79 @@ pub enum Operation {
     Delete {
         /// Layer to remove.
         id: LayerId,
+    },
+    /// Copies a layer, and everything inside it, directly above the original.
+    Duplicate {
+        /// Layer to copy.
+        id: LayerId,
+    },
+    /// Moves a layer by a distance, leaving its size and rotation alone.
+    Move {
+        /// Layer to move.
+        id: LayerId,
+        /// Distance along x.
+        dx: f64,
+        /// Distance along y.
+        dy: f64,
+    },
+    /// Sets a layer's box size.
+    Resize {
+        /// Layer to resize.
+        id: LayerId,
+        /// New width.
+        width: f64,
+        /// New height.
+        height: f64,
+    },
+    /// Sets a layer's rotation: the angle to rotate *to*, not by.
+    Rotate {
+        /// Layer to rotate.
+        id: LayerId,
+        /// Degrees clockwise about the layer's centre.
+        degrees: f64,
+    },
+    /// Moves a layer elsewhere in the tree: another parent, another z-order,
+    /// or both.
+    Reorder {
+        /// Layer to move.
+        id: LayerId,
+        /// Where it should end up.
+        to: LayerPosition,
+    },
+    /// Wraps sibling layers in a new group, without moving the picture.
+    Group {
+        /// Layers to wrap. They must currently share a parent.
+        ids: Vec<LayerId>,
+        /// Optional name for the new group.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Replaces a group with its children, in place.
+    Ungroup {
+        /// The group to dissolve.
+        id: LayerId,
+    },
+    /// Shows or hides a layer.
+    SetVisible {
+        /// Layer to change.
+        id: LayerId,
+        /// Whether it renders.
+        visible: bool,
+    },
+    /// Locks or unlocks a layer.
+    SetLocked {
+        /// Layer to change.
+        id: LayerId,
+        /// Whether editing operations refuse to touch it.
+        locked: bool,
+    },
+    /// Renames a layer, or clears its name.
+    Rename {
+        /// Layer to rename.
+        id: LayerId,
+        /// The new name, or `None` to clear it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
     },
 }
 
@@ -102,6 +176,50 @@ pub fn apply(
         Operation::Create(request) => create(&mut candidate, request, ids),
         Operation::Update(request) => update(&mut candidate, request),
         Operation::Delete { id } => delete(&mut candidate, id),
+        Operation::Duplicate { id } => edits::duplicate(&mut candidate, id, ids),
+        Operation::Move { id, dx, dy } => edits::transform(&mut candidate, id, |t| {
+            t.x += dx;
+            t.y += dy;
+        }),
+        Operation::Resize { id, width, height } => edits::transform(&mut candidate, id, |t| {
+            t.width = *width;
+            t.height = *height;
+        }),
+        Operation::Rotate { id, degrees } => edits::transform(&mut candidate, id, |t| {
+            t.rotation = *degrees;
+        }),
+        Operation::Reorder { id, to } => edits::reorder(&mut candidate, id, to),
+        Operation::Group { ids: members, name } => {
+            edits::group(&mut candidate, members, name.clone(), ids)
+        }
+        Operation::Ungroup { id } => edits::ungroup(&mut candidate, id),
+        // Named for the caller's sake — an agent asking to "hide" a layer
+        // should not have to know it is an update with one field set. The
+        // journal reads better for it too.
+        Operation::SetVisible { id, visible } => update(
+            &mut candidate,
+            &UpdateLayer {
+                visible: Some(*visible),
+                ..UpdateLayer::new(id.clone())
+            },
+        ),
+        Operation::SetLocked { id, locked } => update(
+            &mut candidate,
+            &UpdateLayer {
+                locked: Some(*locked),
+                // Unlocking a locked layer is the point of this operation, so
+                // it carries the override.
+                allow_locked: true,
+                ..UpdateLayer::new(id.clone())
+            },
+        ),
+        Operation::Rename { id, name } => update(
+            &mut candidate,
+            &UpdateLayer {
+                name: Some(name.clone()),
+                ..UpdateLayer::new(id.clone())
+            },
+        ),
     }?;
 
     // The operation itself checks its own preconditions; this catches
