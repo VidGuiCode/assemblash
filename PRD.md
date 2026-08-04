@@ -328,10 +328,18 @@ The operation layer MUST support:
 - reorder;
 - hide/show;
 - lock/unlock;
-- select;
 - rename.
 
 Each mutation MUST be validated before commit.
+
+**Selection is a client concern, not document state** (amended 2026-08-04;
+this list originally included `select`). Each client — a UI session, an API
+consumer, an MCP session — keeps its own selection, and every operation that
+acts on layers takes explicit layer-id lists. Rationale: concurrent sessions
+must not fight over one stored selection; selection changes must not dirty
+the document or its history journal; and explicit id lists keep agent
+operations auditable in the journal ("align these three ids" rather than
+"align whatever was selected").
 
 ### FR-8 — Undo and history
 
