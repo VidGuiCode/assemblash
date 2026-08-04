@@ -1,7 +1,7 @@
 # Assemblash Product Requirements Document
 
 **Product:** Assemblash  
-**Status:** Early design / pre-alpha  
+**Status:** Pre-alpha — v0.1.0 (Phase 0 spike) released 2026-08-04  
 **Document type:** Product and technical requirements  
 **Audience:** Maintainers, contributors, downstream integrators, and coding agents  
 **Primary deployment model:** Local machine or self-hosted server  

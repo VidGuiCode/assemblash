@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** Early design / pre-alpha
+**Status:** Pre-alpha — v0.1.0, the Phase 0 spike, is released and runs. Most of the product described below does not exist yet.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -220,13 +220,32 @@ The dependency graph must be rechecked against this license once an implementati
 
 ## Current project status
 
-This repository currently contains the product definition only. Implementation should begin with a small vertical slice that can:
+**v0.1.0 — the Phase 0 vertical slice.** What exists and has been run:
 
 1. create a document;
 2. add text and image layers;
-3. save and reload the document;
-4. render a preview;
-5. export a PNG; and
-6. inspect the document through a local API.
+3. save and reload the document (a directory: `document.json` plus `assets/`);
+4. render SVG;
+5. export PNG.
 
-The project should not claim to support features until they have been implemented and verified.
+What does not exist yet: the local HTTP API, the MCP server, undo and history, the reference UI, layout operations, the font store, blend modes, and effects. Everything above this section describes where the project is going, not what it does today.
+
+The Phase 0 renderer gate passed on Windows and Linux, x86_64 and aarch64: the same document plus the same font files produces bit-identical PNGs on every one of those targets. macOS is not built or tested yet.
+
+### Trying it
+
+Binaries for those four targets are attached to each [release](https://github.com/VidGuiCode/assemblash/releases). To build from source instead, with Rust 1.92 or newer:
+
+```sh
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.1.0 assemblash-cli
+```
+
+Then, with a font file of your own — the engine never uses installed system fonts, so you must name one:
+
+```sh
+assemblash new ./poster --width 800 --height 400 --background '#f6f4ef'
+assemblash add-text ./poster --text "Hello" --font "Noto Sans" --size 64 --x 40 --y 40 --width 720 --height 120
+assemblash export ./poster --out poster.png --font /path/to/NotoSans-Regular.ttf
+```
+
+The project does not claim to support a feature until it has been implemented and run.

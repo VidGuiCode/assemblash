@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach binaries to
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    # The same four targets CI tests. macOS is deliberately absent: it is not
+    # in the test matrix until v0.10, and shipping a binary nothing tests
+    # would be a claim this project does not make.
+    name: Build (${{ matrix.target-name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-name: linux-x86_64
+            archive: tar.gz
+          - os: ubuntu-24.04-arm
+            target-name: linux-aarch64
+            archive: tar.gz
+          - os: windows-latest
+            target-name: windows-x86_64
+            archive: zip
+          - os: windows-11-arm
+            target-name: windows-aarch64
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target-name }}
+
+      - name: Build the binary
+        run: cargo build --release --package assemblash-cli
+
+      - name: Check the binary runs
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./target/release/assemblash.exe --version
+          else
+            ./target/release/assemblash --version
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          set -eu
+          name="assemblash-${{ inputs.tag || github.ref_name }}-${{ matrix.target-name }}"
+          mkdir -p "dist/$name"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/assemblash.exe "dist/$name/"
+          else
+            cp target/release/assemblash "dist/$name/"
+          fi
+          cp LICENSE NOTICE README.md CHANGELOG.md "dist/$name/"
+          cd dist
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a "$name.zip" "$name" >/dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target-name }}
+          path: dist/*.${{ matrix.archive }}
+          if-no-files-found: error
+
+  attach:
+    name: Attach binaries to the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
