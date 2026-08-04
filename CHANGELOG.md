@@ -10,6 +10,65 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-04
+
+The full layer model. Every mutation of a document now goes through one
+operation layer, which is what the HTTP API and the MCP server will be
+transports over rather than parallel implementations of.
+
+Document `schemaVersion`: **1** (unchanged — the new layer kind is additive,
+and documents written by 0.1.0 still load unchanged).
+
+### Added
+
+- Operation layer (`assemblash-core::ops`). Applying is transactional: the
+  operation runs against a copy, the result is validated, and only then is it
+  written back. A refused operation leaves the document exactly as it was,
+  never half-applied. Operations are serializable, so the value an agent sends
+  is the value that can be journalled.
+- Dry run (PRD §10.4): what an operation would do, without doing it.
+- Thirteen of the fourteen operations FR-7 lists: create, update, delete,
+  duplicate, move, resize, rotate, reorder, group, ungroup, show/hide,
+  lock/unlock, rename. Grouping boxes layers by their bounding box and re-bases
+  them, so the picture does not move; ungrouping puts them back.
+- SVG layer type, referencing an imported SVG asset.
+- Locked layers refuse changes unless a request says explicitly to override,
+  which is also the only way to unlock one.
+- `assemblash add-svg`, and the CLI now reports what an SVG import removed.
+
+### Security
+
+- Imported SVGs are rewritten to an allowlisted subset of themselves before
+  they are stored. Scripts, event handlers, `foreignObject`, and references to
+  anything outside the file are removed; only same-document fragments and
+  `data:` image URIs survive. A DOCTYPE is refused outright, which closes off
+  entity expansion.
+- Deeply nested markup is refused before it reaches the XML parser. Found by
+  the no-panic property tests: a few hundred bytes of nested elements
+  overflows the stack inside the parser, and a stack overflow aborts the
+  process rather than returning an error.
+- Sanitising happens at import, so everything under a project's `assets/`
+  directory is safe by construction.
+
+### Verified
+
+- Property tests: arbitrary sequences of operations either succeed and leave a
+  valid document, or are refused and leave it byte-identical. Group then
+  ungroup restores every layer's position. A layer cannot be moved inside
+  itself. Duplicating a group mints new ids for the whole copied subtree.
+- No-panic tests: hostile operations — ids that do not exist, indices past the
+  end, NaN, infinity, `f64::MAX` — applied singly and in sequence, and
+  arbitrary bytes fed to the SVG importer. Only a valid document or a typed
+  error is accepted.
+- A document written by 0.1.0 still loads and validates.
+
+### Not included
+
+- `select`, the fourteenth FR-7 operation. Whether selection belongs to the
+  document or to each client changes the API, the MCP tools, and the UI, so it
+  is a product decision rather than something to settle while writing code. It
+  is not implemented, and FR-7 is therefore not complete.
+
 ## [0.1.0] — 2026-08-04
 
 First release with running code: the Phase 0 vertical slice (PRD §13). It

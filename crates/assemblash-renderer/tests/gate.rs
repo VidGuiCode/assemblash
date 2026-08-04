@@ -249,6 +249,24 @@ const BLUR_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" h
 </svg>
 "##;
 
+/// Metadata for a golden render.
+///
+/// The renderer version is pinned to a constant rather than taken from the
+/// build. The goldens hash whole PNG files, metadata included, and a release
+/// that only bumps the version number must not look like a change in rendered
+/// output — that would train whoever sees the failure to regenerate goldens
+/// without reading them, which is how a real regression gets waved through.
+fn gate_metadata(document_id: &str) -> PngMetadata {
+    PngMetadata {
+        document_id: document_id.to_owned(),
+        schema_version: assemblash_core::SCHEMA_VERSION,
+        renderer_version: "gate".to_owned(),
+        // No timestamp: provenance that changes per run would make the whole
+        // comparison meaningless.
+        created: None,
+    }
+}
+
 fn goldens_path() -> PathBuf {
     manifest_dir().join("tests/gate/goldens.json")
 }
@@ -385,9 +403,7 @@ fn g2_reference_documents_match_the_committed_hashes() {
             &fonts,
             &hrefs,
             1.0,
-            // No timestamp: provenance that changes per run would make the
-            // whole comparison meaningless.
-            &PngMetadata::for_document(&document),
+            &gate_metadata(&document.id.to_string()),
         )
         .unwrap();
         let (_, _, pixels) = decode(&png);
@@ -404,12 +420,7 @@ fn g2_reference_documents_match_the_committed_hashes() {
         let pixmap = svg_to_pixmap(svg, &fonts, 1.0).unwrap();
         let png = assemblash_renderer::pixmap_to_png(
             &pixmap,
-            &PngMetadata {
-                document_id: format!("doc_gate_{name}"),
-                schema_version: assemblash_core::SCHEMA_VERSION,
-                renderer_version: assemblash_renderer::RENDERER_VERSION.to_owned(),
-                created: None,
-            },
+            &gate_metadata(&format!("doc_gate_{name}")),
         )
         .unwrap();
         let (_, _, pixels) = decode(&png);
