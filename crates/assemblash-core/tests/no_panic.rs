@@ -221,17 +221,14 @@ proptest! {
     /// treatment: any input at all, no panic.
     #[test]
     fn the_svg_importer_never_panics(source in ".{0,400}") {
-        match svg_import::sanitize(&source) {
-            // Whatever comes out must itself be clean when run through again:
-            // sanitising is a fixed point, not a single pass that might leave
-            // something behind.
-            Ok((clean, _)) => {
-                let (again, report) = svg_import::sanitize(&clean)
-                    .expect("sanitised output is importable");
-                prop_assert_eq!(clean, again);
-                prop_assert!(report.is_clean());
-            }
-            Err(_) => {}
+        // Whatever comes out must itself be clean when run through again:
+        // sanitising is a fixed point, not a single pass that might leave
+        // something behind. A rejected input is a fine outcome too.
+        if let Ok((clean, _)) = svg_import::sanitize(&source) {
+            let (again, report) =
+                svg_import::sanitize(&clean).expect("sanitised output is importable");
+            prop_assert_eq!(clean, again);
+            prop_assert!(report.is_clean());
         }
     }
 }
