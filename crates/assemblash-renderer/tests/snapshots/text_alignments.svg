@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <text x="10" y="34" font-family="Inter" font-size="24" fill="#112233" text-anchor="start"><tspan x="10" dy="0">Aligned</tspan></text>
+  <text x="150" y="84" font-family="Inter" font-size="24" fill="#112233" text-anchor="middle"><tspan x="150" dy="0">Aligned</tspan></text>
+  <text x="290" y="134" font-family="Inter" font-size="24" fill="#112233" text-anchor="end"><tspan x="290" dy="0">Aligned</tspan></text>
+</svg>

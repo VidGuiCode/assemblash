@@ -4,6 +4,14 @@
 //! the caller. That purity is what makes deterministic output testable
 //! (NFR-1).
 
+pub mod error;
+pub mod fonts;
+pub mod svg;
+
+pub use error::RenderError;
+pub use fonts::FontSet;
+pub use svg::{doc_to_svg, AssetHrefs};
+
 /// Version of the rendering pipeline, recorded in exported image metadata
 /// (FR-11) so a rendered file can be traced back to the code that produced it.
 pub const RENDERER_VERSION: &str = env!("CARGO_PKG_VERSION");

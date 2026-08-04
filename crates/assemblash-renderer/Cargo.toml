@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 assemblash-core.workspace = true
+thiserror = "2.0.19"
 
 [lints]
 workspace = true

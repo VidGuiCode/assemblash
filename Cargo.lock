@@ -29,6 +29,7 @@ name = "assemblash-renderer"
 version = "0.1.0"
 dependencies = [
  "assemblash-core",
+ "thiserror",
 ]
 
 [[package]]

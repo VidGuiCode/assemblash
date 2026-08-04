@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <image x="10" y="10" width="120" height="80" preserveAspectRatio="none" href="assets/logo.png"/>
+  <image x="10" y="100" width="120" height="80" preserveAspectRatio="xMidYMid meet" href="assets/logo.png"/>
+  <image x="10" y="190" width="120" height="80" preserveAspectRatio="xMidYMid slice" href="assets/logo.png"/>
+</svg>
