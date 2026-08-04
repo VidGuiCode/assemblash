@@ -142,9 +142,21 @@ fn layer(assets: Vec<AssetId>) -> impl Strategy<Value = Layer> {
         any::<bool>(),
         blend_mode(),
         prop::collection::vec(unknown_value(), 0..2),
+        any::<bool>(),
+        any::<bool>(),
     )
         .prop_map(
-            |(kind, transform, opacity, visible, locked, blend_mode, effects)| Layer {
+            |(
+                kind,
+                transform,
+                opacity,
+                visible,
+                locked,
+                blend_mode,
+                effects,
+                protected,
+                read_only,
+            )| Layer {
                 id: LayerId::new("layer_placeholder"),
                 name: None,
                 transform,
@@ -154,6 +166,8 @@ fn layer(assets: Vec<AssetId>) -> impl Strategy<Value = Layer> {
                 blend_mode,
                 effects,
                 constraints: None,
+                protected,
+                read_only,
                 kind,
             },
         );
@@ -213,6 +227,7 @@ fn document() -> impl Strategy<Value = Document> {
                     Document {
                         schema_version: SCHEMA_VERSION,
                         id: DocumentId::new("doc_00000000000000000000000001"),
+                        version: 0,
                         name,
                         canvas: Canvas {
                             width,

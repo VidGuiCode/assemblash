@@ -23,6 +23,10 @@ thiserror = "2.0.19"
 workspace = true
 
 [dev-dependencies]
+# Fault injection is enabled only for the test build of the binary, so the
+# crash-recovery tests can kill it at an exact point. Release builds never see
+# it.
+assemblash-core = { workspace = true, features = ["fault-injection"] }
 png = "0.18.1"
 serde_json = "1.0.151"
 tempfile = "3.27.0"

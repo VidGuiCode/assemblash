@@ -148,6 +148,7 @@ pub fn save(document: &Document, project_dir: &Path) -> Result<(), StorageError>
 
     let temporary = project_dir.join(format!("{DOCUMENT_FILE}.tmp"));
     std::fs::write(&temporary, json).map_err(|e| StorageError::io("writing", &temporary, e))?;
+    crate::crash_point("document-tmp-written");
     std::fs::rename(&temporary, &document_path)
         .map_err(|e| StorageError::io("replacing", &document_path, e))?;
 

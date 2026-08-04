@@ -12,9 +12,11 @@
 
 pub mod document;
 pub mod error;
+pub mod history;
 pub mod ids;
 pub mod ops;
 pub mod schema;
+pub mod session;
 pub mod storage;
 pub mod svg_import;
 pub mod validate;
@@ -24,10 +26,38 @@ pub use document::{
     LayerKind, SvgLayer, TextAlign, TextLayer, Transform,
 };
 pub use error::{ValidationError, ValidationErrors};
+pub use history::{Actor, ActorKind, History, HistoryError};
 pub use ids::{AssetId, DocumentId, IdSource, LayerId, SequentialIdSource, UlidIdSource};
 pub use ops::{apply, dry_run, OpError, Operation};
+pub use session::{Session, SessionError};
 pub use storage::{load, save, StorageError};
 pub use validate::validate;
+
+/// Aborts the process if this build has fault injection enabled and the
+/// environment names this point.
+///
+/// Crash recovery is only worth claiming if it has been watched happen, and a
+/// test cannot reliably win a race against a millisecond-long write. Naming
+/// the exact points where a crash is interesting — and letting a test ask for
+/// one — turns "should recover" into "did recover".
+///
+/// Compiled out entirely unless the `fault-injection` feature is on, which no
+/// release build enables.
+#[inline]
+pub fn crash_point(name: &str) {
+    #[cfg(feature = "fault-injection")]
+    {
+        if std::env::var("ASSEMBLASH_CRASH_AT").as_deref() == Ok(name) {
+            // abort, not exit: no unwinding, no destructors, no flushing —
+            // the same thing a kill -9 or a power cut leaves behind.
+            std::process::abort();
+        }
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        let _ = name;
+    }
+}
 
 /// The document schema version this build reads and writes.
 ///

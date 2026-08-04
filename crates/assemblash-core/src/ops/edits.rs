@@ -19,11 +19,9 @@ pub(super) fn transform(
     id: &LayerId,
     edit: impl FnOnce(&mut Transform),
 ) -> Result<OpOutcome, OpError> {
+    super::ensure_mutable(document, id, false)?;
     let layer =
         tree::find_mut(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
-    if layer.locked {
-        return Err(OpError::LayerLocked { id: id.clone() });
-    }
     edit(&mut layer.transform);
     Ok(OpOutcome::changed(id.clone()))
 }
@@ -61,10 +59,7 @@ pub(super) fn reorder(
     id: &LayerId,
     to: &LayerPosition,
 ) -> Result<OpOutcome, OpError> {
-    let layer = tree::find(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
-    if layer.locked {
-        return Err(OpError::LayerLocked { id: id.clone() });
-    }
+    super::ensure_mutable(document, id, false)?;
 
     if let LayerPosition::In { parent, .. } = to {
         // A layer inside itself is a tree with a loop in it — unrepresentable
@@ -91,11 +86,7 @@ pub(super) fn group(
         return Err(OpError::NothingToDo { operation: "group" });
     }
     for id in members {
-        let layer =
-            tree::find(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
-        if layer.locked {
-            return Err(OpError::LayerLocked { id: id.clone() });
-        }
+        super::ensure_mutable(document, id, false)?;
     }
 
     let parent = tree::common_parent(document, members)?;
@@ -142,10 +133,8 @@ pub(super) fn group(
 /// exactly. It is still deterministic — the same edits always produce the
 /// same numbers.
 pub(super) fn ungroup(document: &mut Document, id: &LayerId) -> Result<OpOutcome, OpError> {
+    super::ensure_mutable(document, id, false)?;
     let layer = tree::find(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
-    if layer.locked {
-        return Err(OpError::LayerLocked { id: id.clone() });
-    }
     if !matches!(layer.kind, LayerKind::Group(_)) {
         return Err(OpError::NotAGroup { id: id.clone() });
     }

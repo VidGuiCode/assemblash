@@ -33,6 +33,13 @@ pub struct Document {
     pub schema_version: u32,
     /// Stable id, `doc_<ULID>`.
     pub id: DocumentId,
+    /// How many mutations this document has had.
+    ///
+    /// A caller that read the document at version 7 sends 7 back with its
+    /// next mutation; if the document has moved on, the mutation is refused
+    /// rather than silently overwriting someone else's work (PRD §10.3).
+    #[serde(default)]
+    pub version: u64,
     /// Human-facing name. Not an identifier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -55,6 +62,7 @@ impl Document {
         Self {
             schema_version: SCHEMA_VERSION,
             id: DocumentId::generate(source),
+            version: 0,
             name: None,
             canvas: Canvas {
                 width,
@@ -198,8 +206,20 @@ pub struct Layer {
     #[serde(default = "default_true")]
     pub visible: bool,
     /// Whether editing tools should refuse to move this layer.
+    ///
+    /// The user-facing "don't let me nudge this by accident" flag. An
+    /// explicit override can still change it (PRD §10.2).
     #[serde(default)]
     pub locked: bool,
+    /// Whether AI adapters and agents may change this layer at all.
+    ///
+    /// Unlike `locked`, there is no override: a protected layer is refused
+    /// for every mutation, whoever asks (PRD §10.2, MVP criterion 11).
+    #[serde(default)]
+    pub protected: bool,
+    /// Whether the layer is inspectable but never mutable through the API.
+    #[serde(default)]
+    pub read_only: bool,
     /// Reserved (v0.5): only `normal` is rendered today; other values
     /// round-trip but do not yet change output.
     #[serde(default)]
@@ -229,6 +249,8 @@ impl Layer {
             blend_mode: BlendMode::default(),
             effects: Vec::new(),
             constraints: None,
+            protected: false,
+            read_only: false,
             kind,
         }
     }

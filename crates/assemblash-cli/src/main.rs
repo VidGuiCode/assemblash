@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use assemblash_core::document::{ImageFit, TextAlign, Transform};
+use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::UlidIdSource;
-use assemblash_core::ops::{self, CreateLayer, LayerPosition, NewLayerKind, OpError, Operation};
+use assemblash_core::ops::{CreateLayer, LayerPosition, NewLayerKind, OpOutcome, Operation};
+use assemblash_core::session::{self, Session, SessionError};
 use assemblash_core::storage::{self, StorageError};
 use assemblash_core::{Color, Document};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
@@ -67,6 +69,8 @@ enum Command {
         align: Align,
         #[command(flatten)]
         box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
     },
 
     /// Imports an image file and appends an image layer for it.
@@ -81,6 +85,8 @@ enum Command {
         fit: Fit,
         #[command(flatten)]
         box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
     },
 
     /// Imports an SVG file and appends a vector layer for it.
@@ -98,6 +104,8 @@ enum Command {
         fit: Fit,
         #[command(flatten)]
         box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
     },
 
     /// Writes the document as SVG.
@@ -134,6 +142,87 @@ enum Command {
         /// Project directory.
         project: PathBuf,
     },
+
+    /// Undoes the last operation.
+    Undo {
+        /// Project directory.
+        project: PathBuf,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Redoes the operation that was last undone.
+    Redo {
+        /// Project directory.
+        project: PathBuf,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Prints the history of the project, oldest first.
+    History {
+        /// Project directory.
+        project: PathBuf,
+    },
+
+    /// Removes a lock left behind by a process that is gone.
+    ///
+    /// This build cannot tell a crashed process from a slow one, so clearing
+    /// the lock is a decision a person makes, not a timeout.
+    Unlock {
+        /// Project directory.
+        project: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct ActorArgs {
+    /// Who is making this change, for the audit trail (PRD §10.5).
+    #[arg(long, value_enum, default_value_t = ActorArg::Human)]
+    actor: ActorArg,
+    /// Which human, agent, script, or adapter.
+    #[arg(long)]
+    actor_name: Option<String>,
+    /// The document version this change was written against.
+    ///
+    /// If the document has moved on since, the change is refused rather than
+    /// overwriting work you never saw (PRD §10.3).
+    #[arg(long)]
+    expect_version: Option<u64>,
+}
+
+impl ActorArgs {
+    fn actor(&self) -> Actor {
+        let kind = match self.actor {
+            ActorArg::Human => ActorKind::Human,
+            ActorArg::Agent => ActorKind::Agent,
+            ActorArg::Script => ActorKind::Script,
+            ActorArg::Adapter => ActorKind::Adapter,
+        };
+        match &self.actor_name {
+            Some(name) => Actor::named(kind, name),
+            None => Actor::new(kind),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ActorArg {
+    Human,
+    Agent,
+    Script,
+    Adapter,
+}
+
+/// Milliseconds since the Unix epoch, for the audit trail.
+///
+/// The clock is read here, in the transport, and passed in. Nothing in the
+/// core reads it — that is what lets a test produce the same journal twice.
+fn now_millis() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_millis() as u64)
 }
 
 #[derive(Debug, Args)]
@@ -186,6 +275,16 @@ enum Fit {
     Cover,
 }
 
+impl From<Fit> for ImageFit {
+    fn from(fit: Fit) -> Self {
+        match fit {
+            Fit::Fill => Self::Fill,
+            Fit::Contain => Self::Contain,
+            Fit::Cover => Self::Cover,
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli.command) {
@@ -214,7 +313,7 @@ enum CliError {
     #[error("serialising the document: {0}")]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
-    Operation(#[from] OpError),
+    Session(#[from] SessionError),
 }
 
 fn run(command: Command) -> Result<(), CliError> {
@@ -232,8 +331,8 @@ fn run(command: Command) -> Result<(), CliError> {
             let mut document = Document::new(&mut UlidIdSource, width, height);
             document.name = name;
             document.canvas.background = background.map(Color::new);
-            storage::save(&document, &project)?;
-            println!("{}", document.id);
+            let session = Session::create(&project, document, now_millis())?;
+            println!("{}", session.document().id);
             Ok(())
         }
 
@@ -245,10 +344,11 @@ fn run(command: Command) -> Result<(), CliError> {
             color,
             align,
             box_,
+            who,
         } => {
-            let mut document = storage::load(&project)?;
-            let outcome = apply(
-                &mut document,
+            let mut session = open_session(&project)?;
+            let outcome = add_layer(
+                &mut session,
                 NewLayerKind::Text {
                     text,
                     font_family: font,
@@ -262,8 +362,8 @@ fn run(command: Command) -> Result<(), CliError> {
                     line_height: 1.2,
                 },
                 &box_,
+                &who,
             )?;
-            storage::save(&document, &project)?;
             print_created(&outcome);
             Ok(())
         }
@@ -273,24 +373,19 @@ fn run(command: Command) -> Result<(), CliError> {
             file,
             fit,
             box_,
+            who,
         } => {
-            let mut document = storage::load(&project)?;
-            let asset = storage::import_asset(&project, &file, &mut UlidIdSource)?;
-            let asset_id = asset.id.clone();
-            document.assets.push(asset);
-            let outcome = apply(
-                &mut document,
+            let mut session = open_session(&project)?;
+            let asset_id = import_into(&mut session, &file)?.0;
+            let outcome = add_layer(
+                &mut session,
                 NewLayerKind::Image {
                     asset: asset_id,
-                    fit: match fit {
-                        Fit::Fill => ImageFit::Fill,
-                        Fit::Contain => ImageFit::Contain,
-                        Fit::Cover => ImageFit::Cover,
-                    },
+                    fit: fit.into(),
                 },
                 &box_,
+                &who,
             )?;
-            storage::save(&document, &project)?;
             print_created(&outcome);
             Ok(())
         }
@@ -300,25 +395,19 @@ fn run(command: Command) -> Result<(), CliError> {
             file,
             fit,
             box_,
+            who,
         } => {
-            let mut document = storage::load(&project)?;
-            let (asset, report) =
-                storage::import_asset_reporting(&project, &file, &mut UlidIdSource)?;
-            let asset_id = asset.id.clone();
-            document.assets.push(asset);
-            let outcome = apply(
-                &mut document,
+            let mut session = open_session(&project)?;
+            let (asset_id, report) = import_into(&mut session, &file)?;
+            let outcome = add_layer(
+                &mut session,
                 NewLayerKind::Svg {
                     asset: asset_id,
-                    fit: match fit {
-                        Fit::Fill => ImageFit::Fill,
-                        Fit::Contain => ImageFit::Contain,
-                        Fit::Cover => ImageFit::Cover,
-                    },
+                    fit: fit.into(),
                 },
                 &box_,
+                &who,
             )?;
-            storage::save(&document, &project)?;
 
             // Say what was taken out. Silently altering someone's artwork
             // would be worse than refusing it.
@@ -346,7 +435,7 @@ fn run(command: Command) -> Result<(), CliError> {
             out,
             fonts,
         } => {
-            let document = storage::load(&project)?;
+            let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assets::data_uris(&document, &project)?;
             let font_set = match load_fonts(&fonts)? {
                 Some(loaded) => loaded.font_set().clone(),
@@ -367,7 +456,7 @@ fn run(command: Command) -> Result<(), CliError> {
             timestamp,
             fonts,
         } => {
-            let document = storage::load(&project)?;
+            let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assets::data_uris(&document, &project)?;
             let loaded = load_fonts(&fonts)?.unwrap_or_else(|| LoadedFonts::from_bytes([]));
             let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
@@ -380,23 +469,127 @@ fn run(command: Command) -> Result<(), CliError> {
         }
 
         Command::Show { project } => {
-            let document = storage::load(&project)?;
-            println!("{}", serde_json::to_string_pretty(&document)?);
+            let session = Session::open_read_only(&project)?;
+            println!("{}", serde_json::to_string_pretty(session.document())?);
+            Ok(())
+        }
+
+        Command::Undo { project, who } => {
+            let mut session = open_session(&project)?;
+            let transaction = session.undo(&who.actor(), now_millis(), &mut UlidIdSource)?;
+            println!("{transaction}");
+            Ok(())
+        }
+
+        Command::Redo { project, who } => {
+            let mut session = open_session(&project)?;
+            let transaction = session.redo(&who.actor(), now_millis(), &mut UlidIdSource)?;
+            println!("{transaction}");
+            Ok(())
+        }
+
+        Command::History { project } => {
+            let session = Session::open_read_only(&project)?;
+            for entry in session.history().entries() {
+                let what = match &entry.kind {
+                    EntryKind::Applied { operation, .. } => operation_name(operation).to_owned(),
+                    EntryKind::Undone { target } => format!("undo {target}"),
+                    EntryKind::Redone { target } => format!("redo {target}"),
+                    // The enum is non-exhaustive so history written by a newer
+                    // build still lists, rather than refusing to print.
+                    _ => "unknown".to_owned(),
+                };
+                let who = entry
+                    .actor
+                    .detail
+                    .as_ref()
+                    .map(|detail| format!(" ({detail})"))
+                    .unwrap_or_default();
+                println!(
+                    "{}\t{}\t{:?}{}\t{}",
+                    entry.position, entry.transaction, entry.actor.kind, who, what
+                );
+            }
+            println!(
+                "position {} of {}",
+                session.history().position(),
+                session.history().head()
+            );
+            Ok(())
+        }
+
+        Command::Unlock { project } => {
+            if session::force_unlock(&project)? {
+                println!("lock removed");
+            } else {
+                println!("no lock to remove");
+            }
             Ok(())
         }
     }
 }
 
-/// Adds a layer through the operation layer.
+/// Opens a project for editing, saying plainly when it had to be repaired.
+fn open_session(project: &Path) -> Result<Session, CliError> {
+    let session = Session::open(project, now_millis())?;
+    if session.recovered_from_interrupted_write() {
+        eprintln!("recovered an interrupted write: the document was rebuilt from history");
+    }
+    Ok(session)
+}
+
+/// Imports an asset into an open project and records it on the document.
+///
+/// Importing changes the project directory rather than the layer tree, so it
+/// is not an operation; the layer that references the asset goes through the
+/// operation layer as usual.
+fn import_into(
+    session: &mut Session,
+    file: &Path,
+) -> Result<
+    (
+        assemblash_core::AssetId,
+        Option<assemblash_core::svg_import::SvgImportReport>,
+    ),
+    CliError,
+> {
+    let project = session.project_dir().to_path_buf();
+    let (asset, report) = storage::import_asset_reporting(&project, file, &mut UlidIdSource)?;
+    let asset_id = asset.id.clone();
+    session.register_asset(asset)?;
+    Ok((asset_id, report))
+}
+
+fn operation_name(operation: &Operation) -> &'static str {
+    match operation {
+        Operation::Create(_) => "create",
+        Operation::Update(_) => "update",
+        Operation::Delete { .. } => "delete",
+        Operation::Duplicate { .. } => "duplicate",
+        Operation::Move { .. } => "move",
+        Operation::Resize { .. } => "resize",
+        Operation::Rotate { .. } => "rotate",
+        Operation::Reorder { .. } => "reorder",
+        Operation::Group { .. } => "group",
+        Operation::Ungroup { .. } => "ungroup",
+        Operation::SetVisible { .. } => "setVisible",
+        Operation::SetLocked { .. } => "setLocked",
+        Operation::Rename { .. } => "rename",
+        _ => "operation",
+    }
+}
+
+/// Adds a layer through the operation layer, journalled and saved.
 ///
 /// The CLI does not touch `document.layers` itself: every transport goes
-/// through the same operations (PRD §7.2), so that validation, and later
-/// history and permissions, cannot be bypassed by one of them.
-fn apply(
-    document: &mut Document,
+/// through the same operations (PRD §7.2), so validation, history, and
+/// protection cannot be bypassed by one of them.
+fn add_layer(
+    session: &mut Session,
     kind: NewLayerKind,
     box_: &BoxArgs,
-) -> Result<ops::OpOutcome, OpError> {
+    who: &ActorArgs,
+) -> Result<OpOutcome, CliError> {
     let operation = Operation::Create(CreateLayer {
         position: LayerPosition::Root { index: None },
         transform: Transform {
@@ -406,23 +599,35 @@ fn apply(
         name: box_.layer_name.clone(),
         kind,
     });
-    let outcome = ops::apply(document, &operation, &mut UlidIdSource)?;
+    let (outcome, _) = session.apply(
+        &operation,
+        &who.actor(),
+        now_millis(),
+        who.expect_version,
+        &mut UlidIdSource,
+    )?;
 
     // Opacity is not part of creating a layer, so it is a second operation on
     // the layer that was just made.
     if box_.opacity != 1.0 {
         if let Some(id) = outcome.created.first() {
-            let set_opacity = ops::UpdateLayer {
+            let set_opacity = assemblash_core::ops::UpdateLayer {
                 opacity: Some(box_.opacity),
-                ..ops::UpdateLayer::new(id.clone())
+                ..assemblash_core::ops::UpdateLayer::new(id.clone())
             };
-            ops::apply(document, &Operation::Update(set_opacity), &mut UlidIdSource)?;
+            session.apply(
+                &Operation::Update(set_opacity),
+                &who.actor(),
+                now_millis(),
+                None,
+                &mut UlidIdSource,
+            )?;
         }
     }
     Ok(outcome)
 }
 
-fn print_created(outcome: &ops::OpOutcome) {
+fn print_created(outcome: &OpOutcome) {
     for id in &outcome.created {
         println!("{id}");
     }

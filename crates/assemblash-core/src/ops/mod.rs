@@ -241,6 +241,46 @@ pub fn dry_run(
     apply(&mut copy, operation, ids)
 }
 
+/// Refuses a mutation the document's own flags forbid (PRD §10.2).
+///
+/// One function, called by every operation, because a protection that each
+/// operation has to remember to check is a protection that a new operation
+/// will forget. `protected` and `readOnly` have no override; `locked` has one,
+/// because unlocking is itself an update.
+pub(super) fn ensure_mutable(
+    document: &Document,
+    id: &LayerId,
+    allow_locked: bool,
+) -> Result<(), OpError> {
+    let layer = tree::find(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
+    if layer.protected {
+        return Err(OpError::LayerProtected { id: id.clone() });
+    }
+    if layer.read_only {
+        return Err(OpError::LayerReadOnly { id: id.clone() });
+    }
+    if layer.locked && !allow_locked {
+        return Err(OpError::LayerLocked { id: id.clone() });
+    }
+    Ok(())
+}
+
+/// The same check, applied to a layer and everything inside it.
+///
+/// Deleting a group must not quietly take a protected child with it.
+pub(super) fn ensure_subtree_mutable(document: &Document, id: &LayerId) -> Result<(), OpError> {
+    ensure_mutable(document, id, false)?;
+    let layer = tree::find(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
+    if let LayerKind::Group(group) = &layer.kind {
+        let mut ids = Vec::new();
+        tree::collect_ids(&group.children, &mut ids);
+        for child in ids {
+            ensure_mutable(document, &child, true)?;
+        }
+    }
+    Ok(())
+}
+
 fn create(
     document: &mut Document,
     request: &CreateLayer,
@@ -253,23 +293,17 @@ fn create(
 }
 
 fn update(document: &mut Document, request: &UpdateLayer) -> Result<OpOutcome, OpError> {
+    ensure_mutable(document, &request.id, request.allow_locked)?;
     let layer = tree::find_mut(document, &request.id).ok_or_else(|| OpError::NoSuchLayer {
         id: request.id.clone(),
     })?;
-    if layer.locked && !request.allow_locked {
-        return Err(OpError::LayerLocked {
-            id: request.id.clone(),
-        });
-    }
     request.apply_to(layer)?;
     Ok(OpOutcome::changed(request.id.clone()))
 }
 
 fn delete(document: &mut Document, id: &LayerId) -> Result<OpOutcome, OpError> {
+    ensure_subtree_mutable(document, id)?;
     let layer = tree::find(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
-    if layer.locked {
-        return Err(OpError::LayerLocked { id: id.clone() });
-    }
 
     // Everything inside a group goes with it, and the caller is told exactly
     // what disappeared — a group deletion that silently takes twenty layers

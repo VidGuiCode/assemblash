@@ -14,6 +14,13 @@
       "description": "Stable id, `doc_<ULID>`.",
       "$ref": "#/$defs/DocumentId"
     },
+    "version": {
+      "description": "How many mutations this document has had.\n\nA caller that read the document at version 7 sends 7 back with its\nnext mutation; if the document has moved on, the mutation is refused\nrather than silently overwriting someone else's work (PRD §10.3).",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0,
+      "default": 0
+    },
     "name": {
       "description": "Human-facing name. Not an identifier.",
       "type": [
@@ -171,7 +178,17 @@
           "default": true
         },
         "locked": {
-          "description": "Whether editing tools should refuse to move this layer.",
+          "description": "Whether editing tools should refuse to move this layer.\n\nThe user-facing \"don't let me nudge this by accident\" flag. An\nexplicit override can still change it (PRD §10.2).",
+          "type": "boolean",
+          "default": false
+        },
+        "protected": {
+          "description": "Whether AI adapters and agents may change this layer at all.\n\nUnlike `locked`, there is no override: a protected layer is refused\nfor every mutation, whoever asks (PRD §10.2, MVP criterion 11).",
+          "type": "boolean",
+          "default": false
+        },
+        "readOnly": {
+          "description": "Whether the layer is inspectable but never mutable through the API.",
           "type": "boolean",
           "default": false
         },

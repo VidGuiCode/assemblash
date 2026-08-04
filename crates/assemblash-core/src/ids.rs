@@ -105,6 +105,11 @@ macro_rules! id_type {
 id_type!(DocumentId, "doc", "Identifier of a document.");
 id_type!(LayerId, "layer", "Identifier of a layer.");
 id_type!(AssetId, "asset", "Identifier of an imported asset.");
+id_type!(
+    TransactionId,
+    "txn",
+    "Identifier of one history transaction, returned so a write can be undone by id (FR-13)."
+);
 
 #[cfg(test)]
 mod tests {

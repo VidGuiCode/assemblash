@@ -61,6 +61,22 @@ pub enum OpError {
         property: &'static str,
     },
 
+    /// The layer is protected: agents and adapters may not change it, and
+    /// there is no override (PRD §10.2).
+    #[error("layer {id} is protected and cannot be modified")]
+    LayerProtected {
+        /// The protected layer.
+        id: LayerId,
+    },
+
+    /// The layer is read-only: inspectable, but never mutable through the
+    /// operation layer.
+    #[error("layer {id} is read-only")]
+    LayerReadOnly {
+        /// The read-only layer.
+        id: LayerId,
+    },
+
     /// A layer was asked to be moved inside itself or its own descendant.
     #[error("layer {id} cannot be placed inside itself")]
     WouldCycle {

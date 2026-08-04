@@ -21,6 +21,12 @@ sha2 = "0.11.0"
 thiserror = "2.0.19"
 ulid = "3.0.0"
 
+[features]
+# Test-only fault injection: lets a test abort the process at an exact point
+# so crash recovery can be exercised for real rather than simulated. Never
+# enabled in a release build.
+fault-injection = []
+
 [lints]
 workspace = true
 
