@@ -42,6 +42,17 @@ pub enum Root {
 #[derive(Debug, Clone)]
 pub struct Backend {
     root: Root,
+    /// Sessions opened in single-project mode.
+    ///
+    /// Owned by the backend rather than kept in a `static`: a static is never
+    /// dropped, so the lock a session holds would outlive the process and
+    /// leave the project unopenable until someone ran `assemblash unlock`.
+    /// [`Backend::close`] is what releases them.
+    single: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<PathBuf, assemblash_server::state::OpenProject>,
+        >,
+    >,
 }
 
 /// Milliseconds since the Unix epoch, for the audit trail.
@@ -195,6 +206,7 @@ impl Backend {
     pub fn workspace(workspace: Workspace) -> Self {
         Self {
             root: Root::Workspace(Box::new(AppState::new(workspace))),
+            single: Default::default(),
         }
     }
 
@@ -206,6 +218,22 @@ impl Backend {
             .unwrap_or_else(|| "project".to_owned());
         Self {
             root: Root::SingleProject { directory, name },
+            single: Default::default(),
+        }
+    }
+
+    /// Releases every project this server holds.
+    ///
+    /// Called when the client closes the connection. A `Session` releases its
+    /// lock file on drop, and dropping it here rather than relying on process
+    /// teardown is the difference between a project that reopens cleanly and
+    /// one that needs `assemblash unlock` first.
+    pub fn close(&self) {
+        if let Root::Workspace(state) = &self.root {
+            state.close_all();
+        }
+        if let Ok(mut single) = self.single.lock() {
+            single.clear();
         }
     }
 
@@ -396,16 +424,10 @@ impl Backend {
         &self,
         directory: &std::path::Path,
     ) -> Result<assemblash_server::state::OpenProject, ApiError> {
-        // Cached on the state the same way the workspace case is, so the
-        // session — and its lock — is taken once for the life of the process
-        // rather than per call.
-        static ONCE: std::sync::OnceLock<
-            std::sync::Mutex<
-                std::collections::BTreeMap<PathBuf, assemblash_server::state::OpenProject>,
-            >,
-        > = std::sync::OnceLock::new();
-        let cache = ONCE.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
-        let mut cache = cache.lock().map_err(|_| {
+        // Cached the same way the workspace case is, so the session — and its
+        // lock — is taken once for the life of the connection rather than per
+        // call, and released by `close` when the client goes away.
+        let mut cache = self.single.lock().map_err(|_| {
             ApiError::new(
                 axum_status_internal(),
                 "poisoned",

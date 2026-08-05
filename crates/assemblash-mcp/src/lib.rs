@@ -50,13 +50,24 @@ pub enum McpError {
 /// The client owns the lifetime: an MCP server is spawned by the agent and
 /// exits when its standard input closes.
 pub async fn serve(backend: Backend) -> Result<(), McpError> {
-    let service = AssemblashMcp::new(backend)
-        .serve(stdio())
-        .await
-        .map_err(|error| McpError::Start(error.to_string()))?;
-    service
-        .waiting()
-        .await
-        .map_err(|error| McpError::Serving(error.to_string()))?;
+    // A handle to the same registries the server uses, so the projects can be
+    // released explicitly when the client goes away. Relying on the process
+    // exiting is not enough: a lock left behind makes the project unopenable
+    // until someone runs `assemblash unlock`, which is a puzzle to hand a
+    // person whose agent simply closed a pipe.
+    let projects = backend.clone();
+
+    let started = AssemblashMcp::new(backend).serve(stdio()).await;
+    let service = match started {
+        Ok(service) => service,
+        Err(error) => {
+            projects.close();
+            return Err(McpError::Start(error.to_string()));
+        }
+    };
+
+    let outcome = service.waiting().await;
+    projects.close();
+    outcome.map_err(|error| McpError::Serving(error.to_string()))?;
     Ok(())
 }

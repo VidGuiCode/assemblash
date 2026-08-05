@@ -10,6 +10,27 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-08-05
+
+Two findings from an independent verification of the 0.10.0 release. Both are
+things that made a correct system feel broken.
+
+### Fixed
+
+- **`assemblash mcp --project <dir>` left its lock file behind.** The sessions
+  it opened lived in a `static`, and a static is never dropped — so the lock
+  outlived the process and the project could not be reopened until someone ran
+  `assemblash unlock`. That is a puzzle to hand a person whose agent simply
+  closed a pipe. The registry is now owned by the server and released
+  explicitly when the client goes away, rather than as a side effect of
+  ownership working out. (`--workspace` mode was never affected; both are now
+  covered by a regression test that spawns the real binary.)
+- **`add-text` accepts `--font-store`** and checks the family against it,
+  naming what *is* installed when it does not match. Naming a font the store
+  does not have used to succeed and then fail at export several commands
+  later, looking like a rendering problem rather than a typo. The flag is
+  optional and reads `ASSEMBLASH_FONT_STORE`; without it nothing changes.
+
 ## [0.10.0] — 2026-08-05
 
 Packaging, and the promise that someone who has never opened a terminal can

@@ -73,6 +73,22 @@ impl AppState {
         Ok(session)
     }
 
+    /// Closes every open project, releasing the lock each one holds.
+    ///
+    /// A `Session` releases its lock file when it is dropped, and a process
+    /// that exits normally drops what it owns — but a registry reachable from
+    /// a static, or from a value the runtime tears down without unwinding,
+    /// is not dropped, and the lock outlives the process. That is a project
+    /// nobody can open until someone runs `assemblash unlock`.
+    ///
+    /// Calling this on the way out makes the release explicit rather than a
+    /// consequence of ownership working out.
+    pub fn close_all(&self) {
+        if let Ok(mut open) = self.inner.open.lock() {
+            open.clear();
+        }
+    }
+
     /// Registers a session for a project that has just been created.
     pub fn adopt(&self, id: &ProjectId, session: Session) -> Result<OpenProject, ApiError> {
         let session = Arc::new(Mutex::new(session));

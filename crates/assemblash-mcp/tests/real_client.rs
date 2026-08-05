@@ -488,3 +488,82 @@ async fn every_tool_schema_is_an_object() {
 
     client.cancel().await.unwrap();
 }
+
+/// The project lock is released when the client closes the connection.
+///
+/// A `Session` holds an exclusive lock for its lifetime, so an MCP server that
+/// exits without dropping its sessions leaves `.assemblash-lock` behind and
+/// the project cannot be opened again until someone runs `assemblash unlock`.
+/// That is a puzzle to hand a person whose agent simply closed a pipe — and it
+/// is what a second pair of hands found in the v0.10.0 verification.
+#[tokio::test]
+async fn closing_the_connection_releases_the_project_lock() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let lock = root.join("projects/poster/.assemblash-lock");
+
+    // Workspace mode: the project is opened by the first tool call.
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    client
+        .call_tool(call(
+            "list_layers",
+            arguments(json!({ "project": "poster" })),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        lock.is_file(),
+        "the server should hold the project while serving"
+    );
+
+    // `cancel` closes the connection, which is what stdin-EOF does to a
+    // server an agent client has finished with.
+    client.cancel().await.unwrap();
+    wait_for_unlock(&lock).await;
+    assert!(
+        !lock.exists(),
+        "the lock must be released when the client goes away"
+    );
+
+    // And the project opens again, which is the thing that was actually
+    // broken: the error was recoverable but nobody should have to.
+    assemblash_core::Session::open(&root.join("projects/poster"), Some(1))
+        .expect("the project reopens without needing `assemblash unlock`");
+
+    // Single-project mode holds its sessions somewhere else, so it gets its
+    // own check rather than an assumption.
+    let standalone = scratch.path().join("standalone");
+    std::fs::create_dir_all(&standalone).unwrap();
+    build_project(&standalone);
+    let standalone_lock = standalone.join(".assemblash-lock");
+
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--project").arg(&standalone);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    client.call_tool(call("list_layers", None)).await.unwrap();
+    assert!(standalone_lock.is_file());
+
+    client.cancel().await.unwrap();
+    wait_for_unlock(&standalone_lock).await;
+    assert!(
+        !standalone_lock.exists(),
+        "single-project mode must release its lock too"
+    );
+}
+
+/// Waits briefly for the child process to finish exiting.
+///
+/// The release happens as the server shuts down, which is a different process:
+/// there is no ordering between `cancel` returning here and the file being
+/// gone there, so this polls rather than asserting into a race.
+async fn wait_for_unlock(lock: &Path) {
+    for _ in 0..100 {
+        if !lock.exists() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}

@@ -562,3 +562,87 @@ fn the_workspace_command_creates_a_workspace_on_first_run() {
         settings
     );
 }
+
+/// `add-text` checks the family against the store when told where it is.
+///
+/// Naming a font that is not installed used to succeed and then fail at
+/// export, several commands later, looking like a rendering problem rather
+/// than a typo. Found in the v0.10.0 independent verification.
+#[test]
+fn add_text_checks_the_font_family_against_the_store() {
+    let workspace = tempfile::tempdir().unwrap();
+    let store = workspace.path().join("fonts");
+    let store_arg = store.to_str().unwrap();
+    run(&[
+        "font",
+        "add",
+        font_dir().join("NotoSans-Subset.ttf").to_str().unwrap(),
+        "--font-store",
+        store_arg,
+    ]);
+
+    let project = workspace.path().join("poster");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "100"]);
+
+    let add = |family: &'static str| {
+        [
+            "add-text",
+            project_arg,
+            "--text",
+            "hello",
+            "--font",
+            family,
+            "--size",
+            "20",
+            "--x",
+            "0",
+            "--y",
+            "0",
+            "--width",
+            "100",
+            "--height",
+            "30",
+            "--font-store",
+            store_arg,
+        ]
+    };
+
+    // A family the store has goes through.
+    run(&add("Noto Sans"));
+
+    // One it does not have is refused here, with what is available.
+    let error = run_failing(&add("Helvetica Neue"));
+    assert!(error.contains("Helvetica Neue"), "{error}");
+    assert!(
+        error.contains("Noto Sans"),
+        "the error should say what is available: {error}"
+    );
+
+    // The document was not touched by the refusal.
+    let shown = run(&["show", project_arg]);
+    let document: serde_json::Value = serde_json::from_str(&shown).unwrap();
+    assert_eq!(document["layers"].as_array().unwrap().len(), 1);
+
+    // Without the flag it still works, because the check is a courtesy and
+    // not a new requirement — the store is optional and export is where a
+    // missing font has always been fatal.
+    run(&[
+        "add-text",
+        project_arg,
+        "--text",
+        "unchecked",
+        "--font",
+        "Whatever",
+        "--size",
+        "20",
+        "--x",
+        "0",
+        "--y",
+        "40",
+        "--width",
+        "100",
+        "--height",
+        "30",
+    ]);
+}

@@ -73,6 +73,13 @@ enum Command {
         /// Horizontal alignment inside the layer box.
         #[arg(long, value_enum, default_value_t = Align::Left)]
         align: Align,
+        /// Font store to check the family against.
+        ///
+        /// Optional, and only a check: naming a font that is not installed is
+        /// a mistake worth catching here rather than at export, which is
+        /// several commands later and looks like a rendering problem.
+        #[arg(long = "font-store", env = "ASSEMBLASH_FONT_STORE")]
+        font_store: Option<PathBuf>,
         #[command(flatten)]
         box_: BoxArgs,
         #[command(flatten)]
@@ -603,6 +610,12 @@ enum CliError {
     InstallTarget,
     #[error("say where the font store is: --font-store")]
     NoStore,
+    #[error("font family {family:?} is not in the font store at {store}; available: {available}")]
+    FontNotInstalled {
+        family: String,
+        store: PathBuf,
+        available: String,
+    },
     #[error(transparent)]
     Workspace(#[from] assemblash_core::WorkspaceError),
     #[error(transparent)]
@@ -640,9 +653,13 @@ fn run(command: Command) -> Result<(), CliError> {
             size,
             color,
             align,
+            font_store,
             box_,
             who,
         } => {
+            if let Some(directory) = &font_store {
+                check_family_installed(directory, &font)?;
+            }
             let mut session = open_session(&project)?;
             let outcome = add_layer(
                 &mut session,
@@ -1216,6 +1233,28 @@ fn open_workspace(explicit: Option<PathBuf>) -> Result<Workspace, CliError> {
         None => Workspace::default_dir()?,
     };
     Ok(Workspace::open_or_create(root)?)
+}
+
+/// Refuses a font family the store does not have, and says what it does.
+///
+/// The store is the authority on what a render may use, so naming something
+/// else is a mistake — and one that otherwise surfaces at export, several
+/// commands later, looking like a rendering problem rather than a typo.
+fn check_family_installed(directory: &Path, family: &str) -> Result<(), CliError> {
+    let store = FontStore::open(directory)?;
+    if store.has_family(family) {
+        return Ok(());
+    }
+    let available = store.families();
+    Err(CliError::FontNotInstalled {
+        family: family.to_owned(),
+        store: directory.to_path_buf(),
+        available: if available.is_empty() {
+            "none installed yet — try: assemblash font install \"Noto Sans\"".to_owned()
+        } else {
+            available.join(", ")
+        },
+    })
 }
 
 fn open_store(args: &StoreArgs) -> Result<FontStore, CliError> {
