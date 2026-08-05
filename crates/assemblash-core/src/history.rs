@@ -336,6 +336,17 @@ impl History {
         self.write_snapshot(0, document)
     }
 
+    /// Records the document as the state at a position, replacing any
+    /// snapshot already there.
+    ///
+    /// For a document that was edited outside the journal: history has never
+    /// seen that state, so a rebuild would land on the last one it did see.
+    /// Writing it down is what makes a later undo return to what the user
+    /// actually last had.
+    pub fn snapshot_at(&mut self, position: u64, document: &Document) -> Result<(), HistoryError> {
+        self.write_snapshot(position, document)
+    }
+
     /// Records a base snapshot if the project has none.
     ///
     /// `Session::create` writes one, but a project can arrive without ever

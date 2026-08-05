@@ -217,7 +217,7 @@ impl Session {
 
     fn open_with_lock(project_dir: &Path, lock: ProjectLock) -> Result<Self, SessionError> {
         let mut document = storage::load(project_dir)?;
-        let history = History::open(project_dir)?;
+        let mut history = History::open(project_dir)?;
         let mut recovered = false;
 
         // Reconcile against the *version*, not against the content.
@@ -239,6 +239,26 @@ impl Session {
             // data and stays; the version follows history, which is the only
             // thing that can say what is undoable.
             document.version = position;
+        }
+
+        // A hand edit is a state history has never seen. Undo rebuilds from a
+        // snapshot, so without this the first undo after a hand edit would
+        // quietly restore the pre-edit document and destroy the user's work —
+        // which was the behaviour up to 0.8.0. Recording the state as it
+        // actually is makes undo return to what the user last saw.
+        //
+        // Only when the session can write: `open_read_only` must not touch the
+        // project, and a reader has nothing to undo anyway.
+        if lock.owned && !recovered {
+            let diverged = match history.rebuild(position) {
+                Ok(recorded) => recorded != document,
+                // Nothing to compare against — `ensure_base` will lay the
+                // foundation on the first mutation.
+                Err(_) => false,
+            };
+            if diverged {
+                history.snapshot_at(position, &document)?;
+            }
         }
 
         Ok(Self {

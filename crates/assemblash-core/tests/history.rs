@@ -425,6 +425,89 @@ fn a_project_made_by_hand_can_still_be_undone() {
 }
 
 #[test]
+fn a_hand_edit_survives_a_later_undo() {
+    // Up to 0.8.0 this destroyed work: history rebuilds from a snapshot, and a
+    // hand edit is a state no snapshot had ever seen, so the first undo after
+    // one restored the pre-edit document instead. Hand editing is supported
+    // (FR-9), so undo has to return to what the user last saw.
+    let mut project = Project::new();
+    let id = project.apply(new_text("before"))[0].clone();
+
+    // The user edits document.json themselves. This is not a corner case:
+    // hand editing is how `protected` and `readOnly` get set at all, because
+    // deliberately no operation sets them.
+    let (path, mut session, mut ids) = reopen_with(project, |document| {
+        document.name = Some("edited by hand".to_owned());
+        document.layers[0].opacity = 0.5;
+    });
+    let hand_edited = std::fs::read(path.join("document.json")).unwrap();
+
+    // An agent then does something, and undoes it.
+    session
+        .apply(
+            &Operation::Rename {
+                id,
+                name: Some("agent was here".to_owned()),
+            },
+            &agent(),
+            Some(20),
+            None,
+            &mut ids,
+        )
+        .unwrap();
+    assert_ne!(
+        std::fs::read(path.join("document.json")).unwrap(),
+        hand_edited
+    );
+
+    session.undo(&agent(), Some(21), &mut ids).unwrap();
+    assert_eq!(
+        std::fs::read(path.join("document.json")).unwrap(),
+        hand_edited,
+        "undo must return to the hand-edited state, not to before it"
+    );
+    assert_eq!(session.document().name.as_deref(), Some("edited by hand"));
+    assert_eq!(session.document().layers[0].opacity, 0.5);
+}
+
+#[test]
+fn opening_read_only_never_writes() {
+    // The divergence snapshot is a write, and a reader must not perform one:
+    // `open_read_only` does not hold the lock, so writing would race whoever
+    // does.
+    let mut project = Project::new();
+    project.apply(new_text("something"));
+    let (path, session, _ids) = reopen_with(project, |document| {
+        document.name = Some("edited by hand".to_owned());
+    });
+    drop(session);
+
+    let snapshots = path.join("history/snapshots");
+    let before: Vec<_> = std::fs::read_dir(&snapshots)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|e| e.file_name())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let reader = Session::open_read_only(&path).unwrap();
+    assert_eq!(reader.document().name.as_deref(), Some("edited by hand"));
+    drop(reader);
+
+    let after: Vec<_> = std::fs::read_dir(&snapshots)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|e| e.file_name())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(before, after, "a read-only open must not write a snapshot");
+}
+
+#[test]
 fn read_only_layers_reject_mutations_too() {
     let mut project = Project::new();
     let id = project.apply(new_text("frozen"))[0].clone();
