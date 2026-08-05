@@ -5,8 +5,6 @@
 //! thin — the real surfaces are the HTTP API and MCP, over the same operation
 //! layer in `assemblash-core`.
 
-mod assets;
-
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -19,6 +17,7 @@ use assemblash_core::ops::{
 };
 use assemblash_core::session::{self, Session, SessionError};
 use assemblash_core::storage::{self, StorageError};
+use assemblash_core::workspace::Workspace;
 use assemblash_core::{Color, Document};
 use assemblash_renderer::install::{self, HttpFetcher, InstallError, Manifest};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
@@ -250,6 +249,28 @@ enum Command {
     /// Manages the local font store.
     #[command(subcommand)]
     Font(FontCommand),
+
+    /// Serves the local HTTP API.
+    ///
+    /// Listens on 127.0.0.1 only. Making it reachable from the network is a
+    /// decision with an authentication question attached, and is not something
+    /// this release lets you turn on by accident.
+    Serve {
+        /// Workspace to serve. Defaults to this machine's data directory,
+        /// created on first run.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+        /// Port to try first. Falls back to one the OS picks if it is taken.
+        #[arg(long)]
+        port: Option<u16>,
+    },
+
+    /// Prints where this machine's workspace is, creating it if needed.
+    Workspace {
+        /// Workspace to report on. Defaults to this machine's data directory.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+    },
 
     /// Removes a lock left behind by a process that is gone.
     ///
@@ -544,6 +565,12 @@ enum CliError {
     InstallTarget,
     #[error("say where the font store is: --font-store")]
     NoStore,
+    #[error(transparent)]
+    Workspace(#[from] assemblash_core::WorkspaceError),
+    #[error(transparent)]
+    Serve(#[from] assemblash_server::ServeError),
+    #[error("starting the server: {source}")]
+    Runtime { source: std::io::Error },
 }
 
 fn run(command: Command) -> Result<(), CliError> {
@@ -666,7 +693,7 @@ fn run(command: Command) -> Result<(), CliError> {
             fonts,
         } => {
             let document = Session::open_read_only(&project)?.document().clone();
-            let hrefs = assets::data_uris(&document, &project)?;
+            let hrefs = assemblash_renderer::data_uris(&document, &project)?;
             let loaded = load_fonts(&fonts, &document)?;
             let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
             write_file(&out, svg.as_bytes())?;
@@ -681,7 +708,7 @@ fn run(command: Command) -> Result<(), CliError> {
             fonts,
         } => {
             let document = Session::open_read_only(&project)?.document().clone();
-            let hrefs = assets::data_uris(&document, &project)?;
+            let hrefs = assemblash_renderer::data_uris(&document, &project)?;
             let loaded = load_fonts(&fonts, &document)?;
             let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
             let pixmap = svg_to_pixmap(&svg, &loaded, scale)?;
@@ -844,6 +871,30 @@ fn run(command: Command) -> Result<(), CliError> {
         }
 
         Command::Font(command) => run_font(command),
+
+        Command::Serve { workspace, port } => {
+            let workspace = open_workspace(workspace)?;
+            let port = port.unwrap_or(workspace.config().port);
+            // One runtime, built here rather than by an attribute on `main`,
+            // so every other command stays a plain synchronous program with no
+            // async runtime started for it.
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|source| CliError::Runtime { source })?;
+            runtime.block_on(async move {
+                let server = assemblash_server::Server::bind(workspace, port).await?;
+                println!("{}", server.url());
+                server.serve().await
+            })?;
+            Ok(())
+        }
+
+        Command::Workspace { workspace } => {
+            let workspace = open_workspace(workspace)?;
+            println!("{}", workspace.root().display());
+            Ok(())
+        }
 
         Command::Unlock { project } => {
             if session::force_unlock(&project)? {
@@ -1058,6 +1109,15 @@ fn load_fonts(args: &FontArgs, document: &Document) -> Result<LoadedFonts, CliEr
     paths.sort();
     paths.dedup();
     Ok(LoadedFonts::from_files(paths)?)
+}
+
+/// Opens a workspace, at the given path or at this machine's default.
+fn open_workspace(explicit: Option<PathBuf>) -> Result<Workspace, CliError> {
+    let root = match explicit {
+        Some(path) => path,
+        None => Workspace::default_dir()?,
+    };
+    Ok(Workspace::open_or_create(root)?)
 }
 
 fn open_store(args: &StoreArgs) -> Result<FontStore, CliError> {

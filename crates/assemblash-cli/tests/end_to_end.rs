@@ -525,3 +525,40 @@ fn the_font_store_is_driven_from_the_command_line() {
     );
     assert_eq!(run(&["font", "list", "--font-store", store_arg]).trim(), "");
 }
+
+#[test]
+fn the_workspace_command_creates_a_workspace_on_first_run() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("data");
+
+    let output = Command::new(binary())
+        .args(["workspace"])
+        .env("ASSEMBLASH_WORKSPACE", &root)
+        .output()
+        .expect("the binary runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        root.to_string_lossy()
+    );
+
+    assert!(root.join("projects").is_dir());
+    assert!(root.join("fonts").is_dir());
+    assert!(root.join("config.toml").is_file());
+
+    // Running it again reports the same place and changes nothing.
+    let settings = std::fs::read_to_string(root.join("config.toml")).unwrap();
+    Command::new(binary())
+        .args(["workspace"])
+        .env("ASSEMBLASH_WORKSPACE", &root)
+        .output()
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("config.toml")).unwrap(),
+        settings
+    );
+}

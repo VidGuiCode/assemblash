@@ -10,6 +10,77 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-05
+
+The local HTTP API, and a home for the data it manages. This is the first
+network-facing surface, and it listens on `127.0.0.1` only.
+
+Document `schemaVersion`: **1** (unchanged).
+
+### Added
+
+- **Workspace.** On first run the binary creates an OS-appropriate data
+  directory — `%APPDATA%\Assemblash`, `$XDG_DATA_HOME/assemblash` or
+  `~/.local/share/assemblash`, `~/Library/Application Support/Assemblash` —
+  holding `config.toml`, `fonts/`, and `projects/`. `ASSEMBLASH_WORKSPACE`
+  overrides it. A project directory stays portable: the workspace is a default
+  location, not a container.
+- **HTTP API** (`assemblash serve`) over the same operation layer everything
+  else uses: projects, document, history, validation, one operations endpoint
+  taking an `Operation` with an optional expected version and a dry-run flag,
+  undo and redo, asset upload, and PNG preview. Fonts come from the
+  workspace store.
+- Every failure answers with one envelope — `{"error":{"code","message",
+  "details"}}` — with a stable machine-readable code, including a body that
+  does not parse (FR-12).
+- A `ProjectId` type: a project name is checked to be a single ordinary
+  directory name before anything joins it to a path, so there is no code path
+  that can be handed `../../etc` (PRD §10.1).
+- Published **JSON Schemas** for the document and for operations, served by
+  the API from the same generator that writes the committed copies, plus
+  generated **TypeScript declarations** at `schema/*.d.ts`.
+- `assemblash workspace` prints (and creates) this machine's workspace.
+
+### Fixed
+
+- `NewLayerKind::Text` sent `font_family`, `font_size`, and `line_height` in an
+  otherwise camelCase wire format. `rename_all` on an enum renames its
+  variants, not the fields of a struct variant, and nothing noticed while the
+  only caller built the value in Rust. They are now `fontFamily`, `fontSize`,
+  and `lineHeight`; the old spellings are still accepted, so history journals
+  written before 0.6.0 keep replaying.
+
+### Verified
+
+- **Path-escape attempts are rejected**: through a project id, a URL-encoded
+  separator, a drive letter, a UNC path, a reserved device name, and an
+  uploaded filename. Nothing lands outside the workspace.
+- **A stale expected version gives a 409** naming the expected and actual
+  versions, and leaves the document byte-identical.
+- **First run creates a valid workspace**, checked by running it on Windows
+  and Linux. The macOS location is a pure function of `HOME` and is unit
+  tested rather than executed — macOS joins the CI matrix in 0.10.0.
+- An uploaded file is stored under its content hash; the client's filename
+  contributes only an extension, and no scratch file is left behind.
+- A dry run reports what would happen and changes nothing.
+- Rendering through the API refuses a family the store does not have, and two
+  previews of an unchanged document are byte-identical.
+
+### Notes
+
+- **`127.0.0.1` only, and not configurable.** Exposing the API to a network
+  needs an answer to authentication first (PRD §16.14, open), and a settings
+  key is how that decision gets made by accident.
+- The server opens each project once and keeps the session, so it is the
+  single writer for what it has open. Another process holding the same project
+  is a structured 409 with the offending pid, never a wait.
+- Not in this release, and not implied by it: browser auto-open, single-
+  instance detection, a shutdown button, and `index.db`. Those belong to the
+  milestones that need them.
+- CI does not compile the generated TypeScript with `tsc` — it is checked
+  structurally and for drift against the Rust types. The reference UI in 0.9.0
+  is what will compile it in anger.
+
 ## [0.5.0] — 2026-08-05
 
 Fonts and render depth. The document has been reproducible since 0.1.0, but a
