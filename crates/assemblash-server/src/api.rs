@@ -13,8 +13,6 @@ use assemblash_core::ops::OpOutcome;
 use assemblash_core::storage;
 use assemblash_core::workspace::ProjectId;
 use assemblash_core::{Color, Document, Operation};
-use assemblash_renderer::raster::PngMetadata;
-use assemblash_renderer::{document_to_png, LoadedFonts};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
@@ -23,6 +21,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ApiError, ApiJson};
+use crate::render;
 use crate::state::{lock_project, AppState};
 
 /// Milliseconds since the Unix epoch, for the audit trail.
@@ -36,9 +35,14 @@ fn now_millis() -> Option<u64> {
         .map(|elapsed| elapsed.as_millis() as u64)
 }
 
-/// The API routes, over shared state.
-pub fn router(state: AppState) -> Router {
+/// The API routes and the reference interface, over shared state.
+pub fn router(state: AppState, ui: crate::UiSource) -> Router {
     Router::new()
+        // The interface, at the root. Everything under /api is the engine;
+        // everything else is one of a fixed list of files (see `crate::ui`).
+        .route("/", get(serve_ui_root))
+        .route("/{*path}", get(serve_ui))
+        .layer(axum::Extension(ui))
         .route("/api/version", get(version))
         .route("/api/schema/document", get(document_schema))
         .route("/api/schema/operation", get(operation_schema))
@@ -53,6 +57,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/projects/{id}/redo", post(redo))
         .route("/api/projects/{id}/assets", post(upload_asset))
         .route("/api/projects/{id}/preview.png", get(preview))
+        .route("/api/projects/{id}/preview.svg", get(preview_svg))
+        .route("/api/projects/{id}/export", post(export_document))
         .with_state(state)
 }
 
@@ -62,6 +68,19 @@ struct Version {
     name: &'static str,
     version: &'static str,
     schema_version: u32,
+}
+
+async fn serve_ui_root(
+    axum::Extension(ui): axum::Extension<crate::UiSource>,
+) -> axum::response::Response {
+    ui.serve("index.html")
+}
+
+async fn serve_ui(
+    axum::Extension(ui): axum::Extension<crate::UiSource>,
+    Path(path): Path<String>,
+) -> axum::response::Response {
+    ui.serve(&path)
 }
 
 async fn version() -> Json<Version> {
@@ -532,46 +551,75 @@ async fn preview(
     Path(id): Path<String>,
     Query(query): Query<PreviewQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let id = ProjectId::new(id)?;
-    let project = state.project(&id, now_millis())?;
-    let session = lock_project(&project)?;
-    let document = session.document().clone();
-    let directory = session.project_dir().to_path_buf();
-    drop(session);
-
-    let hrefs = assemblash_renderer::data_uris(&document, &directory)?;
-    let families = families_used(&document);
-    let fonts = if families.is_empty() {
-        LoadedFonts::from_bytes([])
-    } else {
-        state.font_store()?.load_families(&families)?
-    };
-
-    let png = document_to_png(
-        &document,
-        &fonts,
-        &hrefs,
-        query.scale,
-        // No timestamp: two previews of an unchanged document are identical,
-        // which is what makes a client's cache trustworthy.
-        &PngMetadata::for_document(&document),
-    )?;
-
+    let (document, directory) = read_for_render(&state, id)?;
+    let rendered = render::png_for(&document, &directory, &state.font_store()?, query.scale)?;
     Ok((
         [
             (header::CONTENT_TYPE, "image/png"),
             (header::CACHE_CONTROL, "no-store"),
         ],
-        png,
+        rendered.bytes,
     ))
 }
 
-fn families_used(document: &Document) -> Vec<String> {
-    let mut families = std::collections::BTreeSet::new();
-    document.walk_layers(&mut |layer| {
-        if let assemblash_core::LayerKind::Text(text) = &layer.kind {
-            families.insert(text.font_family.clone());
-        }
-    });
-    families.into_iter().collect()
+/// Renders a project to SVG.
+///
+/// The same render one step before rasterization. Useful to take away; not
+/// what the reference interface displays, because a browser would re-render it
+/// with its own fonts rather than the pinned files in the store.
+async fn preview_svg(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (document, directory) = read_for_render(&state, id)?;
+    let rendered = render::svg_for(&document, &directory, &state.font_store()?)?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        rendered.bytes,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportRequest {
+    /// File name stem, without an extension. The directory is not the
+    /// caller's to choose.
+    #[serde(default)]
+    name: Option<String>,
+    /// Multiplier on the canvas size.
+    #[serde(default = "one")]
+    scale: f32,
+}
+
+/// Writes a PNG into the project's own `exports/` directory.
+async fn export_document(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(request): ApiJson<ExportRequest>,
+) -> Result<Json<render::Exported>, ApiError> {
+    let (document, directory) = read_for_render(&state, id)?;
+    Ok(Json(render::export_into_project(
+        &document,
+        &directory,
+        &state.font_store()?,
+        request.scale,
+        request.name.as_deref(),
+    )?))
+}
+
+/// The document and its directory, with the lock held only for the read.
+fn read_for_render(
+    state: &AppState,
+    id: String,
+) -> Result<(Document, std::path::PathBuf), ApiError> {
+    let id = ProjectId::new(id)?;
+    let project = state.project(&id, now_millis())?;
+    let session = lock_project(&project)?;
+    Ok((
+        session.document().clone(),
+        session.project_dir().to_path_buf(),
+    ))
 }

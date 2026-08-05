@@ -16,7 +16,9 @@
 
 pub mod api;
 pub mod error;
+pub mod render;
 pub mod state;
+pub mod ui;
 
 use std::net::{Ipv4Addr, SocketAddr};
 
@@ -25,6 +27,7 @@ use axum::Router;
 
 pub use error::ApiError;
 pub use state::AppState;
+pub use ui::UiSource;
 
 /// Re-exported so another transport can build an [`ApiError`] without taking
 /// its own dependency on axum. MCP has no status codes; it uses the shared
@@ -69,8 +72,8 @@ impl Server {
     /// taken port is the ordinary case for a second launch, not an error worth
     /// stopping for — and the fallback is what makes the no-terminal launch in
     /// v0.10 possible.
-    pub async fn bind(workspace: Workspace, port: u16) -> Result<Self, ServeError> {
-        let router = api::router(AppState::new(workspace));
+    pub async fn bind(workspace: Workspace, port: u16, ui: UiSource) -> Result<Self, ServeError> {
+        let router = api::router(AppState::new(workspace), ui);
 
         let mut last = None;
         for candidate in [port, 0] {

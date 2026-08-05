@@ -1,0 +1,15 @@
+{
+  "name": "assemblash-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Reference interface for Assemblash. Built with tsc alone; the output is committed so the binary embeds it without needing Node.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && node copy-static.mjs",
+    "check": "npm run typecheck && npm run build"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

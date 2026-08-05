@@ -65,6 +65,43 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+  ui:
+    name: Reference interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        working-directory: ui
+        run: npm ci
+
+      # The interface is typed against the declarations generated from the
+      # Rust types, so a change to the document model that the UI has not
+      # caught up with fails here rather than at runtime.
+      - name: Typecheck
+        working-directory: ui
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: ui
+        run: npm run build
+
+      # ui/dist is committed because the binary embeds it: `cargo build` must
+      # work with no Node involved. This is what keeps the committed copy
+      # honest.
+      - name: The committed build output is the build output
+        run: |
+          if ! git diff --quiet -- ui/dist; then
+            echo "::error::ui/dist is out of date — run: cd ui && npm run build"
+            git diff --stat -- ui/dist
+            exit 1
+          fi
+
   deny:
     name: Dependency licenses and advisories
     runs-on: ubuntu-latest

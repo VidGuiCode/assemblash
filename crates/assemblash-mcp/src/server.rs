@@ -280,15 +280,20 @@ impl ServerHandler for AssemblashMcp {
             "This server holds a single project, so the project argument may be omitted."
         };
         let instructions = format!(
-            "Assemblash is a deterministic visual document engine. A document is a canvas              and a nested tree of text, image, SVG, and group layers.
-
-             {scope}
-
-             Every tool that changes something takes `expectedVersion` (pass the version              `get_document_state` reported, and the change is refused if the document has              moved on) and `dryRun` (report what would happen and change nothing). Each one              returns a transaction id, and `undo` restores the document exactly.
-
-             Layers marked `protected` or `readOnly` are refused for every change, and no              tool can clear those flags. `locked` layers refuse ordinary changes;              `set_layer_locked` is the way to unlock one. `list_layers` reports all three              flags, so check before planning an edit.
-
-             Selection is yours to keep — there is none stored here, and tools take              explicit layer ids. Fonts are never substituted: a family the font store does              not have is an error, not a fallback."
+            "Assemblash is a deterministic visual document engine. A document is a canvas \
+             and a nested tree of text, image, SVG, and group layers.\n\n\
+             {scope}\n\n\
+             Every tool that changes something takes `expectedVersion` (pass the version \
+             `get_document_state` reported, and the change is refused if the document has \
+             moved on) and `dryRun` (report what would happen and change nothing). Each one \
+             returns a transaction id, and `undo` restores the document exactly.\n\n\
+             Layers marked `protected` or `readOnly` are refused for every change, and no \
+             tool can clear those flags. `locked` layers refuse ordinary changes; \
+             `set_layer_locked` is the way to unlock one. `list_layers` reports all three \
+             flags, so check before planning an edit.\n\n\
+             Selection is yours to keep — there is none stored here, and tools take \
+             explicit layer ids. Fonts are never substituted: a family the font store does \
+             not have is an error, not a fallback."
         );
 
         let mut info = ServerInfo::default();

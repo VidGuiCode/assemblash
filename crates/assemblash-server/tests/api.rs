@@ -49,7 +49,9 @@ impl Harness {
             runtime.block_on(async move {
                 // Port 0: the OS picks, so tests never collide with each other
                 // or with whatever else is running on the machine.
-                let server = Server::bind(workspace, 0).await.unwrap();
+                let server = Server::bind(workspace, 0, Default::default())
+                    .await
+                    .unwrap();
                 send.send(server.url()).unwrap();
                 let _ = server.serve().await;
             });

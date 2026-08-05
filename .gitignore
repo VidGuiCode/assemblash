@@ -46,6 +46,11 @@ config.local.*
 # --- Node / TypeScript ------------------------------------------------------
 node_modules/
 dist/
+# ...except the reference interface's. The binary embeds it, so `cargo build`
+# and `cargo install --git` have to work with no Node anywhere near them. CI
+# rebuilds it and fails if what is committed is not what the build produces,
+# which is the same drift check the generated schemas use.
+!/ui/dist/
 build/
 .next/
 .turbo/

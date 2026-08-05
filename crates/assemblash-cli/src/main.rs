@@ -263,6 +263,10 @@ enum Command {
         /// Port to try first. Falls back to one the OS picks if it is taken.
         #[arg(long)]
         port: Option<u16>,
+        /// Serve the interface from this directory instead of the copy built
+        /// into the binary. For working on the interface itself.
+        #[arg(long)]
+        ui_dir: Option<PathBuf>,
     },
 
     /// Serves the Model Context Protocol over standard input and output.
@@ -890,9 +894,17 @@ fn run(command: Command) -> Result<(), CliError> {
 
         Command::Font(command) => run_font(command),
 
-        Command::Serve { workspace, port } => {
+        Command::Serve {
+            workspace,
+            port,
+            ui_dir,
+        } => {
             let workspace = open_workspace(workspace)?;
             let port = port.unwrap_or(workspace.config().port);
+            let ui = match ui_dir {
+                Some(directory) => assemblash_server::UiSource::Directory(directory),
+                None => assemblash_server::UiSource::Embedded,
+            };
             // One runtime, built here rather than by an attribute on `main`,
             // so every other command stays a plain synchronous program with no
             // async runtime started for it.
@@ -901,7 +913,7 @@ fn run(command: Command) -> Result<(), CliError> {
                 .build()
                 .map_err(|source| CliError::Runtime { source })?;
             runtime.block_on(async move {
-                let server = assemblash_server::Server::bind(workspace, port).await?;
+                let server = assemblash_server::Server::bind(workspace, port, ui).await?;
                 println!("{}", server.url());
                 server.serve().await
             })?;

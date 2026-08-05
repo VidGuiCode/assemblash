@@ -10,6 +10,79 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-05
+
+The reference interface, served by the binary. And the last way undo could
+lose work, closed.
+
+Document `schemaVersion`: **1** (unchanged).
+
+### Added
+
+- **A reference web interface**, embedded in the binary and served at `/` by
+  `assemblash serve`: project browser, canvas, layer tree, inspector, insert
+  text, drag to move and resize, group and delete, undo and redo, history, and
+  export. Written in TypeScript against the declarations generated from the
+  Rust types.
+- **No canvas library and no second renderer** (PRD §16.3). The canvas is the
+  engine's own render, shown as an image, with plain DOM elements over it for
+  selection and handles.
+- Layers marked `protected`, `readOnly`, or `locked` are shown as such and
+  their inputs are disabled, with the reason on hover. The engine refuses them
+  either way; saying so is what the interface owes a person.
+- `GET /api/projects/{id}/preview.svg` — the same render one step before
+  rasterization — and `POST /api/projects/{id}/export`, which writes a PNG
+  into the project's own `exports/` directory.
+- `assemblash serve --ui-dir` serves the interface from a directory, for
+  working on it without rebuilding the binary.
+- `tsc` and the interface build now run in CI, and fail if the committed
+  `ui/dist` is not what the build produces — closing the drift-test-only debt
+  0.6.0 recorded.
+
+### Fixed
+
+- **Undo could destroy a hand edit.** Undo rebuilds from a snapshot, and a
+  document edited outside the journal was a state no snapshot had seen, so the
+  first undo after a hand edit silently restored the document from before it.
+  Opening a project for writing now records a diverged document before
+  anything else happens, so undo returns to what the user last saw. Hand
+  editing is supported (FR-9) — and it is the only way `protected` and
+  `readOnly` get set at all.
+- **The generated TypeScript dropped the fields a tagged union sits beside.**
+  `Layer` is a union of payloads *plus* the properties every layer has; the
+  emitter kept only the union, so a client typed against it would not know a
+  layer had an `id` or a `transform`. Found by the interface being the first
+  thing to actually compile against those types.
+- The MCP server's instructions had lost their line breaks in 0.8.0 and read
+  as one run-on paragraph with stray spacing.
+
+### Verified
+
+- **MVP criterion 12 — the interface opens, edits, and exports the same
+  document format used by the API.** Driven in a real browser against the
+  released binary: it opened a project the CLI and the API had written, added
+  a layer, changed its text, moved it, exported a PNG, and undid a change —
+  and the MCP server then read exactly the same document back.
+- **What the canvas shows is what the export contains**, byte for byte,
+  because they are the same render. Asserted in CI, not argued.
+- The interface serves only the files this build carries: a path is never
+  taken from a request.
+- A hand edit survives a later undo; `open_read_only` still never writes.
+
+### Notes
+
+- The canvas shows the *rasterized* render rather than the SVG, and that is
+  the decision working rather than a departure from it: a browser handed the
+  SVG would re-render it with its own fonts instead of the pinned files in the
+  store, so the preview would differ from the export exactly where this
+  project cares most.
+- `ui/dist` is committed. The binary embeds it, so `cargo build` and
+  `cargo install --git` must work with no Node involved; CI is what keeps the
+  committed copy honest.
+- Handles are drawn for top-level layers. A layer inside a group is positioned
+  relative to it, and guessing at a transform chain the drag would then have
+  to invert is worse than not offering it.
+
 ## [0.8.0] — 2026-08-05
 
 MCP writes. An agent can now change a document — reversibly, with a version

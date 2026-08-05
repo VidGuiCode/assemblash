@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Assemblash</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Assemblash</h1>
+      <select id="projects" aria-label="Project"></select>
+      <button id="new-project" type="button">New project</button>
+      <button id="reload" type="button">Reload</button>
+      <span class="spacer"></span>
+      <span class="version-label">version <span id="version">–</span></span>
+    </header>
+
+    <main>
+      <section class="panel left">
+        <h2>Layers</h2>
+        <ul id="layers"></ul>
+        <div class="buttons">
+          <button id="add-text" type="button">Add text</button>
+          <button id="group-layers" type="button" disabled>Group</button>
+          <button id="delete-layer" type="button" disabled>Delete</button>
+        </div>
+      </section>
+
+      <section class="stage">
+        <!--
+          The engine's own render, as an image. The page never interprets
+          document content as markup, and what is shown is byte-for-byte what
+          an export at the same scale writes.
+        -->
+        <div id="canvas">
+          <img id="canvas-image" alt="" />
+          <div id="overlay"></div>
+        </div>
+        <div class="buttons">
+          <button id="undo" type="button" disabled>Undo</button>
+          <button id="redo" type="button" disabled>Redo</button>
+          <button id="export" type="button">Export PNG</button>
+          <a id="download" href="#" download="assemblash.png" hidden>Download PNG</a>
+          <a id="download-svg" href="#" download="assemblash.svg" hidden>Download SVG</a>
+        </div>
+        <div id="status" data-kind="info">Loading…</div>
+      </section>
+
+      <section class="panel right">
+        <h2>Inspector</h2>
+        <div id="inspector"></div>
+        <h2>History</h2>
+        <ol id="history"></ol>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
