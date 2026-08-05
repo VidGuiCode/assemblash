@@ -272,6 +272,12 @@ a {
   color: var(--warn);
 }
 
+.shortcuts {
+  margin: 0;
+  font-size: 11px;
+  text-align: center;
+}
+
 #status {
   min-height: 20px;
   font-size: 12px;

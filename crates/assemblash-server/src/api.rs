@@ -65,6 +65,8 @@ pub fn router(
         .route("/api/projects/{id}/preview.png", get(preview))
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
         .route("/api/projects/{id}/export", post(export_document))
+        .route("/api/projects/{id}/slots", get(get_slots))
+        .route("/api/projects/{id}/variants", post(render_variants))
         // Layers last: `layer` applies to the routes added before it, so
         // anything added afterwards would silently not see these.
         // Authentication wraps everything, including the interface's own
@@ -684,6 +686,56 @@ async fn export_document(
         &state.font_store()?,
         request.scale,
         request.name.as_deref(),
+    )?))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SlotsResponse {
+    /// Whether this document offers any slots at all.
+    is_template: bool,
+    /// The slots, in the order the document lists them.
+    slots: Vec<assemblash_core::Slot>,
+}
+
+/// What a template offers to be filled.
+async fn get_slots(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<SlotsResponse>, ApiError> {
+    let (document, _) = read_for_render(&state, id)?;
+    Ok(Json(SlotsResponse {
+        is_template: !document.slots.is_empty(),
+        slots: document.slots.clone(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VariantsRequest {
+    /// One entry per variant to render.
+    variants: Vec<render::Variant>,
+    /// Multiplier on the canvas size.
+    #[serde(default = "one")]
+    scale: f32,
+}
+
+/// Renders a template once per set of slot values (PRD use case C).
+///
+/// The template is not modified: each variant is filled on a copy, so a batch
+/// leaves the project exactly as it found it.
+async fn render_variants(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(request): ApiJson<VariantsRequest>,
+) -> Result<Json<render::RenderedVariants>, ApiError> {
+    let (document, directory) = read_for_render(&state, id)?;
+    Ok(Json(render::render_variants(
+        &document,
+        &directory,
+        &state.font_store()?,
+        request.scale,
+        &request.variants,
     )?))
 }
 

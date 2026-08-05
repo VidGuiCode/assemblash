@@ -23,6 +23,7 @@
 
 pub mod backend;
 pub mod server;
+pub mod templates;
 pub mod write_tools;
 pub mod writes;
 

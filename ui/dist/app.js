@@ -41,6 +41,8 @@ const dom = {
     status: el("status"),
     version: el("version"),
     addText: el("add-text"),
+    addImage: el("add-image"),
+    imageFile: el("image-file"),
     deleteLayer: el("delete-layer"),
     groupLayers: el("group-layers"),
     undo: el("undo"),
@@ -157,6 +159,27 @@ function drawLayers() {
     }
 }
 /**
+ * Where a layer's parents put it, or null if a rotated group makes it
+ * unanswerable with translations alone.
+ */
+function ancestorOffset(flat, parent) {
+    let offset = { x: 0, y: 0 };
+    let current = parent;
+    while (current !== null) {
+        const found = flat.find(({ layer }) => layer.id === current);
+        if (!found)
+            return null;
+        if ((found.layer.transform.rotation ?? 0) !== 0)
+            return null;
+        offset = {
+            x: offset.x + found.layer.transform.x,
+            y: offset.y + found.layer.transform.y,
+        };
+        current = found.parent;
+    }
+    return offset;
+}
+/**
  * Selection handles, as DOM elements over the SVG.
  *
  * Positioned in percentages of the canvas so they stay put when the preview is
@@ -167,18 +190,21 @@ function drawOverlay() {
     if (!state.document)
         return;
     const { width, height } = state.document.canvas;
-    for (const { layer, parent } of api.flatten(api.layersOf(state.document))) {
+    const flat = api.flatten(api.layersOf(state.document));
+    for (const { layer, parent } of flat) {
         if (!state.selection.includes(layer.id))
             continue;
-        // A layer inside a group is positioned relative to it; this build draws
-        // handles for top-level layers only rather than guessing at a transform
-        // chain it would then have to invert on drag.
-        if (parent !== null)
+        // A layer inside a group is positioned relative to it, so the handle has
+        // to be drawn at the sum of its ancestors' offsets. A rotated ancestor is
+        // skipped rather than drawn in the wrong place: this build composes
+        // translations, and a handle a few degrees out is worse than none.
+        const offset = ancestorOffset(flat, parent);
+        if (!offset)
             continue;
         const box = document.createElement("div");
         box.className = "handle-box";
-        box.style.left = `${(layer.transform.x / width) * 100}%`;
-        box.style.top = `${(layer.transform.y / height) * 100}%`;
+        box.style.left = `${((layer.transform.x + offset.x) / width) * 100}%`;
+        box.style.top = `${((layer.transform.y + offset.y) / height) * 100}%`;
         box.style.width = `${(layer.transform.width / width) * 100}%`;
         box.style.height = `${(layer.transform.height / height) * 100}%`;
         box.dataset["id"] = layer.id;
@@ -462,6 +488,82 @@ dom.exportButton.addEventListener("click", () => {
         dom.download.href = api.pngUrl(state.project, api.versionOf(state.document));
         dom.download.hidden = false;
     });
+});
+dom.addImage.addEventListener("click", () => dom.imageFile.click());
+dom.imageFile.addEventListener("change", () => {
+    const file = dom.imageFile.files?.[0];
+    // Cleared straight away so choosing the same file twice fires again.
+    dom.imageFile.value = "";
+    if (!file)
+        return;
+    void guard("add image", async () => {
+        if (!state.project || !state.document)
+            return;
+        // Two steps, because importing a file and adding a layer are different
+        // things: the import copies bytes into the project and is not undoable,
+        // and the layer that draws them is an ordinary operation that is.
+        const uploaded = await api.uploadAsset(state.project, file);
+        const result = await api.applyOperation(state.project, {
+            op: "create",
+            position: { at: "root" },
+            transform: { x: 40, y: 40, width: 300, height: 200 },
+            type: "image",
+            asset: uploaded.asset.id,
+            fit: "contain",
+        }, uploaded.version);
+        if (result.created?.length)
+            state.selection = result.created;
+        say(`added ${file.name} (version ${result.version})`);
+        await refresh();
+    });
+});
+/** Whether the keyboard belongs to a field rather than to the canvas. */
+function typingInAField(target) {
+    const element = target;
+    if (!element)
+        return false;
+    return (element.tagName === "INPUT" ||
+        element.tagName === "TEXTAREA" ||
+        element.tagName === "SELECT" ||
+        element.isContentEditable);
+}
+window.addEventListener("keydown", (event) => {
+    // Never steal a key from someone editing a value.
+    if (typingInAField(event.target))
+        return;
+    const control = event.ctrlKey || event.metaKey;
+    if (control && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        (event.shiftKey ? dom.redo : dom.undo).click();
+        return;
+    }
+    const layer = selectedLayer();
+    if (!layer || !api.isEditable(layer))
+        return;
+    if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        void send("delete", { op: "delete", id: layer.id });
+        return;
+    }
+    // Arrows nudge; with shift, by ten. Whole pixels, because a layout nudged
+    // by a fraction is a layout nobody can reproduce by hand.
+    const step = event.shiftKey ? 10 : 1;
+    const nudges = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+    };
+    const nudge = nudges[event.key];
+    if (nudge) {
+        event.preventDefault();
+        void send("nudge", {
+            op: "move",
+            id: layer.id,
+            dx: nudge[0],
+            dy: nudge[1],
+        });
+    }
 });
 async function loadProjects(select) {
     const projects = await api.listProjects();

@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
+use assemblash_core::session::SessionError;
 use assemblash_core::{Document, LayerKind};
 use assemblash_renderer::raster::PngMetadata;
 use assemblash_renderer::{doc_to_svg, document_to_png, FontStore, LoadedFonts};
@@ -200,4 +201,122 @@ mod tests {
             assert!(safe_stem(bad).is_err(), "{bad:?} should have been refused");
         }
     }
+}
+
+/// One variant to render: a name and the values that make it.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Variant {
+    /// File stem for this variant's export. Letters, digits, hyphens, and
+    /// underscores; the directory is not the caller's to choose.
+    pub name: String,
+    /// Slot name to value.
+    #[serde(default)]
+    pub values: assemblash_core::SlotValues,
+}
+
+/// What one rendered variant is, and what made it.
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderedVariant {
+    /// The variant's name.
+    pub name: String,
+    /// Path inside the project, `/`-separated.
+    pub path: String,
+    /// Bytes written.
+    pub bytes: usize,
+    /// Pixel width.
+    pub width: u32,
+    /// Pixel height.
+    pub height: u32,
+    /// Content hash of the PNG, `sha256:<hex>`.
+    ///
+    /// Two runs of the same template with the same values produce the same
+    /// hash — which is what makes a batch as checkable as a single render.
+    pub hash: String,
+}
+
+/// A batch of variants, and what they came from.
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderedVariants {
+    /// Document id of the template.
+    pub template: String,
+    /// Version of the template these were rendered from.
+    pub template_version: u64,
+    /// Every variant, in the order asked for.
+    pub variants: Vec<RenderedVariant>,
+}
+
+/// Renders a template once per set of slot values.
+///
+/// The template is **not modified**. Each variant is filled on a copy, so a
+/// batch of fifty leaves the project exactly as it found it — and so a variant
+/// that is refused stops only itself.
+///
+/// Filling goes through the operation layer, which is the whole safety story:
+/// a slot pointing at a protected layer is refused there, by the same check
+/// that refuses every other route to it. Templates are not a way around
+/// protection; they are a way to offer exactly what was meant to be offered.
+pub fn render_variants(
+    template: &Document,
+    project_dir: &Path,
+    store: &FontStore,
+    scale: f32,
+    variants: &[Variant],
+) -> Result<RenderedVariants, ApiError> {
+    // Checked once, before anything renders: a broken template should be one
+    // clear error rather than the same error N times.
+    assemblash_core::templates::validate_slots(template).map_err(template_error)?;
+
+    let directory = project_dir.join(EXPORTS_DIR);
+    std::fs::create_dir_all(&directory).map_err(|source| io(&directory, "creating", source))?;
+
+    let mut rendered = Vec::with_capacity(variants.len());
+    for variant in variants {
+        let stem = safe_stem(&variant.name)?;
+
+        let mut filled = template.clone();
+        let operations = assemblash_core::templates::fill_operations(template, &variant.values)
+            .map_err(template_error)?;
+        for operation in &operations {
+            // The same entry point every transport uses. A protected layer
+            // refuses here, and the copy is left untouched because applying is
+            // transactional.
+            assemblash_core::ops::apply(
+                &mut filled,
+                operation,
+                &mut assemblash_core::ids::UlidIdSource,
+            )
+            .map_err(|source| ApiError::from(SessionError::from(source)))?;
+        }
+
+        let png = png_for(&filled, project_dir, store, scale)?;
+        let file = format!("{stem}.png");
+        let path = directory.join(&file);
+        std::fs::write(&path, &png.bytes).map_err(|source| io(&path, "writing", source))?;
+
+        rendered.push(RenderedVariant {
+            name: variant.name.clone(),
+            path: format!("{EXPORTS_DIR}/{file}"),
+            bytes: png.bytes.len(),
+            width: png.width,
+            height: png.height,
+            hash: assemblash_core::storage::hash_bytes(&png.bytes),
+        });
+    }
+
+    Ok(RenderedVariants {
+        template: template.id.to_string(),
+        template_version: template.version,
+        variants: rendered,
+    })
+}
+
+fn template_error(error: assemblash_core::TemplateError) -> ApiError {
+    ApiError::new(
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "templateRefused",
+        error.to_string(),
+    )
 }

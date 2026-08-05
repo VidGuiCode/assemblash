@@ -47,6 +47,13 @@
         "$ref": "#/$defs/Layer"
       },
       "default": []
+    },
+    "slots": {
+      "description": "Named openings a caller may fill, making this document a template\n(PRD use case C). Empty for an ordinary document.\n\nAdditive with a default, like every other field added since schema\nversion 1: a build that does not know about slots preserves them, and\na document without them loads here unchanged.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Slot"
+      }
     }
   },
   "required": [
@@ -476,6 +483,62 @@
         "asset"
       ],
       "additionalProperties": true
+    },
+    "Slot": {
+      "description": "A named opening in a template.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "What a caller names this slot by. Unique within a document.",
+          "type": "string"
+        },
+        "layer": {
+          "description": "The layer it fills.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "kind": {
+          "description": "What may be supplied for it.",
+          "$ref": "#/$defs/SlotKind",
+          "default": "text"
+        },
+        "description": {
+          "description": "What this slot is for, for whoever is filling it — including an agent,\nwhich is the case that needs it most.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required": {
+          "description": "Whether a variant must supply it.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name",
+        "layer"
+      ],
+      "additionalProperties": true
+    },
+    "SlotKind": {
+      "description": "What a slot lets a caller supply.",
+      "oneOf": [
+        {
+          "description": "The text of a text layer.",
+          "type": "string",
+          "const": "text"
+        },
+        {
+          "description": "The asset an image layer draws.",
+          "type": "string",
+          "const": "image"
+        },
+        {
+          "description": "The fill colour of a text layer.",
+          "type": "string",
+          "const": "color"
+        }
+      ]
     }
   }
 }

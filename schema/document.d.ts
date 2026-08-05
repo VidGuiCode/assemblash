@@ -163,6 +163,24 @@ export type SvgLayer = {
   [key: string]: unknown;
 };
 
+/// A named opening in a template.
+export type Slot = {
+  /** What a caller names this slot by. Unique within a document. */
+  name: string;
+  /** The layer it fills. */
+  layer: LayerId;
+  /** What may be supplied for it. */
+  kind?: SlotKind;
+  /** What this slot is for, for whoever is filling it — including an agent, */
+  description?: string | null;
+  /** Whether a variant must supply it. */
+  required?: boolean;
+  [key: string]: unknown;
+};
+
+/// What a slot lets a caller supply.
+export type SlotKind = "text" | "image" | "color";
+
 /// A whole document: canvas, imported assets, and the layer stack.
 export type Document = {
   /** Schema version of this document, independent of the release version. */
@@ -179,6 +197,8 @@ export type Document = {
   assets?: Asset[];
   /** Layers, bottom first: array order is z-order. */
   layers?: Layer[];
+  /** Named openings a caller may fill, making this document a template */
+  slots?: Slot[];
   [key: string]: unknown;
 };
 

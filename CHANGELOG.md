@@ -10,6 +10,66 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-05
+
+Templates with named slots — PRD use case C, one of the product's primary use
+cases — and the interface essentials 0.9.0 cut.
+
+Document `schemaVersion`: **1 (unchanged)**. `slots` is additive with a
+default, exactly like `blendMode`, `effects`, and `runs` before it: a document
+written by 0.11.0 loads here unchanged, and one written here loads there with
+its slots preserved verbatim. Bumping the version would have broken every
+existing reader in exchange for a migration with nothing to do.
+
+### Added
+
+- **Templates.** A document may name some of its own layers as slots —
+  `headline`, `logo` — so a script or an agent supplies content without
+  knowing layer ids, and **without being able to touch anything that was not
+  offered**.
+- **Filling is ordinary operations.** A slot fill is an `Update` handed to the
+  same `Session::apply` everything else uses, which is why a slot pointing at
+  a protected layer is refused: not by a check templates remembered to make,
+  but by the one every route to a protected layer already passes through.
+- **`render_variants`**: one template, N sets of values, N PNGs into the
+  project's `exports/`, each reported with its content hash and traceable to
+  the template's id and version. The template is never modified — variants are
+  filled on a copy — so a batch of fifty leaves the project as it found it.
+- Exposed on every surface: `assemblash slots` and `assemblash variants` on the
+  command line, `GET /api/projects/{id}/slots` and
+  `POST /api/projects/{id}/variants` over HTTP, and `list_slots`,
+  `fill_template`, and `render_variants` over MCP.
+- **`UpdateLayer` can change an image layer's asset.** Image slots need it, and
+  "swap the picture in this layer" was an obvious operation the engine did not
+  have. The asset must already be in the document.
+- **Interface essentials**: image upload from the page, keyboard shortcuts
+  (arrows nudge, shift-arrows nudge by ten, Delete removes, Ctrl/Cmd+Z undo and
+  redo), and selection handles for layers **inside groups**.
+
+### Verified
+
+- **The exit test, over MCP against the released binary**: one template, four
+  value sets, four different and correct exports; the same values render
+  byte-identical bytes on a second run; the template's own file is untouched.
+- **The protected chrome is pixel-identical in every variant**, compared row by
+  row rather than by whole-file hash — which could not tell "the chrome
+  survived" from "nothing changed at all".
+- A slot aimed at a protected layer is refused, and nothing is written.
+- A value for a slot that does not exist is refused rather than ignored: a
+  typo must not produce a variant that looks finished and is missing the
+  change you meant.
+
+### Notes
+
+- Slots are `text`, `image`, or `color`. Positions, sizes, and fonts are not
+  fillable: a template that let a caller move things is a document, and there
+  is already an API for that.
+- Handles for a layer inside a **rotated** group are still not drawn. This
+  build composes translations, and a handle a few degrees out of place is
+  worse than no handle.
+- Template filling from the interface did not make this release. It is
+  available on the command line, over HTTP, and over MCP.
+
 ## [0.11.0] — 2026-08-05
 
 Self-hosting works. PRD §16.14 — the last open product decision — is resolved

@@ -237,6 +237,7 @@ fn document() -> impl Strategy<Value = Document> {
                         },
                         assets: assets.clone(),
                         layers,
+                        slots: Vec::new(),
                         extra,
                     }
                 },

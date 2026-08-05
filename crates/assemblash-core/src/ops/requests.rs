@@ -226,6 +226,13 @@ pub struct UpdateLayer {
     /// Image layers: new fit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<ImageFit>,
+    /// Image and SVG layers: draw a different asset.
+    ///
+    /// The asset must already be in the document — importing is not an
+    /// operation (it copies a file, which is not reversible), so swapping to
+    /// something that was never imported is refused rather than half-done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<AssetId>,
 
     /// Change the layer even though it is locked.
     ///
@@ -255,6 +262,7 @@ impl UpdateLayer {
             align: None,
             line_height: None,
             fit: None,
+            asset: None,
             allow_locked: false,
         }
     }
@@ -308,6 +316,9 @@ impl UpdateLayer {
                 if let Some(value) = self.fit {
                     image.fit = value;
                 }
+                if let Some(asset) = &self.asset {
+                    image.asset = asset.clone();
+                }
             }
             LayerKind::Svg(svg) => {
                 if let Some(property) = self.first_text_property() {
@@ -316,6 +327,9 @@ impl UpdateLayer {
                 if let Some(value) = self.fit {
                     svg.fit = value;
                 }
+                if let Some(asset) = &self.asset {
+                    svg.asset = asset.clone();
+                }
             }
             LayerKind::Group(_) => {
                 if let Some(property) = self.first_text_property() {
@@ -323,6 +337,9 @@ impl UpdateLayer {
                 }
                 if self.fit.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "fit"));
+                }
+                if self.asset.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "asset"));
                 }
             }
         }

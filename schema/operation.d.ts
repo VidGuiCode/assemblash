@@ -124,6 +124,8 @@ export type UpdateLayer = {
   lineHeight?: number | null;
   /** Image layers: new fit. */
   fit?: ImageFit | null;
+  /** Image and SVG layers: draw a different asset. */
+  asset?: AssetId | null;
   /** Change the layer even though it is locked. */
   allowLocked?: boolean;
   [key: string]: unknown;

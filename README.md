@@ -236,7 +236,9 @@ The dependency graph must be rechecked against this license once an implementati
 
 11. **Packaging** — binaries for Windows, Linux, and macOS on x86_64 and ARM64; a 7 MB `scratch` Docker image; and friendly mode: launching the binary with no arguments creates the workspace, serves, opens a browser, and can be stopped from the page. A second launch opens the one already running.
 
-What does not exist yet: effects, styled text runs, and templates. Everything above this section describes where the project is going, not what it does today.
+12. **Templates with named slots** — a document names some of its layers as slots, and `assemblash variants` (or the API, or MCP) renders one image per set of values. Protected chrome cannot be reached through a slot, because filling one is an ordinary operation and passes the same check everything else does.
+
+What does not exist yet: effects and styled text runs. Everything above this section describes where the project is going, not what it does today.
 
 The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: the same document plus the same font files produces bit-identical PNGs on all six targets.
 
@@ -247,7 +249,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.11.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.12.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:

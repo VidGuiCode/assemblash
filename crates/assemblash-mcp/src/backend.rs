@@ -190,6 +190,16 @@ pub struct LayerList {
     pub layers: Vec<LayerSummary>,
 }
 
+/// What a template offers to be filled.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotList {
+    /// Whether this document offers any slots at all.
+    pub is_template: bool,
+    /// The slots, in the order the document lists them.
+    pub slots: Vec<assemblash_core::Slot>,
+}
+
 /// A rendered preview.
 #[derive(Debug, Clone)]
 pub struct Preview {
@@ -361,6 +371,11 @@ impl Backend {
         let width = (f64::from(scale) * document.canvas.width).round() as u32;
         let height = (f64::from(scale) * document.canvas.height).round() as u32;
         Ok(Preview { png, width, height })
+    }
+
+    /// The font store this server renders with.
+    pub(crate) fn font_store(&self) -> Result<assemblash_renderer::FontStore, ApiError> {
+        self.fonts()
     }
 
     /// The font store this server renders with.

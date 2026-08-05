@@ -255,6 +255,30 @@ enum Command {
         layers: Vec<String>,
     },
 
+    /// Lists a template's named slots.
+    Slots {
+        /// Project directory.
+        project: PathBuf,
+    },
+
+    /// Renders a template once per set of slot values (PRD use case C).
+    ///
+    /// The template is not modified: each variant is filled on a copy, so a
+    /// batch leaves the project exactly as it found it.
+    Variants {
+        /// Project directory holding the template.
+        project: PathBuf,
+        /// JSON file of variants: `[{ "name": "...", "values": { ... } }]`.
+        #[arg(long)]
+        values: PathBuf,
+        /// Multiplier on the canvas size.
+        #[arg(long, default_value_t = 1.0)]
+        scale: f32,
+        /// Font store to render with.
+        #[arg(long = "font-store", env = "ASSEMBLASH_FONT_STORE")]
+        font_store: PathBuf,
+    },
+
     /// Manages the local font store.
     #[command(subcommand)]
     Font(FontCommand),
@@ -655,6 +679,8 @@ enum CliError {
     InstallTarget,
     #[error("say where the font store is: --font-store")]
     NoStore,
+    #[error("{message} ({code})")]
+    Rendering { code: &'static str, message: String },
     #[error("font family {family:?} is not in the font store at {store}; available: {available}")]
     FontNotInstalled {
         family: String,
@@ -972,6 +998,58 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
+        Command::Slots { project } => {
+            let session = Session::open_read_only(&project)?;
+            let document = session.document();
+            if document.slots.is_empty() {
+                eprintln!("this document has no slots, so it is not a template");
+                return Ok(());
+            }
+            for slot in &document.slots {
+                println!(
+                    "{}	{:?}	{}	{}",
+                    slot.name,
+                    slot.kind,
+                    if slot.required {
+                        "required"
+                    } else {
+                        "optional"
+                    },
+                    slot.description.as_deref().unwrap_or("")
+                );
+            }
+            Ok(())
+        }
+
+        Command::Variants {
+            project,
+            values,
+            scale,
+            font_store,
+        } => {
+            let text = std::fs::read_to_string(&values).map_err(|source| CliError::Write {
+                path: values.clone(),
+                source,
+            })?;
+            let variants: Vec<assemblash_server::render::Variant> = serde_json::from_str(&text)?;
+
+            let session = Session::open_read_only(&project)?;
+            let document = session.document().clone();
+            let store = FontStore::open(&font_store)?;
+            let rendered = assemblash_server::render::render_variants(
+                &document, &project, &store, scale, &variants,
+            )
+            .map_err(|error| CliError::Rendering {
+                code: error.code(),
+                message: error.message().to_owned(),
+            })?;
+
+            for variant in &rendered.variants {
+                println!("{}	{}	{}", variant.name, variant.path, variant.hash);
+            }
+            Ok(())
+        }
+
         Command::Font(command) => run_font(command),
 
         Command::Token(command) => run_token(command),
@@ -1027,10 +1105,9 @@ fn run(command: Command) -> Result<(), CliError> {
                 .build()
                 .map_err(|source| CliError::Runtime { source })?;
             runtime.block_on(async move {
-                let server = assemblash_server::Server::bind_to(
-                    workspace, address, port, ui, shutdown,
-                )
-                .await?;
+                let server =
+                    assemblash_server::Server::bind_to(workspace, address, port, ui, shutdown)
+                        .await?;
                 let url = server.url();
                 // The URL goes to stdout whatever else happens, so a person on
                 // a machine with no browser — or a script — still has it.
@@ -1040,7 +1117,10 @@ fn run(command: Command) -> Result<(), CliError> {
                     // captures this output, which is the one place a secret
                     // must not be (PRD §16.1).
                     eprintln!(
-                        "Bound {address}. Clients must send the workspace access token as                          `Authorization: Bearer <token>`; `assemblash token show` prints it.                          The token authenticates but does not encrypt — put a reverse proxy                          with TLS in front of anything reachable beyond a trusted network."
+                        "Bound {address}. Clients must send the workspace access token as \
+                         `Authorization: Bearer <token>`; `assemblash token show` prints it.\n\
+                         The token authenticates but does not encrypt — put a reverse proxy \
+                         with TLS in front of anything reachable beyond a trusted network."
                     );
                 }
                 if friendly {

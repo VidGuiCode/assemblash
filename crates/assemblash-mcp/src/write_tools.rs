@@ -692,3 +692,86 @@ impl AssemblashMcp {
 fn layer_ids(raw: &[String]) -> Vec<LayerId> {
     raw.iter().map(|id| LayerId::new(id.clone())).collect()
 }
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FillTemplateArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// Slot name to value, as `list_slots` reports the names.
+    pub values: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderVariantsArgs {
+    /// Project holding the template. Omit to use the one in use.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// One entry per variant.
+    pub variants: Vec<VariantArgs>,
+    /// Multiplier on the canvas size.
+    #[serde(default)]
+    pub scale: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VariantArgs {
+    /// File stem for this variant. Letters, digits, hyphens, underscores.
+    pub name: String,
+    /// Slot name to value. Slots left out keep the template's own content.
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, String>,
+}
+
+#[tool_router(router = template_tool_router, vis = "pub(crate)")]
+impl AssemblashMcp {
+    /// Fills a template in place.
+    #[tool(
+        description = "Fill a template's named slots in the project itself, as one recorded \
+                       change. Slots that point at protected layers are refused, like every \
+                       other route to them. Use render_variants to produce several images \
+                       without changing the template."
+    )]
+    async fn fill_template(
+        &self,
+        Parameters(args): Parameters<FillTemplateArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.fill(&args.write, &args.values)
+    }
+
+    /// Renders a template once per set of values.
+    #[tool(
+        description = "Render a template once for each set of slot values and write the PNGs \
+                       into the project's exports directory. The template is not modified, \
+                       and the same values always produce the same bytes."
+    )]
+    async fn render_variants(
+        &self,
+        Parameters(args): Parameters<RenderVariantsArgs>,
+    ) -> Result<Json<assemblash_server::render::RenderedVariants>, ErrorData> {
+        let project = self.resolve_project(args.project.clone());
+        let variants: Vec<serde_json::Value> = args
+            .variants
+            .iter()
+            .map(|variant| serde_json::json!({ "name": variant.name, "values": variant.values }))
+            .collect();
+        self.variants(project.as_deref(), args.scale.unwrap_or(1.0), &variants)
+    }
+
+    /// What a template offers.
+    #[tool(
+        description = "List a template's named slots: what each one is called, what it fills, \
+                       and whether it must be given a value."
+    )]
+    async fn list_slots(
+        &self,
+        Parameters(args): Parameters<crate::server::ProjectArgs>,
+    ) -> Result<Json<crate::backend::SlotList>, ErrorData> {
+        self.backend()
+            .slots(self.resolve_project(args.project).as_deref())
+            .map(Json)
+            .map_err(to_error)
+    }
+}

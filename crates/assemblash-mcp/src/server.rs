@@ -116,6 +116,38 @@ impl AssemblashMcp {
         envelope
     }
 
+    /// Fills a template's slots, resolving the project first.
+    pub(crate) fn fill(
+        &self,
+        envelope: &crate::writes::WriteEnvelope,
+        values: &assemblash_core::SlotValues,
+    ) -> Result<Json<crate::writes::WriteOutcome>, ErrorData> {
+        self.backend
+            .fill_template(&self.resolved(envelope), values)
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// Renders variants of a template.
+    pub(crate) fn variants(
+        &self,
+        project: Option<&str>,
+        scale: f32,
+        variants: &[serde_json::Value],
+    ) -> Result<Json<assemblash_server::render::RenderedVariants>, ErrorData> {
+        // Reparsed into the server crate's own type so there is one definition
+        // of what a variant is, rather than a second that could drift.
+        let parsed: Vec<assemblash_server::render::Variant> = variants
+            .iter()
+            .map(|value| serde_json::from_value(value.clone()))
+            .collect::<Result<_, _>>()
+            .map_err(|error| ErrorData::invalid_request(error.to_string(), None))?;
+        self.backend
+            .render_variants(project, scale, &parsed)
+            .map(Json)
+            .map_err(to_error)
+    }
+
     /// Applies an operation through the one choke point.
     pub(crate) fn write(
         &self,
@@ -139,7 +171,7 @@ impl AssemblashMcp {
     /// tools and the mutating ones stay in separate files without the server
     /// advertising two disjoint sets.
     fn all_tools(&self) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
-        Self::tool_router() + Self::write_tool_router()
+        Self::tool_router() + Self::write_tool_router() + Self::template_tool_router()
     }
 }
 

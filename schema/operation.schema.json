@@ -783,6 +783,17 @@
             }
           ]
         },
+        "asset": {
+          "description": "Image and SVG layers: draw a different asset.\n\nThe asset must already be in the document — importing is not an\noperation (it copies a file, which is not reversible), so swapping to\nsomething that was never imported is refused rather than half-done.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "allowLocked": {
           "description": "Change the layer even though it is locked.\n\nNeeded to unlock a layer at all, and kept explicit so that no ordinary\nedit slips past a lock by accident.",
           "type": "boolean"

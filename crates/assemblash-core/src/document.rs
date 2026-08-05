@@ -51,6 +51,14 @@ pub struct Document {
     /// Layers, bottom first: array order is z-order.
     #[serde(default)]
     pub layers: Vec<Layer>,
+    /// Named openings a caller may fill, making this document a template
+    /// (PRD use case C). Empty for an ordinary document.
+    ///
+    /// Additive with a default, like every other field added since schema
+    /// version 1: a build that does not know about slots preserves them, and
+    /// a document without them loads here unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<crate::templates::Slot>,
     /// Keys this build does not know about, preserved verbatim.
     #[serde(flatten)]
     pub extra: Extras,
@@ -72,6 +80,7 @@ impl Document {
             },
             assets: Vec::new(),
             layers: Vec::new(),
+            slots: Vec::new(),
             extra: Extras::new(),
         }
     }

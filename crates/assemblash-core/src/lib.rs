@@ -21,6 +21,7 @@ pub mod schema;
 pub mod session;
 pub mod storage;
 pub mod svg_import;
+pub mod templates;
 pub mod typescript;
 pub mod validate;
 pub mod workspace;
@@ -36,6 +37,7 @@ pub use layout::{bounding_box, find_overlaps, LayoutError, Rect};
 pub use ops::{apply, dry_run, OpError, Operation};
 pub use session::{Session, SessionError};
 pub use storage::{load, save, StorageError};
+pub use templates::{Slot, SlotKind, SlotValues, TemplateError};
 pub use validate::validate;
 pub use workspace::{ProjectId, Workspace, WorkspaceError};
 

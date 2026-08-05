@@ -222,6 +222,43 @@ export async function serverInfo(): Promise<ServerInfo> {
   return request<ServerInfo>("/api/version");
 }
 
+/**
+ * Uploads a file into a project's assets.
+ *
+ * The client's filename contributes only its extension; the stored name is
+ * the content hash, so nothing a person types becomes a path.
+ */
+export async function uploadAsset(
+  project: string,
+  file: File,
+): Promise<{ asset: { id: string }; version: number }> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/assets?filename=${encodeURIComponent(file.name)}`,
+    {
+      method: "POST",
+      headers: withToken({ "content-type": file.type || "application/octet-stream" }),
+      body: file,
+    },
+  );
+  if (response.status === 401) {
+    goToLogin();
+    throw new ApiError("unauthorized", "this server needs an access token", null);
+  }
+  if (!response.ok) {
+    let code = `http${response.status}`;
+    let message = response.statusText;
+    try {
+      const body = await response.json();
+      code = body?.error?.code ?? code;
+      message = body?.error?.message ?? message;
+    } catch {
+      // Not the envelope; the status still says enough.
+    }
+    throw new ApiError(code, message, null);
+  }
+  return (await response.json()) as { asset: { id: string }; version: number };
+}
+
 export async function fonts(): Promise<string[]> {
   const body = await request<{ families: string[] }>("/api/fonts");
   return body.families;
