@@ -6,26 +6,27 @@
 //! [`Session::apply`](assemblash_core::Session::apply); the MCP server in v0.7
 //! will be another transport over exactly the same calls.
 //!
-//! # It listens on the loopback interface only
+//! # Where it listens, and who may talk to it
 //!
-//! [`Server::bind`] resolves its address itself and always to `127.0.0.1`.
-//! There is no configuration key for the address, because "make it reachable
-//! from the network" is a decision with an authentication question attached
-//! (PRD §16.14, still open) and a setting is how such a decision gets made by
-//! accident.
+//! The default is `127.0.0.1` with no token and nothing to configure. Binding
+//! anywhere else is possible and **refuses to start without an access token**
+//! (PRD §16.1, decision 14) — see [`crate::auth`], which is the one place that
+//! rule lives.
 
 pub mod api;
+pub mod auth;
 pub mod error;
 pub mod instance;
 pub mod render;
 pub mod state;
 pub mod ui;
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use assemblash_core::workspace::Workspace;
 use axum::Router;
 
+pub use auth::{Access, AccessError};
 pub use error::ApiError;
 pub use instance::Shutdown;
 pub use state::AppState;
@@ -52,6 +53,13 @@ pub enum ServeError {
     Serving {
         /// Underlying cause.
         source: std::io::Error,
+    },
+
+    /// The requested address is not one this server will serve.
+    #[error(transparent)]
+    Access {
+        /// What was wrong.
+        source: AccessError,
     },
 }
 
@@ -80,23 +88,58 @@ impl Server {
         Self::bind_with(workspace, port, ui, Shutdown::Refused).await
     }
 
-    /// Binds, saying whether the interface may stop this server.
-    ///
-    /// Only a server this binary started for a person may be stopped from the
-    /// page. A service manager or a container owns its own lifetime, and a web
-    /// page must not be able to take it away.
+    /// Binds loopback with a shutdown policy, the way tests and friendly mode
+    /// have always done.
     pub async fn bind_with(
         workspace: Workspace,
         port: u16,
         ui: UiSource,
         shutdown: Shutdown,
     ) -> Result<Self, ServeError> {
+        Self::bind_to(
+            workspace,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port,
+            ui,
+            shutdown,
+        )
+        .await
+    }
+
+    /// Binds an explicit address, refusing a wide one with no token.
+    ///
+    /// The refusal is the point: a server that bound a network and went on
+    /// serving would publish the workspace to it, and the flag that did so
+    /// would not have looked like it was going to.
+    ///
+    /// The token comes from the workspace configuration, so the only way to
+    /// get one is `assemblash token rotate` — deliberately not a command-line
+    /// argument, which would put it in shell history and process listings.
+    pub async fn bind_to(
+        workspace: Workspace,
+        address: IpAddr,
+        port: u16,
+        ui: UiSource,
+        shutdown: Shutdown,
+    ) -> Result<Self, ServeError> {
+        let access = auth::policy_for(address, workspace.config().token.as_deref())
+            .map_err(|source| ServeError::Access { source })?;
+
         let (send, receive) = tokio::sync::watch::channel(false);
-        let router = api::router(AppState::new(workspace), ui, shutdown, send);
+        let router = api::router(AppState::new(workspace), ui, shutdown, send, access);
+
+        // Port 0 as a fallback only for loopback: a server meant to be
+        // reachable at a known address that quietly moved to another port
+        // would be worse than one that says it could not start.
+        let candidates: &[u16] = if auth::is_loopback(address) {
+            &[port, 0]
+        } else {
+            &[port]
+        };
 
         let mut last = None;
-        for candidate in [port, 0] {
-            let address = SocketAddr::from((Ipv4Addr::LOCALHOST, candidate));
+        for candidate in candidates.iter().copied() {
+            let address = SocketAddr::from((address, candidate));
             match tokio::net::TcpListener::bind(address).await {
                 Ok(listener) => {
                     let address = listener
@@ -123,7 +166,13 @@ impl Server {
     }
 
     /// The base URL a browser or client should use.
+    ///
+    /// A wildcard bind has no useful address to print, so it becomes loopback:
+    /// that is where the person who started it is.
     pub fn url(&self) -> String {
+        if self.address.ip().is_unspecified() {
+            return format!("http://127.0.0.1:{}", self.address.port());
+        }
         format!("http://{}", self.address)
     }
 

@@ -41,6 +41,7 @@ pub fn router(
     ui: crate::UiSource,
     shutdown: crate::Shutdown,
     stop: tokio::sync::watch::Sender<bool>,
+    access: crate::Access,
 ) -> Router {
     Router::new()
         // The interface, at the root. Everything under /api is the engine;
@@ -66,8 +67,16 @@ pub fn router(
         .route("/api/projects/{id}/export", post(export_document))
         // Layers last: `layer` applies to the routes added before it, so
         // anything added afterwards would silently not see these.
+        // Authentication wraps everything, including the interface's own
+        // files: a page that loaded and then failed every call would be a
+        // worse way to learn a token is needed than not loading at all.
+        .layer(axum::middleware::from_fn_with_state(
+            access.clone(),
+            require_access,
+        ))
         .layer(axum::Extension(ui))
         .layer(axum::Extension(shutdown))
+        .layer(axum::Extension(access))
         .layer(axum::Extension(std::sync::Arc::new(stop)))
         .with_state(state)
 }
@@ -83,6 +92,27 @@ struct Version {
     /// Reported rather than discovered, so the page offers the button only
     /// when it would work. Nobody should be shown a control that does nothing.
     can_shutdown: bool,
+}
+
+/// Refuses a request that does not present the token, when one is required.
+///
+/// One place, wrapping every route, because an authentication check each
+/// handler has to remember is one a new handler will forget.
+async fn require_access(
+    axum::extract::State(access): axum::extract::State<crate::Access>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    // The login page is the one thing reachable without a token: it is how
+    // somebody with a token gets it into the browser, and it says nothing a
+    // stranger does not already know from the 401.
+    if request.uri().path() == "/login.html" || request.uri().path() == "/login.js" {
+        return next.run(request).await;
+    }
+    match access.check(request.headers()) {
+        Ok(()) => next.run(request).await,
+        Err(error) => error.into_response(),
+    }
 }
 
 async fn serve_ui_root(

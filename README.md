@@ -247,7 +247,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.10.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.11.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:
@@ -269,7 +269,7 @@ assemblash export ./poster --out poster.png --font-store ~/assemblash-fonts
 In Docker, from a `scratch` image with nothing else in it:
 
 ```sh
-docker build -t assemblash . && docker run --rm -v assemblash:/data assemblash export /data/projects/poster --out /data/poster.png --font-store /data/fonts
+docker compose run --rm assemblash token show && docker compose up
 ```
 
 Or serve the API and the interface. `serve` creates the workspace on first run and prints the URL it bound:
@@ -278,7 +278,16 @@ Or serve the API and the interface. `serve` creates the workspace on first run a
 assemblash serve
 ```
 
-It prints the URL it bound; open that and the reference interface is there. It listens on `127.0.0.1` only — making it reachable from a network needs an answer to authentication first, so this release does not offer the option.
+It prints the URL it bound; open that and the reference interface is there. It listens on `127.0.0.1` by default and needs no configuration.
+
+To serve it to more than this machine, bind explicitly — which requires an access token, and refuses to start without one:
+
+```sh
+assemblash token show
+assemblash serve --bind 0.0.0.0
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the token, Docker, and reverse-proxy configurations with TLS.
 
 Or point an agent at it. Most MCP clients take a command and its arguments:
 

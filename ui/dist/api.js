@@ -4,6 +4,7 @@
 // Operation — the same value the CLI builds and the MCP server sends. The UI
 // has no second idea of what a document is, and no code path that edits one
 // locally and syncs later (PRD §7.2).
+import { goToLogin, withToken } from "./token.js";
 /** The layers of a document, with the schema's default applied. */
 export function layersOf(document) {
     return document.layers ?? [];
@@ -24,7 +25,17 @@ export class ApiError extends Error {
     }
 }
 async function request(path, init) {
-    const response = await fetch(path, init);
+    const response = await fetch(path, {
+        ...init,
+        headers: withToken(init?.headers),
+    });
+    if (response.status === 401) {
+        // The token is missing, wrong, or the server was restarted with a new
+        // one. Asking again is the only thing that helps, and continuing would
+        // leave every control broken with no explanation.
+        goToLogin();
+        throw new ApiError("unauthorized", "this server needs an access token", null);
+    }
     if (!response.ok) {
         // Every failure comes back in one envelope with a stable code, so this is
         // the only place that has to know what a refusal looks like.
@@ -139,6 +150,25 @@ export async function fonts() {
  */
 export function svgUrl(project, version) {
     return `/api/projects/${encodeURIComponent(project)}/preview.svg?v=${version}`;
+}
+/**
+ * Fetches an image as a blob URL, carrying the token.
+ *
+ * An `<img src>` cannot send a header, and putting the token in the query
+ * string is exactly what "never in a URL" rules out — it would land in
+ * history, in referrers, and in any proxy log on the way. So the bytes are
+ * fetched properly and handed to the element as a blob.
+ */
+export async function imageObjectUrl(url) {
+    const response = await fetch(url, { headers: withToken() });
+    if (response.status === 401) {
+        goToLogin();
+        throw new ApiError("unauthorized", "this server needs an access token", null);
+    }
+    if (!response.ok) {
+        throw new ApiError(`http${response.status}`, response.statusText, null);
+    }
+    return URL.createObjectURL(await response.blob());
 }
 /**
  * Where the rendered PNG lives.

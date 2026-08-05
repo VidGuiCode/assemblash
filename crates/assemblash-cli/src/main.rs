@@ -269,9 +269,18 @@ enum Command {
         /// created on first run.
         #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
         workspace: Option<PathBuf>,
-        /// Port to try first. Falls back to one the OS picks if it is taken.
+        /// Port to try first. Falls back to one the OS picks if it is taken,
+        /// but only on loopback: a server meant to be reachable at a known
+        /// address should say it could not start rather than move quietly.
         #[arg(long)]
         port: Option<u16>,
+        /// Address to bind. Defaults to 127.0.0.1.
+        ///
+        /// Anything else refuses to start without an access token — serving a
+        /// network without one would publish this workspace to it. Create a
+        /// token with `assemblash token rotate`.
+        #[arg(long, env = "ASSEMBLASH_BIND")]
+        bind: Option<String>,
         /// Serve the interface from this directory instead of the copy built
         /// into the binary. For working on the interface itself.
         #[arg(long)]
@@ -301,6 +310,10 @@ enum Command {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+
+    /// Manages the access token a non-loopback bind requires.
+    #[command(subcommand)]
+    Token(TokenCommand),
 
     /// Prints where this machine's workspace is, creating it if needed.
     Workspace {
@@ -390,6 +403,35 @@ enum FontCommand {
         family: String,
         #[command(flatten)]
         store: StoreArgs,
+    },
+}
+
+/// The access token, which exists only so a non-loopback bind is possible.
+///
+/// It lives in the workspace configuration and nowhere else. There is
+/// deliberately no `--token` argument anywhere: a secret on a command line is
+/// a secret in shell history and in every process listing on the machine.
+#[derive(Debug, Subcommand)]
+enum TokenCommand {
+    /// Prints the token, creating one if there is none.
+    Show {
+        /// Workspace to read. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+    },
+    /// Replaces the token with a new one.
+    ///
+    /// Every client using the old one stops working, which is the point.
+    Rotate {
+        /// Workspace to change. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+    },
+    /// Removes the token, so only a loopback bind will start.
+    Clear {
+        /// Workspace to change. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
     },
 }
 
@@ -568,6 +610,9 @@ fn main() -> ExitCode {
     let command = cli.command.unwrap_or(Command::Serve {
         workspace: None,
         port: None,
+        // A double-click serves the person at the keyboard, so loopback and
+        // the config default is right; anything wider is an explicit choice.
+        bind: None,
         ui_dir: None,
         // Double-clicked: there is no console to press Ctrl-C in, so the
         // interface is allowed to stop it, and a browser is opened.
@@ -929,9 +974,12 @@ fn run(command: Command) -> Result<(), CliError> {
 
         Command::Font(command) => run_font(command),
 
+        Command::Token(command) => run_token(command),
+
         Command::Serve {
             workspace,
             port,
+            bind,
             ui_dir,
             friendly,
         } => {
@@ -951,6 +999,15 @@ fn run(command: Command) -> Result<(), CliError> {
             }
 
             let port = port.unwrap_or(workspace.config().port);
+            let requested = bind.unwrap_or_else(|| workspace.config().bind.clone());
+            let address: std::net::IpAddr = requested.parse().map_err(|_| {
+                CliError::Serve(assemblash_server::ServeError::Access {
+                    source: assemblash_server::AccessError::UnusableAddress {
+                        address: requested.clone(),
+                        reason: "expected an IP address such as 127.0.0.1 or 0.0.0.0".to_owned(),
+                    },
+                })
+            })?;
             let ui = match ui_dir {
                 Some(directory) => assemblash_server::UiSource::Directory(directory),
                 None => assemblash_server::UiSource::Embedded,
@@ -960,6 +1017,7 @@ fn run(command: Command) -> Result<(), CliError> {
             } else {
                 assemblash_server::Shutdown::Refused
             };
+            let needs_token = !assemblash_server::auth::is_loopback(address);
             let open_browser = friendly && workspace.config().open_browser;
             // One runtime, built here rather than by an attribute on `main`,
             // so every other command stays a plain synchronous program with no
@@ -969,12 +1027,22 @@ fn run(command: Command) -> Result<(), CliError> {
                 .build()
                 .map_err(|source| CliError::Runtime { source })?;
             runtime.block_on(async move {
-                let server =
-                    assemblash_server::Server::bind_with(workspace, port, ui, shutdown).await?;
+                let server = assemblash_server::Server::bind_to(
+                    workspace, address, port, ui, shutdown,
+                )
+                .await?;
                 let url = server.url();
                 // The URL goes to stdout whatever else happens, so a person on
                 // a machine with no browser — or a script — still has it.
                 println!("{url}");
+                if needs_token {
+                    // Never the token itself: it would land in whatever
+                    // captures this output, which is the one place a secret
+                    // must not be (PRD §16.1).
+                    eprintln!(
+                        "Bound {address}. Clients must send the workspace access token as                          `Authorization: Bearer <token>`; `assemblash token show` prints it.                          The token authenticates but does not encrypt — put a reverse proxy                          with TLS in front of anything reachable beyond a trusted network."
+                    );
+                }
                 if friendly {
                     let _ = assemblash_server::instance::record(&root, &url);
                     eprintln!("Assemblash is running. Close it from the page, or press Ctrl-C.");
@@ -1255,6 +1323,49 @@ fn check_family_installed(directory: &Path, family: &str) -> Result<(), CliError
             available.join(", ")
         },
     })
+}
+
+fn new_token() -> Result<String, CliError> {
+    assemblash_server::auth::generate_token()
+        .map_err(|source| CliError::Serve(assemblash_server::ServeError::Access { source }))
+}
+
+fn run_token(command: TokenCommand) -> Result<(), CliError> {
+    match command {
+        TokenCommand::Show { workspace } => {
+            let mut workspace = open_workspace(workspace)?;
+            // Created on demand rather than on first run: a purely local
+            // install should never have a secret sitting in a file it never
+            // needed.
+            if workspace.config().token.is_none() {
+                let mut config = workspace.config().clone();
+                config.token = Some(new_token()?);
+                workspace.set_config(config)?;
+                eprintln!("No token existed, so one was created.");
+            }
+            // The one place a token is printed, because someone asked for it
+            // by name. Nothing else ever writes it anywhere.
+            println!("{}", workspace.config().token.clone().unwrap_or_default());
+            Ok(())
+        }
+        TokenCommand::Rotate { workspace } => {
+            let mut workspace = open_workspace(workspace)?;
+            let mut config = workspace.config().clone();
+            config.token = Some(new_token()?);
+            workspace.set_config(config)?;
+            eprintln!("Every client using the old token must be given the new one.");
+            println!("{}", workspace.config().token.clone().unwrap_or_default());
+            Ok(())
+        }
+        TokenCommand::Clear { workspace } => {
+            let mut workspace = open_workspace(workspace)?;
+            let mut config = workspace.config().clone();
+            config.token = None;
+            workspace.set_config(config)?;
+            eprintln!("Token removed. Only a loopback bind will start now.");
+            Ok(())
+        }
+    }
 }
 
 fn open_store(args: &StoreArgs) -> Result<FontStore, CliError> {

@@ -284,6 +284,57 @@ a {
   font-weight: 600;
 }
 
+/* The token hand-off page: one field, and an explanation of what the token
+ * is and is not. */
+body.login {
+  display: block;
+  padding: 40px 20px;
+}
+
+.login-panel {
+  max-width: 460px;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 20px 22px 22px;
+}
+
+.login-panel h1 {
+  margin-bottom: 10px;
+}
+
+.login-panel p {
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+
+.login-panel .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  color: var(--ink);
+}
+
+.login-panel .field input {
+  width: 100%;
+}
+
+.login-panel button {
+  margin-top: 10px;
+}
+
+.login-panel code {
+  background: var(--paper);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+#login-status[data-kind="error"] {
+  color: var(--warn);
+  font-weight: 600;
+}
+
 /* Once the server has stopped there is nothing to talk to, so the interface
  * stops pretending it is live. */
 body.stopped main {

@@ -90,8 +90,13 @@ async function refresh() {
     state.selection = state.selection.filter((id) => api.flatten(api.layersOf(doc)).some(({ layer }) => layer.id === id));
     dom.version.textContent = String(api.versionOf(doc));
     // A render the engine produced, shown as an image. Nothing from the
-    // document is ever interpreted as markup by this page.
-    dom.canvasImage.src = api.pngUrl(state.project, api.versionOf(doc));
+    // document is ever interpreted as markup by this page. Fetched rather than
+    // pointed at, because an <img src> cannot carry the access token and the
+    // token must never go in a URL.
+    const previous = dom.canvasImage.src;
+    dom.canvasImage.src = await api.imageObjectUrl(api.pngUrl(state.project, api.versionOf(doc)));
+    if (previous.startsWith("blob:"))
+        URL.revokeObjectURL(previous);
     dom.canvasImage.alt = `Preview of ${doc.name ?? state.project}`;
     dom.canvas.style.aspectRatio = `${doc.canvas.width} / ${doc.canvas.height}`;
     dom.downloadSvg.href = api.svgUrl(state.project, api.versionOf(doc));

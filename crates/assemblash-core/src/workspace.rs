@@ -206,10 +206,21 @@ pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
     /// Whether a no-arguments launch should open a browser.
-    ///
-    /// Read but not yet acted on: the launch UX is v0.10.
     #[serde(default = "default_true")]
     pub open_browser: bool,
+    /// Address to bind. Loopback unless someone says otherwise.
+    ///
+    /// Anything other than a loopback address requires [`Config::token`],
+    /// and the server refuses to start without one (PRD §16.1, decision 14).
+    #[serde(default = "default_bind")]
+    pub bind: String,
+    /// Access token for a non-loopback bind.
+    ///
+    /// Generated on demand rather than on first run, so a purely local
+    /// install never has a secret sitting in a file it did not need. Rotate
+    /// it with `assemblash token rotate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
     /// Keys this build does not know about, preserved verbatim.
     ///
     /// The same promise the document model makes: a settings file written by a
@@ -222,6 +233,10 @@ fn default_port() -> u16 {
     8787
 }
 
+fn default_bind() -> String {
+    "127.0.0.1".to_owned()
+}
+
 fn default_true() -> bool {
     true
 }
@@ -231,6 +246,8 @@ impl Default for Config {
         Self {
             port: default_port(),
             open_browser: default_true(),
+            bind: default_bind(),
+            token: None,
             extra: BTreeMap::new(),
         }
     }

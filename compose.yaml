@@ -1,0 +1,39 @@
+# Assemblash, self-hosted.
+#
+#   docker compose run --rm assemblash token show   # once, to get the token
+#   docker compose up
+#
+# The server binds 0.0.0.0 inside the container so the published port reaches
+# it, and a non-loopback bind refuses to start without an access token. Get the
+# token with the first command and paste it into the browser once.
+#
+# The token authenticates; it does not encrypt. The commented block below puts
+# Caddy in front for TLS, which is what anything reachable beyond a trusted
+# network wants — see DEPLOYMENT.md.
+
+services:
+  assemblash:
+    build: .
+    # Or: image: ghcr.io/vidguicode/assemblash:0.11.0
+    volumes:
+      - assemblash:/data
+    ports:
+      # Published on loopback only. Change to "8787:8787" to reach it from the
+      # network — deliberately not the default, because the token is the only
+      # thing standing between that and the workspace.
+      - "127.0.0.1:8787:8787"
+    restart: unless-stopped
+
+  # caddy:
+  #   image: caddy:2
+  #   depends_on: [assemblash]
+  #   ports:
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy-data:/data
+  #   restart: unless-stopped
+
+volumes:
+  assemblash:
+  # caddy-data:

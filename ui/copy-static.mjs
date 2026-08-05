@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-for (const file of ["index.html", "style.css"]) {
+for (const file of ["index.html", "login.html", "style.css"]) {
   copyFileSync(join(here, "src", file), join(here, "dist", file));
 }
-console.log("copied index.html, style.css");
+console.log("copied index.html, login.html, style.css");

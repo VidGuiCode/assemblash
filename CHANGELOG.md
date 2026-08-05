@@ -10,6 +10,53 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-08-05
+
+Self-hosting works. PRD §16.14 — the last open product decision — is resolved
+as **access token plus explicit bind**, and this is it built.
+
+Document `schemaVersion`: **1** (unchanged).
+
+### Added
+
+- **`--bind <address>`**, and a `bind` key in the workspace configuration. The
+  default is `127.0.0.1` and needs no token and no setup: anyone who can reach
+  that socket is already on the machine, where the projects are ordinary
+  readable files.
+- **A non-loopback bind refuses to start without an access token.** Not a
+  warning — a refusal, because a server that bound a network and carried on
+  serving would publish the workspace to it, and the flag that did so would
+  not have looked like it was going to. The error says exactly what to run.
+- **`assemblash token show | rotate | clear`.** The token lives in the
+  workspace configuration and nowhere else; there is deliberately no `--token`
+  argument anywhere, because a secret on a command line is a secret in shell
+  history and in every process listing on the machine.
+- **`Authorization: Bearer` for the API**, and a **one-time browser login** for
+  the interface: paste the token once, it is kept in that tab, and every
+  request carries it as a header. Even the canvas image is fetched rather than
+  pointed at, so the token never reaches a URL.
+- **The Docker image is genuinely servable.** It binds `0.0.0.0` so a published
+  port reaches it — which means it requires a token, which is the safety
+  property rather than an obstacle. `compose.yaml` publishes on loopback by
+  default.
+- **`DEPLOYMENT.md`**: how to get a token, what it protects, and reverse-proxy
+  configurations for Caddy, Traefik, and nginx — with the point stated plainly
+  that the token authenticates and does not encrypt.
+
+### Notes
+
+- Comparison is constant time; a rejected token is never echoed back, never
+  logged, and never placed in a URL.
+- The interface's own files are behind the token too. A page that loaded and
+  then failed every call would be a worse way to learn a token is needed than
+  not loading at all. The login page is the one exception, because it is how a
+  token gets into the browser.
+- Port fallback (trying port 0 when the configured port is taken) applies to
+  loopback only. A server meant to be reachable at a known address should say
+  it could not start rather than move quietly to another port.
+- There are no accounts and no built-in OIDC. Identity belongs in the reverse
+  proxy, which is where TLS belongs too.
+
 ## [0.10.1] — 2026-08-05
 
 Two findings from an independent verification of the 0.10.0 release. Both are

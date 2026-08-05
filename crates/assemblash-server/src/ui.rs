@@ -51,6 +51,23 @@ const ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
         body: include_bytes!("../../../ui/dist/api.js"),
     },
+    Asset {
+        name: "token.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/token.js"),
+    },
+    // Reachable without a token: it is how somebody with one gets it into the
+    // browser (see `api::require_access`).
+    Asset {
+        name: "login.html",
+        content_type: "text/html; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/login.html"),
+    },
+    Asset {
+        name: "login.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/login.js"),
+    },
 ];
 
 /// Where the interface is served from.

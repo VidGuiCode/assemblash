@@ -7,6 +7,7 @@
 
 import type { Document } from "../../schema/document.js";
 import type { Operation } from "../../schema/operation.js";
+import { goToLogin, withToken } from "./token.js";
 
 export type { Document, Operation };
 
@@ -69,7 +70,17 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const response = await fetch(path, {
+    ...init,
+    headers: withToken(init?.headers),
+  });
+  if (response.status === 401) {
+    // The token is missing, wrong, or the server was restarted with a new
+    // one. Asking again is the only thing that helps, and continuing would
+    // leave every control broken with no explanation.
+    goToLogin();
+    throw new ApiError("unauthorized", "this server needs an access token", null);
+  }
   if (!response.ok) {
     // Every failure comes back in one envelope with a stable code, so this is
     // the only place that has to know what a refusal looks like.
@@ -227,6 +238,26 @@ export async function fonts(): Promise<string[]> {
  */
 export function svgUrl(project: string, version: number): string {
   return `/api/projects/${encodeURIComponent(project)}/preview.svg?v=${version}`;
+}
+
+/**
+ * Fetches an image as a blob URL, carrying the token.
+ *
+ * An `<img src>` cannot send a header, and putting the token in the query
+ * string is exactly what "never in a URL" rules out — it would land in
+ * history, in referrers, and in any proxy log on the way. So the bytes are
+ * fetched properly and handed to the element as a blob.
+ */
+export async function imageObjectUrl(url: string): Promise<string> {
+  const response = await fetch(url, { headers: withToken() });
+  if (response.status === 401) {
+    goToLogin();
+    throw new ApiError("unauthorized", "this server needs an access token", null);
+  }
+  if (!response.ok) {
+    throw new ApiError(`http${response.status}`, response.statusText, null);
+  }
+  return URL.createObjectURL(await response.blob());
 }
 
 /**

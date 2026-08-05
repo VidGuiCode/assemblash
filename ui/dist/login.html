@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Assemblash — access token</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="login">
+    <main class="login-panel">
+      <h1>Assemblash</h1>
+      <p>
+        This server is bound to a network address, so it asks for its access
+        token once. Find it with <code>assemblash token show</code> on the
+        machine running the server, or in that workspace's
+        <code>config.toml</code>.
+      </p>
+      <form id="login-form">
+        <label class="field">
+          Access token
+          <input id="token" type="password" autocomplete="off" spellcheck="false" required />
+        </label>
+        <button type="submit">Continue</button>
+      </form>
+      <p id="login-status" data-kind="info"></p>
+      <p class="hint">
+        The token is kept in this browser only, and sent as an
+        <code>Authorization</code> header — never in a URL. It authenticates;
+        it does not encrypt. Put a reverse proxy with TLS in front of anything
+        reachable beyond a trusted network.
+      </p>
+    </main>
+    <script type="module" src="login.js"></script>
+  </body>
+</html>

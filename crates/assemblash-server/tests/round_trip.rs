@@ -43,6 +43,16 @@ mod http {
     }
 
     pub fn request(method: &str, url: &str, body: Option<&[u8]>) -> Response {
+        request_with(method, url, body, &[])
+    }
+
+    /// A request carrying extra headers, for the ones authentication needs.
+    pub fn request_with(
+        method: &str,
+        url: &str,
+        body: Option<&[u8]>,
+        extra: &[(&str, &str)],
+    ) -> Response {
         let rest = url.strip_prefix("http://").expect("http url");
         let (authority, path) = match rest.find('/') {
             Some(index) => (&rest[..index], &rest[index..]),
@@ -50,11 +60,18 @@ mod http {
         };
         let mut stream = TcpStream::connect(authority).expect("connect");
         let body = body.unwrap_or(&[]);
-        let head = format!(
+        let mut head = format!(
             "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\
-             Content-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+             Content-Type: application/json\r\nContent-Length: {}\r\n",
             body.len()
         );
+        for (name, value) in extra {
+            head.push_str(name);
+            head.push_str(": ");
+            head.push_str(value);
+            head.push_str("\r\n");
+        }
+        head.push_str("\r\n");
         stream.write_all(head.as_bytes()).expect("write head");
         stream.write_all(body).expect("write body");
         stream.flush().expect("flush");
@@ -393,4 +410,161 @@ fn a_managed_server_refuses_to_be_shut_down() {
 
     // Still serving.
     assert_eq!(harness.get("/api/version").status, 200);
+}
+
+/// The v0.11.0 exit test: a non-loopback bind refuses without a token, and
+/// with one it demands the token on every request.
+///
+/// The refusal is the load-bearing half. A server that bound a network and
+/// went on serving would publish a workspace to it, and the flag that did so
+/// would not have looked like it was going to (PRD §16.1, decision 14).
+#[test]
+fn a_wide_bind_needs_a_token_and_then_enforces_it() {
+    use assemblash_core::workspace::Config;
+
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    let workspace = Workspace::open_or_create(&root).unwrap();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    // --- without a token: refused, and nothing is listening -----------------
+    let refused = runtime.block_on(assemblash_server::Server::bind_to(
+        workspace.clone(),
+        "0.0.0.0".parse().unwrap(),
+        0,
+        UiSource::Embedded,
+        assemblash_server::Shutdown::Refused,
+    ));
+    let error = refused.expect_err("a wide bind with no token must refuse");
+    let message = error.to_string();
+    assert!(message.contains("token rotate"), "{message}");
+    assert!(message.contains("0.0.0.0"), "{message}");
+
+    // Loopback with no token is unchanged: the default needs no setup.
+    let allowed = runtime.block_on(assemblash_server::Server::bind_to(
+        workspace.clone(),
+        "127.0.0.1".parse().unwrap(),
+        0,
+        UiSource::Embedded,
+        assemblash_server::Shutdown::Refused,
+    ));
+    assert!(allowed.is_ok(), "loopback must still need nothing");
+    drop(allowed);
+
+    // --- with a token: it binds, and every request must carry it ------------
+    let token = assemblash_server::auth::generate_token().unwrap();
+    let mut workspace = Workspace::open_or_create(&root).unwrap();
+    let mut config: Config = workspace.config().clone();
+    config.token = Some(token.clone());
+    workspace.set_config(config).unwrap();
+
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let server = assemblash_server::Server::bind_to(
+                workspace,
+                "0.0.0.0".parse().unwrap(),
+                0,
+                UiSource::Embedded,
+                assemblash_server::Shutdown::Refused,
+            )
+            .await
+            .expect("a wide bind with a token starts");
+            send.send(server.url()).unwrap();
+            let _ = server.serve().await;
+        });
+    });
+    let base = receive.recv().expect("the server started");
+
+    let bearer = |token: &str| format!("Bearer {token}");
+
+    // No token at all.
+    let anonymous = http::request_with("GET", &format!("{base}/api/version"), None, &[]);
+    assert_eq!(anonymous.status, 401);
+    let body = anonymous.json();
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert!(
+        !anonymous_body_mentions(&body.to_string(), &token),
+        "a 401 must not echo the token back"
+    );
+
+    // A wrong token, including one that shares a prefix.
+    for wrong in [
+        "nope".to_owned(),
+        token[..token.len() - 1].to_owned(),
+        format!("{token}x"),
+    ] {
+        let header = bearer(&wrong);
+        let response = http::request_with(
+            "GET",
+            &format!("{base}/api/version"),
+            None,
+            &[("authorization", header.as_str())],
+        );
+        assert_eq!(response.status, 401, "{wrong} was accepted");
+    }
+
+    // The right one, and the whole surface behind it.
+    let header = bearer(&token);
+    let authorized = http::request_with(
+        "GET",
+        &format!("{base}/api/version"),
+        None,
+        &[("authorization", header.as_str())],
+    );
+    assert_eq!(
+        authorized.status,
+        200,
+        "token {:?} rejected; body {}",
+        header,
+        String::from_utf8_lossy(&authorized.body)
+    );
+    assert_eq!(authorized.json()["name"], "assemblash");
+
+    // The interface's own files are behind it too: a page that loaded and
+    // then failed everything would be a worse way to learn a token is needed.
+    assert_eq!(
+        http::request_with("GET", &format!("{base}/"), None, &[]).status,
+        401
+    );
+    assert_eq!(
+        http::request_with("GET", &format!("{base}/app.js"), None, &[]).status,
+        401
+    );
+
+    // Except the login page, which is how a token gets into the browser.
+    assert_eq!(
+        http::request_with("GET", &format!("{base}/login.html"), None, &[]).status,
+        200
+    );
+    assert_eq!(
+        http::request_with("GET", &format!("{base}/login.js"), None, &[]).status,
+        200
+    );
+
+    // And a write is refused just as firmly as a read.
+    let write = http::request_with(
+        "POST",
+        &format!("{base}/api/projects"),
+        Some(
+            json!({ "id": "sneaky", "width": 10.0, "height": 10.0 })
+                .to_string()
+                .as_bytes(),
+        ),
+        &[],
+    );
+    assert_eq!(write.status, 401);
+    assert!(!root.join("projects/sneaky").exists());
+}
+
+fn anonymous_body_mentions(body: &str, token: &str) -> bool {
+    body.contains(token)
 }

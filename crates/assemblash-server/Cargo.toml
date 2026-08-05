@@ -11,6 +11,8 @@ authors.workspace = true
 [dependencies]
 assemblash-core.workspace = true
 assemblash-renderer.workspace = true
+# Randomness for access tokens, from the operating system.
+getrandom = "0.3.4"
 axum = { version = "0.8.9", default-features = false, features = [
     "http1",
     "json",
