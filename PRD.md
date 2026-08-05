@@ -787,7 +787,7 @@ These decisions should be resolved before implementation reaches the first publi
 
 1. ~~TypeScript-only core or a language-neutral API with multiple implementations?~~ **Resolved:** Rust core with a language-neutral JSON Schema document format (see §16.1).
 2. ~~SVG-first, HTML/canvas, or hybrid renderer?~~ **Resolved:** SVG-first, rasterized with resvg (see §16.1).
-3. Which canvas library, if any, should power the reference UI?
+3. ~~Which canvas library, if any, should power the reference UI?~~ **Resolved:** none (see §16.1).
 4. Directory-based JSON documents only, or a packaged `.assemblash` file?
 5. ~~Which local API transport: embedded library, HTTP, or both?~~ **Resolved:** embedded (core crate) first, HTTP via axum in Phase 2 (see §16.1).
 6. ~~Which MCP transport should the reference server support first?~~ **Resolved:** stdio first (see §16.1).
@@ -836,6 +836,16 @@ explicitly deprioritized.
 - **Reference UI:** web-based (TypeScript) as always intended, shipped as
   static assets served by the same binary. The UI is a client of the API like
   any downstream application (§7.1).
+
+**Reference UI rendering (decision 3, resolved 2026-08-05):** no canvas
+library. The engine already produces the authoritative SVG render; the
+reference UI displays that render and overlays DOM elements for selection
+handles and interaction. Preview is therefore pixel-true to export by
+construction, which eliminates the preview/export divergence risk (R3) rather
+than mitigating it. A canvas library would have introduced a second renderer
+whose display could drift from the engine's output, plus a significant
+dependency to license-track. The UI may use a minimal TypeScript build step;
+generated types are compiled in CI from this milestone on.
 
 Considered and rejected: **TypeScript/Node** (best iteration speed and MCP
 maturity, but a ~100 MB runtime, roughly an order of magnitude more idle
