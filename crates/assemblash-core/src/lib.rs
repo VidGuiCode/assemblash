@@ -20,7 +20,9 @@ pub mod schema;
 pub mod session;
 pub mod storage;
 pub mod svg_import;
+pub mod typescript;
 pub mod validate;
+pub mod workspace;
 
 pub use document::{
     Asset, BlendMode, Canvas, Color, Document, Extras, GroupLayer, ImageFit, ImageLayer, Layer,
@@ -34,6 +36,7 @@ pub use ops::{apply, dry_run, OpError, Operation};
 pub use session::{Session, SessionError};
 pub use storage::{load, save, StorageError};
 pub use validate::validate;
+pub use workspace::{ProjectId, Workspace, WorkspaceError};
 
 /// Aborts the process if this build has fault injection enabled and the
 /// environment names this point.
