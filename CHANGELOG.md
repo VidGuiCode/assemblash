@@ -10,6 +10,74 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-08-05
+
+MCP writes. An agent can now change a document — reversibly, with a version
+check, and never through a protected layer.
+
+Document `schemaVersion`: **1** (unchanged).
+
+### Added
+
+- **Twenty mutating MCP tools**, named rather than one generic
+  `apply_operation`: `add_text_layer`, `add_image_layer`, `update_layer`,
+  `move_layer`, `resize_layer`, `rotate_layer`, `reorder_layer`,
+  `group_layers`, `ungroup_layer`, `duplicate_layer`, `delete_layer`,
+  `set_layer_visible`, `set_layer_locked`, `rename_layer`, `align_layers`,
+  `center_on_canvas`, `distribute_layers`, `snap_layer`, `undo`, `redo`, and
+  `export_document`.
+- Every one carries all four safeguards FR-13 asks for — `dryRun`,
+  `expectedVersion`, protected-layer checks, and a transaction id in the
+  result — implemented once, in one function every tool goes through.
+- `open_project` selects the project later calls act on, so a conversation
+  does not repeat its name. Every tool still takes an explicit `project`,
+  which wins.
+- `export_document` writes a PNG into the project's `exports/` directory and
+  reports the path.
+- Server instructions now describe the version check, the dry run, and which
+  layers refuse changes.
+
+### Fixed
+
+- **Ungrouping a group could modify a protected layer inside it.** Ungrouping
+  rebases every child's transform, which is a change to each child, but only
+  the group itself was checked. Deleting such a group was already refused;
+  dissolving it was not. Found by the protected-layer exit test trying every
+  mutating tool against a protected layer.
+- **A project assembled by hand could not be undone.** A directory with a
+  `document.json` and no history has no snapshot to rebuild from, so its very
+  first undo failed. The first mutation now establishes the base from the
+  state before it — which is exactly what undoing it must return to.
+- `get_layer` took `layer_id` while every other tool took `layerId`. It now
+  takes `layerId`, and still accepts the old spelling.
+
+### Verified
+
+- **MVP criterion 10 — a local MCP client applies a reversible layer
+  operation.** A real client, driving the actual binary over a real stdio
+  pipe: dry run changes nothing, the real call returns a transaction id, a
+  stale `expectedVersion` is refused, and **undo restores `document.json` byte
+  for byte**. Redo brings it back.
+- **MVP criterion 11 — protected and locked layers cannot be modified through
+  normal agent tools.** Seventeen mutating calls aimed at a protected layer,
+  every one refused with `operationRefused` and the document byte-identical
+  afterwards; the same for a locked layer. The same tools succeed on an
+  ordinary layer, so the refusals are about the flags and not about the calls.
+- Duplicating a protected layer is *allowed* — it does not touch the original
+  — and the copy is protected too, so it cannot be used to obtain an editable
+  clone.
+- No tool can set or clear `protected`, and there is no generic
+  `apply_operation` escape hatch. Both are asserted, not assumed.
+- An export name that is really a path is refused.
+
+### Notes
+
+- There is no tool that imports a file from a path: that is the unrestricted
+  filesystem access FR-13 rules out. `add_image_layer` references an asset
+  already in the document, and assets arrive through the CLI or the HTTP API.
+- The MCP actor is always recorded as an agent. A transport that could claim
+  to be a human would make the audit trail a fiction.
+
 ## [0.7.0] — 2026-08-05
 
 The MCP server, read-only. The first release an agent can point at a canvas.

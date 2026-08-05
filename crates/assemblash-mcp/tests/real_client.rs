@@ -168,8 +168,8 @@ async fn a_real_mcp_client_inspects_a_document() {
     assert_eq!(identity.version, env!("CARGO_PKG_VERSION"));
     let instructions = info.instructions.clone().unwrap_or_default();
     assert!(
-        instructions.contains("read-only"),
-        "the instructions should say these tools do not write: {instructions}"
+        instructions.contains("protected"),
+        "the instructions should warn about layers an agent may not touch: {instructions}"
     );
 
     // Every tool it advertises, and nothing that writes.
@@ -186,21 +186,20 @@ async fn a_real_mcp_client_inspects_a_document() {
     ] {
         assert!(names.contains(&expected), "no {expected} in {names:?}");
     }
-    // FR-13 orders read before write, and this milestone is the read half.
-    for forbidden in [
-        "apply_operation",
-        "create_layer",
-        "update_layer",
-        "delete_layer",
-        "undo",
-        "redo",
-        // Selection is client state (amended FR-7): there is nothing here to
-        // read, and there never will be.
-        "get_selection",
-    ] {
+    // Two things that must never exist, whatever the milestone:
+    //
+    // * `get_selection` — selection is client state (amended FR-7), so there
+    //   is nothing here to read;
+    // * `apply_operation` — a generic escape hatch would let an agent build
+    //   operations no tool describes, which is the surface the write-tool
+    //   safeguards exist to bound.
+    //
+    // The write tools themselves arrived in 0.8.0; that they refuse protected
+    // layers is the subject of `tests/writes.rs`.
+    for forbidden in ["get_selection", "apply_operation", "set_layer_protected"] {
         assert!(
             !names.contains(&forbidden),
-            "{forbidden} must not exist in a read-only build: {names:?}"
+            "{forbidden} must not exist: {names:?}"
         );
     }
 
@@ -259,7 +258,7 @@ async fn a_real_mcp_client_inspects_a_document() {
                 "get_layer",
                 arguments(json!({
                     "project": "poster",
-                    "layer_id": layers[2]["id"],
+                    "layerId": layers[2]["id"],
                 })),
             ))
             .await
@@ -267,6 +266,22 @@ async fn a_real_mcp_client_inspects_a_document() {
     );
     assert_eq!(layer["name"], "brand");
     assert_eq!(layer["protected"], true);
+
+    // 0.7.0 spelled this argument `layer_id`. It still works, so a client
+    // written against that release keeps working.
+    let same = structured(
+        &client
+            .call_tool(call(
+                "get_layer",
+                arguments(json!({
+                    "project": "poster",
+                    "layer_id": layers[2]["id"],
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(same, layer);
 
     // validate_document: answers rather than failing.
     let report = structured(

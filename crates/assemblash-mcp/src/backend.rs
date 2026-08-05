@@ -48,7 +48,7 @@ pub struct Backend {
 ///
 /// Read in the transport and passed down, like every other transport does.
 /// Nothing in core reads a clock.
-fn now_millis() -> Option<u64> {
+pub(crate) fn now_millis() -> Option<u64> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()

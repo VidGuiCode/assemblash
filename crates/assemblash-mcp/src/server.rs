@@ -31,6 +31,7 @@ use crate::backend::{
 /// server holds a workspace, leaving it out is a typed error that says to call
 /// `list_projects` first.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectArgs {
     /// Project to read, as reported by `list_projects`. Omit when this server
     /// was started for a single project.
@@ -39,17 +40,23 @@ pub struct ProjectArgs {
 }
 
 /// Which layer, in which project.
+///
+/// camelCase like every other argument in this server — 0.7.0 shipped this one
+/// as `layer_id` by omission, so that spelling is still accepted.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct LayerArgs {
     /// Project to read. Omit when this server holds a single project.
     #[serde(default)]
     pub project: Option<String>,
     /// Layer id, as reported by `list_layers`.
+    #[serde(alias = "layer_id")]
     pub layer_id: String,
 }
 
 /// A preview request.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct PreviewArgs {
     /// Project to render. Omit when this server holds a single project.
     #[serde(default)]
@@ -61,17 +68,84 @@ pub struct PreviewArgs {
 
 /// The MCP server.
 ///
-/// No router is stored: `#[tool_handler]` builds one from the static the
-/// `#[tool_router]` macro generates, and keeping a second copy in a field only
-/// makes it possible for the two to disagree.
+/// No router is stored: the two `#[tool_router]` blocks generate statics
+/// that [`AssemblashMcp::all_tools`] merges per request. Keeping a copy in a
+/// field only makes it possible for the two to disagree.
 #[derive(Debug, Clone)]
 pub struct AssemblashMcp {
     backend: Backend,
+    /// The project `open_project` selected, if any.
+    ///
+    /// The one piece of state this server keeps. It exists so a conversation
+    /// does not have to repeat the project name on every call; every tool
+    /// still accepts an explicit `project`, which wins.
+    current: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl AssemblashMcp {
+    /// The engine behind the tools.
+    pub(crate) fn backend(&self) -> &Backend {
+        &self.backend
+    }
+
+    /// The project a call means: the one it named, else the one in use.
+    pub(crate) fn resolve_project(&self, named: Option<String>) -> Option<String> {
+        named.or_else(|| self.current.lock().ok().and_then(|current| current.clone()))
+    }
+
+    /// Remembers the project later calls should assume.
+    pub(crate) fn set_current_project(&self, project: &str) {
+        if let Ok(mut current) = self.current.lock() {
+            *current = Some(project.to_owned());
+        }
+    }
+
+    /// An envelope with the project filled in from `open_project` when the
+    /// caller did not name one.
+    ///
+    /// Every mutating tool goes through this, including undo and redo. A tool
+    /// that took the envelope raw would work in a workspace only if the client
+    /// repeated the project name, which is exactly the papercut
+    /// `open_project` exists to remove.
+    pub(crate) fn resolved(
+        &self,
+        envelope: &crate::writes::WriteEnvelope,
+    ) -> crate::writes::WriteEnvelope {
+        let mut envelope = envelope.clone();
+        envelope.project = self.resolve_project(envelope.project);
+        envelope
+    }
+
+    /// Applies an operation through the one choke point.
+    pub(crate) fn write(
+        &self,
+        envelope: &crate::writes::WriteEnvelope,
+        operation: assemblash_core::Operation,
+    ) -> Result<Json<crate::writes::WriteOutcome>, ErrorData> {
+        self.backend
+            .apply(&self.resolved(envelope), operation)
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// The project argument a read tool should use.
+    fn read_project(&self, named: Option<String>) -> Option<String> {
+        self.resolve_project(named)
+    }
+
+    /// Every tool this server offers, read and write.
+    ///
+    /// Two `#[tool_router]` blocks — one per module — merged here, so the read
+    /// tools and the mutating ones stay in separate files without the server
+    /// advertising two disjoint sets.
+    fn all_tools(&self) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
+        Self::tool_router() + Self::write_tool_router()
+    }
 }
 
 /// Turns a shared engine error into an MCP tool error carrying the same
 /// machine-readable code the HTTP API reports.
-fn to_error(error: assemblash_server::ApiError) -> ErrorData {
+pub(crate) fn to_error(error: assemblash_server::ApiError) -> ErrorData {
     ErrorData::invalid_request(
         error.message().to_owned(),
         Some(serde_json::json!({
@@ -85,7 +159,10 @@ fn to_error(error: assemblash_server::ApiError) -> ErrorData {
 impl AssemblashMcp {
     /// Wraps a backend.
     pub fn new(backend: Backend) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            current: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
     }
 
     /// Lists the projects this server can read.
@@ -107,7 +184,7 @@ impl AssemblashMcp {
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<Json<DocumentState>, ErrorData> {
         self.backend
-            .document_state(args.project.as_deref())
+            .document_state(self.read_project(args.project).as_deref())
             .map(Json)
             .map_err(to_error)
     }
@@ -123,7 +200,7 @@ impl AssemblashMcp {
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<Json<LayerList>, ErrorData> {
         self.backend
-            .list_layers(args.project.as_deref())
+            .list_layers(self.read_project(args.project).as_deref())
             .map(Json)
             .map_err(to_error)
     }
@@ -135,7 +212,7 @@ impl AssemblashMcp {
         Parameters(args): Parameters<LayerArgs>,
     ) -> Result<Json<LayerSummary>, ErrorData> {
         self.backend
-            .get_layer(args.project.as_deref(), &args.layer_id)
+            .get_layer(self.read_project(args.project).as_deref(), &args.layer_id)
             .map(Json)
             .map_err(to_error)
     }
@@ -150,7 +227,7 @@ impl AssemblashMcp {
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<Json<ValidationReport>, ErrorData> {
         self.backend
-            .validate(args.project.as_deref())
+            .validate(self.read_project(args.project).as_deref())
             .map(Json)
             .map_err(to_error)
     }
@@ -165,7 +242,7 @@ impl AssemblashMcp {
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<Json<HistoryReport>, ErrorData> {
         self.backend
-            .history(args.project.as_deref())
+            .history(self.read_project(args.project).as_deref())
             .map(Json)
             .map_err(to_error)
     }
@@ -183,7 +260,7 @@ impl AssemblashMcp {
         let scale = args.scale.unwrap_or(1.0);
         let preview = self
             .backend
-            .preview(args.project.as_deref(), scale)
+            .preview(self.read_project(args.project).as_deref(), scale)
             .map_err(to_error)?;
 
         Ok(CallToolResult::success(vec![
@@ -193,7 +270,7 @@ impl AssemblashMcp {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.all_tools())]
 impl ServerHandler for AssemblashMcp {
     fn get_info(&self) -> ServerInfo {
         let scope = if self.backend.needs_project_argument() {
@@ -203,12 +280,15 @@ impl ServerHandler for AssemblashMcp {
             "This server holds a single project, so the project argument may be omitted."
         };
         let instructions = format!(
-            "Assemblash is a deterministic visual document engine. A document is a canvas \
-             and a nested tree of text, image, SVG, and group layers.\n\n\
-             {scope}\n\n\
-             These tools are read-only: nothing here changes a document. Layers marked \
-             `protected` or `readOnly` are never mutable by an agent. Selection is yours \
-             to keep — there is none stored here, and tools take explicit layer ids."
+            "Assemblash is a deterministic visual document engine. A document is a canvas              and a nested tree of text, image, SVG, and group layers.
+
+             {scope}
+
+             Every tool that changes something takes `expectedVersion` (pass the version              `get_document_state` reported, and the change is refused if the document has              moved on) and `dryRun` (report what would happen and change nothing). Each one              returns a transaction id, and `undo` restores the document exactly.
+
+             Layers marked `protected` or `readOnly` are refused for every change, and no              tool can clear those flags. `locked` layers refuse ordinary changes;              `set_layer_locked` is the way to unlock one. `list_layers` reports all three              flags, so check before planning an edit.
+
+             Selection is yours to keep — there is none stored here, and tools take              explicit layer ids. Fonts are never substituted: a family the font store does              not have is an error, not a fallback."
         );
 
         let mut info = ServerInfo::default();

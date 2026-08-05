@@ -6,12 +6,14 @@
 //! policies or two vocabularies for the same failure would be two ways to be
 //! wrong.
 //!
-//! # This build is read-only
+//! # Reading and writing
 //!
-//! FR-13 divides MCP capabilities into read-only and mutating, and orders
-//! them. Every tool here reads; none changes a document. The mutating tools —
-//! with dry-run, expected versions, protected-layer checks, and undo
-//! transaction ids — arrive in 0.8.0.
+//! FR-13 divides MCP capabilities into read-only and mutating and orders them:
+//! the read tools shipped in 0.7.0, the mutating ones in 0.8.0. Every mutating
+//! tool carries all four safeguards FR-13 asks for — a dry run, an expected
+//! document version, protected-layer checks, and an undo transaction id — and
+//! they are implemented once, in [`Backend::apply`], because twenty tools each
+//! remembering four things is twenty chances to forget one.
 //!
 //! # Standard output is protocol
 //!
@@ -21,6 +23,8 @@
 
 pub mod backend;
 pub mod server;
+pub mod write_tools;
+pub mod writes;
 
 pub use backend::Backend;
 pub use server::AssemblashMcp;
