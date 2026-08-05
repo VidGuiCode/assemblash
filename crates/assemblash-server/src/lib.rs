@@ -26,6 +26,11 @@ use axum::Router;
 pub use error::ApiError;
 pub use state::AppState;
 
+/// Re-exported so another transport can build an [`ApiError`] without taking
+/// its own dependency on axum. MCP has no status codes; it uses the shared
+/// error type for its machine-readable codes, and the status rides along.
+pub use axum::http::StatusCode;
+
 /// Something that stopped the server starting.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]

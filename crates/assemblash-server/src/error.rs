@@ -61,8 +61,22 @@ impl ApiError {
     }
 
     /// The machine-readable code.
+    ///
+    /// A closed set that does not change when a message is reworded. The MCP
+    /// server reports the same codes, so a client that has learned one
+    /// transport's vocabulary does not have to learn a second.
     pub fn code(&self) -> &'static str {
         self.code
+    }
+
+    /// The human-facing message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The structured details, `{}` when there are none.
+    pub fn details(&self) -> &serde_json::Value {
+        &self.details
     }
 }
 
