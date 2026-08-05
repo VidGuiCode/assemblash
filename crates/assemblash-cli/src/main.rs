@@ -265,6 +265,22 @@ enum Command {
         port: Option<u16>,
     },
 
+    /// Serves the Model Context Protocol over standard input and output.
+    ///
+    /// Started by an agent client, not by a person: it speaks a protocol on
+    /// stdin and stdout and exits when the client closes them. Standard output
+    /// carries protocol frames and nothing else; anything to say goes to
+    /// standard error.
+    Mcp {
+        /// Workspace to serve. Tools take a project name from `list_projects`.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+        /// Serve one project directory instead of a workspace. The project
+        /// argument on each tool then becomes optional.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+
     /// Prints where this machine's workspace is, creating it if needed.
     Workspace {
         /// Workspace to report on. Defaults to this machine's data directory.
@@ -569,6 +585,8 @@ enum CliError {
     Workspace(#[from] assemblash_core::WorkspaceError),
     #[error(transparent)]
     Serve(#[from] assemblash_server::ServeError),
+    #[error(transparent)]
+    Mcp(#[from] assemblash_mcp::McpError),
     #[error("starting the server: {source}")]
     Runtime { source: std::io::Error },
 }
@@ -887,6 +905,20 @@ fn run(command: Command) -> Result<(), CliError> {
                 println!("{}", server.url());
                 server.serve().await
             })?;
+            Ok(())
+        }
+
+        Command::Mcp { workspace, project } => {
+            // Nothing in this arm may print to stdout: the protocol owns it.
+            let backend = match project {
+                Some(directory) => assemblash_mcp::Backend::single_project(directory),
+                None => assemblash_mcp::Backend::workspace(open_workspace(workspace)?),
+            };
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|source| CliError::Runtime { source })?;
+            runtime.block_on(assemblash_mcp::serve(backend))?;
             Ok(())
         }
 

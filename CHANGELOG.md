@@ -10,6 +10,61 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-08-05
+
+The MCP server, read-only. The first release an agent can point at a canvas.
+
+Document `schemaVersion`: **1** (unchanged).
+
+### Added
+
+- **`assemblash mcp`**: a Model Context Protocol server over stdio, built on
+  the official Rust SDK. It is the third transport over the one operation
+  layer, after the command line and the HTTP API, and it shares the HTTP API's
+  open-project registry and its machine-readable error codes rather than
+  growing its own.
+- Seven read tools: `list_projects`, `get_document_state`, `list_layers`,
+  `get_layer`, `validate_document`, `get_history`, and `get_canvas_preview`
+  (a real PNG, as an image content block).
+- `--workspace` serves a workspace and its tools take a project name;
+  `--project <path>` serves one arbitrary folder and the project argument
+  becomes optional — the headless and home-lab flow, unchanged.
+- Server instructions that say what Assemblash is, which mode this server is
+  in, and that these tools do not write.
+
+### Verified
+
+- **MVP criterion 9 — at least one local MCP client can inspect the
+  document.** An integration test spawns the *actual* `assemblash` binary as a
+  child process and drives it over a real stdio pipe with the SDK's client
+  half: initialize, list tools, call every tool, and compare the document that
+  comes back with the one on disk. It runs on Windows and Linux, x86_64 and
+  aarch64.
+- The same server was additionally driven by the **official TypeScript MCP
+  SDK** — a separate implementation in a separate language — reading the
+  project list, the layers, the document, the validation report, and a
+  480×220 PNG preview.
+- The tool list contains **nothing that writes**, and no `get_selection`.
+- A project name that is really a path is refused with `invalidProjectId`
+  before it reaches the filesystem, over MCP as over HTTP.
+- A failure leaves standard output empty: the protocol owns it.
+
+### Notes
+
+- **Read-only by design.** FR-13 divides MCP capabilities into read-only and
+  mutating and orders them. The write tools — with dry run, expected versions,
+  protected-layer checks, and undo transaction ids — arrive in 0.8.0.
+- `list_projects` ships here rather than with the other workspace-aware tools:
+  it is read-only, and without it a client has no way to name the thing it
+  wants to inspect. `open_project`, which is stateful, is still 0.8.0.
+- Tool results are objects, never bare arrays — `{"projects": [...]}` rather
+  than `[...]`. MCP requires a tool's output schema to describe an object, and
+  a strict client refuses a server that sends anything else. Found by pointing
+  the TypeScript SDK at it; there is now a test that every tool's schemas are
+  objects.
+- Selection is client state (amended FR-7). There is no `get_selection` tool
+  and never will be; tools take explicit layer ids.
+
 ## [0.6.0] — 2026-08-05
 
 The local HTTP API, and a home for the data it manages. This is the first

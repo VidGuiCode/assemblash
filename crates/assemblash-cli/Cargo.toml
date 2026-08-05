@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 assemblash-core.workspace = true
+assemblash-mcp.workspace = true
 assemblash-renderer.workspace = true
 assemblash-server.workspace = true
 # env: paths like the font store and the workspace can come from
