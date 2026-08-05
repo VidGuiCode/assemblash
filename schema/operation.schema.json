@@ -1,0 +1,897 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Operation",
+  "description": "One mutation of a document.",
+  "oneOf": [
+    {
+      "description": "Adds a layer.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "create"
+        }
+      },
+      "$ref": "#/$defs/CreateLayer",
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "description": "Changes properties of an existing layer.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "update"
+        }
+      },
+      "$ref": "#/$defs/UpdateLayer",
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "description": "Removes a layer and everything inside it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to remove.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "op": {
+          "type": "string",
+          "const": "delete"
+        }
+      },
+      "required": [
+        "op",
+        "id"
+      ]
+    },
+    {
+      "description": "Copies a layer, and everything inside it, directly above the original.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to copy.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "op": {
+          "type": "string",
+          "const": "duplicate"
+        }
+      },
+      "required": [
+        "op",
+        "id"
+      ]
+    },
+    {
+      "description": "Moves a layer by a distance, leaving its size and rotation alone.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to move.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "dx": {
+          "description": "Distance along x.",
+          "type": "number",
+          "format": "double"
+        },
+        "dy": {
+          "description": "Distance along y.",
+          "type": "number",
+          "format": "double"
+        },
+        "op": {
+          "type": "string",
+          "const": "move"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "dx",
+        "dy"
+      ]
+    },
+    {
+      "description": "Sets a layer's box size.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to resize.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "width": {
+          "description": "New width.",
+          "type": "number",
+          "format": "double"
+        },
+        "height": {
+          "description": "New height.",
+          "type": "number",
+          "format": "double"
+        },
+        "op": {
+          "type": "string",
+          "const": "resize"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "width",
+        "height"
+      ]
+    },
+    {
+      "description": "Sets a layer's rotation: the angle to rotate *to*, not by.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to rotate.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "degrees": {
+          "description": "Degrees clockwise about the layer's centre.",
+          "type": "number",
+          "format": "double"
+        },
+        "op": {
+          "type": "string",
+          "const": "rotate"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "degrees"
+      ]
+    },
+    {
+      "description": "Moves a layer elsewhere in the tree: another parent, another z-order,\nor both.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to move.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "to": {
+          "description": "Where it should end up.",
+          "$ref": "#/$defs/LayerPosition"
+        },
+        "op": {
+          "type": "string",
+          "const": "reorder"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "to"
+      ]
+    },
+    {
+      "description": "Wraps sibling layers in a new group, without moving the picture.",
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "Layers to wrap. They must currently share a parent.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LayerId"
+          }
+        },
+        "name": {
+          "description": "Optional name for the new group.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "op": {
+          "type": "string",
+          "const": "group"
+        }
+      },
+      "required": [
+        "op",
+        "ids"
+      ]
+    },
+    {
+      "description": "Replaces a group with its children, in place.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The group to dissolve.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "op": {
+          "type": "string",
+          "const": "ungroup"
+        }
+      },
+      "required": [
+        "op",
+        "id"
+      ]
+    },
+    {
+      "description": "Shows or hides a layer.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to change.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "visible": {
+          "description": "Whether it renders.",
+          "type": "boolean"
+        },
+        "op": {
+          "type": "string",
+          "const": "setVisible"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "visible"
+      ]
+    },
+    {
+      "description": "Locks or unlocks a layer.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to change.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "locked": {
+          "description": "Whether editing operations refuse to touch it.",
+          "type": "boolean"
+        },
+        "op": {
+          "type": "string",
+          "const": "setLocked"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "locked"
+      ]
+    },
+    {
+      "description": "Renames a layer, or clears its name.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to rename.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "name": {
+          "description": "The new name, or `None` to clear it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "op": {
+          "type": "string",
+          "const": "rename"
+        }
+      },
+      "required": [
+        "op",
+        "id"
+      ]
+    },
+    {
+      "description": "Lines the given layers up on an edge or a centre line.\n\nTakes explicit ids rather than acting on a selection: what an agent\nasked for should be legible in the journal afterwards.",
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "Layers to line up.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LayerId"
+          }
+        },
+        "edge": {
+          "description": "Which edge or centre line.",
+          "$ref": "#/$defs/AlignEdge"
+        },
+        "op": {
+          "type": "string",
+          "const": "align"
+        }
+      },
+      "required": [
+        "op",
+        "ids",
+        "edge"
+      ]
+    },
+    {
+      "description": "Moves the given layers, as one group, onto the centre of the canvas.",
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "Layers to move.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LayerId"
+          }
+        },
+        "axis": {
+          "description": "Which axis to centre on.",
+          "$ref": "#/$defs/Axis"
+        },
+        "op": {
+          "type": "string",
+          "const": "centerOnCanvas"
+        }
+      },
+      "required": [
+        "op",
+        "ids",
+        "axis"
+      ]
+    },
+    {
+      "description": "Spreads the given layers out with equal gaps.",
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "Layers to spread out.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LayerId"
+          }
+        },
+        "axis": {
+          "description": "Which axis to spread along.",
+          "$ref": "#/$defs/Axis"
+        },
+        "op": {
+          "type": "string",
+          "const": "distribute"
+        }
+      },
+      "required": [
+        "op",
+        "ids",
+        "axis"
+      ]
+    },
+    {
+      "description": "Moves one layer so it sits against an edge of another layer or of the\ncanvas.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to move.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "target": {
+          "description": "What to snap it against.",
+          "$ref": "#/$defs/SnapTarget"
+        },
+        "op": {
+          "type": "string",
+          "const": "snapTo"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "target"
+      ]
+    }
+  ],
+  "$defs": {
+    "LayerPosition": {
+      "description": "Where a new layer goes.",
+      "oneOf": [
+        {
+          "description": "At the top level of the document.",
+          "type": "object",
+          "properties": {
+            "index": {
+              "description": "Index in the layer list; `None` means on top of everything.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "at": {
+              "type": "string",
+              "const": "root"
+            }
+          },
+          "required": [
+            "at"
+          ]
+        },
+        {
+          "description": "Inside a group.",
+          "type": "object",
+          "properties": {
+            "parent": {
+              "description": "The group to place it in.",
+              "$ref": "#/$defs/LayerId"
+            },
+            "index": {
+              "description": "Index among the group's children; `None` means on top.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "at": {
+              "type": "string",
+              "const": "in"
+            }
+          },
+          "required": [
+            "at",
+            "parent"
+          ]
+        }
+      ]
+    },
+    "LayerId": {
+      "description": "Identifier of a layer.",
+      "type": "string"
+    },
+    "Transform": {
+      "description": "Position, size, and rotation of a layer in its parent's coordinate space.",
+      "type": "object",
+      "properties": {
+        "x": {
+          "description": "Left edge.",
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "description": "Top edge.",
+          "type": "number",
+          "format": "double"
+        },
+        "width": {
+          "description": "Box width; must be finite and not negative.",
+          "type": "number",
+          "format": "double"
+        },
+        "height": {
+          "description": "Box height; must be finite and not negative.",
+          "type": "number",
+          "format": "double"
+        },
+        "rotation": {
+          "description": "Clockwise rotation in degrees about the box centre.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "additionalProperties": true
+    },
+    "Color": {
+      "description": "An sRGB colour, `#rrggbb` or `#rrggbbaa`.\n\nStored as written so a document round-trips exactly; validation checks the\nshape and [`Color::to_rgba`] parses it.",
+      "type": "string"
+    },
+    "TextAlign": {
+      "description": "Horizontal text alignment inside the layer box.",
+      "oneOf": [
+        {
+          "description": "Aligned to the left edge.",
+          "type": "string",
+          "const": "left"
+        },
+        {
+          "description": "Centred horizontally.",
+          "type": "string",
+          "const": "center"
+        },
+        {
+          "description": "Aligned to the right edge.",
+          "type": "string",
+          "const": "right"
+        }
+      ]
+    },
+    "AssetId": {
+      "description": "Identifier of an imported asset.",
+      "type": "string"
+    },
+    "ImageFit": {
+      "description": "How an image is scaled into its box.",
+      "oneOf": [
+        {
+          "description": "Stretch to the box, ignoring aspect ratio.",
+          "type": "string",
+          "const": "fill"
+        },
+        {
+          "description": "Scale down to fit inside the box, keeping aspect ratio.",
+          "type": "string",
+          "const": "contain"
+        },
+        {
+          "description": "Scale to cover the box, keeping aspect ratio, cropping the overflow.",
+          "type": "string",
+          "const": "cover"
+        }
+      ]
+    },
+    "CreateLayer": {
+      "description": "Add a layer to the document.",
+      "type": "object",
+      "properties": {
+        "position": {
+          "description": "Where it goes.",
+          "$ref": "#/$defs/LayerPosition",
+          "default": {
+            "at": "root"
+          }
+        },
+        "transform": {
+          "description": "Its box in the parent's coordinate space.",
+          "$ref": "#/$defs/Transform"
+        },
+        "name": {
+          "description": "Optional human-facing name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "transform"
+      ],
+      "oneOf": [
+        {
+          "description": "A text layer.",
+          "type": "object",
+          "properties": {
+            "text": {
+              "description": "The text; `\\n` starts a new line.",
+              "type": "string"
+            },
+            "fontFamily": {
+              "description": "Font family, resolved at render time against the caller's fonts.",
+              "type": "string"
+            },
+            "fontSize": {
+              "description": "Font size in pixels.",
+              "type": "number",
+              "format": "double"
+            },
+            "color": {
+              "description": "Fill colour.",
+              "$ref": "#/$defs/Color",
+              "default": "#000000"
+            },
+            "align": {
+              "description": "Horizontal alignment in the box.",
+              "$ref": "#/$defs/TextAlign",
+              "default": "left"
+            },
+            "lineHeight": {
+              "description": "Line height as a multiple of the font size.",
+              "type": "number",
+              "format": "double",
+              "default": 1.2
+            },
+            "type": {
+              "type": "string",
+              "const": "text"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "fontFamily",
+            "fontSize"
+          ]
+        },
+        {
+          "description": "An image layer referencing an asset already in the document.",
+          "type": "object",
+          "properties": {
+            "asset": {
+              "description": "The asset to draw.",
+              "$ref": "#/$defs/AssetId"
+            },
+            "fit": {
+              "description": "How it fills its box.",
+              "$ref": "#/$defs/ImageFit",
+              "default": "fill"
+            },
+            "type": {
+              "type": "string",
+              "const": "image"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
+          "description": "An empty group.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "group"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A vector graphic layer referencing an imported SVG asset.",
+          "type": "object",
+          "properties": {
+            "asset": {
+              "description": "The asset to draw.",
+              "$ref": "#/$defs/AssetId"
+            },
+            "fit": {
+              "description": "How it fills its box.",
+              "$ref": "#/$defs/ImageFit",
+              "default": "fill"
+            },
+            "type": {
+              "type": "string",
+              "const": "svg"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        }
+      ]
+    },
+    "UpdateLayer": {
+      "description": "Change properties of an existing layer.\n\nEvery field is optional and means \"leave alone\" when absent. `name` is\ndoubly optional: `Some(None)` clears the name, `None` leaves it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The layer to change.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "name": {
+          "description": "New name, or `Some(None)` to remove it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transform": {
+          "description": "Replace the whole transform.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Transform"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opacity": {
+          "description": "New opacity.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "visible": {
+          "description": "Show or hide.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "locked": {
+          "description": "Lock or unlock.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "Text layers: new text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontFamily": {
+          "description": "Text layers: new font family.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontSize": {
+          "description": "Text layers: new font size.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "color": {
+          "description": "Text layers: new colour.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "align": {
+          "description": "Text layers: new alignment.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextAlign"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lineHeight": {
+          "description": "Text layers: new line height.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "fit": {
+          "description": "Image layers: new fit.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImageFit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "allowLocked": {
+          "description": "Change the layer even though it is locked.\n\nNeeded to unlock a layer at all, and kept explicit so that no ordinary\nedit slips past a lock by accident.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "AlignEdge": {
+      "description": "Which edge or axis an alignment lines up.",
+      "oneOf": [
+        {
+          "description": "Left edges.",
+          "type": "string",
+          "const": "left"
+        },
+        {
+          "description": "Right edges.",
+          "type": "string",
+          "const": "right"
+        },
+        {
+          "description": "Top edges.",
+          "type": "string",
+          "const": "top"
+        },
+        {
+          "description": "Bottom edges.",
+          "type": "string",
+          "const": "bottom"
+        },
+        {
+          "description": "Horizontal centres.",
+          "type": "string",
+          "const": "centerHorizontal"
+        },
+        {
+          "description": "Vertical centres.",
+          "type": "string",
+          "const": "centerVertical"
+        }
+      ]
+    },
+    "Axis": {
+      "description": "Which way an operation works.",
+      "oneOf": [
+        {
+          "description": "Left to right.",
+          "type": "string",
+          "const": "horizontal"
+        },
+        {
+          "description": "Top to bottom.",
+          "type": "string",
+          "const": "vertical"
+        },
+        {
+          "description": "Both at once.",
+          "type": "string",
+          "const": "both"
+        }
+      ]
+    },
+    "SnapTarget": {
+      "description": "What a layer is snapped to.",
+      "oneOf": [
+        {
+          "description": "An edge of another layer.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "The layer to snap against.",
+              "$ref": "#/$defs/LayerId"
+            },
+            "edge": {
+              "description": "Which of its edges.",
+              "$ref": "#/$defs/AlignEdge"
+            },
+            "to": {
+              "type": "string",
+              "const": "layer"
+            }
+          },
+          "required": [
+            "to",
+            "id",
+            "edge"
+          ]
+        },
+        {
+          "description": "An edge of the canvas.",
+          "type": "object",
+          "properties": {
+            "edge": {
+              "description": "Which canvas edge.",
+              "$ref": "#/$defs/AlignEdge"
+            },
+            "to": {
+              "type": "string",
+              "const": "canvas"
+            }
+          },
+          "required": [
+            "to",
+            "edge"
+          ]
+        }
+      ]
+    }
+  }
+}
