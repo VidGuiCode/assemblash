@@ -508,6 +508,65 @@ fn opening_read_only_never_writes() {
 }
 
 #[test]
+fn undo_works_after_an_image_import() {
+    // Importing an asset changes the document but is not an operation, so
+    // history never saw it — and undo, which replays operations onto the
+    // nearest snapshot, then replayed the image layer onto a snapshot with no
+    // such asset and failed with a dangling reference. Undo was broken for
+    // every project containing an imported image whose snapshot predated the
+    // import. Found by the §17 smoke test.
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("project");
+    let mut ids = SequentialIdSource::new();
+    let document = Document::new(&mut ids, 200.0, 200.0);
+    let mut session = Session::create(&project, document, Some(1)).unwrap();
+
+    // One operation first, so the image layer does not land on the base
+    // snapshot — which is what hid this.
+    session
+        .apply(&new_text("first"), &agent(), Some(2), None, &mut ids)
+        .unwrap();
+    let source = dir.path().join("swatch.png");
+    std::fs::write(&source, b"pretend png").unwrap();
+    let asset = assemblash_core::storage::import_asset(&project, &source, &mut ids).unwrap();
+    let asset_id = asset.id.clone();
+    session.register_asset(asset).unwrap();
+    // After the import, not before: importing is deliberately not undoable
+    // (undoing a file copy would mean deciding whether to delete the user's
+    // file), so the asset entry is what undo should land back on.
+    let before = std::fs::read(project.join("document.json")).unwrap();
+
+    session
+        .apply(
+            &Operation::Create(assemblash_core::ops::CreateLayer {
+                position: assemblash_core::ops::LayerPosition::Root { index: None },
+                transform: Transform::new(0.0, 0.0, 50.0, 50.0),
+                name: None,
+                kind: assemblash_core::ops::NewLayerKind::Image {
+                    asset: asset_id,
+                    fit: assemblash_core::document::ImageFit::Contain,
+                },
+            }),
+            &agent(),
+            Some(3),
+            None,
+            &mut ids,
+        )
+        .unwrap();
+
+    session.undo(&agent(), Some(4), &mut ids).unwrap();
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before,
+        "undo after an image import must restore the document exactly"
+    );
+    // The layer is gone and the asset entry stays: undo reverses operations,
+    // and importing is not one.
+    assert_eq!(session.document().layers.len(), 1);
+    assert_eq!(session.document().assets.len(), 1);
+}
+
+#[test]
 fn read_only_layers_reject_mutations_too() {
     let mut project = Project::new();
     let id = project.apply(new_text("frozen"))[0].clone();

@@ -284,6 +284,13 @@ a {
   font-weight: 600;
 }
 
+/* Once the server has stopped there is nothing to talk to, so the interface
+ * stops pretending it is live. */
+body.stopped main {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 @media (max-width: 900px) {
   main {
     grid-template-columns: 1fr;

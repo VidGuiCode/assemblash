@@ -68,6 +68,7 @@ const dom = {
   exportButton: el<HTMLButtonElement>("export"),
   download: el<HTMLAnchorElement>("download"),
   downloadSvg: el<HTMLAnchorElement>("download-svg"),
+  shutdown: el<HTMLButtonElement>("shutdown"),
 };
 
 function say(message: string, kind: "info" | "error" = "info"): void {
@@ -543,7 +544,25 @@ async function loadProjects(select?: string): Promise<void> {
   }
 }
 
+dom.shutdown.addEventListener("click", () => {
+  if (!window.confirm("Stop Assemblash? Any unsaved work is already on disk.")) return;
+  void guard("stop", async () => {
+    await api.shutdown();
+    // The server finishes this request and then stops, so there is nothing
+    // left to talk to. Say so plainly rather than leaving a page that looks
+    // alive and answers nothing.
+    dom.shutdown.disabled = true;
+    document.body.classList.add("stopped");
+    say("Assemblash has stopped. You can close this window.");
+  });
+});
+
 void guard("start", async () => {
+  // The button is offered only by a server that would accept it: one started
+  // for a person, with no console to press Ctrl-C in. A server under a service
+  // manager or in a container owns its own lifetime.
+  const info = await api.serverInfo();
+  dom.shutdown.hidden = !info.canShutdown;
   await loadProjects();
-  say("ready");
+  say(`ready — Assemblash ${info.version}`);
 });

@@ -16,6 +16,7 @@
 
 pub mod api;
 pub mod error;
+pub mod instance;
 pub mod render;
 pub mod state;
 pub mod ui;
@@ -26,6 +27,7 @@ use assemblash_core::workspace::Workspace;
 use axum::Router;
 
 pub use error::ApiError;
+pub use instance::Shutdown;
 pub use state::AppState;
 pub use ui::UiSource;
 
@@ -63,6 +65,8 @@ pub struct Server {
     listener: tokio::net::TcpListener,
     router: Router,
     address: SocketAddr,
+    /// Flipped when the interface asks the server to stop.
+    stopping: tokio::sync::watch::Receiver<bool>,
 }
 
 impl Server {
@@ -73,7 +77,22 @@ impl Server {
     /// stopping for — and the fallback is what makes the no-terminal launch in
     /// v0.10 possible.
     pub async fn bind(workspace: Workspace, port: u16, ui: UiSource) -> Result<Self, ServeError> {
-        let router = api::router(AppState::new(workspace), ui);
+        Self::bind_with(workspace, port, ui, Shutdown::Refused).await
+    }
+
+    /// Binds, saying whether the interface may stop this server.
+    ///
+    /// Only a server this binary started for a person may be stopped from the
+    /// page. A service manager or a container owns its own lifetime, and a web
+    /// page must not be able to take it away.
+    pub async fn bind_with(
+        workspace: Workspace,
+        port: u16,
+        ui: UiSource,
+        shutdown: Shutdown,
+    ) -> Result<Self, ServeError> {
+        let (send, receive) = tokio::sync::watch::channel(false);
+        let router = api::router(AppState::new(workspace), ui, shutdown, send);
 
         let mut last = None;
         for candidate in [port, 0] {
@@ -87,6 +106,7 @@ impl Server {
                         listener,
                         router,
                         address,
+                        stopping: receive,
                     });
                 }
                 Err(source) => last = Some(source),
@@ -107,9 +127,18 @@ impl Server {
         format!("http://{}", self.address)
     }
 
-    /// Serves until the process is stopped.
+    /// Serves until the process is stopped, or the interface asks it to stop.
+    ///
+    /// A graceful shutdown: in-flight requests finish, and every open session
+    /// is dropped — which releases its lock file — before this returns.
     pub async fn serve(self) -> Result<(), ServeError> {
+        let mut stopping = self.stopping;
         axum::serve(self.listener, self.router)
+            .with_graceful_shutdown(async move {
+                // `changed()` only returns once someone sets it, which is the
+                // shutdown endpoint.
+                let _ = stopping.changed().await;
+            })
             .await
             .map_err(|source| ServeError::Serving { source })
     }

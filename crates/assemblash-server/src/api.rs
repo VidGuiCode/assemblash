@@ -36,13 +36,18 @@ fn now_millis() -> Option<u64> {
 }
 
 /// The API routes and the reference interface, over shared state.
-pub fn router(state: AppState, ui: crate::UiSource) -> Router {
+pub fn router(
+    state: AppState,
+    ui: crate::UiSource,
+    shutdown: crate::Shutdown,
+    stop: tokio::sync::watch::Sender<bool>,
+) -> Router {
     Router::new()
         // The interface, at the root. Everything under /api is the engine;
         // everything else is one of a fixed list of files (see `crate::ui`).
         .route("/", get(serve_ui_root))
         .route("/{*path}", get(serve_ui))
-        .layer(axum::Extension(ui))
+        .route("/api/shutdown", post(shutdown_server))
         .route("/api/version", get(version))
         .route("/api/schema/document", get(document_schema))
         .route("/api/schema/operation", get(operation_schema))
@@ -59,6 +64,11 @@ pub fn router(state: AppState, ui: crate::UiSource) -> Router {
         .route("/api/projects/{id}/preview.png", get(preview))
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
         .route("/api/projects/{id}/export", post(export_document))
+        // Layers last: `layer` applies to the routes added before it, so
+        // anything added afterwards would silently not see these.
+        .layer(axum::Extension(ui))
+        .layer(axum::Extension(shutdown))
+        .layer(axum::Extension(std::sync::Arc::new(stop)))
         .with_state(state)
 }
 
@@ -68,6 +78,11 @@ struct Version {
     name: &'static str,
     version: &'static str,
     schema_version: u32,
+    /// Whether this server may be stopped from the interface.
+    ///
+    /// Reported rather than discovered, so the page offers the button only
+    /// when it would work. Nobody should be shown a control that does nothing.
+    can_shutdown: bool,
 }
 
 async fn serve_ui_root(
@@ -83,11 +98,43 @@ async fn serve_ui(
     ui.serve(&path)
 }
 
-async fn version() -> Json<Version> {
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShutdownResponse {
+    stopping: bool,
+}
+
+/// Stops the server, when this one is a server a person started.
+///
+/// The whole point of the no-terminal promise's second half: there is no
+/// console to press Ctrl-C in, so the page has to be able to say stop. It is
+/// refused for a server under a service manager or in a container, which owns
+/// its own lifetime — and the API is loopback-only either way, so the reach of
+/// this is one machine's own browser.
+async fn shutdown_server(
+    axum::Extension(policy): axum::Extension<crate::Shutdown>,
+    axum::Extension(stop): axum::Extension<std::sync::Arc<tokio::sync::watch::Sender<bool>>>,
+) -> Result<Json<ShutdownResponse>, ApiError> {
+    if policy != crate::Shutdown::Allowed {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "shutdownRefused",
+            "this server is managed by whoever started it; stop it there",
+        ));
+    }
+    // Sending is what `serve` is waiting on. In-flight requests — including
+    // this one — finish first, and every open session is dropped, which
+    // releases its lock file.
+    let _ = stop.send(true);
+    Ok(Json(ShutdownResponse { stopping: true }))
+}
+
+async fn version(axum::Extension(policy): axum::Extension<crate::Shutdown>) -> Json<Version> {
     Json(Version {
         name: "assemblash",
         version: env!("CARGO_PKG_VERSION"),
         schema_version: assemblash_core::SCHEMA_VERSION,
+        can_shutdown: policy == crate::Shutdown::Allowed,
     })
 }
 

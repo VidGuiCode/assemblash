@@ -1,0 +1,9 @@
+# Everything the build does not need. `target/` especially: copying a host
+# build tree into the image would be slow and would not be used anyway.
+target/
+.git/
+.github/
+.ai/
+ui/node_modules/
+*.md
+!DEPENDENCIES.md

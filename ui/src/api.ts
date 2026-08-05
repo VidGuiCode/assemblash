@@ -186,6 +186,31 @@ export async function exportDocument(
   });
 }
 
+/**
+ * Asks the server to stop.
+ *
+ * Refused unless this server was started for a person — a service manager or a
+ * container owns its own lifetime. The button is only offered once this has
+ * been shown to work, so nobody is presented with a control that cannot do
+ * anything.
+ */
+export async function shutdown(): Promise<void> {
+  await request<{ stopping: boolean }>("/api/shutdown", { method: "POST" });
+}
+
+/** What the server is, and what it will let the page do. */
+export interface ServerInfo {
+  name: string;
+  version: string;
+  schemaVersion: number;
+  /** Whether this server may be stopped from here. */
+  canShutdown: boolean;
+}
+
+export async function serverInfo(): Promise<ServerInfo> {
+  return request<ServerInfo>("/api/version");
+}
+
 export async function fonts(): Promise<string[]> {
   const body = await request<{ families: string[] }>("/api/fonts");
   return body.families;

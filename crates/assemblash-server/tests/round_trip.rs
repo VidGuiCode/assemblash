@@ -370,3 +370,27 @@ fn an_export_name_is_never_a_path() {
     // And the directory is the engine's choice, not the caller's.
     assert_eq!(render::EXPORTS_DIR, "exports");
 }
+
+/// A server nobody may stop refuses to be stopped, and says so.
+///
+/// The shutdown endpoint exists for the no-terminal promise: a person who
+/// double-clicked the binary has no console to press Ctrl-C in. A server under
+/// a service manager or in a container owns its own lifetime, and a web page
+/// must not be able to take it away.
+#[test]
+fn a_managed_server_refuses_to_be_shut_down() {
+    let harness = Harness::start();
+
+    let version = harness.get("/api/version").json();
+    assert_eq!(
+        version["canShutdown"], false,
+        "a plain `serve` must not offer the interface a way to stop it"
+    );
+
+    let refused = harness.post("/api/shutdown", &json!({}));
+    assert_eq!(refused.status, 403);
+    assert_eq!(refused.json()["error"]["code"], "shutdownRefused");
+
+    // Still serving.
+    assert_eq!(harness.get("/api/version").status, 200);
+}

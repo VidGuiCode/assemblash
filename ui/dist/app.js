@@ -48,6 +48,7 @@ const dom = {
     exportButton: el("export"),
     download: el("download"),
     downloadSvg: el("download-svg"),
+    shutdown: el("shutdown"),
 };
 function say(message, kind = "info") {
     dom.status.textContent = message;
@@ -476,7 +477,25 @@ async function loadProjects(select) {
         await refresh();
     }
 }
+dom.shutdown.addEventListener("click", () => {
+    if (!window.confirm("Stop Assemblash? Any unsaved work is already on disk."))
+        return;
+    void guard("stop", async () => {
+        await api.shutdown();
+        // The server finishes this request and then stops, so there is nothing
+        // left to talk to. Say so plainly rather than leaving a page that looks
+        // alive and answers nothing.
+        dom.shutdown.disabled = true;
+        document.body.classList.add("stopped");
+        say("Assemblash has stopped. You can close this window.");
+    });
+});
 void guard("start", async () => {
+    // The button is offered only by a server that would accept it: one started
+    // for a person, with no console to press Ctrl-C in. A server under a service
+    // manager or in a container owns its own lifetime.
+    const info = await api.serverInfo();
+    dom.shutdown.hidden = !info.canShutdown;
     await loadProjects();
-    say("ready");
+    say(`ready — Assemblash ${info.version}`);
 });

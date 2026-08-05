@@ -14,6 +14,7 @@ pub mod document;
 pub mod error;
 pub mod history;
 pub mod ids;
+pub mod inventory;
 pub mod layout;
 pub mod ops;
 pub mod schema;

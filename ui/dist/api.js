@@ -110,6 +110,20 @@ export async function exportDocument(project, name, scale) {
         body: JSON.stringify({ name, scale }),
     });
 }
+/**
+ * Asks the server to stop.
+ *
+ * Refused unless this server was started for a person — a service manager or a
+ * container owns its own lifetime. The button is only offered once this has
+ * been shown to work, so nobody is presented with a control that cannot do
+ * anything.
+ */
+export async function shutdown() {
+    await request("/api/shutdown", { method: "POST" });
+}
+export async function serverInfo() {
+    return request("/api/version");
+}
 export async function fonts() {
     const body = await request("/api/fonts");
     return body.families;

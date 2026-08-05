@@ -42,6 +42,12 @@ jobs:
             exit 1
           fi
 
+      - name: The dependency inventory is committed
+        run: |
+          # PRD §18. The content is drift-tested by `cargo test`; this only
+          # checks the file a reader expects to find is actually there.
+          test -f DEPENDENCIES.md
+
       - name: No AI working directory committed
         run: |
           # .ai/ is local-only scratch space for agent handoffs, roadmaps, notes.

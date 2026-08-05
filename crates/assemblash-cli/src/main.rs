@@ -28,8 +28,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[derive(Debug, Parser)]
 #[command(name = "assemblash", version, about = "Deterministic document engine")]
 struct Cli {
+    /// What to do. Omitted means friendly mode: create the workspace if it is
+    /// not there, serve, and open a browser.
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -267,6 +269,14 @@ enum Command {
         /// into the binary. For working on the interface itself.
         #[arg(long)]
         ui_dir: Option<PathBuf>,
+        /// Open a browser, and let the interface stop this server.
+        ///
+        /// On by default when the binary is launched with no arguments at all,
+        /// which is what a double-click does. Off for `serve`, because a
+        /// service manager or a container owns its own lifetime and a web page
+        /// must not be able to take it away.
+        #[arg(long)]
+        friendly: bool,
     },
 
     /// Serves the Model Context Protocol over standard input and output.
@@ -548,7 +558,15 @@ impl From<Fit> for ImageFit {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli.command) {
+    let command = cli.command.unwrap_or(Command::Serve {
+        workspace: None,
+        port: None,
+        ui_dir: None,
+        // Double-clicked: there is no console to press Ctrl-C in, so the
+        // interface is allowed to stop it, and a browser is opened.
+        friendly: true,
+    });
+    match run(command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -898,13 +916,34 @@ fn run(command: Command) -> Result<(), CliError> {
             workspace,
             port,
             ui_dir,
+            friendly,
         } => {
             let workspace = open_workspace(workspace)?;
+            let root = workspace.root().to_path_buf();
+
+            // A second double-click must not start a rival server on another
+            // port, leaving two windows editing the same projects. If one is
+            // already running and answering, open that instead.
+            if friendly {
+                if let Some(url) = assemblash_server::instance::running_url(&root) {
+                    println!("{url}");
+                    eprintln!("Assemblash is already running; opening it.");
+                    assemblash_server::instance::open_browser(&url);
+                    return Ok(());
+                }
+            }
+
             let port = port.unwrap_or(workspace.config().port);
             let ui = match ui_dir {
                 Some(directory) => assemblash_server::UiSource::Directory(directory),
                 None => assemblash_server::UiSource::Embedded,
             };
+            let shutdown = if friendly {
+                assemblash_server::Shutdown::Allowed
+            } else {
+                assemblash_server::Shutdown::Refused
+            };
+            let open_browser = friendly && workspace.config().open_browser;
             // One runtime, built here rather than by an attribute on `main`,
             // so every other command stays a plain synchronous program with no
             // async runtime started for it.
@@ -913,9 +952,24 @@ fn run(command: Command) -> Result<(), CliError> {
                 .build()
                 .map_err(|source| CliError::Runtime { source })?;
             runtime.block_on(async move {
-                let server = assemblash_server::Server::bind(workspace, port, ui).await?;
-                println!("{}", server.url());
-                server.serve().await
+                let server =
+                    assemblash_server::Server::bind_with(workspace, port, ui, shutdown).await?;
+                let url = server.url();
+                // The URL goes to stdout whatever else happens, so a person on
+                // a machine with no browser — or a script — still has it.
+                println!("{url}");
+                if friendly {
+                    let _ = assemblash_server::instance::record(&root, &url);
+                    eprintln!("Assemblash is running. Close it from the page, or press Ctrl-C.");
+                    if open_browser {
+                        assemblash_server::instance::open_browser(&url);
+                    }
+                }
+                let result = server.serve().await;
+                if friendly {
+                    assemblash_server::instance::clear(&root);
+                }
+                result
             })?;
             Ok(())
         }

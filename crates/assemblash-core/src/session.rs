@@ -339,9 +339,19 @@ impl Session {
     /// mean deciding whether to delete the user's file. The asset entry is
     /// saved immediately, and the layer that references it goes through the
     /// operation layer as usual.
+    /// Recording it as the state at this position is not optional. Undo
+    /// rebuilds by replaying operations onto the nearest snapshot, and the
+    /// layer that references this asset *is* an operation — so replaying it
+    /// onto a snapshot taken before the import fails with a dangling
+    /// reference, and undo stops working for the whole project. The same
+    /// mechanism a hand edit uses, for the same reason: history has to be able
+    /// to see every change to the document, even the ones it cannot reverse.
     pub fn register_asset(&mut self, asset: crate::Asset) -> Result<(), SessionError> {
         self.document.assets.push(asset);
         storage::save(&self.document, &self.project_dir)?;
+        self.history.ensure_base(&self.document)?;
+        let position = self.history.position();
+        self.history.snapshot_at(position, &self.document)?;
         Ok(())
     }
 

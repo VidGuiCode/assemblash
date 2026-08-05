@@ -10,6 +10,74 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-05
+
+Packaging, and the promise that someone who has never opened a terminal can
+start this and stop it. The last milestone of the v0.x ladder.
+
+Document `schemaVersion`: **1** (unchanged).
+
+### Added
+
+- **macOS in CI**, x86_64 and arm64. The macOS workspace path had been a
+  unit-tested branch since 0.6.0 and the renderer gate had never run there;
+  both execute now. **The gate's committed hashes match on macOS**, so the
+  same document plus the same font files produce the same pixels on three
+  operating systems and two architectures.
+- **Release binaries for all six targets.**
+- **Friendly mode.** Launching the binary with no arguments at all — which is
+  what a double-click does — creates the workspace if it is not there, serves,
+  falls back to a port the OS picks if the configured one is taken, opens a
+  browser, and prints the URL for anyone who wants it.
+- **Stop without a terminal.** A shutdown button in the interface, and the
+  endpoint behind it, with a graceful stop that finishes in-flight requests
+  and releases every project lock. Offered only by a server started for a
+  person: a plain `serve`, a service manager, or a container refuses, because
+  it owns its own lifetime.
+- **Single-instance detection.** A second launch finds the server already
+  running and opens its URL instead of starting a rival on another port. A
+  claim left behind by a crashed process is checked before it is believed.
+- **Docker**, from `scratch`: a 7 MB image with one statically linked binary,
+  no shell and no libc.
+- **`DEPENDENCIES.md`** — the inventory §18 asks for, generated from
+  `cargo metadata` and drift-tested, so a dependency cannot be added without
+  appearing in it.
+- The end-to-end smoke test PRD §17 specifies, as one test on every CI target:
+  create, add text and image layers, save, reload, preview, **one MCP mutation
+  through a real protocol conversation with a real child process**, undo, and
+  export.
+
+### Fixed
+
+- **Undo was broken for any project with an imported image.** Importing an
+  asset changes the document but is not an operation, so history never saw it
+  — and undo, which replays operations onto the nearest snapshot, replayed the
+  image layer onto a snapshot with no such asset and failed with a dangling
+  reference. Present since 0.3.0; found by the §17 smoke test on its first
+  run.
+
+### Verified
+
+- **PRD §17's smoke test is green on all six targets.**
+- **A non-technical user starts and stops it without a terminal**: the
+  released binary launched by double-click created its workspace, served, and
+  opened a browser; the interface was used; and the Stop button ended the
+  process. A second launch opened the running server rather than starting a
+  rival.
+- The whole pipeline runs inside the scratch container: create, add text,
+  install a font over the network, export a PNG.
+
+### Notes
+
+- **The Docker image's HTTP server is reachable only on the container's own
+  loopback**, because the server binds `127.0.0.1` and PRD §16.14 — whether to
+  expose it more widely, and what authentication that needs — is still open.
+  `--network host` works on Linux; the CLI and MCP surfaces are unaffected.
+  This is the one thing in the image that a decision, not code, is blocking.
+- On Windows a double-click briefly shows a console window: the binary is a
+  console-subsystem executable, and changing that would hide the output the
+  command-line surface needs. Said here rather than left to be discovered.
+
 ## [0.9.0] — 2026-08-05
 
 The reference interface, served by the binary. And the last way undo could
