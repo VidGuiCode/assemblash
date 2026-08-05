@@ -665,3 +665,43 @@ fn nested_groups_survive_a_deep_duplicate() {
     editor.document.walk_layers(&mut |_| count += 1);
     assert_eq!(count, 6);
 }
+
+/// The wire format is camelCase throughout — and the snake_case spellings a
+/// journal written before 0.6.0 contains are still read.
+///
+/// `rename_all` on an enum renames variants, not the fields of a struct
+/// variant, so `NewLayerKind::Text` shipped three snake_case names in an
+/// otherwise camelCase format. Nothing noticed while the only caller built the
+/// value in Rust. The HTTP API is what made it visible.
+#[test]
+fn create_operations_are_camel_case_and_still_read_the_old_spelling() {
+    let camel = serde_json::json!({
+        "op": "create",
+        "position": { "at": "root" },
+        "transform": { "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 },
+        "type": "text",
+        "text": "hi",
+        "fontFamily": "Inter",
+        "fontSize": 12.0,
+        "lineHeight": 1.5
+    });
+    let snake = serde_json::json!({
+        "op": "create",
+        "position": { "at": "root" },
+        "transform": { "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 },
+        "type": "text",
+        "text": "hi",
+        "font_family": "Inter",
+        "font_size": 12.0,
+        "line_height": 1.5
+    });
+
+    let from_camel: Operation = serde_json::from_value(camel).unwrap();
+    let from_snake: Operation = serde_json::from_value(snake).unwrap();
+    assert_eq!(from_camel, from_snake);
+
+    // What this build writes is the camelCase spelling.
+    let written = serde_json::to_value(&from_camel).unwrap();
+    assert_eq!(written["fontFamily"], "Inter");
+    assert!(written.get("font_family").is_none());
+}

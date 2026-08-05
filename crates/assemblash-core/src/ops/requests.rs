@@ -41,16 +41,29 @@ impl Default for LayerPosition {
 }
 
 /// The kind-specific part of a new layer.
+///
+/// `rename_all` on an enum renames its *variants*; the fields inside a struct
+/// variant need `rename_all_fields`. Without it these three were the only
+/// snake_case names in an otherwise camelCase wire format — invisible while
+/// the only caller built the value in Rust, and a trap the moment the HTTP API
+/// made it something a client writes by hand. The old spellings are still
+/// accepted so journals written before 0.6.0 keep replaying.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum NewLayerKind {
     /// A text layer.
     Text {
         /// The text; `\n` starts a new line.
         text: String,
         /// Font family, resolved at render time against the caller's fonts.
+        #[serde(alias = "font_family")]
         font_family: String,
         /// Font size in pixels.
+        #[serde(alias = "font_size")]
         font_size: f64,
         /// Fill colour.
         #[serde(default)]
@@ -59,7 +72,7 @@ pub enum NewLayerKind {
         #[serde(default)]
         align: TextAlign,
         /// Line height as a multiple of the font size.
-        #[serde(default = "default_line_height")]
+        #[serde(default = "default_line_height", alias = "line_height")]
         line_height: f64,
     },
     /// An image layer referencing an asset already in the document.
