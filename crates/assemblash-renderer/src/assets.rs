@@ -1,21 +1,23 @@
-//! Turning a project's asset files into hrefs the renderer can use.
+//! Turning a project's asset files into hrefs a render can use.
 //!
 //! Assets are embedded as `data:` URIs rather than referenced by path. The
 //! rendered SVG is then self-contained wherever it is written, and
-//! rasterization needs no filesystem access of its own — the renderer stays a
+//! rasterization needs no filesystem access of its own — `doc_to_svg` stays a
 //! function of its inputs.
+//!
+//! This is the one place that reads a project's asset files for a render. It
+//! lives here rather than in a transport so the command line, the HTTP API,
+//! and later the MCP server cannot each grow a slightly different version of
+//! it.
 
 use std::path::Path;
 
+use crate::svg::AssetHrefs;
 use assemblash_core::storage::{self, StorageError};
 use assemblash_core::Document;
-use assemblash_renderer::AssetHrefs;
 
 /// Reads every asset of a document and returns one `data:` URI per asset.
-pub(crate) fn data_uris(
-    document: &Document,
-    project_dir: &Path,
-) -> Result<AssetHrefs, StorageError> {
+pub fn data_uris(document: &Document, project_dir: &Path) -> Result<AssetHrefs, StorageError> {
     let mut hrefs = AssetHrefs::new();
     for asset in &document.assets {
         let path = storage::asset_path(project_dir, asset);

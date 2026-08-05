@@ -1,0 +1,42 @@
+[package]
+name = "assemblash-server"
+description = "Local HTTP API over the Assemblash operation layer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+assemblash-core.workspace = true
+assemblash-renderer.workspace = true
+axum = { version = "0.8.9", default-features = false, features = [
+    "http1",
+    "json",
+    "query",
+    "tokio",
+] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+thiserror = "2.0.19"
+# Only the pieces the server needs: a current-thread-capable multi-thread
+# runtime and a TCP listener. No process, signal, or filesystem features.
+tokio = { version = "1.49.0", default-features = false, features = [
+    "macros",
+    "net",
+    "rt-multi-thread",
+] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+png = "0.18.1"
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+tokio = { version = "1.49.0", default-features = false, features = [
+    "macros",
+    "rt-multi-thread",
+    "time",
+] }

@@ -4,6 +4,7 @@
 //! the caller. That purity is what makes deterministic output testable
 //! (NFR-1).
 
+pub mod assets;
 pub mod error;
 pub mod fonts;
 pub mod install;
@@ -11,6 +12,7 @@ pub mod raster;
 pub mod store;
 pub mod svg;
 
+pub use assets::data_uris;
 pub use error::RenderError;
 pub use fonts::{FontMetrics, FontSet};
 pub use install::{FontFetcher, HttpFetcher, InstallError, Manifest};
