@@ -336,6 +336,21 @@ impl History {
         self.write_snapshot(0, document)
     }
 
+    /// Records a base snapshot if the project has none.
+    ///
+    /// `Session::create` writes one, but a project can arrive without ever
+    /// having been through it: a directory someone assembled by hand, which
+    /// FR-9 supports, or one whose `history/` was deleted. Rebuilding needs
+    /// somewhere to start, so the first mutation establishes it from the state
+    /// *before* that mutation — which is exactly what undoing it must return
+    /// to.
+    pub fn ensure_base(&mut self, document: &Document) -> Result<(), HistoryError> {
+        if self.snapshots()?.is_empty() {
+            self.record_base(document)?;
+        }
+        Ok(())
+    }
+
     /// Moves back one position, returning the rebuilt document.
     pub fn undo(
         &mut self,

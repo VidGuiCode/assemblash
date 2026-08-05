@@ -133,7 +133,12 @@ pub(super) fn group(
 /// exactly. It is still deterministic — the same edits always produce the
 /// same numbers.
 pub(super) fn ungroup(document: &mut Document, id: &LayerId) -> Result<OpOutcome, OpError> {
-    super::ensure_mutable(document, id, false)?;
+    // The whole subtree, not just the group: ungrouping rebases every child's
+    // transform into the parent's coordinate space, which is a change to each
+    // child. Checking only the group let a protected layer be modified by
+    // dissolving the container around it — found by the MCP protected-layer
+    // exit test, which tries every mutating tool against a protected layer.
+    super::ensure_subtree_mutable(document, id)?;
     let layer = tree::find(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
     if !matches!(layer.kind, LayerKind::Group(_)) {
         return Err(OpError::NotAGroup { id: id.clone() });

@@ -360,6 +360,71 @@ fn a_protected_child_stops_its_group_being_deleted() {
 }
 
 #[test]
+fn a_protected_child_stops_its_group_being_ungrouped() {
+    // Ungrouping rebases every child's transform into the parent's coordinate
+    // space, so it changes each child. Checking only the group let a protected
+    // layer be modified by dissolving the container around it.
+    let mut project = Project::new();
+    let child = project.apply(new_text("precious"))[0].clone();
+    let group = project.apply(Operation::Group {
+        ids: vec![child.clone()],
+        name: None,
+    })[0]
+        .clone();
+
+    let (_path, mut session, mut ids) = reopen_with(project, |document| {
+        if let assemblash_core::LayerKind::Group(inner) = &mut document.layers[0].kind {
+            inner.children[0].protected = true;
+        }
+    });
+
+    let error = session
+        .apply(
+            &Operation::Ungroup { id: group },
+            &agent(),
+            Some(10),
+            None,
+            &mut ids,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            SessionError::Operation(OpError::LayerProtected { .. })
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_project_made_by_hand_can_still_be_undone() {
+    // A directory someone assembled themselves — document.json and nothing
+    // else — has no snapshot to rebuild from, so its very first undo used to
+    // fail. Hand-editing is supported (FR-9), so hand-making one is too.
+    let directory = tempfile::tempdir().unwrap();
+    let document = Document::new(&mut SequentialIdSource::new(), 100.0, 100.0);
+    assemblash_core::storage::save(&document, directory.path()).unwrap();
+    let before = std::fs::read(directory.path().join("document.json")).unwrap();
+
+    let mut ids = SequentialIdSource::new();
+    let mut session = Session::open(directory.path(), Some(1)).unwrap();
+    session
+        .apply(&new_text("added"), &agent(), Some(2), None, &mut ids)
+        .unwrap();
+    assert_ne!(
+        std::fs::read(directory.path().join("document.json")).unwrap(),
+        before
+    );
+
+    session.undo(&agent(), Some(3), &mut ids).unwrap();
+    assert_eq!(
+        std::fs::read(directory.path().join("document.json")).unwrap(),
+        before,
+        "undo must restore a hand-made project byte for byte"
+    );
+}
+
+#[test]
 fn read_only_layers_reject_mutations_too() {
     let mut project = Project::new();
     let id = project.apply(new_text("frozen"))[0].clone();

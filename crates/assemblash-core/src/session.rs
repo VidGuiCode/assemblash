@@ -290,6 +290,12 @@ impl Session {
     ) -> Result<(OpOutcome, TransactionId), SessionError> {
         self.check_version(expected_version)?;
 
+        // A project that never went through `create` — assembled by hand, or
+        // with its history removed — has no snapshot to rebuild from, so its
+        // very first undo would fail. Establish the base from the state before
+        // this operation, which is what that undo has to return to.
+        self.history.ensure_base(&self.document)?;
+
         let mut candidate = self.document.clone();
         let outcome = ops::apply(&mut candidate, operation, ids)?;
         candidate.version = self.history.position() + 1;
