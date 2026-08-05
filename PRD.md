@@ -798,7 +798,7 @@ These decisions should be resolved before implementation reaches the first publi
 11. ~~Which open-source license fits the dependency graph and contribution goals?~~ **Resolved:** Apache-2.0 (see §16.1 below).
 12. Should optional provider adapters live in this repository or separate repositories?
 13. ~~What versioning policy applies to the document schema and API?~~ **Resolved:** see §16.1 below.
-14. What security profile is required for home-lab deployment?
+14. ~~What security profile is required for home-lab deployment?~~ **Resolved:** token + explicit bind (see §16.1).
 
 ### 16.1 Resolved decisions
 
@@ -836,6 +836,18 @@ explicitly deprioritized.
 - **Reference UI:** web-based (TypeScript) as always intended, shipped as
   static assets served by the same binary. The UI is a client of the API like
   any downstream application (§7.1).
+
+**Home-lab security profile (decision 14, resolved 2026-08-05):** access
+token plus explicit bind. The default stays `127.0.0.1` with no token and no
+configuration. A non-loopback bind is possible but refuses to start unless an
+access token is configured; the token is generated into the workspace
+configuration on first use, presented as a bearer header to the API and via a
+one-time browser login for the UI, compared in constant time, and never
+logged or placed in URLs. There are no accounts and no built-in OIDC —
+identity-provider integration belongs behind a reverse proxy, which is also
+the documented path for TLS. This keeps the core local-first and
+single-binary while making self-hosted and Docker deployment genuinely
+usable (decision applies from v0.11.0).
 
 **Reference UI rendering (decision 3, resolved 2026-08-05):** no canvas
 library. The engine already produces the authoritative SVG render; the
