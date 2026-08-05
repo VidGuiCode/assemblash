@@ -96,7 +96,22 @@ fn type_of(schema: &Value, depth: usize) -> String {
             .iter()
             .map(|variant| type_of(variant, depth))
             .collect();
-        return rendered.join(" | ");
+        let union = rendered.join(" | ");
+
+        // Variants *and* properties of its own: a tagged enum flattened next
+        // to a struct's ordinary fields, which is exactly how `Layer` is
+        // built. Emitting only the union silently dropped every common field —
+        // `id`, `transform`, `opacity` — from the generated type, and a client
+        // written against it would think a layer had none of them.
+        if schema.get("properties").is_some() {
+            let mut common = schema.clone();
+            if let Some(object) = common.as_object_mut() {
+                object.remove("oneOf");
+                object.remove("anyOf");
+            }
+            return format!("({union}) & {}", object_type(&common, depth));
+        }
+        return union;
     }
 
     // `allOf` is how schemars expresses a flattened field: everything in the
@@ -245,6 +260,33 @@ mod tests {
                 generated,
                 "{path} is out of date — run: \
                  cargo run -p assemblash-core --example generate-schema"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tagged_union_keeps_the_fields_it_sits_beside() {
+        // `Layer` is a tagged union of payloads *plus* the fields every layer
+        // has. Emitting only the union dropped `id` and `transform` from the
+        // type, and a client written against it would not know a layer had
+        // them.
+        let types = document_types();
+        let layer = types
+            .split("export type Layer = ")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(
+                    "
+export type ",
+                )
+                .next()
+            })
+            .unwrap_or_default();
+        for field in ["id:", "transform:", "opacity?:", "protected?:"] {
+            assert!(
+                layer.contains(field),
+                "no {field} in:
+{layer}"
             );
         }
     }

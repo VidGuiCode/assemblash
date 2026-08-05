@@ -43,7 +43,7 @@ export type Asset = {
 export type AssetId = string;
 
 /// One layer: the properties every layer has, plus its kind-specific payload.
-export type Layer = TextLayer & {
+export type Layer = (TextLayer & {
   type: "text";
   [key: string]: unknown;
 } | ImageLayer & {
@@ -54,6 +54,30 @@ export type Layer = TextLayer & {
   [key: string]: unknown;
 } | SvgLayer & {
   type: "svg";
+  [key: string]: unknown;
+}) & {
+  /** Stable id, `layer_<ULID>`. */
+  id: LayerId;
+  /** Human-facing name. Not an identifier. */
+  name?: string | null;
+  /** Placement in the parent's coordinate space. */
+  transform: Transform;
+  /** Opacity from 0 (invisible) to 1 (opaque). */
+  opacity?: number;
+  /** Whether the layer is rendered at all. */
+  visible?: boolean;
+  /** Whether editing tools should refuse to move this layer. */
+  locked?: boolean;
+  /** Whether AI adapters and agents may change this layer at all. */
+  protected?: boolean;
+  /** Whether the layer is inspectable but never mutable through the API. */
+  readOnly?: boolean;
+  /** Reserved (v0.5): only `normal` is rendered today; other values */
+  blendMode?: BlendMode;
+  /** Reserved (v1.x effect stack): preserved verbatim, never interpreted. */
+  effects?: unknown[];
+  /** Reserved (layout constraints): preserved verbatim, never interpreted. */
+  constraints?: unknown;
   [key: string]: unknown;
 };
 

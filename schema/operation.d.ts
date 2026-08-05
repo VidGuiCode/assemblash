@@ -51,7 +51,7 @@ export type AssetId = string;
 export type ImageFit = "fill" | "contain" | "cover";
 
 /// Add a layer to the document.
-export type CreateLayer = {
+export type CreateLayer = ({
   /** The text; `\n` starts a new line. */
   text: string;
   /** Font family, resolved at render time against the caller's fonts. */
@@ -82,6 +82,14 @@ export type CreateLayer = {
   /** How it fills its box. */
   fit?: ImageFit;
   type: "svg";
+  [key: string]: unknown;
+}) & {
+  /** Where it goes. */
+  position?: LayerPosition;
+  /** Its box in the parent's coordinate space. */
+  transform: Transform;
+  /** Optional human-facing name. */
+  name?: string | null;
   [key: string]: unknown;
 };
 
