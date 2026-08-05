@@ -135,7 +135,8 @@ jobs:
             target-name: windows-x86_64
           - os: windows-11-arm
             target-name: windows-aarch64
-          - os: macos-13
+          # macos-13 was retired; macos-15-intel is the current Intel runner.
+          - os: macos-15-intel
             target-name: macos-x86_64
           - os: macos-14
             target-name: macos-aarch64
