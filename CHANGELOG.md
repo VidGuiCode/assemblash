@@ -53,6 +53,9 @@ cache.
   is refreshed when a listing is asked for rather than trusted.
 - Every new font family was downloaded from the pinned commit, hashed, and
   checked for the family name a document has to spell.
+- **The container still builds from `scratch` and still runs**: SQLite is
+  compiled in and links statically against musl. The image grew from 7 MB to
+  8.65 MB, which is the honest price of the cache; `README.md` now says 9 MB.
 
 ## [0.15.0] — 2026-08-06
 

@@ -234,7 +234,7 @@ The dependency graph must be rechecked against this license once an implementati
 
 10. **Reference interface** — served at `/` by `assemblash serve`, embedded in the binary. Project browser, canvas, layer tree, inspector, insert, drag to move and resize, undo and redo, history, export, and — for a project that declares slots — a template panel that fills slots and renders a batch of variants into a gallery. No canvas library: the canvas is the engine's own render with DOM handles over it, so what you see is byte-for-byte what you export.
 
-11. **Packaging** — binaries for Windows, Linux, and macOS on x86_64 and ARM64; a 7 MB `scratch` Docker image; and friendly mode: launching the binary with no arguments creates the workspace, serves, opens a browser, and can be stopped from the page. A second launch opens the one already running.
+11. **Packaging** — binaries for Windows, Linux, and macOS on x86_64 and ARM64; a 9 MB `scratch` Docker image; and friendly mode: launching the binary with no arguments creates the workspace, serves, opens a browser, and can be stopped from the page. A second launch opens the one already running.
 
 12. **Presets** — named style bundles stored in the document: font, size, colour, alignment, line height, opacity, blend mode, and effect stack. Applying one compiles to exactly the update a person would send, so it is journalled, undoable, refused on protected layers, and pixel-identical to setting the same properties by hand.
 
