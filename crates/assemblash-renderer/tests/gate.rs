@@ -216,14 +216,15 @@ fn japanese_document() -> (Document, AssetHrefs) {
     (document, AssetHrefs::new())
 }
 
-/// Every blend mode this build renders, over one background.
+/// One blend mode, over one background.
 ///
-/// In the golden set because a blend mode is a compositing path in the
-/// rasterizer, and compositing is exactly the kind of thing that can differ
-/// between a machine's SIMD paths. If aarch64 blends differently from x86_64,
-/// this is where it says so.
-fn blend_modes_document() -> (Document, AssetHrefs) {
-    let mut document = Document::new(&mut SequentialIdSource::new(), 320.0, 320.0);
+/// One document per mode rather than a grid of sixteen: when a target
+/// disagrees, the failure has to name the mode, or the next person is left
+/// bisecting a picture. Blending is a compositing path in the rasterizer, and
+/// compositing is exactly where a machine's SIMD dispatch can change the
+/// arithmetic.
+fn blend_mode_document(mode: &assemblash_core::BlendMode) -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 120.0, 120.0);
     document.canvas.background = Some(Color::new("#204060"));
 
     let asset_id = AssetId::new("asset_00000000000000000000000001");
@@ -237,21 +238,17 @@ fn blend_modes_document() -> (Document, AssetHrefs) {
         extra: Extras::new(),
     });
 
-    for (index, mode) in assemblash_core::BlendMode::RENDERED.iter().enumerate() {
-        let column = (index % 4) as f64;
-        let row = (index / 4) as f64;
-        let mut layer = Layer::new(
-            LayerId::new(format!("layer_{:026}", index + 1)),
-            Transform::new(10.0 + column * 78.0, 10.0 + row * 78.0, 68.0, 68.0),
-            LayerKind::Image(ImageLayer {
-                asset: asset_id.clone(),
-                fit: ImageFit::Fill,
-                extra: Extras::new(),
-            }),
-        );
-        layer.blend_mode = mode.clone();
-        document.layers.push(layer);
-    }
+    let mut layer = Layer::new(
+        LayerId::new("layer_00000000000000000000000001"),
+        Transform::new(10.0, 10.0, 100.0, 100.0),
+        LayerKind::Image(ImageLayer {
+            asset: asset_id.clone(),
+            fit: ImageFit::Fill,
+            extra: Extras::new(),
+        }),
+    );
+    layer.blend_mode = mode.clone();
+    document.layers.push(layer);
 
     let hrefs = AssetHrefs::from([(
         asset_id,
@@ -345,9 +342,15 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("latin", latin_document()),
         ("arabic", arabic_document()),
         ("japanese", japanese_document()),
-        ("blend-modes", blend_modes_document()),
         ("effects", effects_document()),
     ] {
+        out.push((name, document, hrefs));
+    }
+    for mode in assemblash_core::BlendMode::RENDERED {
+        let (document, hrefs) = blend_mode_document(mode);
+        // Leaked so the name can be `&'static str` like the rest; this is a
+        // test binary that runs once and exits.
+        let name: &'static str = Box::leak(format!("blend-{}", mode.as_str()).into_boxed_str());
         out.push((name, document, hrefs));
     }
     out
