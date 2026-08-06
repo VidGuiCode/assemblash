@@ -48,7 +48,15 @@ mod http {
         }
     }
 
+    pub fn post(url: &str) -> Response {
+        send("POST", url)
+    }
+
     pub fn get(url: &str) -> Response {
+        send("GET", url)
+    }
+
+    fn send(method: &str, url: &str) -> Response {
         let rest = url.strip_prefix("http://").expect("an http url");
         let (authority, path) = match rest.find('/') {
             Some(index) => (&rest[..index], &rest[index..]),
@@ -56,7 +64,7 @@ mod http {
         };
         let mut stream = TcpStream::connect(authority).expect("connect");
         let head = format!(
-            "GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\
+            "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\
              Content-Length: 0\r\n\r\n"
         );
         stream.write_all(head.as_bytes()).expect("write");
@@ -137,6 +145,11 @@ fn big_workspace(root: &Path) -> Workspace {
 }
 
 /// Starts a server over an existing workspace root.
+///
+/// Stoppable, because a workspace has exactly one writer: a second server over
+/// the same projects is refused by the lock, by design. A test that wants to
+/// restart one has to stop the first properly rather than leaving it holding
+/// every project it has touched.
 fn serve(root: &Path) -> String {
     let workspace = Workspace::open_or_create(root).unwrap();
     let (send, receive) = std::sync::mpsc::channel();
@@ -146,14 +159,41 @@ fn serve(root: &Path) -> String {
             .build()
             .unwrap();
         runtime.block_on(async move {
-            let server = Server::bind(workspace, 0, Default::default())
-                .await
-                .unwrap();
+            let server = Server::bind_with(
+                workspace,
+                0,
+                Default::default(),
+                assemblash_server::Shutdown::Allowed,
+            )
+            .await
+            .unwrap();
             send.send(server.url()).unwrap();
             let _ = server.serve().await;
         });
     });
     receive.recv().expect("the server started")
+}
+
+/// Asks a server to stop, and waits until it really has.
+fn stop(base: &str) {
+    let response = http::post(&format!("{base}/api/shutdown"));
+    assert_eq!(
+        response.status,
+        200,
+        "the server refused to stop: {}",
+        String::from_utf8_lossy(&response.body)
+    );
+    // The server finishes this request and then stops; the sessions it held
+    // are dropped with it, which is what releases the project locks.
+    for _ in 0..100 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        if std::net::TcpStream::connect(base.trim_start_matches("http://").trim_end_matches('/'))
+            .is_err()
+        {
+            return;
+        }
+    }
+    panic!("the server did not stop");
 }
 
 fn ids(list: &Value) -> Vec<String> {
@@ -236,30 +276,17 @@ fn deleting_the_index_changes_nothing() {
     ))
     .body;
 
-    // The server holds the file open, so this is the honest version of the
-    // test: delete it out from under a running server.
+    // Stopped rather than abandoned: a workspace has one writer, so leaving
+    // this server holding every project it has touched would make the restart
+    // below fail on the lock rather than on anything to do with the cache.
+    stop(&base);
+
     let index = root.join(assemblash_core::index::INDEX_FILE);
     assert!(index.is_file(), "the cache should exist by now");
-    let removed = std::fs::remove_file(&index).is_ok();
+    std::fs::remove_file(&index).expect("the cache is an ordinary file");
+    assert!(!index.exists());
 
-    // Whether or not the platform allowed the delete while it was open, the
-    // answers must not change. On Windows an open file cannot be unlinked,
-    // which is itself fine: the cache is still just a cache.
-    let after_list = ids(&http::get(&format!("{base}/api/projects")).json());
-    let after_search = ids(&http::get(&format!("{base}/api/projects?query=flyer")).json());
-    let after_thumb = http::get(&format!(
-        "{base}/api/projects/{}/thumbnail.png",
-        before_search[0]
-    ))
-    .body;
-
-    assert_eq!(after_list, before_list, "removed: {removed}");
-    assert_eq!(after_search, before_search);
-    assert_eq!(after_thumb, before_thumb);
-
-    // And a server started fresh on the same workspace — with the cache gone,
-    // or rebuilt — answers the same way.
-    let _ = std::fs::remove_file(&index);
+    // A server started fresh with no cache at all must answer identically.
     let restarted = serve(&root);
     assert_eq!(
         ids(&http::get(&format!("{restarted}/api/projects")).json()),
@@ -270,6 +297,19 @@ fn deleting_the_index_changes_nothing() {
         ids(&http::get(&format!("{restarted}/api/projects?query=flyer")).json()),
         before_search
     );
+    // Including the thumbnails. Checking only the list and the search left a
+    // hole: a rebuilt cache could have answered those two correctly and still
+    // produced a different picture, and nothing here would have said so.
+    assert_eq!(
+        http::get(&format!(
+            "{restarted}/api/projects/{}/thumbnail.png",
+            before_search[0]
+        ))
+        .body,
+        before_thumb,
+        "a thumbnail rendered after the rebuild differs"
+    );
+    assert!(index.is_file(), "the cache was not rebuilt");
 }
 
 #[test]

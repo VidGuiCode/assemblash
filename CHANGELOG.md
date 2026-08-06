@@ -10,6 +10,15 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+### Changed
+
+- The scale test now stops the first server before restarting one over the
+  same workspace, and compares the **thumbnail bytes** across the rebuild as
+  well as the list and the search. Checking only the list and the search left a
+  hole: a rebuilt cache could have answered those correctly and still produced
+  a different picture. Found by running the exit test by hand against the
+  v0.16.0 artifact, where a force-killed server left its project locks behind.
+
 ## [0.16.0] — 2026-08-06
 
 A workspace holding two hundred projects stays usable, and the bundled font
