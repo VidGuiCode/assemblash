@@ -37,6 +37,7 @@ pub fn validate(document: &Document) -> Result<(), ValidationErrors> {
 
     check_canvas(document, &mut errors);
     check_assets(document, &mut errors);
+    check_presets(document, &mut errors);
 
     let known_assets: HashSet<&AssetId> = document.assets.iter().map(|a| &a.id).collect();
     let mut seen_layers = HashSet::new();
@@ -95,6 +96,23 @@ fn check_assets(document: &Document, errors: &mut Vec<ValidationError>) {
             errors.push(ValidationError::InvalidAssetHash {
                 asset: asset.id.clone(),
                 hash: asset.hash.clone(),
+            });
+        }
+    }
+}
+
+/// Checks the document's presets.
+///
+/// Only what makes a preset *unusable* is an error: a duplicate name means one
+/// of them can never be applied. The properties themselves are checked by the
+/// operation that stores one, and again by the update it compiles to, so a
+/// preset cannot carry a style the engine would refuse to draw.
+fn check_presets(document: &Document, errors: &mut Vec<ValidationError>) {
+    let mut seen = HashSet::new();
+    for preset in &document.presets {
+        if !seen.insert(preset.name.as_str()) {
+            errors.push(ValidationError::DuplicatePreset {
+                name: preset.name.clone(),
             });
         }
     }

@@ -51,6 +51,15 @@ pub struct Document {
     /// Layers, bottom first: array order is z-order.
     #[serde(default)]
     pub layers: Vec<Layer>,
+    /// Named style bundles this document offers.
+    ///
+    /// In the document rather than beside the workspace, so that a project
+    /// directory stays portable and the same document cannot render
+    /// differently depending on what else is installed next to it — see
+    /// [`crate::presets`]. Additive with a default, like every field added
+    /// since schema version 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<crate::presets::Preset>,
     /// Named openings a caller may fill, making this document a template
     /// (PRD use case C). Empty for an ordinary document.
     ///
@@ -80,6 +89,7 @@ impl Document {
             },
             assets: Vec::new(),
             layers: Vec::new(),
+            presets: Vec::new(),
             slots: Vec::new(),
             extra: Extras::new(),
         }

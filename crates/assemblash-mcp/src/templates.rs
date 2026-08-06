@@ -20,6 +20,14 @@ impl Backend {
         })
     }
 
+    /// What style bundles a document offers.
+    pub fn presets(&self, project: Option<&str>) -> Result<crate::backend::PresetList, ApiError> {
+        let state = self.document_state(project)?;
+        Ok(crate::backend::PresetList {
+            presets: state.document.presets.clone(),
+        })
+    }
+
     /// Fills a template's slots in the project, as one change per slot.
     ///
     /// Every operation goes through the one choke point, so the whole

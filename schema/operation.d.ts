@@ -209,6 +209,45 @@ export type SnapTarget = {
   [key: string]: unknown;
 };
 
+/// A named bundle of style properties.
+export type Preset = {
+  /** What it is called. Unique within a document. */
+  name: string;
+  /** What it is for, for whoever is choosing between presets — including an */
+  description?: string | null;
+  /** The properties it sets. Anything left out is left alone on apply. */
+  properties: PresetProperties;
+  [key: string]: unknown;
+};
+
+/// What a preset sets.
+/// 
+/// Every field optional, and absent means "leave alone" — so a preset that
+/// only names a colour is a colour preset, and applying it does not quietly
+/// reset a layer's font.
+/// 
+/// Deliberately no transform: a style is not a position. A preset that moved
+/// layers would be a template, and templates already exist.
+export type PresetProperties = {
+  /** Text layers: font family. */
+  fontFamily?: string | null;
+  /** Text layers: font size. */
+  fontSize?: number | null;
+  /** Text layers: fill colour. */
+  color?: Color | null;
+  /** Text layers: horizontal alignment. */
+  align?: TextAlign | null;
+  /** Text layers: line height. */
+  lineHeight?: number | null;
+  /** Any layer: opacity. */
+  opacity?: number | null;
+  /** Any layer: how it composites. */
+  blendMode?: BlendMode | null;
+  /** Any layer: the whole effect stack. */
+  effects?: Effect[] | null;
+  [key: string]: unknown;
+};
+
 /// One mutation of a document.
 export type Operation = CreateLayer & {
   op: "create";
@@ -318,6 +357,25 @@ export type Operation = CreateLayer & {
   /** What to snap it against. */
   target: SnapTarget;
   op: "snapTo";
+  [key: string]: unknown;
+} | {
+  /** The preset to store. */
+  preset: Preset;
+  op: "definePreset";
+  [key: string]: unknown;
+} | {
+  /** The preset to remove. */
+  name: string;
+  op: "deletePreset";
+  [key: string]: unknown;
+} | {
+  /** Layer to restyle. */
+  id: LayerId;
+  /** Name of the preset to apply. */
+  preset: string;
+  /** Apply to a locked layer. */
+  allow_locked?: boolean;
+  op: "applyPreset";
   [key: string]: unknown;
 };
 

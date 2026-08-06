@@ -391,6 +391,69 @@
         "id",
         "target"
       ]
+    },
+    {
+      "description": "Adds a named style bundle to the document, or replaces one by name.",
+      "type": "object",
+      "properties": {
+        "preset": {
+          "description": "The preset to store.",
+          "$ref": "#/$defs/Preset"
+        },
+        "op": {
+          "type": "string",
+          "const": "definePreset"
+        }
+      },
+      "required": [
+        "op",
+        "preset"
+      ]
+    },
+    {
+      "description": "Removes a named style bundle.\n\nLayers that were styled by it keep their properties: applying a preset\nsets properties, it does not create a link, so deleting one cannot\nchange a picture.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The preset to remove.",
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "const": "deletePreset"
+        }
+      },
+      "required": [
+        "op",
+        "name"
+      ]
+    },
+    {
+      "description": "Applies a named style bundle to a layer.\n\nCompiles to the [`Update`](Operation::Update) the preset describes\nbefore anything is changed, which is what makes applying a preset and\nsetting the same properties by hand the same picture — and what makes\na protected layer refuse here without a preset-specific check.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to restyle.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "preset": {
+          "description": "Name of the preset to apply.",
+          "type": "string"
+        },
+        "allow_locked": {
+          "description": "Apply to a locked layer.",
+          "type": "boolean"
+        },
+        "op": {
+          "type": "string",
+          "const": "applyPreset"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "preset"
+      ]
     }
   ],
   "$defs": {
@@ -1129,6 +1192,113 @@
           ]
         }
       ]
+    },
+    "Preset": {
+      "description": "A named bundle of style properties.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "What it is called. Unique within a document.",
+          "type": "string"
+        },
+        "description": {
+          "description": "What it is for, for whoever is choosing between presets — including an\nagent, which is the case that needs it most.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "properties": {
+          "description": "The properties it sets. Anything left out is left alone on apply.",
+          "$ref": "#/$defs/PresetProperties"
+        }
+      },
+      "required": [
+        "name",
+        "properties"
+      ],
+      "additionalProperties": true
+    },
+    "PresetProperties": {
+      "description": "What a preset sets.\n\nEvery field optional, and absent means \"leave alone\" — so a preset that\nonly names a colour is a colour preset, and applying it does not quietly\nreset a layer's font.\n\nDeliberately no transform: a style is not a position. A preset that moved\nlayers would be a template, and templates already exist.",
+      "type": "object",
+      "properties": {
+        "fontFamily": {
+          "description": "Text layers: font family.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontSize": {
+          "description": "Text layers: font size.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "color": {
+          "description": "Text layers: fill colour.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "align": {
+          "description": "Text layers: horizontal alignment.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextAlign"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lineHeight": {
+          "description": "Text layers: line height.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "opacity": {
+          "description": "Any layer: opacity.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "blendMode": {
+          "description": "Any layer: how it composites.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effects": {
+          "description": "Any layer: the whole effect stack.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

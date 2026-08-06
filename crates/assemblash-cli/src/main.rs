@@ -387,11 +387,77 @@ enum Command {
         who: ActorArgs,
     },
 
+    /// Named style bundles stored in the document.
+    #[command(subcommand)]
+    Preset(PresetCommand),
+
     /// Lists the blend modes and effects this build renders.
     ///
     /// The list comes from the engine rather than from documentation, so it
     /// cannot describe a mode that does not draw.
     Styles,
+}
+
+/// Presets: named style bundles, stored in the document that uses them.
+///
+/// In the document rather than beside the workspace so a project directory
+/// stays portable — the same document must not render differently depending
+/// on what else is installed next to it.
+#[derive(Debug, Subcommand)]
+enum PresetCommand {
+    /// Stores a preset, replacing any with the same name.
+    Define {
+        /// Project directory.
+        project: PathBuf,
+        /// What the preset is called.
+        #[arg(long)]
+        name: String,
+        /// What it is for.
+        #[arg(long)]
+        description: Option<String>,
+        /// The properties it sets, as JSON:
+        /// `{"fontSize":48,"color":"#101820"}`.
+        #[arg(long)]
+        properties: String,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Lists the presets a document offers.
+    List {
+        /// Project directory.
+        project: PathBuf,
+    },
+
+    /// Removes a preset.
+    ///
+    /// Layers styled by it keep their properties: applying a preset sets
+    /// properties, it does not create a link, so this cannot change a picture.
+    Delete {
+        /// Project directory.
+        project: PathBuf,
+        /// Which preset.
+        name: String,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Applies a preset to a layer.
+    Apply {
+        /// Project directory.
+        project: PathBuf,
+        /// Which preset.
+        #[arg(long)]
+        preset: String,
+        /// Which layer.
+        #[arg(long)]
+        layer: String,
+        /// Apply to a locked layer.
+        #[arg(long)]
+        allow_locked: bool,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
 }
 
 /// The font store: a directory of hash-pinned font files.
@@ -1197,6 +1263,8 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
+        Command::Preset(command) => run_preset(command),
+
         Command::Styles => {
             println!("blend modes:");
             for mode in assemblash_core::BlendMode::RENDERED {
@@ -1272,6 +1340,89 @@ fn run(command: Command) -> Result<(), CliError> {
                 println!("lock removed");
             } else {
                 println!("no lock to remove");
+            }
+            Ok(())
+        }
+    }
+}
+
+/// The preset commands.
+fn run_preset(command: PresetCommand) -> Result<(), CliError> {
+    match command {
+        PresetCommand::Define {
+            project,
+            name,
+            description,
+            properties,
+            who,
+        } => {
+            let properties: assemblash_core::PresetProperties = serde_json::from_str(&properties)?;
+            let mut session = Session::open(&project, now_millis())?;
+            session.apply(
+                &Operation::DefinePreset {
+                    preset: assemblash_core::Preset {
+                        name: name.clone(),
+                        description,
+                        properties,
+                        extra: Default::default(),
+                    },
+                },
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            println!("{name}");
+            Ok(())
+        }
+
+        PresetCommand::List { project } => {
+            let session = Session::open_read_only(&project)?;
+            for preset in &session.document().presets {
+                println!(
+                    "{}	{}	{}",
+                    preset.name,
+                    serde_json::to_string(&preset.properties)?,
+                    preset.description.as_deref().unwrap_or("")
+                );
+            }
+            Ok(())
+        }
+
+        PresetCommand::Delete { project, name, who } => {
+            let mut session = Session::open(&project, now_millis())?;
+            session.apply(
+                &Operation::DeletePreset { name: name.clone() },
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            println!("{name}");
+            Ok(())
+        }
+
+        PresetCommand::Apply {
+            project,
+            preset,
+            layer,
+            allow_locked,
+            who,
+        } => {
+            let mut session = Session::open(&project, now_millis())?;
+            let (outcome, _) = session.apply(
+                &Operation::ApplyPreset {
+                    id: assemblash_core::LayerId::new(layer),
+                    preset,
+                    allow_locked,
+                },
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            for id in &outcome.changed {
+                println!("{id}");
             }
             Ok(())
         }

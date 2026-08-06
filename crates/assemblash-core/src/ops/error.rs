@@ -76,6 +76,24 @@ pub enum OpError {
         effect: String,
     },
 
+    /// No preset of that name is in the document.
+    #[error("no preset named {name:?}; this document has: {available}")]
+    NoSuchPreset {
+        /// The name that was asked for.
+        name: String,
+        /// What it does have.
+        available: String,
+    },
+
+    /// A preset was defined that could never be usefully applied.
+    #[error("preset {name:?} is not usable: {reason}")]
+    InvalidPreset {
+        /// The preset at fault.
+        name: String,
+        /// What is wrong with it.
+        reason: &'static str,
+    },
+
     /// A property was set that does not exist on that kind of layer.
     #[error("layer {id} is a {actual} layer, so {property} cannot be set on it")]
     WrongLayerKind {

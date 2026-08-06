@@ -48,6 +48,13 @@
       },
       "default": []
     },
+    "presets": {
+      "description": "Named style bundles this document offers.\n\nIn the document rather than beside the workspace, so that a project\ndirectory stays portable and the same document cannot render\ndifferently depending on what else is installed next to it — see\n[`crate::presets`]. Additive with a default, like every field added\nsince schema version 1.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Preset"
+      }
+    },
     "slots": {
       "description": "Named openings a caller may fill, making this document a template\n(PRD use case C). Empty for an ordinary document.\n\nAdditive with a default, like every other field added since schema\nversion 1: a build that does not know about slots preserves them, and\na document without them loads here unchanged.",
       "type": "array",
@@ -665,6 +672,113 @@
       "required": [
         "asset"
       ],
+      "additionalProperties": true
+    },
+    "Preset": {
+      "description": "A named bundle of style properties.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "What it is called. Unique within a document.",
+          "type": "string"
+        },
+        "description": {
+          "description": "What it is for, for whoever is choosing between presets — including an\nagent, which is the case that needs it most.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "properties": {
+          "description": "The properties it sets. Anything left out is left alone on apply.",
+          "$ref": "#/$defs/PresetProperties"
+        }
+      },
+      "required": [
+        "name",
+        "properties"
+      ],
+      "additionalProperties": true
+    },
+    "PresetProperties": {
+      "description": "What a preset sets.\n\nEvery field optional, and absent means \"leave alone\" — so a preset that\nonly names a colour is a colour preset, and applying it does not quietly\nreset a layer's font.\n\nDeliberately no transform: a style is not a position. A preset that moved\nlayers would be a template, and templates already exist.",
+      "type": "object",
+      "properties": {
+        "fontFamily": {
+          "description": "Text layers: font family.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontSize": {
+          "description": "Text layers: font size.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "color": {
+          "description": "Text layers: fill colour.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "align": {
+          "description": "Text layers: horizontal alignment.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextAlign"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lineHeight": {
+          "description": "Text layers: line height.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "opacity": {
+          "description": "Any layer: opacity.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "blendMode": {
+          "description": "Any layer: how it composites.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effects": {
+          "description": "Any layer: the whole effect stack.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        }
+      },
       "additionalProperties": true
     },
     "Slot": {

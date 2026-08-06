@@ -10,6 +10,48 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-08-06
+
+Presets: named style bundles, defined, applied, and undone like anything else.
+
+Document `schemaVersion`: **1 (unchanged)**. `presets` is additive with a
+default, like `slots` and `effects` before it.
+
+### Added
+
+- **Presets live in the document.** A project directory stays portable, and
+  the same document must not render differently depending on what else is
+  installed next to it — the exact failure the font store exists to prevent.
+  The cost, stated plainly: sharing a preset between projects means copying it.
+- **A preset is the properties of an update**: font family, size, colour,
+  alignment, line height, opacity, blend mode, effect stack. Applying one
+  builds that same `UpdateLayer` and hands it to the operation layer, which is
+  what makes "a preset renders identically to the same properties set by hand"
+  true by construction rather than by hope. Deliberately no transform: a style
+  is not a position, and a preset that moved layers would be a template.
+- Three operations — `definePreset`, `deletePreset`, `applyPreset` — all
+  journalled, undoable, and dry-runnable. Applying to a protected layer is
+  refused by the check that already guards every other mutation.
+- `assemblash preset define|list|delete|apply`, `GET
+  /api/projects/{id}/presets` alongside the operation endpoint,
+  `list_presets`/`define_preset`/`delete_preset`/`apply_preset` over MCP, and
+  a preset list in the interface's inspector with a "save style as preset"
+  control.
+
+### Verified
+
+- **A preset applied is pixel-identical to the same properties set by hand** —
+  compared as decoded pixels, both in the renderer's tests and through the
+  binary on two identically built projects.
+- Define, apply, undo, redo: the document comes back byte for byte at every
+  step, and defining a preset does not change any picture.
+- **Deleting a preset changes no picture**: applying one sets properties, it
+  does not create a link.
+- A preset that sets nothing, or that names a blend mode or effect this build
+  cannot draw, is refused when it is defined rather than when it is finally
+  applied.
+- Applying an unknown preset says what the document does have.
+
 ## [0.14.0] — 2026-08-06
 
 A non-destructive effect stack, and the rest of the CSS blend modes. Every

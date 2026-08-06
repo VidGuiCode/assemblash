@@ -207,6 +207,45 @@ export type SvgLayer = {
   [key: string]: unknown;
 };
 
+/// A named bundle of style properties.
+export type Preset = {
+  /** What it is called. Unique within a document. */
+  name: string;
+  /** What it is for, for whoever is choosing between presets — including an */
+  description?: string | null;
+  /** The properties it sets. Anything left out is left alone on apply. */
+  properties: PresetProperties;
+  [key: string]: unknown;
+};
+
+/// What a preset sets.
+/// 
+/// Every field optional, and absent means "leave alone" — so a preset that
+/// only names a colour is a colour preset, and applying it does not quietly
+/// reset a layer's font.
+/// 
+/// Deliberately no transform: a style is not a position. A preset that moved
+/// layers would be a template, and templates already exist.
+export type PresetProperties = {
+  /** Text layers: font family. */
+  fontFamily?: string | null;
+  /** Text layers: font size. */
+  fontSize?: number | null;
+  /** Text layers: fill colour. */
+  color?: Color | null;
+  /** Text layers: horizontal alignment. */
+  align?: TextAlign | null;
+  /** Text layers: line height. */
+  lineHeight?: number | null;
+  /** Any layer: opacity. */
+  opacity?: number | null;
+  /** Any layer: how it composites. */
+  blendMode?: BlendMode | null;
+  /** Any layer: the whole effect stack. */
+  effects?: Effect[] | null;
+  [key: string]: unknown;
+};
+
 /// A named opening in a template.
 export type Slot = {
   /** What a caller names this slot by. Unique within a document. */
@@ -241,6 +280,8 @@ export type Document = {
   assets?: Asset[];
   /** Layers, bottom first: array order is z-order. */
   layers?: Layer[];
+  /** Named style bundles this document offers. */
+  presets?: Preset[];
   /** Named openings a caller may fill, making this document a template */
   slots?: Slot[];
   [key: string]: unknown;

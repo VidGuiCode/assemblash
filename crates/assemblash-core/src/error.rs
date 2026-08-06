@@ -71,6 +71,13 @@ pub enum ValidationError {
         value: f64,
     },
 
+    /// Two presets share a name, so one of them can never be applied.
+    #[error("two presets are both named {name:?}")]
+    DuplicatePreset {
+        /// The name in question.
+        name: String,
+    },
+
     /// An effect's parameter is out of range or not a number.
     #[error("layer {layer}: effect {effect} — {field} must be {expected}, got {value}")]
     InvalidEffect {

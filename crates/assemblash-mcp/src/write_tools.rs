@@ -790,4 +790,110 @@ impl AssemblashMcp {
             .map(Json)
             .map_err(to_error)
     }
+
+    /// What style bundles a document offers.
+    #[tool(
+        description = "List the document's named style presets: what each one is called, what                        it is for, and exactly which properties it sets."
+    )]
+    async fn list_presets(
+        &self,
+        Parameters(args): Parameters<crate::server::ProjectArgs>,
+    ) -> Result<Json<crate::backend::PresetList>, ErrorData> {
+        self.backend()
+            .presets(self.resolve_project(args.project).as_deref())
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// Stores a named style bundle.
+    #[tool(
+        description = "Store a named style bundle in the document, replacing any with the same                        name. A preset sets properties — font, size, colour, alignment, line                        height, opacity, blend mode, effects — and nothing about position."
+    )]
+    async fn define_preset(
+        &self,
+        Parameters(args): Parameters<DefinePresetArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(
+            &args.write,
+            Operation::DefinePreset {
+                preset: assemblash_core::Preset {
+                    name: args.name.clone(),
+                    description: args.description.clone(),
+                    properties: args.properties.clone(),
+                    extra: Default::default(),
+                },
+            },
+        )
+    }
+
+    /// Removes a named style bundle.
+    #[tool(
+        description = "Remove a named style bundle. Layers styled by it keep their properties:                        applying a preset sets properties rather than creating a link, so this                        cannot change any picture."
+    )]
+    async fn delete_preset(
+        &self,
+        Parameters(args): Parameters<DeletePresetArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(
+            &args.write,
+            Operation::DeletePreset {
+                name: args.name.clone(),
+            },
+        )
+    }
+
+    /// Applies a named style bundle to a layer.
+    #[tool(
+        description = "Apply a named style bundle to a layer. Identical to setting the same                        properties by hand — it compiles to exactly that update — so it is                        journalled, undoable, and refused on a protected layer."
+    )]
+    async fn apply_preset(
+        &self,
+        Parameters(args): Parameters<ApplyPresetArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(
+            &args.write,
+            Operation::ApplyPreset {
+                id: LayerId::new(args.layer_id.clone()),
+                preset: args.preset.clone(),
+                allow_locked: args.allow_locked.unwrap_or(false),
+            },
+        )
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinePresetArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// What the preset is called. Replaces any existing one of that name.
+    pub name: String,
+    /// What it is for, for whoever chooses between presets later.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// The properties it sets. Anything left out is left alone on apply.
+    pub properties: assemblash_core::PresetProperties,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletePresetArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// Which preset to remove.
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyPresetArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// Which preset, as `list_presets` reports the names.
+    pub preset: String,
+    /// Which layer to restyle.
+    pub layer_id: String,
+    /// Apply to a locked layer.
+    #[serde(default)]
+    pub allow_locked: Option<bool>,
 }

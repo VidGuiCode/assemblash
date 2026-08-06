@@ -153,6 +153,35 @@ fn effect() -> impl Strategy<Value = Effect> {
     ]
 }
 
+/// Presets with distinct names, since duplicates are invalid.
+///
+/// Includes properties this build understands and one it does not, because
+/// preserving a newer build's preset is the same promise as preserving its
+/// layers.
+fn presets() -> impl Strategy<Value = Vec<assemblash_core::Preset>> {
+    prop::collection::vec((0.0f64..=1.0, prop::option::of("[a-z ]{0,10}")), 0..3).prop_map(|rows| {
+        rows.into_iter()
+            .enumerate()
+            .map(|(index, (opacity, description))| assemblash_core::Preset {
+                name: format!("preset-{index}"),
+                description,
+                properties: assemblash_core::PresetProperties {
+                    opacity: Some(opacity),
+                    effects: Some(vec![Effect::Blur { radius: 2.0 }]),
+                    extra: [(
+                        "futureProperty".to_owned(),
+                        serde_json::Value::from(index as i64),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    ..assemblash_core::PresetProperties::default()
+                },
+                extra: Extras::new(),
+            })
+            .collect()
+    })
+}
+
 /// Builds layers with unique ids: `id_counter` is threaded through the tree
 /// after generation, because proptest has no notion of "unique across the
 /// whole structure" and duplicate ids would be an invalid document.
@@ -248,9 +277,19 @@ fn document() -> impl Strategy<Value = Document> {
             prop::option::of("[a-zA-Z ]{0,20}"),
             extras(),
             extras(),
+            presets(),
         )
             .prop_map(
-                move |(mut layers, width, height, background, name, canvas_extra, extra)| {
+                move |(
+                    mut layers,
+                    width,
+                    height,
+                    background,
+                    name,
+                    canvas_extra,
+                    extra,
+                    presets,
+                )| {
                     let mut next = 0;
                     assign_ids(&mut layers, &mut next);
                     Document {
@@ -266,6 +305,7 @@ fn document() -> impl Strategy<Value = Document> {
                         },
                         assets: assets.clone(),
                         layers,
+                        presets: presets.clone(),
                         slots: Vec::new(),
                         extra,
                     }

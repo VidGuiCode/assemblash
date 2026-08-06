@@ -159,10 +159,42 @@ pub enum Operation {
         /// What to snap it against.
         target: SnapTarget,
     },
+
+    /// Adds a named style bundle to the document, or replaces one by name.
+    DefinePreset {
+        /// The preset to store.
+        preset: crate::presets::Preset,
+    },
+
+    /// Removes a named style bundle.
+    ///
+    /// Layers that were styled by it keep their properties: applying a preset
+    /// sets properties, it does not create a link, so deleting one cannot
+    /// change a picture.
+    DeletePreset {
+        /// The preset to remove.
+        name: String,
+    },
+
+    /// Applies a named style bundle to a layer.
+    ///
+    /// Compiles to the [`Update`](Operation::Update) the preset describes
+    /// before anything is changed, which is what makes applying a preset and
+    /// setting the same properties by hand the same picture — and what makes
+    /// a protected layer refuse here without a preset-specific check.
+    ApplyPreset {
+        /// Layer to restyle.
+        id: LayerId,
+        /// Name of the preset to apply.
+        preset: String,
+        /// Apply to a locked layer.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        allow_locked: bool,
+    },
 }
 
 /// What an operation did, beyond changing the document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct OpOutcome {
@@ -178,6 +210,12 @@ pub struct OpOutcome {
 }
 
 impl OpOutcome {
+    /// An operation that changed the document without touching any layer —
+    /// defining or deleting a preset, for instance.
+    fn nothing() -> Self {
+        Self::default()
+    }
+
     fn created(id: LayerId) -> Self {
         Self {
             created: vec![id],
@@ -251,6 +289,26 @@ pub fn apply(
                 ..UpdateLayer::new(id.clone())
             },
         ),
+        Operation::DefinePreset { preset } => define_preset(&mut candidate, preset),
+        Operation::DeletePreset { name } => delete_preset(&mut candidate, name),
+        Operation::ApplyPreset {
+            id,
+            preset,
+            allow_locked,
+        } => {
+            // Resolved here, against the document as it is now, and applied as
+            // an ordinary update. The journal therefore records what actually
+            // changed rather than a name whose meaning could move later — a
+            // replay of "apply heading" would stop being deterministic the
+            // first time somebody redefined `heading`.
+            let found =
+                crate::presets::find(&candidate, preset).ok_or_else(|| OpError::NoSuchPreset {
+                    name: preset.clone(),
+                    available: crate::presets::names(&candidate).join(", "),
+                })?;
+            let update = found.properties.update_for(id.clone(), *allow_locked);
+            update_layer(&mut candidate, &update)
+        }
         Operation::Align { ids: members, edge } => {
             layout_ops::align(&mut candidate, members, *edge)
         }
@@ -338,6 +396,81 @@ fn create(
     let id = layer.id.clone();
     tree::insert(document, &request.position, layer)?;
     Ok(OpOutcome::created(id))
+}
+
+/// Stores a preset, replacing any with the same name.
+///
+/// Replacing rather than refusing a duplicate: "define this style" is what a
+/// caller means whether or not the name is already taken, and the alternative
+/// is every caller writing a delete-then-define dance that is not atomic.
+/// Nothing that was already applied changes — a preset sets properties, it
+/// does not create a link.
+fn define_preset(
+    document: &mut Document,
+    preset: &crate::presets::Preset,
+) -> Result<OpOutcome, OpError> {
+    if preset.name.trim().is_empty() {
+        return Err(OpError::InvalidPreset {
+            name: preset.name.clone(),
+            reason: "a preset needs a name",
+        });
+    }
+    if preset.properties.is_empty() {
+        return Err(OpError::InvalidPreset {
+            name: preset.name.clone(),
+            reason: "a preset that sets nothing would do nothing",
+        });
+    }
+    // The same checks setting these properties directly would face, so a
+    // preset cannot be a way to smuggle in a blend mode or an effect that
+    // nothing can draw.
+    if let Some(mode) = &preset.properties.blend_mode {
+        if !mode.is_rendered() {
+            return Err(OpError::UnsupportedBlendMode {
+                id: LayerId::new(format!("preset:{}", preset.name)),
+                mode: mode.as_str().to_owned(),
+                available: crate::document::BlendMode::RENDERED
+                    .iter()
+                    .map(crate::document::BlendMode::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
+        }
+    }
+    if let Some(effects) = &preset.properties.effects {
+        if let Some(unknown) = effects.iter().find(|effect| !effect.is_rendered()) {
+            return Err(OpError::UnsupportedEffect {
+                id: LayerId::new(format!("preset:{}", preset.name)),
+                effect: unknown.type_name().to_owned(),
+            });
+        }
+    }
+
+    match document
+        .presets
+        .iter_mut()
+        .find(|existing| existing.name == preset.name)
+    {
+        Some(existing) => *existing = preset.clone(),
+        None => document.presets.push(preset.clone()),
+    }
+    Ok(OpOutcome::nothing())
+}
+
+fn delete_preset(document: &mut Document, name: &str) -> Result<OpOutcome, OpError> {
+    let before = document.presets.len();
+    document.presets.retain(|preset| preset.name != name);
+    if document.presets.len() == before {
+        return Err(OpError::NoSuchPreset {
+            name: name.to_owned(),
+            available: crate::presets::names(document).join(", "),
+        });
+    }
+    Ok(OpOutcome::nothing())
+}
+
+fn update_layer(document: &mut Document, request: &UpdateLayer) -> Result<OpOutcome, OpError> {
+    update(document, request)
 }
 
 fn update(document: &mut Document, request: &UpdateLayer) -> Result<OpOutcome, OpError> {

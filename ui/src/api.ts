@@ -343,6 +343,44 @@ export function newEffect(type: string): Effect {
   }
 }
 
+/** A named style bundle, as the document stores it. */
+export interface Preset {
+  name: string;
+  description?: string | null;
+  properties: Record<string, unknown>;
+}
+
+export async function getPresets(project: string): Promise<Preset[]> {
+  const body = await request<{ presets: Preset[] }>(
+    `/api/projects/${encodeURIComponent(project)}/presets`,
+  );
+  return body.presets;
+}
+
+/**
+ * The style properties of a layer, as a preset would carry them.
+ *
+ * Used by "save as preset": what is stored is exactly what an update would
+ * set, which is why applying it later reproduces this layer's look and not an
+ * approximation of it. Position is deliberately absent — a style is not a
+ * place.
+ */
+export function styleOf(layer: Layer): Record<string, unknown> {
+  const properties: Record<string, unknown> = {
+    opacity: layer.opacity ?? 1,
+    blendMode: layer.blendMode ?? "normal",
+    effects: layer.effects ?? [],
+  };
+  if (layer.type === "text") {
+    properties["fontFamily"] = layer.fontFamily;
+    properties["fontSize"] = layer.fontSize;
+    properties["color"] = layer.color ?? "#000000";
+    properties["align"] = layer.align ?? "left";
+    properties["lineHeight"] = layer.lineHeight ?? 1.2;
+  }
+  return properties;
+}
+
 /** What a template offers to be filled. */
 export interface SlotList {
   isTemplate: boolean;

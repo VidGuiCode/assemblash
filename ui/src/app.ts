@@ -22,6 +22,8 @@ import { mountTemplates } from "./templates.js";
 interface State {
   project: string | null;
   document: Document | null;
+  /** The presets this document offers, as last read. */
+  presets: api.Preset[];
   /** Ids the user has selected. The engine never hears about this. */
   selection: string[];
   /** Layer being dragged, and where the drag started. */
@@ -38,6 +40,7 @@ interface State {
 const state: State = {
   project: null,
   document: null,
+  presets: [],
   selection: [],
   drag: null,
   busy: false,
@@ -141,6 +144,9 @@ async function refresh(): Promise<void> {
   dom.canvas.style.aspectRatio = `${doc.canvas.width} / ${doc.canvas.height}`;
   dom.downloadSvg.href = api.svgUrl(state.project, api.versionOf(doc));
   dom.downloadSvg.hidden = false;
+  // Read with the document, because defining or deleting one is an ordinary
+  // operation and every operation refreshes.
+  state.presets = await api.getPresets(state.project);
 
   drawLayers();
   drawOverlay();
@@ -393,6 +399,7 @@ function drawInspector(): void {
   dom.inspector.append(blend);
 
   drawEffects(layer, why !== null);
+  drawPresets(layer, why !== null);
 
   const visible = document.createElement("label");
   visible.className = "field checkbox";
@@ -490,6 +497,79 @@ function drawEffects(layer: Layer, guarded: boolean): void {
   });
   add.append(chooser, button);
   dom.inspector.append(add);
+}
+
+/**
+ * The document's named styles: apply one, or save this layer's as a new one.
+ *
+ * Applying is one operation the engine resolves — the page never assembles the
+ * properties itself. That is what makes a preset applied here identical to the
+ * same preset applied from the command line or by an agent.
+ */
+function drawPresets(layer: Layer, guarded: boolean): void {
+  const heading = document.createElement("h2");
+  heading.textContent = "Presets";
+  dom.inspector.append(heading);
+
+  if (state.presets.length === 0) {
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = "No presets in this document yet.";
+    dom.inspector.append(hint);
+  }
+
+  for (const preset of state.presets) {
+    const row = document.createElement("div");
+    row.className = "effect-row";
+    const label = document.createElement("span");
+    label.className = "effect-name";
+    label.textContent = preset.name;
+    if (preset.description) label.title = preset.description;
+    row.append(label);
+
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "small";
+    apply.textContent = "Apply";
+    apply.disabled = guarded;
+    apply.addEventListener("click", () =>
+      void send(`apply ${preset.name}`, {
+        op: "applyPreset",
+        id: layer.id,
+        preset: preset.name,
+      } as Operation),
+    );
+    row.append(apply);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "small";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", () =>
+      void send(`delete ${preset.name}`, {
+        op: "deletePreset",
+        name: preset.name,
+      } as Operation),
+    );
+    row.append(remove);
+    dom.inspector.append(row);
+  }
+
+  const save = document.createElement("div");
+  save.className = "buttons";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Save style as preset";
+  button.addEventListener("click", () => {
+    const name = window.prompt("Preset name:");
+    if (!name) return;
+    void send(`define ${name}`, {
+      op: "definePreset",
+      preset: { name, properties: api.styleOf(layer) },
+    } as Operation);
+  });
+  save.append(button);
+  dom.inspector.append(save);
 }
 
 async function drawHistory(): Promise<void> {

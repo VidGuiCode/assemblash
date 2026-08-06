@@ -200,6 +200,14 @@ pub struct SlotList {
     pub slots: Vec<assemblash_core::Slot>,
 }
 
+/// The named style bundles a document offers.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetList {
+    /// The presets, in the order the document lists them.
+    pub presets: Vec<assemblash_core::Preset>,
+}
+
 /// A rendered preview.
 #[derive(Debug, Clone)]
 pub struct Preview {

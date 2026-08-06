@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** Pre-alpha — v0.14.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
+**Status:** Pre-alpha — v0.15.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -219,7 +219,7 @@ The dependency graph must be rechecked against this license once an implementati
 
 ## Current project status
 
-**v0.14.0.** What exists and has been run:
+**v0.15.0.** What exists and has been run:
 
 1. **Documents** — canvas, assets, and a nested tree of text, image, SVG, and group layers, saved as `document.json` plus `assets/`. Unknown fields survive a load-and-save cycle. Hand-editing the file is supported.
 2. **Operations** — thirteen typed operations (create, update, delete, duplicate, move, resize, rotate, reorder, group, ungroup, show/hide, lock/unlock, rename), each validated and applied transactionally: a refused operation leaves the document exactly as it was.
@@ -236,9 +236,11 @@ The dependency graph must be rechecked against this license once an implementati
 
 11. **Packaging** — binaries for Windows, Linux, and macOS on x86_64 and ARM64; a 7 MB `scratch` Docker image; and friendly mode: launching the binary with no arguments creates the workspace, serves, opens a browser, and can be stopped from the page. A second launch opens the one already running.
 
-12. **Templates with named slots** — a document names some of its layers as slots, and `assemblash variants` (or the API, or MCP) renders one image per set of values. Protected chrome cannot be reached through a slot, because filling one is an ordinary operation and passes the same check everything else does.
+12. **Presets** — named style bundles stored in the document: font, size, colour, alignment, line height, opacity, blend mode, and effect stack. Applying one compiles to exactly the update a person would send, so it is journalled, undoable, refused on protected layers, and pixel-identical to setting the same properties by hand.
 
-What does not exist yet: styled text runs, and presets. Everything above this section describes where the project is going, not what it does today.
+13. **Templates with named slots** — a document names some of its layers as slots, and `assemblash variants` (or the API, or MCP) renders one image per set of values. Protected chrome cannot be reached through a slot, because filling one is an ordinary operation and passes the same check everything else does.
+
+What does not exist yet: styled text runs. Everything above this section describes where the project is going, not what it does today.
 
 The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: the same document plus the same font files produces bit-identical PNGs on all six targets.
 
@@ -249,7 +251,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.14.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.15.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:

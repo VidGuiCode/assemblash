@@ -66,6 +66,7 @@ pub fn router(
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
         .route("/api/projects/{id}/export", post(export_document))
         .route("/api/projects/{id}/exports/{file}", get(get_export))
+        .route("/api/projects/{id}/presets", get(get_presets))
         .route("/api/projects/{id}/slots", get(get_slots))
         .route("/api/projects/{id}/variants", post(render_variants))
         // Layers last: `layer` applies to the routes added before it, so
@@ -731,6 +732,29 @@ async fn get_export(
         ],
         bytes,
     ))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresetsResponse {
+    /// The presets, in the order the document lists them.
+    presets: Vec<assemblash_core::Preset>,
+}
+
+/// The named style bundles a document offers.
+///
+/// Read-only: defining, deleting, and applying one are ordinary operations and
+/// go through the operation endpoint like every other mutation. A second way
+/// to change a document is a second place for the version check, the journal,
+/// and the protected-layer rule to be forgotten.
+async fn get_presets(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<PresetsResponse>, ApiError> {
+    let (document, _) = read_for_render(&state, id)?;
+    Ok(Json(PresetsResponse {
+        presets: document.presets.clone(),
+    }))
 }
 
 #[derive(Debug, Serialize)]
