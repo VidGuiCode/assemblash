@@ -54,6 +54,7 @@ pub fn router(
         .route("/api/schema/operation", get(operation_schema))
         .route("/api/fonts", get(fonts))
         .route("/api/projects", get(list_projects).post(create_project))
+        .route("/api/projects/recent", get(recent_projects))
         .route("/api/projects/{id}", get(project_summary))
         .route("/api/projects/{id}/document", get(get_document))
         .route("/api/projects/{id}/history", get(get_history))
@@ -62,6 +63,7 @@ pub fn router(
         .route("/api/projects/{id}/undo", post(undo))
         .route("/api/projects/{id}/redo", post(redo))
         .route("/api/projects/{id}/assets", post(upload_asset))
+        .route("/api/projects/{id}/thumbnail.png", get(thumbnail))
         .route("/api/projects/{id}/preview.png", get(preview))
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
         .route("/api/projects/{id}/export", post(export_document))
@@ -230,7 +232,89 @@ struct ProjectList {
     projects: Vec<ProjectSummary>,
 }
 
-async fn list_projects(State(state): State<AppState>) -> Result<Json<ProjectList>, ApiError> {
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectQuery {
+    /// Substring to match against a project's id or name.
+    #[serde(default)]
+    query: Option<String>,
+    /// How many to return. The cache is there so a big workspace stays
+    /// usable; an unbounded listing would give that back.
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// How many projects a listing returns when the caller does not say.
+const DEFAULT_LIMIT: usize = 200;
+
+fn summarise_indexed(project: &assemblash_core::index::IndexedProject) -> ProjectSummary {
+    ProjectSummary {
+        id: project.id.clone(),
+        name: project.name.clone(),
+        document_id: project.document_id.clone(),
+        version: project.version,
+        layers: project.layers,
+    }
+}
+
+/// The most recently modified projects.
+///
+/// Answered from the cache, which is the only reason it can be answered at all
+/// without opening every document to read a timestamp. Without a cache there
+/// is no order to report, so it falls back to the ordinary listing.
+async fn recent_projects(
+    State(state): State<AppState>,
+    Query(query): Query<ProjectQuery>,
+) -> Result<Json<ProjectList>, ApiError> {
+    let limit = query.limit.unwrap_or(12).min(DEFAULT_LIMIT);
+    state.refresh_index();
+    if let Some(projects) = state.with_index(|index| index.recents(limit)) {
+        return Ok(Json(ProjectList {
+            projects: projects.iter().map(summarise_indexed).collect(),
+        }));
+    }
+    list_projects(
+        State(state),
+        Query(ProjectQuery {
+            query: None,
+            limit: Some(limit),
+        }),
+    )
+    .await
+}
+
+async fn list_projects(
+    State(state): State<AppState>,
+    Query(query): Query<ProjectQuery>,
+) -> Result<Json<ProjectList>, ApiError> {
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
+    let wanted = query.query.unwrap_or_default();
+
+    // Refreshed when the list is asked for rather than after every mutation:
+    // a project whose document.json has not changed costs one `stat` and one
+    // indexed lookup, so this stays cheap, and the alternative would put that
+    // cost on every edit instead of on the one request that needs it.
+    state.refresh_index();
+
+    // The cache answers a search without opening a single document, which is
+    // the difference between a workspace of two hundred projects being usable
+    // and not.
+    if let Some(projects) = state.with_index(|index| {
+        if wanted.is_empty() {
+            index.recents(limit)
+        } else {
+            index.search(&wanted, limit)
+        }
+    }) {
+        if !projects.is_empty() || !wanted.is_empty() {
+            return Ok(Json(ProjectList {
+                projects: projects.iter().map(summarise_indexed).collect(),
+            }));
+        }
+        // An empty cache and no query: fall through and scan, so a workspace
+        // whose cache has not been refreshed yet still lists.
+    }
+
     let mut projects = Vec::new();
     for id in state.workspace().projects()? {
         // Read from disk rather than opening a session: listing must not take
@@ -244,7 +328,63 @@ async fn list_projects(State(state): State<AppState>) -> Result<Json<ProjectList
             Err(_) => continue,
         }
     }
+    if !wanted.is_empty() {
+        let needle = wanted.to_lowercase();
+        projects.retain(|project| {
+            project.id.as_str().to_lowercase().contains(&needle)
+                || project
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.to_lowercase().contains(&needle))
+        });
+    }
+    projects.truncate(limit);
     Ok(Json(ProjectList { projects }))
+}
+
+/// Width a thumbnail is rendered at.
+///
+/// Small on purpose: a project browser showing two hundred of these should
+/// move a few hundred kilobytes, not a few hundred megabytes.
+const THUMBNAIL_WIDTH: f64 = 240.0;
+
+/// A small preview of a project, cached against the version it was made from.
+///
+/// Rendered here rather than in the cache because rendering needs the
+/// renderer, and a stale thumbnail is impossible rather than merely unlikely:
+/// the cache only returns one whose version matches the document's.
+async fn thumbnail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = ProjectId::new(id.clone())?;
+    let (document, directory) = read_for_render(&state, id)?;
+    let version = document.version;
+
+    if let Some(cached) = state
+        .with_index(|index| index.thumbnail(&project_id, version))
+        .flatten()
+    {
+        return Ok(png_response(cached));
+    }
+
+    let scale = (THUMBNAIL_WIDTH / document.canvas.width.max(1.0)).min(1.0) as f32;
+    let rendered = render::png_for(&document, &directory, &state.font_store()?, scale)?;
+    state.with_index(|index| index.set_thumbnail(&project_id, version, &rendered.bytes));
+    Ok(png_response(rendered.bytes))
+}
+
+fn png_response(bytes: Vec<u8>) -> axum::response::Response {
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            // Keyed by document version in the cache, not in the URL, so a
+            // browser must not hold its own copy.
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 #[derive(Debug, Deserialize)]

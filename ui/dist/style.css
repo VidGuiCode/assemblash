@@ -506,3 +506,52 @@ body.stopped main {
   color: var(--ink);
   background: var(--panel);
 }
+
+/* Recently modified projects, from the engine's workspace cache. Present only
+ * when there is more than one, because a list of one is just the project you
+ * have open. */
+#recents {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin: 12px 0;
+}
+
+#recents[hidden] {
+  display: none;
+}
+
+button.recent {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  text-align: left;
+  overflow: hidden;
+}
+
+button.recent img {
+  display: block;
+  width: 100%;
+  height: 48px;
+  object-fit: contain;
+  background: var(--paper);
+}
+
+button.recent span {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#project-search {
+  font: inherit;
+  width: 150px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+}

@@ -34,6 +34,8 @@ const dom = {
     projects: el("projects"),
     newProject: el("new-project"),
     reload: el("reload"),
+    search: el("project-search"),
+    recents: el("recents"),
     canvas: el("canvas"),
     canvasImage: el("canvas-image"),
     overlay: el("overlay"),
@@ -610,6 +612,15 @@ async function openProject() {
     await templates.projectChanged();
 }
 dom.reload.addEventListener("click", () => void guard("reload", refresh));
+// Searching re-asks the engine rather than filtering a list held here, so the
+// page never has to hold a whole workspace to look through it.
+let searchTimer = 0;
+dom.search.addEventListener("input", () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => {
+        void guard("search", () => loadProjects());
+    }, 150);
+});
 dom.newProject.addEventListener("click", () => {
     const id = window.prompt("Project name (letters, digits, spaces, hyphens):");
     if (!id)
@@ -762,11 +773,18 @@ window.addEventListener("keydown", (event) => {
     }
 });
 async function loadProjects(select) {
-    const projects = await api.listProjects();
+    const query = dom.search.value.trim();
+    // Filtered by the engine against its cache: a workspace of two hundred
+    // projects should not be sent here in full for this page to look through it.
+    const projects = await api.listProjects(query);
     dom.projects.replaceChildren();
     const placeholder = document.createElement("option");
     placeholder.value = "";
-    placeholder.textContent = projects.length ? "Choose a project…" : "No projects yet";
+    placeholder.textContent = projects.length
+        ? "Choose a project…"
+        : query
+            ? "Nothing matches"
+            : "No projects yet";
     dom.projects.append(placeholder);
     for (const project of projects) {
         const option = document.createElement("option");
@@ -778,6 +796,56 @@ async function loadProjects(select) {
         dom.projects.value = select;
         state.project = select;
         await openProject();
+    }
+    await drawRecents();
+}
+/** Blob URLs the recents strip is holding, so they can be given back. */
+let recentThumbnails = [];
+/**
+ * The most recently modified projects, as thumbnails.
+ *
+ * Answered from the engine's cache, which is the only reason "most recent"
+ * can be answered without opening every document to read a timestamp.
+ */
+async function drawRecents() {
+    for (const url of recentThumbnails)
+        URL.revokeObjectURL(url);
+    recentThumbnails = [];
+    dom.recents.replaceChildren();
+    const projects = await api.recentProjects(8);
+    // One project is not a list of recents, it is the project you have open.
+    dom.recents.hidden = projects.length < 2;
+    if (dom.recents.hidden)
+        return;
+    for (const project of projects) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "recent";
+        button.title = `${project.name ?? project.id} — ${project.layers} layers`;
+        // Fetched rather than pointed at, like every image here: an <img src>
+        // cannot carry the access token, and the token must never be in a URL.
+        try {
+            const url = await api.imageObjectUrl(api.thumbnailUrl(project.id));
+            recentThumbnails.push(url);
+            const image = document.createElement("img");
+            image.src = url;
+            image.alt = "";
+            button.append(image);
+        }
+        catch {
+            // A project that will not render — a missing font, say — still belongs
+            // in the list; it just has no picture.
+        }
+        const label = document.createElement("span");
+        label.textContent = project.name ?? project.id;
+        button.append(label);
+        button.addEventListener("click", () => {
+            dom.projects.value = project.id;
+            state.project = project.id;
+            state.selection = [];
+            void guard("open", openProject);
+        });
+        dom.recents.append(button);
     }
 }
 dom.shutdown.addEventListener("click", () => {

@@ -10,7 +10,9 @@
       "sha256": "sha256:bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
       "bytes": 2049096,
       "license": "OFL-1.1",
-      "packs": ["default"]
+      "packs": [
+        "default"
+      ]
     },
     {
       "name": "Noto Serif",
@@ -18,7 +20,9 @@
       "sha256": "sha256:4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
       "bytes": 1887192,
       "license": "OFL-1.1",
-      "packs": ["default"]
+      "packs": [
+        "default"
+      ]
     },
     {
       "name": "Noto Sans Mono",
@@ -26,7 +30,9 @@
       "sha256": "sha256:2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
       "bytes": 1708408,
       "license": "OFL-1.1",
-      "packs": ["default"]
+      "packs": [
+        "default"
+      ]
     },
     {
       "name": "Noto Sans Arabic",
@@ -43,6 +49,76 @@
       "bytes": 9589900,
       "license": "OFL-1.1",
       "packs": []
+    },
+    {
+      "name": "Inter",
+      "path": "ofl/inter/Inter[opsz,wght].ttf",
+      "sha256": "sha256:29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "bytes": 876576,
+      "license": "OFL-1.1",
+      "packs": [
+        "text"
+      ]
+    },
+    {
+      "name": "Roboto",
+      "path": "ofl/roboto/Roboto[wdth,wght].ttf",
+      "sha256": "sha256:d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134",
+      "bytes": 488584,
+      "license": "OFL-1.1",
+      "packs": [
+        "text"
+      ]
+    },
+    {
+      "name": "Open Sans",
+      "path": "ofl/opensans/OpenSans[wdth,wght].ttf",
+      "sha256": "sha256:36643644f318a812aab2d2ed3bb98f8cf0872527f835fe9398d95fe6b9adb878",
+      "bytes": 532636,
+      "license": "OFL-1.1",
+      "packs": [
+        "text"
+      ]
+    },
+    {
+      "name": "Montserrat",
+      "path": "ofl/montserrat/Montserrat[wght].ttf",
+      "sha256": "sha256:0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7",
+      "bytes": 744936,
+      "license": "OFL-1.1",
+      "packs": [
+        "display"
+      ]
+    },
+    {
+      "name": "Playfair Display",
+      "path": "ofl/playfairdisplay/PlayfairDisplay[wght].ttf",
+      "sha256": "sha256:c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6",
+      "bytes": 300724,
+      "license": "OFL-1.1",
+      "packs": [
+        "display"
+      ]
+    },
+    {
+      "name": "Lora",
+      "path": "ofl/lora/Lora[wght].ttf",
+      "sha256": "sha256:822a6621ccbe8d97d20ac88c1c41f5615c9c2c202eaa75f272cd452aac6475a7",
+      "bytes": 212196,
+      "license": "OFL-1.1",
+      "packs": [
+        "text"
+      ]
+    },
+    {
+      "name": "JetBrains Mono",
+      "path": "ofl/jetbrainsmono/JetBrainsMono[wght].ttf",
+      "sha256": "sha256:48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda",
+      "bytes": 187208,
+      "license": "OFL-1.1",
+      "packs": [
+        "mono"
+      ]
     }
   ]
 }

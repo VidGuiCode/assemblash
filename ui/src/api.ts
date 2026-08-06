@@ -106,9 +106,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function listProjects(): Promise<ProjectSummary[]> {
-  const body = await request<{ projects: ProjectSummary[] }>("/api/projects");
+/**
+ * The workspace's projects, optionally filtered.
+ *
+ * The filtering happens in the engine, against its cache, because a workspace
+ * of two hundred projects should not have to be sent to the page in full for
+ * the page to look through it.
+ */
+export async function listProjects(query = "", limit = 200): Promise<ProjectSummary[]> {
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  if (query) parameters.set("query", query);
+  const body = await request<{ projects: ProjectSummary[] }>(
+    `/api/projects?${parameters.toString()}`,
+  );
   return body.projects;
+}
+
+/** The most recently modified projects, newest first. */
+export async function recentProjects(limit = 8): Promise<ProjectSummary[]> {
+  const body = await request<{ projects: ProjectSummary[] }>(
+    `/api/projects/recent?limit=${limit}`,
+  );
+  return body.projects;
+}
+
+/** Where a project's small preview lives. Cached by the engine, not the page. */
+export function thumbnailUrl(project: string): string {
+  return `/api/projects/${encodeURIComponent(project)}/thumbnail.png`;
 }
 
 export async function createProject(

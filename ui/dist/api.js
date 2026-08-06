@@ -61,9 +61,28 @@ async function request(path, init) {
     }
     return (await response.json());
 }
-export async function listProjects() {
-    const body = await request("/api/projects");
+/**
+ * The workspace's projects, optionally filtered.
+ *
+ * The filtering happens in the engine, against its cache, because a workspace
+ * of two hundred projects should not have to be sent to the page in full for
+ * the page to look through it.
+ */
+export async function listProjects(query = "", limit = 200) {
+    const parameters = new URLSearchParams({ limit: String(limit) });
+    if (query)
+        parameters.set("query", query);
+    const body = await request(`/api/projects?${parameters.toString()}`);
     return body.projects;
+}
+/** The most recently modified projects, newest first. */
+export async function recentProjects(limit = 8) {
+    const body = await request(`/api/projects/recent?limit=${limit}`);
+    return body.projects;
+}
+/** Where a project's small preview lives. Cached by the engine, not the page. */
+export function thumbnailUrl(project) {
+    return `/api/projects/${encodeURIComponent(project)}/thumbnail.png`;
 }
 export async function createProject(id, width, height, background, name) {
     return request("/api/projects", {

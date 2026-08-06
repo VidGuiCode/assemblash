@@ -12,6 +12,7 @@
       <select id="projects" aria-label="Project"></select>
       <button id="new-project" type="button">New project</button>
       <button id="reload" type="button">Reload</button>
+      <input id="project-search" type="search" placeholder="Search projects" aria-label="Search projects" />
       <span class="spacer"></span>
       <span class="version-label">version <span id="version">–</span></span>
       <button id="shutdown" type="button" hidden>Stop Assemblash</button>
@@ -19,6 +20,8 @@
 
     <main>
       <section class="panel left">
+        <!-- Recently modified projects, from the engine's workspace cache. -->
+        <div id="recents" hidden></div>
         <h2>Layers</h2>
         <ul id="layers"></ul>
         <div class="buttons">

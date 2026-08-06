@@ -10,6 +10,50 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-08-06
+
+A workspace holding two hundred projects stays usable, and the bundled font
+manifest covers more than the Notos.
+
+No document-model change. `index.db` has its own schema version, and drift
+there is a rebuild rather than a migration — which is the whole point of a
+cache.
+
+### Added
+
+- **`index.db`, a cache and never a source of truth.** Delete it and nothing
+  is lost: it rebuilds by scanning `projects/`. Corruption, or a schema this
+  build does not recognise, is not an error anybody sees — it is a reason to
+  throw the file away and build it again. Absent entirely, every route falls
+  back to a directory scan and the product behaves exactly as before.
+- **Search, recents, and thumbnails in the project browser.** Searching
+  happens in the engine against the cache, so a large workspace is never sent
+  to the page for the page to look through. Thumbnails are rendered on demand
+  and cached **against the document version they were made from**, so a stale
+  thumbnail is impossible rather than merely unlikely.
+- `GET /api/projects?query=&limit=`, `GET /api/projects/recent`, and
+  `GET /api/projects/{id}/thumbnail.png`.
+- **Seven more families in the bundled font manifest** — Inter, Roboto, Open
+  Sans, Montserrat, Playfair Display, Lora, and JetBrains Mono — hash-pinned
+  at the commit the manifest already names, exactly like the Notos. Twelve
+  families in total, all OFL.
+
+### Verified
+
+- **Two hundred projects**, over a real socket: listed, searched by id and by
+  name, and thumbnailed, with the second request for a thumbnail served from
+  the cache byte for byte.
+- **Deleting `index.db` changes nothing** — the same list, the same search
+  results, and the same thumbnail bytes, both from the running server and from
+  one restarted over the rebuilt cache. If that ever stops being true, the
+  cache has become a second copy of the truth and has to come back out.
+- A corrupt file and a file from an unknown schema are both rebuilt rather
+  than reported.
+- A project written behind the server's back is still found, because the cache
+  is refreshed when a listing is asked for rather than trusted.
+- Every new font family was downloaded from the pinned commit, hashed, and
+  checked for the family name a document has to spell.
+
 ## [0.15.0] — 2026-08-06
 
 Presets: named style bundles, defined, applied, and undone like anything else.

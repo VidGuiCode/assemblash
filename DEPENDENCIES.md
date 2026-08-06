@@ -14,7 +14,7 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 ## Summary
 
-5 workspace crates, 255 third-party crates in the full dependency graph
+5 workspace crates, 266 third-party crates in the full dependency graph
 (all features, all targets).
 
 | Licence | Crates |
@@ -34,26 +34,26 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | BSD-3-Clause/MIT | 1 |
 | CDLA-Permissive-2.0 | 1 |
 | ISC | 2 |
-| MIT | 43 |
+| MIT | 47 |
 | MIT AND BSD-3-Clause | 1 |
-| MIT OR Apache-2.0 | 146 |
+| MIT OR Apache-2.0 | 149 |
 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | 2 |
 | MIT OR Apache-2.0 OR Zlib | 3 |
 | MIT OR Zlib OR Apache-2.0 | 1 |
-| MIT/Apache-2.0 | 10 |
+| MIT/Apache-2.0 | 13 |
 | Unlicense OR MIT | 2 |
-| Zlib | 1 |
+| Zlib | 2 |
 | Zlib OR Apache-2.0 OR MIT | 3 |
 
 ## This project
 
 | Crate | Version | Licence |
 | ----- | ------- | ------- |
-| assemblash-cli | 0.15.0 | Apache-2.0 |
-| assemblash-core | 0.15.0 | Apache-2.0 |
-| assemblash-mcp | 0.15.0 | Apache-2.0 |
-| assemblash-renderer | 0.15.0 | Apache-2.0 |
-| assemblash-server | 0.15.0 | Apache-2.0 |
+| assemblash-cli | 0.16.0 | Apache-2.0 |
+| assemblash-core | 0.16.0 | Apache-2.0 |
+| assemblash-mcp | 0.16.0 | Apache-2.0 |
+| assemblash-renderer | 0.16.0 | Apache-2.0 |
+| assemblash-server | 0.16.0 | Apache-2.0 |
 
 ## Dependencies
 
@@ -111,12 +111,15 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | equivalent | 1.0.2 | Apache-2.0 OR MIT |
 | errno | 0.3.14 | MIT OR Apache-2.0 |
 | euclid | 0.22.14 | MIT OR Apache-2.0 |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
 | find-msvc-tools | 0.1.9 | MIT OR Apache-2.0 |
 | flate2 | 1.1.9 | MIT OR Apache-2.0 |
 | float-cmp | 0.9.0 | MIT |
 | fnv | 1.0.7 | Apache-2.0 / MIT |
+| foldhash | 0.2.0 | Zlib |
 | font-types | 0.12.2 | MIT OR Apache-2.0 |
 | fontconfig-parser | 0.5.8 | MIT |
 | fontdb | 0.24.0 | MIT |
@@ -135,7 +138,9 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | getrandom | 0.4.3 | MIT OR Apache-2.0 |
 | gif | 0.14.2 | MIT OR Apache-2.0 |
 | harfrust | 0.12.0 | MIT |
+| hashbrown | 0.16.1 | MIT OR Apache-2.0 |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
+| hashlink | 0.11.1 | MIT OR Apache-2.0 |
 | heck | 0.5.0 | MIT OR Apache-2.0 |
 | http | 1.5.0 | MIT OR Apache-2.0 |
 | http-body | 1.1.0 | MIT |
@@ -156,6 +161,7 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | js-sys | 0.3.103 | MIT OR Apache-2.0 |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT |
 | libc | 0.2.189 | MIT OR Apache-2.0 |
+| libsqlite3-sys | 0.36.0 | MIT |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | log | 0.4.33 | MIT OR Apache-2.0 |
 | matchit | 0.8.4 | MIT AND BSD-3-Clause |
@@ -172,6 +178,7 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 |
 | pico-args | 0.5.0 | MIT |
 | pin-project-lite | 0.2.17 | Apache-2.0 OR MIT |
+| pkg-config | 0.3.33 | MIT OR Apache-2.0 |
 | png | 0.18.1 | MIT OR Apache-2.0 |
 | polycool | 0.4.0 | MIT OR Apache-2.0 |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 |
@@ -200,6 +207,8 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | rmcp-macros | 3.1.0 | Apache-2.0 |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.1 | MIT OR Apache-2.0 |
+| rsqlite-vfs | 0.1.1 | MIT |
+| rusqlite | 0.38.0 | MIT |
 | rustix | 1.1.4 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | rustls | 0.23.43 | Apache-2.0 OR ISC OR MIT |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
@@ -228,6 +237,7 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | slotmap | 1.1.1 | Zlib |
 | smallvec | 1.15.2 | MIT OR Apache-2.0 |
 | socket2 | 0.6.5 | MIT OR Apache-2.0 |
+| sqlite-wasm-rs | 0.5.5 | MIT |
 | strict-num | 0.1.1 | MIT |
 | strsim | 0.11.1 | MIT |
 | subtle | 2.6.1 | BSD-3-Clause |
@@ -270,6 +280,7 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | utf8-zero | 0.8.1 | MIT OR Apache-2.0 |
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT |
 | uuid | 1.24.0 | Apache-2.0 OR MIT |
+| vcpkg | 0.2.15 | MIT/Apache-2.0 |
 | version_check | 0.9.5 | MIT/Apache-2.0 |
 | wait-timeout | 0.2.1 | MIT/Apache-2.0 |
 | wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |

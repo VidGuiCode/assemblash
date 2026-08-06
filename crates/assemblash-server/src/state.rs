@@ -30,6 +30,12 @@ pub struct AppState {
 #[derive(Debug)]
 struct Inner {
     workspace: Workspace,
+    /// The workspace cache, when one could be opened.
+    ///
+    /// `None` is an ordinary state, not a failure: every caller falls back to
+    /// scanning the projects directory, which is what the server did before
+    /// the cache existed. A cache that can break the product is not a cache.
+    index: Option<Mutex<assemblash_core::index::Index>>,
     /// Sessions opened so far. A `BTreeMap` rather than a hash map so that
     /// anything derived from iterating it is in the same order every run.
     open: Mutex<BTreeMap<String, OpenProject>>,
@@ -38,12 +44,38 @@ struct Inner {
 impl AppState {
     /// Builds the shared state over a workspace.
     pub fn new(workspace: Workspace) -> Self {
+        // Opened once at start-up and refreshed then, so the first listing is
+        // already warm. A workspace that will not hold one simply does not
+        // get one.
+        let index = assemblash_core::index::Index::open(workspace.root()).map(|index| {
+            index.refresh(&workspace);
+            Mutex::new(index)
+        });
         Self {
             inner: Arc::new(Inner {
                 workspace,
+                index,
                 open: Mutex::new(BTreeMap::new()),
             }),
         }
+    }
+
+    /// Runs something against the cache, if there is one.
+    ///
+    /// Returns `None` when there is no cache *or* when the lock is poisoned —
+    /// both mean "answer this the slow way", which every caller can do.
+    pub fn with_index<T>(
+        &self,
+        run: impl FnOnce(&assemblash_core::index::Index) -> T,
+    ) -> Option<T> {
+        let index = self.inner.index.as_ref()?;
+        let guard = index.lock().ok()?;
+        Some(run(&guard))
+    }
+
+    /// Brings the cache up to date with the projects directory.
+    pub fn refresh_index(&self) {
+        self.with_index(|index| index.refresh(&self.inner.workspace));
     }
 
     /// The workspace.
