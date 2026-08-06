@@ -238,8 +238,6 @@ fn the_styles_command_lists_only_what_this_build_renders() {
         "overlay",
         "darken",
         "lighten",
-        "color-dodge",
-        "color-burn",
         "hard-light",
         "soft-light",
         "difference",

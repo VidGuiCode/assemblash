@@ -516,6 +516,17 @@ impl BlendMode {
     /// One list, used by the renderer, the operation layer's validation, and
     /// the interface's picker — so "what can I set" and "what will draw"
     /// cannot drift apart.
+    ///
+    /// **`color-dodge` and `color-burn` are deliberately absent.** They
+    /// rasterize, and they look right; they are not *bit-identical across
+    /// targets*, which is a different and stricter question. Both are built on
+    /// a division that saturates near zero, and the x86_64 macOS runner
+    /// produced different bytes from the other five targets for the same
+    /// document and fonts. NFR-1 — same document, same fonts, same pixels
+    /// everywhere — is the promise the rest of this engine is built on, and a
+    /// mode that quietly breaks it on one machine is worse than a mode that
+    /// says no. They round-trip like any other value and are refused when
+    /// something tries to draw them, exactly like a mode from a future build.
     pub const RENDERED: &'static [Self] = &[
         Self::Normal,
         Self::Multiply,
@@ -523,8 +534,6 @@ impl BlendMode {
         Self::Overlay,
         Self::Darken,
         Self::Lighten,
-        Self::ColorDodge,
-        Self::ColorBurn,
         Self::HardLight,
         Self::SoftLight,
         Self::Difference,
@@ -537,7 +546,7 @@ impl BlendMode {
 
     /// Whether this build composites with this mode rather than refusing it.
     pub fn is_rendered(&self) -> bool {
-        !matches!(self, Self::Other(_))
+        Self::RENDERED.contains(self)
     }
 
     /// Whether this mode needs a `mix-blend-mode` in the output at all.

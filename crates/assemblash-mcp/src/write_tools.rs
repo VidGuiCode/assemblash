@@ -154,10 +154,11 @@ pub struct UpdateArgs {
     #[serde(default)]
     pub fit: Option<ImageFit>,
     /// How the layer composites onto what is beneath it: normal, multiply,
-    /// screen, overlay, darken, lighten, color-dodge, color-burn, hard-light,
-    /// soft-light, difference, exclusion, hue, saturation, color, luminosity.
-    /// A mode this build does not render is refused rather than drawn as
-    /// normal.
+    /// screen, overlay, darken, lighten, hard-light, soft-light, difference,
+    /// exclusion, hue, saturation, color, luminosity. A mode this build does
+    /// not render — including color-dodge and color-burn, which are not
+    /// reproducible byte for byte on every target — is refused rather than
+    /// drawn as normal.
     #[serde(default)]
     pub blend_mode: Option<BlendMode>,
     /// The whole effect stack, in order, replacing whatever is there:

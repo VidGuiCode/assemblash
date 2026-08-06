@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use assemblash_core::document::{
-    BlendMode, Effect, GroupLayer, ImageFit, Layer, LayerKind, TextAlign, Transform,
+    Effect, GroupLayer, ImageFit, Layer, LayerKind, TextAlign, Transform,
 };
 use assemblash_core::ids::AssetId;
 use assemblash_core::{validate, Color, Document};
@@ -245,14 +245,18 @@ fn write_layer(
 /// value, but drawing something else would be a picture that looks right and
 /// is not.
 fn blend_attribute(layer: &Layer) -> Result<String, RenderError> {
-    match &layer.blend_mode {
-        BlendMode::Other(mode) => Err(RenderError::UnsupportedBlendMode {
+    let mode = &layer.blend_mode;
+    if !mode.is_rendered() {
+        return Err(RenderError::UnsupportedBlendMode {
             layer: layer.id.clone(),
-            mode: mode.clone(),
-        }),
-        mode if mode.is_default() => Ok(String::new()),
-        mode => Ok(format!(" style=\"mix-blend-mode:{}\"", mode.as_str())),
+            mode: mode.as_str().to_owned(),
+        });
     }
+    Ok(if mode.is_default() {
+        String::new()
+    } else {
+        format!(" style=\"mix-blend-mode:{}\"", mode.as_str())
+    })
 }
 
 /// The id of a layer's filter, and the attribute that references it.
@@ -425,10 +429,10 @@ fn grain(out: &mut String, input: &str, result: &str, amount: f64, seed: u32, sc
 /// more than one level by accident.
 fn group_style(layer: &Layer, group: &GroupLayer) -> Result<String, RenderError> {
     let mut parts = Vec::new();
-    if let BlendMode::Other(mode) = &layer.blend_mode {
+    if !layer.blend_mode.is_rendered() {
         return Err(RenderError::UnsupportedBlendMode {
             layer: layer.id.clone(),
-            mode: mode.clone(),
+            mode: layer.blend_mode.as_str().to_owned(),
         });
     }
     if !layer.blend_mode.is_default() {

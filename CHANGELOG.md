@@ -31,9 +31,9 @@ written here loads there with its effects preserved verbatim.
   same document produces the same noise on every machine and in every render.
   A renderer that promises byte-identical output cannot have noise any other
   way.
-- **The remaining blend modes**: overlay, darken, lighten, color-dodge,
-  color-burn, hard-light, soft-light, difference, exclusion, hue, saturation,
-  color, and luminosity, joining normal, multiply, and screen.
+- **The remaining reproducible blend modes**: overlay, darken, lighten,
+  hard-light, soft-light, difference, exclusion, hue, saturation, color, and
+  luminosity, joining normal, multiply, and screen — fourteen in all.
 - `assemblash style` sets a layer's blend mode and effect stack;
   `assemblash styles` lists what this build actually renders. The same fields
   are on `update_layer` over MCP and on the operation endpoint over HTTP, and
@@ -49,9 +49,24 @@ written here loads there with its effects preserved verbatim.
   cannot get into a document through this build at all. The same rule applies
   to an effect type this build does not know.
 
+### Not shipped, and why
+
+- **`color-dodge` and `color-burn` are refused, not rendered.** They
+  rasterize, and they look right. They are not *bit-identical across targets*:
+  with the same document and the same fonts, the x86_64 macOS runner produced
+  different bytes from the other five. Both are built on a division that
+  saturates near zero, which is precisely where a machine's dispatch can
+  change the arithmetic. NFR-1 — same document, same fonts, same pixels on
+  every target — is what the rest of this engine rests on, including the
+  content hashes a variants batch is checked by, so a mode that quietly breaks
+  it on one machine is worse than a mode that says no. Both still round-trip
+  through a document untouched, and both refuse with the same typed error as a
+  mode from a future build. This was found by CI, not reasoned about: the
+  golden set is now one document per mode so a disagreement names the mode.
+
 ### Verified
 
-- **Every one of the sixteen blend modes composites**, checked against the
+- **Every one of the fourteen blend modes composites**, checked against the
   actual pixels of a two-square overlap rather than against the markup.
 - **Each effect does what its name says**, in sRGB: brightness 1.5 takes
   (64, 128, 192) to (96, 192, 255), contrast 0 is flat mid grey, saturation 0
@@ -65,9 +80,10 @@ written here loads there with its effects preserved verbatim.
   document and the render byte for byte** — run through the binary.
 - Styling a protected layer is refused by the same check that refuses every
   other mutation, because it is an ordinary `update`.
-- **Cross-target determinism**: new golden documents covering all sixteen
-  modes and every effect are in the gate, so CI compares hashes on Windows,
-  Linux, and macOS across x86_64 and ARM64.
+- **Cross-target determinism**: a golden document per rendered mode, plus one
+  covering every effect, are in the gate — so CI compares hashes on Windows,
+  Linux, and macOS across x86_64 and ARM64, and every mode this release claims
+  has been shown to produce identical bytes on all six.
 - **No existing golden moved.** The additions to `goldens.json` are additions
   only: nothing about how existing documents render changed.
 

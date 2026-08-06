@@ -268,9 +268,11 @@ export type Effect = NonNullable<Layer["effects"]>[number] & {
 /**
  * The blend modes this build renders.
  *
- * Listed here so the inspector cannot offer one the engine would refuse. A
- * document may still carry a mode written by a newer build; that is shown as
- * itself rather than replaced.
+ * Listed here so the inspector cannot offer one the engine would refuse.
+ * `color-dodge` and `color-burn` are missing on purpose: they rasterize, but
+ * not to the same bytes on every target, and this engine only draws what it
+ * can reproduce. A document may still carry either of those, or a mode from a
+ * newer build; it is shown as itself rather than replaced.
  */
 export const BLEND_MODES = [
   "normal",
@@ -279,8 +281,6 @@ export const BLEND_MODES = [
   "overlay",
   "darken",
   "lighten",
-  "color-dodge",
-  "color-burn",
   "hard-light",
   "soft-light",
   "difference",

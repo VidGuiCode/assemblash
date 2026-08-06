@@ -250,7 +250,7 @@ fn blend_modes_reach_the_output() {
         BlendMode::Normal,
         BlendMode::Multiply,
         BlendMode::Overlay,
-        BlendMode::ColorDodge,
+        BlendMode::Difference,
     ]
     .into_iter()
     .enumerate()
@@ -268,7 +268,7 @@ fn blend_modes_reach_the_output() {
     // `normal` is the default everywhere, so emitting it would only make the
     // output longer.
     assert_eq!(svg.matches("mix-blend-mode").count(), 3, "{svg}");
-    assert!(svg.contains("mix-blend-mode:color-dodge"), "{svg}");
+    assert!(svg.contains("mix-blend-mode:difference"), "{svg}");
     assert_snapshot("blend_modes", &svg);
 }
 

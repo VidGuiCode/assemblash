@@ -326,12 +326,6 @@ fn every_named_blend_mode_composites_and_the_rest_are_refused() {
         (BlendMode::Darken, [0, 0, 0]),
         // Channel-wise maximum: red's R and blue's B.
         (BlendMode::Lighten, [255, 0, 255]),
-        // Dodge: R is 1/(1-0) clamped to 1; the other channels have a zero
-        // backdrop, which dodge leaves at zero.
-        (BlendMode::ColorDodge, [255, 0, 0]),
-        // Burn: a backdrop of 1 stays 1, and a zero backdrop burns to 0
-        // whatever the source is — so this pair gives back the red.
-        (BlendMode::ColorBurn, [255, 0, 0]),
         // Hard-light tests the source instead: blue is 1 in B, 0 elsewhere.
         (BlendMode::HardLight, [0, 0, 255]),
         (BlendMode::SoftLight, [255, 0, 0]),
@@ -393,6 +387,22 @@ fn a_blend_mode_this_build_cannot_draw_is_refused() {
     };
     assert_eq!(layer.as_str(), "layer_2");
     assert_eq!(mode, "plusDarker");
+
+    // `color-dodge` and `color-burn` are named by the document model — they
+    // round-trip, and a document may carry them — but they are refused for
+    // the same reason: they are not bit-identical across targets, and a mode
+    // that renders differently on one machine breaks the promise the whole
+    // engine rests on (NFR-1). See `BlendMode::RENDERED`.
+    for undrawable in [BlendMode::ColorDodge, BlendMode::ColorBurn] {
+        let (doc, hrefs) = blend_document(undrawable.clone());
+        let error = document_to_png(&doc, &fonts, &hrefs, 1.0, &PngMetadata::for_document(&doc))
+            .expect_err("a mode that is not reproducible must not render");
+        assert!(
+            matches!(&error, RenderError::UnsupportedBlendMode { mode, .. }
+                if mode == undrawable.as_str()),
+            "{error:?}"
+        );
+    }
 
     // And the document itself is untouched by the refusal: the mode is still
     // there to be written back out.

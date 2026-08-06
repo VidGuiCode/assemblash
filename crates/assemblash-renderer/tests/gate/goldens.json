@@ -1,10 +1,6 @@
 {
   "arabic.pixels": "sha256:38494ef3dda725b7272715a8ce0e0d54cc6b03ab4dc2710e04e646318f212534",
   "arabic.png": "sha256:d4ee79bbbe3d338fb4e0e2dcf98d51a312a662f6b97352548df6728bda48d136",
-  "blend-color-burn.pixels": "sha256:613314e741d76cdef57a0f11a29cfc6be3db832f9ac258bc3ef5a7f096a4c412",
-  "blend-color-burn.png": "sha256:b4baaa03f2adf17306fa45845dc0582804d7bc1c87eb589a428ca2c03a3fa967",
-  "blend-color-dodge.pixels": "sha256:781faf7bee44bd86a1b782e6eb7a6257d7da379d9ea60f3bfd56b64fe58f33a9",
-  "blend-color-dodge.png": "sha256:3843acae644ec0a60f041b3454a151f55e138451fe315037687410e7eed20b90",
   "blend-color.pixels": "sha256:b4b6777b82371297caa27ccb57388cdfd4caa8d26ccd0276d3e6f8f6e1ec8e7b",
   "blend-color.png": "sha256:dd44a146b785e46737683ffd6bcf6628f9384e886690c9958e74907b2584d83c",
   "blend-darken.pixels": "sha256:a85eeb3f56fe456bccffa04dc462b10ef32384780a8de4351748d1b0a62437dd",
