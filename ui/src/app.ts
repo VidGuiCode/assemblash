@@ -17,6 +17,7 @@
 
 import * as api from "./api.js";
 import type { Document, Layer, Operation } from "./api.js";
+import { mountTemplates } from "./templates.js";
 
 interface State {
   project: string | null;
@@ -95,6 +96,18 @@ async function guard(what: string, run: () => Promise<void>): Promise<void> {
     state.busy = false;
   }
 }
+
+/**
+ * The template panel, which is a client of this page exactly as this page is
+ * a client of the engine: it is handed what it needs and owns nothing else.
+ */
+const templates = mountTemplates({
+  project: () => state.project,
+  document: () => state.document,
+  say,
+  guard,
+  refresh: () => refresh(),
+});
 
 function selectedLayer(): Layer | null {
   if (!state.document || state.selection.length !== 1) return null;
@@ -476,8 +489,16 @@ window.addEventListener("pointerup", (event) => {
 dom.projects.addEventListener("change", () => {
   state.project = dom.projects.value || null;
   state.selection = [];
-  void guard("open", refresh);
+  void guard("open", openProject);
 });
+
+/** Reads a newly opened project, and asks the template panel what it offers. */
+async function openProject(): Promise<void> {
+  await refresh();
+  // After the document, because the panel's image fields are built from the
+  // assets the document lists.
+  await templates.projectChanged();
+}
 
 dom.reload.addEventListener("click", () => void guard("reload", refresh));
 
@@ -660,7 +681,7 @@ async function loadProjects(select?: string): Promise<void> {
   if (select) {
     dom.projects.value = select;
     state.project = select;
-    await refresh();
+    await openProject();
   }
 }
 

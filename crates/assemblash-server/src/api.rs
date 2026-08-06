@@ -65,6 +65,7 @@ pub fn router(
         .route("/api/projects/{id}/preview.png", get(preview))
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
         .route("/api/projects/{id}/export", post(export_document))
+        .route("/api/projects/{id}/exports/{file}", get(get_export))
         .route("/api/projects/{id}/slots", get(get_slots))
         .route("/api/projects/{id}/variants", post(render_variants))
         // Layers last: `layer` applies to the routes added before it, so
@@ -689,6 +690,49 @@ async fn export_document(
     )?))
 }
 
+/// Reads back a PNG the engine wrote into a project's `exports/`.
+///
+/// Needed because a batch of variants leaves its results on disk and the page
+/// has no other way to show what it just made. The caller supplies a *file
+/// name*, never a path: the stem goes through the same [`render::safe_stem`]
+/// that named it in the first place, and the extension is not the caller's to
+/// choose. So the only files reachable here are ones this engine wrote, in the
+/// one directory it writes them to (PRD §10.1, FR-13).
+async fn get_export(
+    State(state): State<AppState>,
+    Path((id, file)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let stem = file.strip_suffix(".png").ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalidExportName",
+            format!("{file:?} is not a PNG this engine writes"),
+        )
+    })?;
+    let stem = render::safe_stem(stem)?;
+
+    let directory = project_directory(&state, id)?;
+    let path = directory
+        .join(render::EXPORTS_DIR)
+        .join(format!("{stem}.png"));
+    let bytes = std::fs::read(&path).map_err(|_| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "noSuchExport",
+            format!("this project has no export named {stem:?}"),
+        )
+    })?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            // An export is rewritten in place under the same name, so a cached
+            // copy would show the previous batch's picture.
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        bytes,
+    ))
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SlotsResponse {
@@ -737,6 +781,17 @@ async fn render_variants(
         request.scale,
         &request.variants,
     )?))
+}
+
+/// A project's directory, with the lock held only long enough to find it.
+///
+/// Going through the session rather than joining a path onto the workspace is
+/// what keeps the project id validated in one place.
+fn project_directory(state: &AppState, id: String) -> Result<std::path::PathBuf, ApiError> {
+    let id = ProjectId::new(id)?;
+    let project = state.project(&id, now_millis())?;
+    let session = lock_project(&project)?;
+    Ok(session.project_dir().to_path_buf())
 }
 
 /// The document and its directory, with the lock held only for the read.

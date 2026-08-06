@@ -539,6 +539,155 @@ fn rendering_needs_a_font_the_store_actually_has() {
     assert_eq!(again.body, response.body);
 }
 
+/// Writes a template project straight onto disk, before the server opens it.
+///
+/// `slots` is a document field with no operation that sets it — a template is
+/// authored by writing one — so this is how a template gets into a workspace
+/// in a test as well as in life.
+fn write_template(harness: &Harness, id: &str, family: &str) {
+    use assemblash_core::document::{Extras, TextAlign, TextLayer, Transform};
+    use assemblash_core::{Color, Document, Layer, LayerId, SequentialIdSource, Slot, SlotKind};
+
+    let directory = harness.root().join(PROJECTS_DIR).join(id);
+    std::fs::create_dir_all(&directory).unwrap();
+
+    let mut document = Document::new(&mut SequentialIdSource::new(), 400.0, 200.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    document.layers.push(Layer::new(
+        LayerId::new("layer_headline"),
+        Transform::new(10.0, 10.0, 380.0, 80.0),
+        assemblash_core::LayerKind::Text(TextLayer {
+            text: "placeholder".to_owned(),
+            font_family: family.to_owned(),
+            font_size: 32.0,
+            color: Color::new("#101820"),
+            align: TextAlign::Left,
+            line_height: 1.2,
+            runs: Vec::new(),
+            extra: Extras::new(),
+        }),
+    ));
+    document.slots = vec![Slot {
+        name: "headline".to_owned(),
+        layer: LayerId::new("layer_headline"),
+        kind: SlotKind::Text,
+        description: Some("The big line".to_owned()),
+        required: true,
+        extra: Extras::new(),
+    }];
+
+    // Dropped straight away: holding the session would keep the lock the
+    // server needs when it opens the project itself.
+    drop(assemblash_core::Session::create(&directory, document, None).unwrap());
+}
+
+fn install_test_font(harness: &Harness) {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../assemblash-renderer/tests/fonts/NotoSans-Subset.ttf");
+    let mut store =
+        assemblash_renderer::store::FontStore::open(harness.root().join(FONTS_DIR)).unwrap();
+    store
+        .import_file(&fixture, None, Some("OFL-1.1".into()))
+        .unwrap();
+}
+
+#[test]
+fn a_variant_batch_is_readable_back_and_repeatable() {
+    // What the interface's gallery needs: render a batch, then fetch each
+    // produced PNG. The bytes it gets must be the bytes the batch hashed,
+    // or a gallery would be showing something other than what was made.
+    let harness = Harness::start();
+    install_test_font(&harness);
+    write_template(&harness, "flyer", "Noto Sans");
+
+    let slots = http::get(&harness.url("/api/projects/flyer/slots")).json();
+    assert_eq!(slots["isTemplate"], true);
+    assert_eq!(slots["slots"][0]["name"], "headline");
+    assert_eq!(slots["slots"][0]["required"], true);
+
+    let request = json!({
+        "scale": 1.0,
+        "variants": [
+            { "name": "one", "values": { "headline": "First" } },
+            { "name": "two", "values": { "headline": "Second" } }
+        ]
+    });
+    let response = http::post_json(&harness.url("/api/projects/flyer/variants"), &request);
+    assert_eq!(response.status, 200, "{}", response.json());
+    let batch = response.json();
+    let variants = batch["variants"].as_array().unwrap().clone();
+    assert_eq!(variants.len(), 2);
+
+    for variant in &variants {
+        let name = variant["name"].as_str().unwrap();
+        let png = http::get(&harness.url(&format!("/api/projects/flyer/exports/{name}.png")));
+        assert_eq!(png.status, 200, "{name}");
+        assert_eq!(&png.body[1..4], b"PNG", "{name}");
+        assert_eq!(
+            assemblash_core::storage::hash_bytes(&png.body),
+            variant["hash"].as_str().unwrap(),
+            "what was served is not what the batch reported for {name}"
+        );
+        assert_eq!(png.body.len(), variant["bytes"].as_u64().unwrap() as usize);
+    }
+
+    // Two different values must not produce the same picture, or the test
+    // above would pass on a batch that ignored its input.
+    assert_ne!(variants[0]["hash"], variants[1]["hash"]);
+
+    // The same values again produce the same hashes: a batch is as
+    // reproducible as a single render (NFR-3).
+    let again = http::post_json(&harness.url("/api/projects/flyer/variants"), &request).json();
+    assert_eq!(again["variants"], batch["variants"]);
+
+    // And the template itself was not touched.
+    let document = http::get(&harness.url("/api/projects/flyer/document")).json();
+    assert_eq!(document["layers"][0]["text"], "placeholder");
+    assert_eq!(document["version"], 0);
+}
+
+#[test]
+fn an_export_name_never_becomes_a_path() {
+    let harness = Harness::start();
+    install_test_font(&harness);
+    write_template(&harness, "flyer", "Noto Sans");
+    http::post_json(
+        &harness.url("/api/projects/flyer/variants"),
+        &json!({ "variants": [{ "name": "one", "values": { "headline": "First" } }] }),
+    );
+
+    // A name that is not a plain stem plus `.png` is refused before anything
+    // reads the filesystem — the same rule that named the file in the first
+    // place (PRD §10.1).
+    for hostile in [
+        "..%2F..%2Fdocument.json",
+        "..%2Fdocument.json",
+        "document.json",
+        "one",
+        "one.png.png",
+        "%2E%2E.png",
+        "%2Fetc%2Fpasswd.png",
+        "C%3A%5CWindows%5Cwin.ini.png",
+    ] {
+        let response = http::get(&harness.url(&format!("/api/projects/flyer/exports/{hostile}")));
+        assert!(
+            matches!(response.status, 400 | 404 | 301 | 405),
+            "{hostile} returned {}: {}",
+            response.status,
+            String::from_utf8_lossy(&response.body)
+        );
+        if response.status == 400 {
+            assert_eq!(error_code(&response), "invalidExportName", "{hostile}");
+        }
+    }
+
+    // A well-formed name for something that was never rendered is a plain
+    // not-found, not an error about the shape of the request.
+    let missing = http::get(&harness.url("/api/projects/flyer/exports/never-made.png"));
+    assert_eq!(missing.status, 404);
+    assert_eq!(error_code(&missing), "noSuchExport");
+}
+
 #[test]
 fn refused_operations_and_bad_requests_are_typed() {
     let harness = Harness::start();

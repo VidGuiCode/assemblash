@@ -15,6 +15,7 @@
 // Selection lives here and only here (amended FR-7). Every edit is an
 // Operation sent to the one endpoint, carrying the version the UI last read.
 import * as api from "./api.js";
+import { mountTemplates } from "./templates.js";
 const state = {
     project: null,
     document: null,
@@ -77,6 +78,17 @@ async function guard(what, run) {
         state.busy = false;
     }
 }
+/**
+ * The template panel, which is a client of this page exactly as this page is
+ * a client of the engine: it is handed what it needs and owns nothing else.
+ */
+const templates = mountTemplates({
+    project: () => state.project,
+    document: () => state.document,
+    say,
+    guard,
+    refresh: () => refresh(),
+});
 function selectedLayer() {
     if (!state.document || state.selection.length !== 1)
         return null;
@@ -411,8 +423,15 @@ window.addEventListener("pointerup", (event) => {
 dom.projects.addEventListener("change", () => {
     state.project = dom.projects.value || null;
     state.selection = [];
-    void guard("open", refresh);
+    void guard("open", openProject);
 });
+/** Reads a newly opened project, and asks the template panel what it offers. */
+async function openProject() {
+    await refresh();
+    // After the document, because the panel's image fields are built from the
+    // assets the document lists.
+    await templates.projectChanged();
+}
 dom.reload.addEventListener("click", () => void guard("reload", refresh));
 dom.newProject.addEventListener("click", () => {
     const id = window.prompt("Project name (letters, digits, spaces, hyphens):");
@@ -581,7 +600,7 @@ async function loadProjects(select) {
     if (select) {
         dom.projects.value = select;
         state.project = select;
-        await refresh();
+        await openProject();
     }
 }
 dom.shutdown.addEventListener("click", () => {

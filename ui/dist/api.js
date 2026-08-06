@@ -166,6 +166,33 @@ export async function uploadAsset(project, file) {
     }
     return (await response.json());
 }
+export async function getSlots(project) {
+    return request(`/api/projects/${encodeURIComponent(project)}/slots`);
+}
+/**
+ * Renders a template once per set of values.
+ *
+ * The same endpoint the CLI's `assemblash variants` reaches through the same
+ * function, so a batch made here and a batch made there produce the same
+ * bytes — and therefore the same hashes — for the same values. The template
+ * is not modified: each variant is filled on a copy.
+ */
+export async function renderVariants(project, variants, scale = 1) {
+    return request(`/api/projects/${encodeURIComponent(project)}/variants`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ variants, scale }),
+    });
+}
+/**
+ * Where a PNG the engine exported can be read back.
+ *
+ * A file name, never a path: the server validates the stem with the same rule
+ * that produced it, so this cannot address anything the engine did not write.
+ */
+export function exportUrl(project, name) {
+    return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.png`;
+}
 export async function fonts() {
     const body = await request("/api/fonts");
     return body.families;

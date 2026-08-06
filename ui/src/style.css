@@ -290,6 +290,124 @@ a {
   font-weight: 600;
 }
 
+/* The template strip, across the bottom: filling on the left, the batch in
+ * the middle, and what came out on the right. Present only for a project that
+ * declares slots. */
+.templates {
+  display: grid;
+  grid-template-columns: 260px 1fr 1fr;
+  gap: 16px;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.templates[hidden] {
+  display: none;
+}
+
+.field.slot {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.slot-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.slot-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.field.slot select {
+  max-width: 150px;
+}
+
+button.small {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+#variant-name {
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+#variant-rows {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 22vh;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+#variant-rows li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.variant-name {
+  font-weight: 600;
+}
+
+.variant-values {
+  flex: 1;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+figure.variant {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 6px;
+  background: var(--paper);
+}
+
+figure.variant img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #ffffff;
+}
+
+figure.variant figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+figure.variant code {
+  font-size: 10px;
+  word-break: break-all;
+}
+
+figure.variant a {
+  align-self: flex-start;
+}
+
 /* The token hand-off page: one field, and an explanation of what the token
  * is and is not. */
 body.login {
@@ -352,6 +470,10 @@ body.stopped main {
   main {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr auto;
+  }
+
+  .templates {
+    grid-template-columns: 1fr;
   }
 
   .panel.left,

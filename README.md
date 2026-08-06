@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** Pre-alpha — v0.10.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
+**Status:** Pre-alpha — v0.13.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -219,7 +219,7 @@ The dependency graph must be rechecked against this license once an implementati
 
 ## Current project status
 
-**v0.10.0.** What exists and has been run:
+**v0.13.0.** What exists and has been run:
 
 1. **Documents** — canvas, assets, and a nested tree of text, image, SVG, and group layers, saved as `document.json` plus `assets/`. Unknown fields survive a load-and-save cycle. Hand-editing the file is supported.
 2. **Operations** — thirteen typed operations (create, update, delete, duplicate, move, resize, rotate, reorder, group, ungroup, show/hide, lock/unlock, rename), each validated and applied transactionally: a refused operation leaves the document exactly as it was.
@@ -232,7 +232,7 @@ The dependency graph must be rechecked against this license once an implementati
 
 9. **MCP server** — `assemblash mcp`, over stdio, on the official Rust SDK. Seven read tools let an agent list projects, read a document, list and inspect layers, validate, read the history, and get a rendered PNG preview. Twenty mutating tools cover the layer and layout operations, undo and redo, and export — each with a dry run, an optional expected version, protected-layer checks, and a transaction id it can be undone by.
 
-10. **Reference interface** — served at `/` by `assemblash serve`, embedded in the binary. Project browser, canvas, layer tree, inspector, insert, drag to move and resize, undo and redo, history, and export. No canvas library: the canvas is the engine's own render with DOM handles over it, so what you see is byte-for-byte what you export.
+10. **Reference interface** — served at `/` by `assemblash serve`, embedded in the binary. Project browser, canvas, layer tree, inspector, insert, drag to move and resize, undo and redo, history, export, and — for a project that declares slots — a template panel that fills slots and renders a batch of variants into a gallery. No canvas library: the canvas is the engine's own render with DOM handles over it, so what you see is byte-for-byte what you export.
 
 11. **Packaging** — binaries for Windows, Linux, and macOS on x86_64 and ARM64; a 7 MB `scratch` Docker image; and friendly mode: launching the binary with no arguments creates the workspace, serves, opens a browser, and can be stopped from the page. A second launch opens the one already running.
 
@@ -249,7 +249,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.12.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.13.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:

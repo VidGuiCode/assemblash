@@ -5,11 +5,11 @@
 // has no second idea of what a document is, and no code path that edits one
 // locally and syncs later (PRD §7.2).
 
-import type { Document } from "../../schema/document.js";
+import type { Document, Slot } from "../../schema/document.js";
 import type { Operation } from "../../schema/operation.js";
 import { goToLogin, withToken } from "./token.js";
 
-export type { Document, Operation };
+export type { Document, Operation, Slot };
 
 /** A layer, as the document model defines it.
  *
@@ -257,6 +257,73 @@ export async function uploadAsset(
     throw new ApiError(code, message, null);
   }
   return (await response.json()) as { asset: { id: string }; version: number };
+}
+
+/** What a template offers to be filled. */
+export interface SlotList {
+  isTemplate: boolean;
+  slots: Slot[];
+}
+
+/** One variant asked for: a file-name stem and the values that make it. */
+export interface Variant {
+  name: string;
+  values: Record<string, string>;
+}
+
+/** One variant produced. */
+export interface RenderedVariant {
+  name: string;
+  path: string;
+  bytes: number;
+  width: number;
+  height: number;
+  /** `sha256:<hex>` of the PNG — the same hash the CLI prints. */
+  hash: string;
+}
+
+/** A batch, and the template it came from. */
+export interface RenderedVariants {
+  template: string;
+  templateVersion: number;
+  variants: RenderedVariant[];
+}
+
+export async function getSlots(project: string): Promise<SlotList> {
+  return request<SlotList>(`/api/projects/${encodeURIComponent(project)}/slots`);
+}
+
+/**
+ * Renders a template once per set of values.
+ *
+ * The same endpoint the CLI's `assemblash variants` reaches through the same
+ * function, so a batch made here and a batch made there produce the same
+ * bytes — and therefore the same hashes — for the same values. The template
+ * is not modified: each variant is filled on a copy.
+ */
+export async function renderVariants(
+  project: string,
+  variants: Variant[],
+  scale = 1,
+): Promise<RenderedVariants> {
+  return request<RenderedVariants>(
+    `/api/projects/${encodeURIComponent(project)}/variants`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ variants, scale }),
+    },
+  );
+}
+
+/**
+ * Where a PNG the engine exported can be read back.
+ *
+ * A file name, never a path: the server validates the stem with the same rule
+ * that produced it, so this cannot address anything the engine did not write.
+ */
+export function exportUrl(project: string, name: string): string {
+  return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.png`;
 }
 
 export async function fonts(): Promise<string[]> {

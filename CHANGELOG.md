@@ -10,6 +10,49 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-08-06
+
+Templates in the interface: the one thing 0.12.0 shipped that the page could
+not do. Filling a template and rendering a batch of variants are now available
+everywhere — command line, HTTP, MCP, and the browser.
+
+Document `schemaVersion`: **1 (unchanged)**. Nothing in the document model
+changed; `slots` shipped in 0.12.0.
+
+### Added
+
+- **A template panel in the reference interface**, shown only for a project
+  that declares slots. The form is generated from the slot definitions the
+  engine reports: text slots get a text field, colour slots a colour picker,
+  and image slots a list of the project's own assets plus an import button.
+  Required slots are marked and a slot's description is its help text.
+- **Preview and batch from the page.** Preview renders one filled result;
+  the batch renders many, from rows built in the form or from a values file —
+  the same JSON file `assemblash variants --values` takes, so a batch that
+  works at the command line works in the page.
+- **A gallery** of the produced PNGs, each with its size, byte count, content
+  hash, and a download link.
+- **`GET /api/projects/{id}/exports/{file}.png`** — reads back a PNG the
+  engine wrote into a project's `exports/`. The caller supplies a file name,
+  never a path: the stem goes through the same check that named it, so the
+  only files reachable are ones this engine wrote, in the one directory it
+  writes them to.
+
+### Verified
+
+- **The command line and the HTTP API render identical variants**, hash for
+  hash, in an automated test that runs both as real processes: `assemblash
+  variants` and `assemblash serve` on the same project, fonts, and values.
+- **In a real browser against the released artifact**: a template chosen from
+  the project list, slots filled, a batch rendered, and the gallery's hashes
+  compared with what `assemblash variants` printed for the same values — the
+  same hashes, variant for variant.
+- What the gallery shows is what the batch made: the bytes served for each
+  variant hash to the value the batch reported, not to a re-render that
+  merely resembles it.
+- A required slot left empty is refused in the engine's own words, and the
+  panel is hidden entirely for a project that is not a template.
+
 ## [0.12.0] — 2026-08-05
 
 Templates with named slots — PRD use case C, one of the product's primary use
