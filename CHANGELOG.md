@@ -10,6 +10,67 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-08-06
+
+A non-destructive effect stack, and the rest of the CSS blend modes. Every
+mode and effect named here was checked against the pixels it produces before
+it was claimed.
+
+Document `schemaVersion`: **1 (unchanged)**. Both changes are additive —
+`blendMode` gains enum values and `effects`, reserved since schema version 1,
+gains a shape. A document written by 0.13.0 loads here unchanged, and one
+written here loads there with its effects preserved verbatim.
+
+### Added
+
+- **Effects, per layer, never baked**: `brightness`, `contrast`,
+  `saturation`, `blur`, and `grain`, applied in the order they are listed. The
+  document keeps the numbers and the pixels are derived from them every
+  render, so an effect is as reversible as any other property.
+- **Grain is seeded** — the seed lives in the document, not in the run, so the
+  same document produces the same noise on every machine and in every render.
+  A renderer that promises byte-identical output cannot have noise any other
+  way.
+- **The remaining blend modes**: overlay, darken, lighten, color-dodge,
+  color-burn, hard-light, soft-light, difference, exclusion, hue, saturation,
+  color, and luminosity, joining normal, multiply, and screen.
+- `assemblash style` sets a layer's blend mode and effect stack;
+  `assemblash styles` lists what this build actually renders. The same fields
+  are on `update_layer` over MCP and on the operation endpoint over HTTP, and
+  the interface's inspector has a blend picker and effect rows.
+
+### Changed
+
+- **A blend mode this build does not render is now refused rather than drawn
+  as `normal`.** Before 0.14.0 an unrecognised mode was quietly composited
+  normally; a picture that silently ignores what it was told to do is worse
+  than no picture. The document still keeps the value — that round trip is
+  unchanged — and setting one through an operation is refused up front, so it
+  cannot get into a document through this build at all. The same rule applies
+  to an effect type this build does not know.
+
+### Verified
+
+- **Every one of the sixteen blend modes composites**, checked against the
+  actual pixels of a two-square overlap rather than against the markup.
+- **Each effect does what its name says**, in sRGB: brightness 1.5 takes
+  (64, 128, 192) to (96, 192, 255), contrast 0 is flat mid grey, saturation 0
+  is grey. **Every effect's neutral value changes nothing**, so turning one
+  down to zero is the same as not having it.
+- **Order matters and is respected**: brightening then desaturating is a
+  different picture from desaturating then brightening.
+- **Grain is repeatable and seed-dependent**, lightens as well as darkens, and
+  cannot paint outside the layer it grains.
+- **Setting a stack is one journalled update, and undo restores both the
+  document and the render byte for byte** — run through the binary.
+- Styling a protected layer is refused by the same check that refuses every
+  other mutation, because it is an ordinary `update`.
+- **Cross-target determinism**: new golden documents covering all sixteen
+  modes and every effect are in the gate, so CI compares hashes on Windows,
+  Linux, and macOS across x86_64 and ARM64.
+- **No existing golden moved.** The additions to `goldens.json` are additions
+  only: nothing about how existing documents render changed.
+
 ## [0.13.0] — 2026-08-06
 
 Templates in the interface: the one thing 0.12.0 shipped that the page could

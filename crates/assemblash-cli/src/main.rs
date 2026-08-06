@@ -354,6 +354,44 @@ enum Command {
         /// Project directory.
         project: PathBuf,
     },
+
+    /// Sets a layer's blend mode and effect stack.
+    ///
+    /// Both are ordinary properties of a layer, so this is one `update`
+    /// operation: journalled, undoable, refused on a protected layer, and
+    /// checked against the same version you read.
+    ///
+    /// Effects are given as JSON, the same shape the document stores and the
+    /// API takes — a list, applied in order, because a blurred thing
+    /// desaturated is not a desaturated thing blurred.
+    Style {
+        /// Project directory.
+        project: PathBuf,
+        /// The layer to restyle.
+        #[arg(long)]
+        layer: String,
+        /// How it composites onto what is beneath it.
+        #[arg(long)]
+        blend: Option<String>,
+        /// The whole effect stack, as JSON:
+        /// `[{"type":"blur","radius":3}]`. `[]` clears it.
+        #[arg(long)]
+        effects: Option<String>,
+        /// Read the effect stack from a JSON file instead.
+        #[arg(long, conflicts_with = "effects")]
+        effects_file: Option<PathBuf>,
+        /// Restyle a locked layer.
+        #[arg(long)]
+        allow_locked: bool,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Lists the blend modes and effects this build renders.
+    ///
+    /// The list comes from the engine rather than from documentation, so it
+    /// cannot describe a mode that does not draw.
+    Styles,
 }
 
 /// The font store: a directory of hash-pinned font files.
@@ -1156,6 +1194,76 @@ fn run(command: Command) -> Result<(), CliError> {
         Command::Workspace { workspace } => {
             let workspace = open_workspace(workspace)?;
             println!("{}", workspace.root().display());
+            Ok(())
+        }
+
+        Command::Styles => {
+            println!("blend modes:");
+            for mode in assemblash_core::BlendMode::RENDERED {
+                println!("  {}", mode.as_str());
+            }
+            println!("effects:");
+            for line in [
+                r#"  {"type":"brightness","amount":1.2}   1 is unchanged"#,
+                r#"  {"type":"contrast","amount":1.4}     1 is unchanged"#,
+                r#"  {"type":"saturation","amount":0}     1 is unchanged, 0 is greyscale"#,
+                r#"  {"type":"blur","radius":3}           0 is unchanged"#,
+                r#"  {"type":"grain","amount":0.2,"seed":7,"scale":1}"#,
+                "                                       seeded, so the same document grains the same way",
+            ] {
+                println!("{line}");
+            }
+            Ok(())
+        }
+
+        Command::Style {
+            project,
+            layer,
+            blend,
+            effects,
+            effects_file,
+            allow_locked,
+            who,
+        } => {
+            let effects_json =
+                match (effects, effects_file) {
+                    (Some(text), _) => Some(text),
+                    (None, Some(path)) => Some(std::fs::read_to_string(&path).map_err(
+                        |source| CliError::Write {
+                            path: path.clone(),
+                            source,
+                        },
+                    )?),
+                    (None, None) => None,
+                };
+            let effects = effects_json
+                .map(|text| serde_json::from_str::<Vec<assemblash_core::document::Effect>>(&text))
+                .transpose()?;
+
+            let mut session = Session::open(&project, now_millis())?;
+            let update = assemblash_core::ops::UpdateLayer {
+                blend_mode: blend.map(|raw| {
+                    // Parsed through serde so the CLI accepts exactly what the
+                    // document format accepts, including the kebab-case
+                    // spellings, and an unknown name becomes `Other` — which
+                    // the operation layer then refuses by name.
+                    serde_json::from_value(serde_json::Value::String(raw.clone()))
+                        .unwrap_or(assemblash_core::BlendMode::Other(raw))
+                }),
+                effects,
+                allow_locked,
+                ..assemblash_core::ops::UpdateLayer::new(assemblash_core::LayerId::new(layer))
+            };
+            let (outcome, _) = session.apply(
+                &Operation::Update(update),
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            for id in &outcome.changed {
+                println!("{id}");
+            }
             Ok(())
         }
 

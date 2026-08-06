@@ -11,7 +11,7 @@
 //! run, the expected version, the protected-layer refusal, and the transaction
 //! id live.
 
-use assemblash_core::document::{ImageFit, TextAlign, Transform};
+use assemblash_core::document::{BlendMode, Effect, ImageFit, TextAlign, Transform};
 use assemblash_core::ops::{
     AlignEdge, Axis, CreateLayer, LayerPosition, NewLayerKind, SnapTarget, UpdateLayer,
 };
@@ -153,6 +153,19 @@ pub struct UpdateArgs {
     /// New fit, for an image or SVG layer.
     #[serde(default)]
     pub fit: Option<ImageFit>,
+    /// How the layer composites onto what is beneath it: normal, multiply,
+    /// screen, overlay, darken, lighten, color-dodge, color-burn, hard-light,
+    /// soft-light, difference, exclusion, hue, saturation, color, luminosity.
+    /// A mode this build does not render is refused rather than drawn as
+    /// normal.
+    #[serde(default)]
+    pub blend_mode: Option<BlendMode>,
+    /// The whole effect stack, in order, replacing whatever is there:
+    /// `[{"type":"brightness","amount":1.2},{"type":"blur","radius":3}]`.
+    /// Pass `[]` to clear it. Grain takes a `seed`, so the same document
+    /// always produces the same noise.
+    #[serde(default)]
+    pub effects: Option<Vec<Effect>>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -371,6 +384,8 @@ impl AssemblashMcp {
             color: args.color.clone().map(Color::new),
             align: args.align,
             fit: args.fit,
+            blend_mode: args.blend_mode.clone(),
+            effects: args.effects.clone(),
             ..UpdateLayer::new(LayerId::new(args.layer_id.clone()))
         });
         self.write(&args.write, operation)

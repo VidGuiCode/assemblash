@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use assemblash_core::document::{
-    BlendMode, GroupLayer, ImageFit, Layer, LayerKind, TextAlign, Transform,
+    BlendMode, Effect, GroupLayer, ImageFit, Layer, LayerKind, TextAlign, Transform,
 };
 use assemblash_core::ids::AssetId;
 use assemblash_core::{validate, Color, Document};
@@ -44,6 +44,28 @@ pub fn doc_to_svg(
         w = number(document.canvas.width),
         h = number(document.canvas.height),
     );
+
+    // Effects become filters in one <defs>, referenced by the layers that ask
+    // for them. Collected up front because a filter has to be defined before
+    // it is used, and because a layer nested three groups deep must still find
+    // its own.
+    let mut defs = String::new();
+    let mut failure = None;
+    document.walk_layers(&mut |layer| {
+        if failure.is_some() || layer.effects.is_empty() {
+            return;
+        }
+        match filter_for(layer) {
+            Ok(filter) => defs.push_str(&filter),
+            Err(error) => failure = Some(error),
+        }
+    });
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    if !defs.is_empty() {
+        let _ = write!(out, "  <defs>\n{defs}  </defs>\n");
+    }
 
     if let Some(background) = &document.canvas.background {
         let _ = writeln!(
@@ -98,7 +120,7 @@ fn write_layer(
                 out,
                 "{pad}<text x=\"{x}\" y=\"{y}\" font-family=\"{family}\" \
                  font-size=\"{size}\" fill=\"{fill}\" text-anchor=\"{anchor}\"\
-                 {opacity}{rotation}{blend}>",
+                 {opacity}{rotation}{filter}{blend}>",
                 x = number(x),
                 // The first baseline sits one ascent below the box top, taken
                 // from the font file itself. The ascent is measured by
@@ -112,7 +134,8 @@ fn write_layer(
                 anchor = anchor,
                 opacity = opacity_attribute(layer.opacity),
                 rotation = rotation_attribute(t),
-                blend = blend_attribute(layer),
+                filter = filter_attribute(layer),
+                blend = blend_attribute(layer)?,
             );
 
             for (index, line) in text.text.split('\n').enumerate() {
@@ -159,7 +182,7 @@ fn write_layer(
             let _ = writeln!(
                 out,
                 "{pad}<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
-                 preserveAspectRatio=\"{preserve}\" href=\"{href}\"{opacity}{rotation}{blend}/>",
+                 preserveAspectRatio=\"{preserve}\" href=\"{href}\"{opacity}{rotation}{filter}{blend}/>",
                 x = number(t.x),
                 y = number(t.y),
                 w = number(t.width),
@@ -168,18 +191,20 @@ fn write_layer(
                 href = attribute(href),
                 opacity = opacity_attribute(layer.opacity),
                 rotation = rotation_attribute(t),
-                blend = blend_attribute(layer),
+                filter = filter_attribute(layer),
+                blend = blend_attribute(layer)?,
             );
         }
 
         LayerKind::Group(group) => {
             let _ = writeln!(
                 out,
-                "{pad}<g transform=\"translate({x} {y})\"{opacity}{style}>",
+                "{pad}<g transform=\"translate({x} {y})\"{opacity}{filter}{style}>",
                 x = number(t.x),
                 y = number(t.y),
                 opacity = opacity_attribute(layer.opacity),
-                style = group_style(layer, group),
+                filter = filter_attribute(layer),
+                style = group_style(layer, group)?,
             );
             // A rotated group rotates its children as a unit, about its own
             // centre, so the rotation wraps the children rather than sitting
@@ -213,18 +238,180 @@ fn write_layer(
     Ok(())
 }
 
-/// A `mix-blend-mode` for a layer that asks for one this build renders.
+/// A `mix-blend-mode` for a layer that asks for one.
 ///
-/// A mode this build does not render produces nothing, so the layer composites
-/// normally — the same thing every build did before v0.5, and the value itself
-/// is still preserved in the document.
-fn blend_attribute(layer: &Layer) -> String {
+/// Every mode this build names was checked to rasterize. A mode it does not
+/// name is refused rather than composited as `normal`: the document keeps the
+/// value, but drawing something else would be a picture that looks right and
+/// is not.
+fn blend_attribute(layer: &Layer) -> Result<String, RenderError> {
     match &layer.blend_mode {
-        BlendMode::Multiply | BlendMode::Screen => {
-            format!(" style=\"mix-blend-mode:{}\"", layer.blend_mode.as_str())
-        }
-        BlendMode::Normal | BlendMode::Other(_) => String::new(),
+        BlendMode::Other(mode) => Err(RenderError::UnsupportedBlendMode {
+            layer: layer.id.clone(),
+            mode: mode.clone(),
+        }),
+        mode if mode.is_default() => Ok(String::new()),
+        mode => Ok(format!(" style=\"mix-blend-mode:{}\"", mode.as_str())),
     }
+}
+
+/// The id of a layer's filter, and the attribute that references it.
+fn filter_attribute(layer: &Layer) -> String {
+    if layer.effects.is_empty() {
+        String::new()
+    } else {
+        format!(" filter=\"url(#{})\"", filter_id(layer))
+    }
+}
+
+fn filter_id(layer: &Layer) -> String {
+    format!("fx-{}", layer.id)
+}
+
+/// A layer's effect stack, as one SVG filter.
+///
+/// Two decisions that are not obvious and matter a lot:
+///
+/// * **`color-interpolation-filters="sRGB"`.** SVG's default filter space is
+///   linearRGB, where `slope="1.5"` comes out as roughly ×1.2 in the output.
+///   Nobody typing "brightness 1.5" means that. In sRGB the arithmetic is
+///   exactly what it looks like.
+/// * **A generous filter region.** The default region clips at 110% of the
+///   bounding box, which cuts the soft edge off any blur worth applying.
+///
+/// Effects chain in document order: each primitive reads the previous one's
+/// result, so `[blur, saturation]` is a blurred thing desaturated, and the
+/// other order is a desaturated thing blurred — which are different pictures,
+/// as they should be.
+fn filter_for(layer: &Layer) -> Result<String, RenderError> {
+    let mut body = String::new();
+    let mut input = "SourceGraphic".to_owned();
+
+    for (index, effect) in layer.effects.iter().enumerate() {
+        let result = format!("e{index}");
+        match effect {
+            Effect::Brightness { amount } => {
+                component_transfer(&mut body, &input, &result, *amount, 0.0);
+            }
+            Effect::Contrast { amount } => {
+                // Pivot around mid grey, so contrast 0 is flat grey rather
+                // than black: slope a, intercept (1 - a) / 2.
+                component_transfer(&mut body, &input, &result, *amount, (1.0 - amount) / 2.0);
+            }
+            Effect::Saturation { amount } => {
+                let _ = writeln!(
+                    body,
+                    "      <feColorMatrix in=\"{input}\" result=\"{result}\" \
+                     type=\"saturate\" values=\"{}\"/>",
+                    number(*amount)
+                );
+            }
+            Effect::Blur { radius } => {
+                let _ = writeln!(
+                    body,
+                    "      <feGaussianBlur in=\"{input}\" result=\"{result}\" \
+                     stdDeviation=\"{}\"/>",
+                    number(*radius)
+                );
+            }
+            Effect::Grain {
+                amount,
+                seed,
+                scale,
+            } => {
+                grain(&mut body, &input, &result, *amount, *seed, *scale);
+            }
+            Effect::Other(_) => {
+                return Err(RenderError::UnsupportedEffect {
+                    layer: layer.id.clone(),
+                    effect: effect.type_name().to_owned(),
+                })
+            }
+        }
+        input = result;
+    }
+
+    Ok(format!(
+        "    <filter id=\"{id}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\" \
+         color-interpolation-filters=\"sRGB\">\n{body}    </filter>\n",
+        id = filter_id(layer),
+    ))
+}
+
+/// The same linear transfer on each colour channel, leaving alpha alone.
+fn component_transfer(out: &mut String, input: &str, result: &str, slope: f64, intercept: f64) {
+    let _ = writeln!(
+        out,
+        "      <feComponentTransfer in=\"{input}\" result=\"{result}\">"
+    );
+    for channel in ["R", "G", "B"] {
+        let _ = writeln!(
+            out,
+            "        <feFunc{channel} type=\"linear\" slope=\"{}\" intercept=\"{}\"/>",
+            number(slope),
+            number(intercept),
+        );
+    }
+    let _ = writeln!(out, "      </feComponentTransfer>");
+}
+
+/// Seeded monochrome noise, overlaid on the layer.
+///
+/// `feTurbulence` is specified down to the integer arithmetic, so the same
+/// seed produces the same noise on every machine — which is the only reason
+/// grain is allowed to exist in a renderer that promises byte-identical output
+/// (NFR-3). Nothing here reads a clock or a random number generator.
+///
+/// The noise is desaturated, squeezed to a band around mid grey, and composited
+/// with `overlay`, for which mid grey is the neutral value: `amount` is
+/// therefore how far the speckle may lighten or darken, symmetrically, and 0
+/// leaves the layer alone. Finally it is clipped back to the layer's own alpha,
+/// so grain cannot paint outside the thing it grains.
+fn grain(out: &mut String, input: &str, result: &str, amount: f64, seed: u32, scale: f64) {
+    // Feature size: a bigger `scale` means coarser noise, so it divides the
+    // frequency. Guarded against a zero that validation should already have
+    // refused.
+    let frequency = 0.75 / scale.max(f64::EPSILON);
+    let _ = writeln!(
+        out,
+        "      <feTurbulence type=\"fractalNoise\" baseFrequency=\"{}\" numOctaves=\"1\" \
+         seed=\"{seed}\" result=\"{result}-noise\"/>",
+        number(frequency),
+    );
+    let _ = writeln!(
+        out,
+        "      <feColorMatrix in=\"{result}-noise\" type=\"saturate\" values=\"0\" \
+         result=\"{result}-grey\"/>",
+    );
+    let _ = writeln!(
+        out,
+        "      <feComponentTransfer in=\"{result}-grey\" result=\"{result}-band\">"
+    );
+    for channel in ["R", "G", "B"] {
+        let _ = writeln!(
+            out,
+            "        <feFunc{channel} type=\"linear\" slope=\"{}\" intercept=\"{}\"/>",
+            number(amount),
+            number((1.0 - amount) / 2.0),
+        );
+    }
+    // Opaque: the turbulence's own alpha is noise too, and a semi-transparent
+    // overlay would thin the layer rather than texture it.
+    let _ = writeln!(
+        out,
+        "        <feFuncA type=\"linear\" slope=\"0\" intercept=\"1\"/>"
+    );
+    let _ = writeln!(out, "      </feComponentTransfer>");
+    let _ = writeln!(
+        out,
+        "      <feBlend in=\"{result}-band\" in2=\"{input}\" mode=\"overlay\" \
+         result=\"{result}-mixed\"/>",
+    );
+    let _ = writeln!(
+        out,
+        "      <feComposite in=\"{result}-mixed\" in2=\"{input}\" operator=\"in\" \
+         result=\"{result}\"/>",
+    );
 }
 
 /// The `style` of a group element: its own blend mode, and isolation.
@@ -236,23 +423,32 @@ fn blend_attribute(layer: &Layer) -> String {
 /// buffer, and there is no reason to make every existing document pay for it.
 /// Nested groups apply the same rule to themselves, so a blend never escapes
 /// more than one level by accident.
-fn group_style(layer: &Layer, group: &GroupLayer) -> String {
+fn group_style(layer: &Layer, group: &GroupLayer) -> Result<String, RenderError> {
     let mut parts = Vec::new();
-    if matches!(layer.blend_mode, BlendMode::Multiply | BlendMode::Screen) {
+    if let BlendMode::Other(mode) = &layer.blend_mode {
+        return Err(RenderError::UnsupportedBlendMode {
+            layer: layer.id.clone(),
+            mode: mode.clone(),
+        });
+    }
+    if !layer.blend_mode.is_default() {
         parts.push(format!("mix-blend-mode:{}", layer.blend_mode.as_str()));
     }
+    // A child that blends at all needs the group isolated. A child whose mode
+    // this build does not render is left to its own element to refuse — that
+    // is where the error names the layer actually at fault.
     if group
         .children
         .iter()
-        .any(|child| matches!(child.blend_mode, BlendMode::Multiply | BlendMode::Screen))
+        .any(|child| !child.blend_mode.is_default() && child.blend_mode.is_rendered())
     {
         parts.push("isolation:isolate".to_owned());
     }
-    if parts.is_empty() {
+    Ok(if parts.is_empty() {
         String::new()
     } else {
         format!(" style=\"{}\"", parts.join(";"))
-    }
+    })
 }
 
 fn opacity_attribute(opacity: f64) -> String {

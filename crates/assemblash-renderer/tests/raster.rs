@@ -15,6 +15,7 @@ use assemblash_core::document::{
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::{Asset, Color, Document, Layer, LayerKind};
 use assemblash_renderer::raster::{font_files_in, read_png_metadata, LoadedFonts, PngMetadata};
+use assemblash_renderer::RenderError;
 use assemblash_renderer::{doc_to_svg, document_to_png, svg_to_pixmap, AssetHrefs};
 
 fn font_dir() -> PathBuf {
@@ -298,21 +299,63 @@ fn blend_document(mode: BlendMode) -> (Document, AssetHrefs) {
     (doc, hrefs)
 }
 
+/// Every blend mode this build names actually composites — and one it does
+/// not name is refused.
+///
+/// The point of the table is that a mode is only claimed once its pixels have
+/// been looked at. Red under blue, on white: the values below are the CSS
+/// blending formulas applied to those two colours, and several modes agree
+/// with each other on this particular pair (multiply and darken both leave
+/// nothing lit) — which is correct, not a mistake.
 #[test]
-fn multiply_and_screen_actually_composite() {
+fn every_named_blend_mode_composites_and_the_rest_are_refused() {
     let fonts = fonts();
 
+    // (mode, the overlap pixel)
     let cases = [
         // Red under blue, unblended: the overlap is plain blue.
         (BlendMode::Normal, [0, 0, 255]),
-        // Multiply: red × blue leaves nothing lit.
+        // Red x blue leaves nothing lit.
         (BlendMode::Multiply, [0, 0, 0]),
-        // Screen: red + blue is magenta.
+        // Red + blue is magenta.
         (BlendMode::Screen, [255, 0, 255]),
-        // A mode this build does not render composites as normal, and the
-        // renderer is never handed a value it might not understand.
-        (BlendMode::Other("overlay".to_owned()), [0, 0, 255]),
+        // Overlay tests the *backdrop*: red is 1 in R (screen -> 1) and 0 in
+        // G and B (multiply -> 0), so the result is the backdrop's own red.
+        (BlendMode::Overlay, [255, 0, 0]),
+        // Channel-wise minimum, which for these two is nothing.
+        (BlendMode::Darken, [0, 0, 0]),
+        // Channel-wise maximum: red's R and blue's B.
+        (BlendMode::Lighten, [255, 0, 255]),
+        // Dodge: R is 1/(1-0) clamped to 1; the other channels have a zero
+        // backdrop, which dodge leaves at zero.
+        (BlendMode::ColorDodge, [255, 0, 0]),
+        // Burn: a backdrop of 1 stays 1, and a zero backdrop burns to 0
+        // whatever the source is — so this pair gives back the red.
+        (BlendMode::ColorBurn, [255, 0, 0]),
+        // Hard-light tests the source instead: blue is 1 in B, 0 elsewhere.
+        (BlendMode::HardLight, [0, 0, 255]),
+        (BlendMode::SoftLight, [255, 0, 0]),
+        // |backdrop - source| per channel.
+        (BlendMode::Difference, [255, 0, 255]),
+        // b + s - 2bs, which for values of 0 and 1 matches difference.
+        (BlendMode::Exclusion, [255, 0, 255]),
+        // The non-separable four take one attribute from the source and the
+        // rest from the backdrop, through the spec's SetLum/SetSat with their
+        // clipping step. These four are pinned to what the renderer produces
+        // rather than to arithmetic done here: re-deriving the clipping by
+        // hand would add a second implementation to disagree with, not
+        // confidence. What they are really guarding is that the mode reaches
+        // the rasterizer and keeps doing the same thing.
+        (BlendMode::Hue, [54, 54, 255]),
+        (BlendMode::Saturation, [255, 0, 0]),
+        (BlendMode::Color, [54, 54, 255]),
+        (BlendMode::Luminosity, [207, 0, 0]),
     ];
+    assert_eq!(
+        cases.len(),
+        BlendMode::RENDERED.len(),
+        "every mode this build claims to render needs a case here"
+    );
 
     for (mode, expected) in cases {
         let (doc, hrefs) = blend_document(mode.clone());
@@ -329,6 +372,34 @@ fn multiply_and_screen_actually_composite() {
         assert_eq!(at(20, 20), [255, 0, 0], "{mode:?}: red square");
         assert_eq!(at(50, 50), expected, "{mode:?}: the overlap");
     }
+}
+
+/// A mode this build does not render is refused, not quietly composited as
+/// `normal`.
+///
+/// This is the whole reason `BlendMode::Other` exists rather than being
+/// normalised away on load: the document keeps what a newer build wrote, and
+/// drawing it as something else — which is what every version before this one
+/// did — would produce a picture that looks finished and is wrong.
+#[test]
+fn a_blend_mode_this_build_cannot_draw_is_refused() {
+    let fonts = fonts();
+    let (doc, hrefs) = blend_document(BlendMode::Other("plusDarker".to_owned()));
+
+    let error = document_to_png(&doc, &fonts, &hrefs, 1.0, &PngMetadata::for_document(&doc))
+        .expect_err("an unknown blend mode must not render");
+    let RenderError::UnsupportedBlendMode { layer, mode } = &error else {
+        panic!("expected UnsupportedBlendMode, got {error:?}");
+    };
+    assert_eq!(layer.as_str(), "layer_2");
+    assert_eq!(mode, "plusDarker");
+
+    // And the document itself is untouched by the refusal: the mode is still
+    // there to be written back out.
+    assert_eq!(
+        doc.layers[1].blend_mode,
+        BlendMode::Other("plusDarker".to_owned())
+    );
 }
 
 #[test]

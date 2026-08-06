@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use assemblash_core::document::{
-    Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
+    Effect, Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
 };
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::storage::{self, hash_bytes};
@@ -216,6 +216,128 @@ fn japanese_document() -> (Document, AssetHrefs) {
     (document, AssetHrefs::new())
 }
 
+/// Every blend mode this build renders, over one background.
+///
+/// In the golden set because a blend mode is a compositing path in the
+/// rasterizer, and compositing is exactly the kind of thing that can differ
+/// between a machine's SIMD paths. If aarch64 blends differently from x86_64,
+/// this is where it says so.
+fn blend_modes_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 320.0, 320.0);
+    document.canvas.background = Some(Color::new("#204060"));
+
+    let asset_id = AssetId::new("asset_00000000000000000000000001");
+    document.assets.push(assemblash_core::Asset {
+        id: asset_id.clone(),
+        path: "swatch.png".to_owned(),
+        hash: storage::hash_bytes(&swatch_png()),
+        media_type: "image/png".to_owned(),
+        width: Some(4),
+        height: Some(4),
+        extra: Extras::new(),
+    });
+
+    for (index, mode) in assemblash_core::BlendMode::RENDERED.iter().enumerate() {
+        let column = (index % 4) as f64;
+        let row = (index / 4) as f64;
+        let mut layer = Layer::new(
+            LayerId::new(format!("layer_{:026}", index + 1)),
+            Transform::new(10.0 + column * 78.0, 10.0 + row * 78.0, 68.0, 68.0),
+            LayerKind::Image(ImageLayer {
+                asset: asset_id.clone(),
+                fit: ImageFit::Fill,
+                extra: Extras::new(),
+            }),
+        );
+        layer.blend_mode = mode.clone();
+        document.layers.push(layer);
+    }
+
+    let hrefs = AssetHrefs::from([(
+        asset_id,
+        format!("data:image/png;base64,{}", base64(&swatch_png())),
+    )]);
+    (document, hrefs)
+}
+
+/// Every effect, alone and stacked — including seeded grain.
+///
+/// Grain is the one that matters most here: `feTurbulence` is specified down
+/// to its integer arithmetic, and this is what proves the same seed really
+/// does produce the same noise on all six targets rather than merely being
+/// expected to (NFR-3).
+fn effects_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 320.0, 260.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+
+    let asset_id = AssetId::new("asset_00000000000000000000000001");
+    document.assets.push(assemblash_core::Asset {
+        id: asset_id.clone(),
+        path: "swatch.png".to_owned(),
+        hash: storage::hash_bytes(&swatch_png()),
+        media_type: "image/png".to_owned(),
+        width: Some(4),
+        height: Some(4),
+        extra: Extras::new(),
+    });
+
+    let stacks = [
+        vec![Effect::Brightness { amount: 1.4 }],
+        vec![Effect::Contrast { amount: 1.8 }],
+        vec![Effect::Saturation { amount: 0.0 }],
+        vec![Effect::Blur { radius: 3.0 }],
+        vec![Effect::Grain {
+            amount: 0.35,
+            seed: 7,
+            scale: 1.0,
+        }],
+        vec![
+            Effect::Brightness { amount: 1.2 },
+            Effect::Saturation { amount: 0.4 },
+            Effect::Grain {
+                amount: 0.2,
+                seed: 99,
+                scale: 2.5,
+            },
+        ],
+    ];
+
+    for (index, effects) in stacks.into_iter().enumerate() {
+        let column = (index % 3) as f64;
+        let row = (index / 3) as f64;
+        let mut layer = Layer::new(
+            LayerId::new(format!("layer_{:026}", index + 1)),
+            Transform::new(15.0 + column * 100.0, 15.0 + row * 120.0, 90.0, 100.0),
+            LayerKind::Image(ImageLayer {
+                asset: asset_id.clone(),
+                fit: ImageFit::Fill,
+                extra: Extras::new(),
+            }),
+        );
+        layer.effects = effects;
+        document.layers.push(layer);
+    }
+
+    // One text layer under an effect too: a filter over glyphs takes a
+    // different path through the rasterizer than one over an image.
+    let mut text = text_layer(
+        "layer_00000000000000000000000009",
+        Transform::new(15.0, 200.0, 290.0, 50.0),
+        "Effects",
+        "Noto Sans",
+        36.0,
+        TextAlign::Left,
+    );
+    text.effects = vec![Effect::Blur { radius: 1.2 }];
+    document.layers.push(text);
+
+    let hrefs = AssetHrefs::from([(
+        asset_id,
+        format!("data:image/png;base64,{}", base64(&swatch_png())),
+    )]);
+    (document, hrefs)
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -223,6 +345,8 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("latin", latin_document()),
         ("arabic", arabic_document()),
         ("japanese", japanese_document()),
+        ("blend-modes", blend_modes_document()),
+        ("effects", effects_document()),
     ] {
         out.push((name, document, hrefs));
     }

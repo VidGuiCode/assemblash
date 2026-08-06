@@ -166,6 +166,78 @@ export async function uploadAsset(project, file) {
     }
     return (await response.json());
 }
+/**
+ * The blend modes this build renders.
+ *
+ * Listed here so the inspector cannot offer one the engine would refuse. A
+ * document may still carry a mode written by a newer build; that is shown as
+ * itself rather than replaced.
+ */
+export const BLEND_MODES = [
+    "normal",
+    "multiply",
+    "screen",
+    "overlay",
+    "darken",
+    "lighten",
+    "color-dodge",
+    "color-burn",
+    "hard-light",
+    "soft-light",
+    "difference",
+    "exclusion",
+    "hue",
+    "saturation",
+    "color",
+    "luminosity",
+];
+/** The effect types this build renders. */
+export const EFFECT_TYPES = [
+    "brightness",
+    "contrast",
+    "saturation",
+    "blur",
+    "grain",
+];
+/** The one number worth editing for an effect, and what it is called. */
+export function effectParameter(effect) {
+    const named = (name) => {
+        const value = effect[name];
+        return typeof value === "number" ? { name, value } : null;
+    };
+    switch (effect.type) {
+        case "brightness":
+        case "contrast":
+        case "saturation":
+        case "grain":
+            return named("amount");
+        case "blur":
+            return named("radius");
+        default:
+            // An effect this build does not know is shown but not edited: changing
+            // a number in something we cannot draw would be guessing.
+            return null;
+    }
+}
+/**
+ * A new effect of the given type, at its neutral value.
+ *
+ * Neutral rather than "a nice default": adding an effect should change
+ * nothing until a number is typed, so the picture never moves under someone
+ * who was only exploring the menu. Grain's seed is fixed rather than random
+ * for the same reason the engine takes one at all — the same document must
+ * produce the same noise.
+ */
+export function newEffect(type) {
+    switch (type) {
+        case "blur":
+            return { type: "blur", radius: 0 };
+        case "grain":
+            return { type: "grain", amount: 0, seed: 1, scale: 1 };
+        default:
+            return { type, amount: 1 };
+    }
+}
 export async function getSlots(project) {
     return request(`/api/projects/${encodeURIComponent(project)}/slots`);
 }

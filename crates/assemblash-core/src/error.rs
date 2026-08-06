@@ -71,6 +71,21 @@ pub enum ValidationError {
         value: f64,
     },
 
+    /// An effect's parameter is out of range or not a number.
+    #[error("layer {layer}: effect {effect} — {field} must be {expected}, got {value}")]
+    InvalidEffect {
+        /// The layer at fault.
+        layer: LayerId,
+        /// Which effect in the stack, by its type name.
+        effect: String,
+        /// The parameter at fault.
+        field: &'static str,
+        /// What it has to be.
+        expected: &'static str,
+        /// The offending value.
+        value: f64,
+    },
+
     /// A font size is zero, negative, or not a number.
     #[error("layer {layer}: fontSize must be a positive finite number, got {value}")]
     InvalidFontSize {

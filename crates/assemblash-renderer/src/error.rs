@@ -34,6 +34,33 @@ pub enum RenderError {
         asset: AssetId,
     },
 
+    /// A layer asks to composite with a mode this build does not render.
+    ///
+    /// Refused rather than composited as `normal`. A document written by a
+    /// newer build keeps its mode when it is loaded and saved here — that is
+    /// the round-trip promise — but drawing it as something else would produce
+    /// a picture that looks finished and is wrong, which is worse than not
+    /// producing one.
+    #[error("layer {layer}: blend mode {mode:?} is not one this build renders")]
+    UnsupportedBlendMode {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The mode it asked for.
+        mode: String,
+    },
+
+    /// A layer asks for an effect this build does not render.
+    ///
+    /// Same bargain as an unknown blend mode: preserved on the way through,
+    /// refused when something tries to draw it.
+    #[error("layer {layer}: effect {effect:?} is not one this build renders")]
+    UnsupportedEffect {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The effect type it asked for.
+        effect: String,
+    },
+
     /// A colour that validation would have rejected reached the renderer.
     #[error("invalid color {0}")]
     InvalidColor(String),

@@ -672,6 +672,211 @@
         }
       ]
     },
+    "BlendMode": {
+      "description": "How a layer composites onto what is beneath it.\n\nThe whole CSS separable-and-non-separable set, every one of which was\nchecked to rasterize before it was named here — a mode that only\nround-trips would be a promise the pixels do not keep.\n\n[`BlendMode::Other`] is what a mode written by some newer build becomes:\npreserved verbatim, because losing it would mean a document came back\ndamaged, but **refused at render time** rather than quietly composited as\n`normal`. Silently drawing the wrong thing is the worse failure: it looks\nlike it worked.",
+      "anyOf": [
+        {
+          "description": "Plain source-over compositing.",
+          "type": "string",
+          "const": "normal"
+        },
+        {
+          "description": "Darkens: multiplies the two colours.",
+          "type": "string",
+          "const": "multiply"
+        },
+        {
+          "description": "Lightens: the inverse of multiplying the inverses.",
+          "type": "string",
+          "const": "screen"
+        },
+        {
+          "description": "Multiplies or screens, depending on the backdrop.",
+          "type": "string",
+          "const": "overlay"
+        },
+        {
+          "description": "Keeps the darker of the two.",
+          "type": "string",
+          "const": "darken"
+        },
+        {
+          "description": "Keeps the lighter of the two.",
+          "type": "string",
+          "const": "lighten"
+        },
+        {
+          "description": "Brightens the backdrop to reflect the source.",
+          "type": "string",
+          "const": "color-dodge"
+        },
+        {
+          "description": "Darkens the backdrop to reflect the source.",
+          "type": "string",
+          "const": "color-burn"
+        },
+        {
+          "description": "`Overlay` with the layers swapped.",
+          "type": "string",
+          "const": "hard-light"
+        },
+        {
+          "description": "A softer `HardLight`.",
+          "type": "string",
+          "const": "soft-light"
+        },
+        {
+          "description": "The absolute difference of the two.",
+          "type": "string",
+          "const": "difference"
+        },
+        {
+          "description": "Like `Difference`, with less contrast.",
+          "type": "string",
+          "const": "exclusion"
+        },
+        {
+          "description": "The source's hue, the backdrop's saturation and luminosity.",
+          "type": "string",
+          "const": "hue"
+        },
+        {
+          "description": "The source's saturation, the backdrop's hue and luminosity.",
+          "type": "string",
+          "const": "saturation"
+        },
+        {
+          "description": "The source's hue and saturation, the backdrop's luminosity.",
+          "type": "string",
+          "const": "color"
+        },
+        {
+          "description": "The source's luminosity, the backdrop's hue and saturation.",
+          "type": "string",
+          "const": "luminosity"
+        },
+        {
+          "description": "A mode this build does not render, preserved as written and refused\nwhen something tries to draw it.",
+          "type": "string"
+        }
+      ]
+    },
+    "Effect": {
+      "description": "One adjustment in a layer's effect stack.\n\nTagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps\nan effect written by a newer build verbatim and refuses to render it —\nthe same bargain as [`BlendMode::Other`]: never lose it, never guess at it.\n\nThe amounts are multipliers where 1 means \"unchanged\", which is what\n`filter: brightness(1.2)` means everywhere else, so a number copied from a\nCSS example does what it looks like it does.",
+      "anyOf": [
+        {
+          "description": "Scales each channel. 1 is unchanged, 0 is black.",
+          "type": "object",
+          "properties": {
+            "amount": {
+              "description": "The multiplier.",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "brightness"
+            }
+          },
+          "required": [
+            "type",
+            "amount"
+          ]
+        },
+        {
+          "description": "Pushes each channel away from mid grey. 1 is unchanged, 0 is flat grey.",
+          "type": "object",
+          "properties": {
+            "amount": {
+              "description": "The multiplier.",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "contrast"
+            }
+          },
+          "required": [
+            "type",
+            "amount"
+          ]
+        },
+        {
+          "description": "Scales colourfulness. 1 is unchanged, 0 is greyscale.",
+          "type": "object",
+          "properties": {
+            "amount": {
+              "description": "The multiplier.",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "saturation"
+            }
+          },
+          "required": [
+            "type",
+            "amount"
+          ]
+        },
+        {
+          "description": "A Gaussian blur.",
+          "type": "object",
+          "properties": {
+            "radius": {
+              "description": "Standard deviation, in document units. 0 does nothing.",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "blur"
+            }
+          },
+          "required": [
+            "type",
+            "radius"
+          ]
+        },
+        {
+          "description": "Seeded monochrome noise, multiplied over the layer.\n\nThe seed is part of the document, not the run: the same document\nproduces the same grain on every machine and in every render (NFR-3).\nGrain from a clock or a random number generator would quietly break\nthe one property this project is built on.",
+          "type": "object",
+          "properties": {
+            "amount": {
+              "description": "How far the noise swings either side of unchanged, 0 to 1.",
+              "type": "number",
+              "format": "double"
+            },
+            "seed": {
+              "description": "The noise seed.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "scale": {
+              "description": "Size of the noise features; 1 is fine grain, larger is coarser.",
+              "type": "number",
+              "format": "double",
+              "default": 1.0
+            },
+            "type": {
+              "type": "string",
+              "const": "grain"
+            }
+          },
+          "required": [
+            "type",
+            "amount",
+            "seed"
+          ]
+        },
+        {
+          "description": "An effect this build does not know, preserved as written and refused\nwhen something tries to draw it."
+        }
+      ]
+    },
     "UpdateLayer": {
       "description": "Change properties of an existing layer.\n\nEvery field is optional and means \"leave alone\" when absent. `name` is\ndoubly optional: `Some(None)` clears the name, `None` leaves it.",
       "type": "object",
@@ -719,6 +924,27 @@
             "boolean",
             "null"
           ]
+        },
+        "blendMode": {
+          "description": "How the layer composites onto what is beneath it.\n\nA mode this build does not render is refused here, so a value that\nwould fail at render time cannot get into a document through this\nbuild in the first place.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effects": {
+          "description": "Replace the whole effect stack.\n\nThe whole stack rather than one effect at a time: order is part of the\nmeaning — a blurred thing desaturated is not a desaturated thing\nblurred — and an insert-at-index operation would be a second, subtler\nway of saying what this already says. Undo restores the previous stack\nlike any other property.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
         },
         "text": {
           "description": "Text layers: new text.",

@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** Pre-alpha — v0.13.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
+**Status:** Pre-alpha — v0.14.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -219,14 +219,14 @@ The dependency graph must be rechecked against this license once an implementati
 
 ## Current project status
 
-**v0.13.0.** What exists and has been run:
+**v0.14.0.** What exists and has been run:
 
 1. **Documents** — canvas, assets, and a nested tree of text, image, SVG, and group layers, saved as `document.json` plus `assets/`. Unknown fields survive a load-and-save cycle. Hand-editing the file is supported.
 2. **Operations** — thirteen typed operations (create, update, delete, duplicate, move, resize, rotate, reorder, group, ungroup, show/hide, lock/unlock, rename), each validated and applied transactionally: a refused operation leaves the document exactly as it was.
 3. **Layout** — align, centre on canvas, distribute, snap, bounding boxes, and overlap detection, all rotation-aware and taking explicit layer-id lists.
 4. **History and safety** — an append-only journal, undo and redo across restarts that produce a byte-identical document, protected and read-only layers, file locking, and expected-version conflict checks.
 5. **Fonts** — a local store where every file is pinned by the hash of its own bytes, importing TTF, OTF, collections, WOFF, and WOFF2, with a one-time installer for a pinned set of OFL families. The system font list is never consulted; a font the store does not have is an error, never a substitution.
-6. **Rendering** — document to SVG as a pure function, then to PNG through resvg, with `normal`, `multiply`, and `screen` blend modes.
+6. **Rendering** — document to SVG as a pure function, then to PNG through resvg, with all sixteen CSS blend modes and a non-destructive per-layer effect stack (brightness, contrast, saturation, blur, and seeded grain). A blend mode or effect this build does not render is refused, never silently drawn as something else.
 7. **Workspace** — an OS-appropriate data directory created on first run, holding `config.toml`, the font store, and projects. A project directory stays portable; the workspace is a default location, not a container.
 8. **Local HTTP API** — `assemblash serve`, on `127.0.0.1` only, over the same operation layer everything else uses: projects, document, history, validation, operations with dry run and expected-version checks, undo and redo, asset upload, and PNG preview. JSON Schemas and TypeScript declarations for the document and the operations are published at [`schema/`](schema/).
 
@@ -238,7 +238,7 @@ The dependency graph must be rechecked against this license once an implementati
 
 12. **Templates with named slots** — a document names some of its layers as slots, and `assemblash variants` (or the API, or MCP) renders one image per set of values. Protected chrome cannot be reached through a slot, because filling one is an ordinary operation and passes the same check everything else does.
 
-What does not exist yet: effects and styled text runs. Everything above this section describes where the project is going, not what it does today.
+What does not exist yet: styled text runs, and presets. Everything above this section describes where the project is going, not what it does today.
 
 The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: the same document plus the same font files produces bit-identical PNGs on all six targets.
 
@@ -249,7 +249,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.13.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.14.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:

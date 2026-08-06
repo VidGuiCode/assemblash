@@ -233,9 +233,17 @@ pub struct Layer {
     /// round-trip but do not yet change output.
     #[serde(default)]
     pub blend_mode: BlendMode,
-    /// Reserved (v1.x effect stack): preserved verbatim, never interpreted.
+    /// Adjustments applied to this layer when it is drawn, in order.
+    ///
+    /// **Never baked.** The document keeps the numbers and the pixels are
+    /// derived from them every render, so an effect is as reversible as any
+    /// other property and a layer under three effects is still the layer.
+    ///
+    /// Always written, even when empty, exactly as it has been since schema
+    /// version 1: omitting it would change the bytes of every document that
+    /// has one, for no gain.
     #[serde(default)]
-    pub effects: Vec<serde_json::Value>,
+    pub effects: Vec<Effect>,
     /// Reserved (layout constraints): preserved verbatim, never interpreted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints: Option<serde_json::Value>,
@@ -370,15 +378,98 @@ pub struct GroupLayer {
     pub extra: Extras,
 }
 
+/// One adjustment in a layer's effect stack.
+///
+/// Tagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps
+/// an effect written by a newer build verbatim and refuses to render it —
+/// the same bargain as [`BlendMode::Other`]: never lose it, never guess at it.
+///
+/// The amounts are multipliers where 1 means "unchanged", which is what
+/// `filter: brightness(1.2)` means everywhere else, so a number copied from a
+/// CSS example does what it looks like it does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Effect {
+    /// Scales each channel. 1 is unchanged, 0 is black.
+    Brightness {
+        /// The multiplier.
+        amount: f64,
+    },
+    /// Pushes each channel away from mid grey. 1 is unchanged, 0 is flat grey.
+    Contrast {
+        /// The multiplier.
+        amount: f64,
+    },
+    /// Scales colourfulness. 1 is unchanged, 0 is greyscale.
+    Saturation {
+        /// The multiplier.
+        amount: f64,
+    },
+    /// A Gaussian blur.
+    Blur {
+        /// Standard deviation, in document units. 0 does nothing.
+        radius: f64,
+    },
+    /// Seeded monochrome noise, multiplied over the layer.
+    ///
+    /// The seed is part of the document, not the run: the same document
+    /// produces the same grain on every machine and in every render (NFR-3).
+    /// Grain from a clock or a random number generator would quietly break
+    /// the one property this project is built on.
+    Grain {
+        /// How far the noise swings either side of unchanged, 0 to 1.
+        amount: f64,
+        /// The noise seed.
+        seed: u32,
+        /// Size of the noise features; 1 is fine grain, larger is coarser.
+        #[serde(default = "default_grain_scale")]
+        scale: f64,
+    },
+    /// An effect this build does not know, preserved as written and refused
+    /// when something tries to draw it.
+    #[serde(untagged)]
+    Other(serde_json::Value),
+}
+
+fn default_grain_scale() -> f64 {
+    1.0
+}
+
+impl Effect {
+    /// What this effect is called in the document.
+    pub fn type_name(&self) -> &str {
+        match self {
+            Self::Brightness { .. } => "brightness",
+            Self::Contrast { .. } => "contrast",
+            Self::Saturation { .. } => "saturation",
+            Self::Blur { .. } => "blur",
+            Self::Grain { .. } => "grain",
+            Self::Other(raw) => raw
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("(untyped)"),
+        }
+    }
+
+    /// Whether this build draws this effect rather than refusing it.
+    pub fn is_rendered(&self) -> bool {
+        !matches!(self, Self::Other(_))
+    }
+}
+
 /// How a layer composites onto what is beneath it.
 ///
-/// `normal`, `multiply`, and `screen` are rendered. The remaining CSS blend
-/// modes arrive in v1.x; until then a document that names one keeps the name
-/// verbatim — [`BlendMode::Other`] — and renders as `Normal`. Losing the value
-/// would mean a document written by a newer build came back damaged, which is
-/// the one thing the schema's round-trip promise rules out.
+/// The whole CSS separable-and-non-separable set, every one of which was
+/// checked to rasterize before it was named here — a mode that only
+/// round-trips would be a promise the pixels do not keep.
+///
+/// [`BlendMode::Other`] is what a mode written by some newer build becomes:
+/// preserved verbatim, because losing it would mean a document came back
+/// damaged, but **refused at render time** rather than quietly composited as
+/// `normal`. Silently drawing the wrong thing is the worse failure: it looks
+/// like it worked.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub enum BlendMode {
     /// Plain source-over compositing.
     #[default]
@@ -387,23 +478,95 @@ pub enum BlendMode {
     Multiply,
     /// Lightens: the inverse of multiplying the inverses.
     Screen,
-    /// A mode this build does not render, preserved as written.
+    /// Multiplies or screens, depending on the backdrop.
+    Overlay,
+    /// Keeps the darker of the two.
+    Darken,
+    /// Keeps the lighter of the two.
+    Lighten,
+    /// Brightens the backdrop to reflect the source.
+    ColorDodge,
+    /// Darkens the backdrop to reflect the source.
+    ColorBurn,
+    /// `Overlay` with the layers swapped.
+    HardLight,
+    /// A softer `HardLight`.
+    SoftLight,
+    /// The absolute difference of the two.
+    Difference,
+    /// Like `Difference`, with less contrast.
+    Exclusion,
+    /// The source's hue, the backdrop's saturation and luminosity.
+    Hue,
+    /// The source's saturation, the backdrop's hue and luminosity.
+    Saturation,
+    /// The source's hue and saturation, the backdrop's luminosity.
+    Color,
+    /// The source's luminosity, the backdrop's hue and saturation.
+    Luminosity,
+    /// A mode this build does not render, preserved as written and refused
+    /// when something tries to draw it.
     #[serde(untagged)]
     Other(String),
 }
 
 impl BlendMode {
-    /// Whether this build composites with this mode rather than ignoring it.
+    /// Every mode this build renders, in a stable order.
+    ///
+    /// One list, used by the renderer, the operation layer's validation, and
+    /// the interface's picker — so "what can I set" and "what will draw"
+    /// cannot drift apart.
+    pub const RENDERED: &'static [Self] = &[
+        Self::Normal,
+        Self::Multiply,
+        Self::Screen,
+        Self::Overlay,
+        Self::Darken,
+        Self::Lighten,
+        Self::ColorDodge,
+        Self::ColorBurn,
+        Self::HardLight,
+        Self::SoftLight,
+        Self::Difference,
+        Self::Exclusion,
+        Self::Hue,
+        Self::Saturation,
+        Self::Color,
+        Self::Luminosity,
+    ];
+
+    /// Whether this build composites with this mode rather than refusing it.
     pub fn is_rendered(&self) -> bool {
-        matches!(self, Self::Normal | Self::Multiply | Self::Screen)
+        !matches!(self, Self::Other(_))
     }
 
-    /// The mode as it is written in the document.
+    /// Whether this mode needs a `mix-blend-mode` in the output at all.
+    ///
+    /// `normal` is the default everywhere, so emitting it would only make
+    /// every existing document's SVG longer.
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Normal)
+    }
+
+    /// The mode as it is written in the document, and in CSS.
     pub fn as_str(&self) -> &str {
         match self {
             Self::Normal => "normal",
             Self::Multiply => "multiply",
             Self::Screen => "screen",
+            Self::Overlay => "overlay",
+            Self::Darken => "darken",
+            Self::Lighten => "lighten",
+            Self::ColorDodge => "color-dodge",
+            Self::ColorBurn => "color-burn",
+            Self::HardLight => "hard-light",
+            Self::SoftLight => "soft-light",
+            Self::Difference => "difference",
+            Self::Exclusion => "exclusion",
+            Self::Hue => "hue",
+            Self::Saturation => "saturation",
+            Self::Color => "color",
+            Self::Luminosity => "luminosity",
             Self::Other(raw) => raw,
         }
     }

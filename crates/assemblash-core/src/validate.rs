@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::document::{Color, Document, Layer, LayerKind};
+use crate::document::{Color, Document, Effect, Layer, LayerKind};
 use crate::error::{ValidationError, ValidationErrors};
 use crate::ids::AssetId;
 use crate::SCHEMA_VERSION;
@@ -135,6 +135,8 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
         });
     }
 
+    check_effects(layer, errors);
+
     match &layer.kind {
         LayerKind::Text(text) => {
             if !text.font_size.is_finite() || text.font_size <= 0.0 {
@@ -170,6 +172,58 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
         // Children are visited by the caller's walk; nothing group-specific
         // to check beyond what every layer gets.
         LayerKind::Group(_) => {}
+    }
+}
+
+/// Checks a layer's effect stack.
+///
+/// An effect this build does not know is *not* an error here: preserving it is
+/// the point, and a document full of a newer build's effects should still
+/// validate, list, and inspect. It is refused where it actually matters —
+/// when something tries to draw it.
+fn check_effects(layer: &Layer, errors: &mut Vec<ValidationError>) {
+    for effect in &layer.effects {
+        let mut bad = |field: &'static str, expected: &'static str, value: f64| {
+            errors.push(ValidationError::InvalidEffect {
+                layer: layer.id.clone(),
+                effect: effect.type_name().to_owned(),
+                field,
+                expected,
+                value,
+            });
+        };
+        match effect {
+            // No upper bound: brightness 4 on a dark photograph is a real
+            // thing to want, and the renderer clamps at white anyway.
+            Effect::Brightness { amount }
+            | Effect::Contrast { amount }
+            | Effect::Saturation { amount } => {
+                if !amount.is_finite() || *amount < 0.0 {
+                    bad("amount", "a finite number of 0 or more", *amount);
+                }
+            }
+            Effect::Blur { radius } => {
+                if !radius.is_finite() || *radius < 0.0 {
+                    bad("radius", "a finite number of 0 or more", *radius);
+                }
+            }
+            Effect::Grain {
+                amount,
+                seed: _,
+                scale,
+            } => {
+                // Grain is a swing either side of unchanged, so more than 1
+                // would mean "darker than black", which is not a stronger
+                // effect — it is a meaningless one.
+                if !amount.is_finite() || !(0.0..=1.0).contains(amount) {
+                    bad("amount", "between 0 and 1", *amount);
+                }
+                if !scale.is_finite() || *scale <= 0.0 {
+                    bad("scale", "a finite number greater than 0", *scale);
+                }
+            }
+            Effect::Other(_) => {}
+        }
     }
 }
 

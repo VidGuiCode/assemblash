@@ -358,6 +358,42 @@ function drawInspector(): void {
     );
   }
 
+  // How it composites. The list comes from the schema's own enumeration, so
+  // the picker cannot offer a mode the engine would refuse.
+  const blend = document.createElement("label");
+  blend.className = "field";
+  blend.append(document.createTextNode("blend"));
+  const blendSelect = document.createElement("select");
+  blendSelect.disabled = why !== null;
+  const currentBlend = layer.blendMode ?? "normal";
+  for (const mode of api.BLEND_MODES) {
+    const option = document.createElement("option");
+    option.value = mode;
+    option.textContent = mode;
+    blendSelect.append(option);
+  }
+  // A mode this build does not know — written by a newer one — is shown
+  // rather than silently replaced by whatever happens to be first.
+  if (!api.BLEND_MODES.includes(currentBlend as (typeof api.BLEND_MODES)[number])) {
+    const option = document.createElement("option");
+    option.value = currentBlend;
+    option.textContent = `${currentBlend} (not rendered here)`;
+    blendSelect.append(option);
+  }
+  blendSelect.value = currentBlend;
+  blendSelect.addEventListener("change", () => {
+    if (blendSelect.value === currentBlend) return;
+    void send("blend mode", {
+      op: "update",
+      id: layer.id,
+      blendMode: blendSelect.value,
+    } as Operation);
+  });
+  blend.append(blendSelect);
+  dom.inspector.append(blend);
+
+  drawEffects(layer, why !== null);
+
   const visible = document.createElement("label");
   visible.className = "field checkbox";
   const box = document.createElement("input");
@@ -371,6 +407,89 @@ function drawInspector(): void {
   });
   visible.append(box, document.createTextNode("visible"));
   dom.inspector.append(visible);
+}
+
+/**
+ * The effect stack, as rows with one number each.
+ *
+ * Effects are never baked: what is edited here is the list of numbers in the
+ * document, and the pixels are derived from it every render. So removing an
+ * effect is as complete as never having added it, and undo restores the whole
+ * stack like any other property.
+ */
+function drawEffects(layer: Layer, guarded: boolean): void {
+  const effects = (layer.effects ?? []) as api.Effect[];
+
+  const heading = document.createElement("h2");
+  heading.textContent = "Effects";
+  dom.inspector.append(heading);
+
+  /** Sends the whole stack, because order is part of what it means. */
+  const setStack = (next: api.Effect[]): void => {
+    void send("effects", { op: "update", id: layer.id, effects: next } as Operation);
+  };
+
+  for (const [index, effect] of effects.entries()) {
+    const row = document.createElement("div");
+    row.className = "effect-row";
+
+    const label = document.createElement("span");
+    label.className = "effect-name";
+    label.textContent = effect.type;
+    row.append(label);
+
+    // Every effect this build renders has exactly one number worth a slider;
+    // grain's seed is deliberately not one of them, because changing it would
+    // change the picture for no reason a person asked for.
+    const parameter = api.effectParameter(effect);
+    if (parameter) {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "0.05";
+      input.value = String(parameter.value);
+      input.disabled = guarded;
+      input.addEventListener("change", () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || value === parameter.value) return;
+        const next = effects.map((one, at) =>
+          at === index ? { ...one, [parameter.name]: value } : one,
+        );
+        setStack(next);
+      });
+      row.append(input);
+    }
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "small";
+    remove.textContent = "Remove";
+    remove.disabled = guarded;
+    remove.addEventListener("click", () =>
+      setStack(effects.filter((_, at) => at !== index)),
+    );
+    row.append(remove);
+    dom.inspector.append(row);
+  }
+
+  const add = document.createElement("div");
+  add.className = "buttons";
+  const chooser = document.createElement("select");
+  chooser.disabled = guarded;
+  for (const type of api.EFFECT_TYPES) {
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    chooser.append(option);
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Add effect";
+  button.disabled = guarded;
+  button.addEventListener("click", () => {
+    setStack([...effects, api.newEffect(chooser.value)]);
+  });
+  add.append(chooser, button);
+  dom.inspector.append(add);
 }
 
 async function drawHistory(): Promise<void> {

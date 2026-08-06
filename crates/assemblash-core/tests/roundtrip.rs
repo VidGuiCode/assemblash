@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 
+use assemblash_core::document::Effect;
 use assemblash_core::document::{Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer};
 use assemblash_core::ids::{AssetId, DocumentId, LayerId};
 use assemblash_core::{
@@ -116,11 +117,39 @@ fn image_kind(assets: Vec<AssetId>) -> impl Strategy<Value = LayerKind> {
         .prop_map(|(asset, fit, extra)| LayerKind::Image(ImageLayer { asset, fit, extra }))
 }
 
+/// Every mode this build renders, plus one it does not.
+///
+/// `Other` belongs in the generator precisely because it is the case the
+/// round-trip promise exists for: a mode written by a newer build must come
+/// back exactly as it went in, even though this build refuses to draw it.
 fn blend_mode() -> impl Strategy<Value = BlendMode> {
+    let known = BlendMode::RENDERED.to_vec();
     prop_oneof![
-        Just(BlendMode::Normal),
-        Just(BlendMode::Multiply),
-        Just(BlendMode::Screen)
+        (0..known.len()).prop_map(move |index| known[index].clone()),
+        Just(BlendMode::Other("plusdarker".to_owned())),
+    ]
+}
+
+/// Effects this build renders, plus one it does not — same reasoning as
+/// `blend_mode`. Parameters stay inside what validation allows, because the
+/// generated documents have to be valid.
+fn effect() -> impl Strategy<Value = Effect> {
+    prop_oneof![
+        (0.0f64..4.0).prop_map(|amount| Effect::Brightness { amount }),
+        (0.0f64..4.0).prop_map(|amount| Effect::Contrast { amount }),
+        (0.0f64..4.0).prop_map(|amount| Effect::Saturation { amount }),
+        (0.0f64..50.0).prop_map(|radius| Effect::Blur { radius }),
+        (0.0f64..=1.0, any::<u32>(), 0.1f64..8.0).prop_map(|(amount, seed, scale)| {
+            Effect::Grain {
+                amount,
+                seed,
+                scale,
+            }
+        }),
+        Just(Effect::Other(serde_json::json!({
+            "type": "vignette",
+            "strength": 0.4
+        }))),
     ]
 }
 
@@ -141,7 +170,7 @@ fn layer(assets: Vec<AssetId>) -> impl Strategy<Value = Layer> {
         any::<bool>(),
         any::<bool>(),
         blend_mode(),
-        prop::collection::vec(unknown_value(), 0..2),
+        prop::collection::vec(effect(), 0..3),
         any::<bool>(),
         any::<bool>(),
     )

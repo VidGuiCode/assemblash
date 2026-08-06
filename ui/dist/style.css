@@ -482,3 +482,27 @@ body.stopped main {
     border-bottom: 1px solid var(--line);
   }
 }
+
+/* An effect row in the inspector: what it is, its one number, and a way to
+ * take it off again. */
+.effect-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.effect-name {
+  flex: 1;
+  color: var(--muted);
+}
+
+.effect-row input {
+  font: inherit;
+  width: 70px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink);
+  background: var(--panel);
+}

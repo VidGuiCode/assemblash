@@ -8,8 +8,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
-    Color, Document, Extras, GroupLayer, ImageFit, ImageLayer, Layer, LayerKind, TextAlign,
-    TextLayer, Transform,
+    BlendMode, Color, Document, Effect, Extras, GroupLayer, ImageFit, ImageLayer, Layer, LayerKind,
+    TextAlign, TextLayer, Transform,
 };
 use crate::ids::{AssetId, IdSource, LayerId};
 use crate::ops::error::OpError;
@@ -203,6 +203,22 @@ pub struct UpdateLayer {
     /// Lock or unlock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<bool>,
+    /// How the layer composites onto what is beneath it.
+    ///
+    /// A mode this build does not render is refused here, so a value that
+    /// would fail at render time cannot get into a document through this
+    /// build in the first place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend_mode: Option<BlendMode>,
+    /// Replace the whole effect stack.
+    ///
+    /// The whole stack rather than one effect at a time: order is part of the
+    /// meaning — a blurred thing desaturated is not a desaturated thing
+    /// blurred — and an insert-at-index operation would be a second, subtler
+    /// way of saying what this already says. Undo restores the previous stack
+    /// like any other property.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<Vec<Effect>>,
 
     /// Text layers: new text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -255,6 +271,8 @@ impl UpdateLayer {
             opacity: None,
             visible: None,
             locked: None,
+            blend_mode: None,
+            effects: None,
             text: None,
             font_family: None,
             font_size: None,
@@ -282,6 +300,31 @@ impl UpdateLayer {
         }
         if let Some(locked) = self.locked {
             layer.locked = locked;
+        }
+        if let Some(mode) = &self.blend_mode {
+            if !mode.is_rendered() {
+                return Err(OpError::UnsupportedBlendMode {
+                    id: layer.id.clone(),
+                    mode: mode.as_str().to_owned(),
+                    available: BlendMode::RENDERED
+                        .iter()
+                        .map(BlendMode::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                });
+            }
+            layer.blend_mode = mode.clone();
+        }
+        if let Some(effects) = &self.effects {
+            // Refused rather than stored: an effect nothing can draw is a
+            // document that renders everywhere except where it matters.
+            if let Some(unknown) = effects.iter().find(|effect| !effect.is_rendered()) {
+                return Err(OpError::UnsupportedEffect {
+                    id: layer.id.clone(),
+                    effect: unknown.type_name().to_owned(),
+                });
+            }
+            layer.effects = effects.clone();
         }
 
         let kind_name = kind_name(&layer.kind);

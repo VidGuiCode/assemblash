@@ -244,14 +244,13 @@ fn blend_modes_reach_the_output() {
     let mut doc = document(300.0, 300.0);
     doc.assets.push(asset());
 
+    // Four of the sixteen, including two that only started rendering in
+    // 0.14.0, so the snapshot shows the kebab-case spelling CSS uses.
     for (index, mode) in [
         BlendMode::Normal,
         BlendMode::Multiply,
-        BlendMode::Screen,
-        // A mode from a later version: preserved in the document, and
-        // deliberately not emitted, so it composites normally rather than
-        // being handed to the renderer as something it may not support.
-        BlendMode::Other("overlay".to_owned()),
+        BlendMode::Overlay,
+        BlendMode::ColorDodge,
     ]
     .into_iter()
     .enumerate()
@@ -266,9 +265,38 @@ fn blend_modes_reach_the_output() {
     }
 
     let svg = doc_to_svg(&doc, &fonts(), &hrefs()).unwrap();
-    assert_eq!(svg.matches("mix-blend-mode").count(), 2, "{svg}");
-    assert!(!svg.contains("overlay"), "{svg}");
+    // `normal` is the default everywhere, so emitting it would only make the
+    // output longer.
+    assert_eq!(svg.matches("mix-blend-mode").count(), 3, "{svg}");
+    assert!(svg.contains("mix-blend-mode:color-dodge"), "{svg}");
     assert_snapshot("blend_modes", &svg);
+}
+
+#[test]
+fn a_mode_this_build_cannot_draw_stops_the_render() {
+    // Before 0.14.0 an unknown mode was left out of the output and composited
+    // as `normal`. It is now refused: the document still keeps the value, but
+    // a picture that silently ignores what it was told to do is worse than no
+    // picture.
+    let mut doc = document(300.0, 300.0);
+    doc.assets.push(asset());
+    let mut layer = image(
+        "layer_future",
+        Transform::new(10.0, 10.0, 100.0, 50.0),
+        ImageFit::Fill,
+    );
+    layer.blend_mode = BlendMode::Other("plus-darker".to_owned());
+    doc.layers.push(layer);
+
+    let error = doc_to_svg(&doc, &fonts(), &hrefs()).unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            assemblash_renderer::RenderError::UnsupportedBlendMode { mode, .. }
+                if mode == "plus-darker"
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]

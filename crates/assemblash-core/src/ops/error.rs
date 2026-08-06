@@ -50,6 +50,32 @@ pub enum OpError {
         asset: AssetId,
     },
 
+    /// A blend mode was set that this build does not render.
+    ///
+    /// Refused on the way in rather than stored and discovered at render
+    /// time: a document that saves cleanly and then cannot be drawn is the
+    /// worst place to find out.
+    #[error(
+        "layer {id}: blend mode {mode:?} is not one this build renders; available: {available}"
+    )]
+    UnsupportedBlendMode {
+        /// The layer in question.
+        id: LayerId,
+        /// The mode that was asked for.
+        mode: String,
+        /// The modes that would have worked.
+        available: String,
+    },
+
+    /// An effect was set whose type this build does not render.
+    #[error("layer {id}: effect {effect:?} is not one this build renders")]
+    UnsupportedEffect {
+        /// The layer in question.
+        id: LayerId,
+        /// The effect type that was asked for.
+        effect: String,
+    },
+
     /// A property was set that does not exist on that kind of layer.
     #[error("layer {id} is a {actual} layer, so {property} cannot be set on it")]
     WrongLayerKind {
