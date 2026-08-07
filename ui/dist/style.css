@@ -555,3 +555,9 @@ button.recent span {
   background: var(--panel);
   color: var(--ink);
 }
+
+/* A slot that offers the layer currently selected. */
+.slot-on-this-layer {
+  color: var(--accent);
+  font-weight: 600;
+}

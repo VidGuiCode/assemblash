@@ -76,6 +76,46 @@ pub enum OpError {
         effect: String,
     },
 
+    /// No slot of that name is in the document.
+    #[error("no slot named {name:?}; this document has: {available}")]
+    NoSuchSlot {
+        /// The name that was asked for.
+        name: String,
+        /// What it does have.
+        available: String,
+    },
+
+    /// A slot was defined that could never be usefully filled.
+    #[error("slot {name:?} is not usable: {reason}")]
+    InvalidSlot {
+        /// The slot at fault.
+        name: String,
+        /// What is wrong with it.
+        reason: &'static str,
+    },
+
+    /// A slot's kind does not match the layer it points at.
+    #[error("slot {name:?} is a {wants} slot but layer {id} is a {found} layer")]
+    SlotKindMismatch {
+        /// The slot at fault.
+        name: String,
+        /// What the slot needs the layer to be.
+        wants: &'static str,
+        /// The layer it names.
+        id: LayerId,
+        /// What that layer actually is.
+        found: &'static str,
+    },
+
+    /// A layer cannot be deleted while a slot offers it.
+    #[error("layer {id} is offered by slot(s) {slots}; remove them first")]
+    LayerIsSlotTarget {
+        /// The layer somebody tried to delete.
+        id: LayerId,
+        /// The slots in the way.
+        slots: String,
+    },
+
     /// No preset of that name is in the document.
     #[error("no preset named {name:?}; this document has: {available}")]
     NoSuchPreset {

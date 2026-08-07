@@ -367,6 +367,15 @@ export function newEffect(type: string): Effect {
   }
 }
 
+/** A named opening a caller may fill, as the document stores it. */
+export interface SlotSummary {
+  name: string;
+  layer: string;
+  kind?: string;
+  description?: string | null;
+  required?: boolean;
+}
+
 /** A named style bundle, as the document stores it. */
 export interface Preset {
   name: string;

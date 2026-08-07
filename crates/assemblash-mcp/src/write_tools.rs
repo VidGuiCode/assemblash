@@ -859,6 +859,125 @@ impl AssemblashMcp {
             },
         )
     }
+
+    /// Declares a named opening, making the document a template.
+    #[tool(
+        description = "Declare a named opening on a layer, making the document a template. \
+                       Refused if the name is taken, the layer is missing, the kind does not \
+                       match the layer, or the layer is protected or read-only \u{2014} a slot on \
+                       chrome would be an opening that always refuses when filled."
+    )]
+    async fn define_slot(
+        &self,
+        Parameters(args): Parameters<DefineSlotArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(&args.write, Operation::DefineSlot { slot: args.slot() })
+    }
+
+    /// Changes an existing slot.
+    #[tool(
+        description = "Change an existing slot, by name. Faces exactly the checks a definition \
+                       faces, so an update cannot produce a slot that could not have been \
+                       defined. Passing a different name renames it."
+    )]
+    async fn update_slot(
+        &self,
+        Parameters(args): Parameters<UpdateSlotArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(
+            &args.write,
+            Operation::UpdateSlot {
+                name: args.name.clone(),
+                slot: args.slot.slot(),
+            },
+        )
+    }
+
+    /// Removes a named opening.
+    #[tool(
+        description = "Remove a named opening. The layer it pointed at is untouched. Note that \
+                       a layer a slot offers cannot be deleted until its slots are removed."
+    )]
+    async fn remove_slot(
+        &self,
+        Parameters(args): Parameters<RemoveSlotArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(
+            &args.write,
+            Operation::RemoveSlot {
+                name: args.name.clone(),
+            },
+        )
+    }
+}
+
+/// The parts of a slot a caller supplies.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotFields {
+    /// What the slot is called. Unique within the document.
+    pub name: String,
+    /// The layer it fills.
+    pub layer_id: String,
+    /// What may be supplied: `text`, `image`, or `color`. Text and colour
+    /// slots fill a text layer; an image slot fills an image layer.
+    #[serde(default)]
+    pub kind: Option<assemblash_core::SlotKind>,
+    /// What this slot is for, for whoever fills it later — including an
+    /// agent, which is the case that needs it most.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Whether a variant must supply a value for it.
+    #[serde(default)]
+    pub required: Option<bool>,
+}
+
+impl SlotFields {
+    fn slot(&self) -> assemblash_core::Slot {
+        assemblash_core::Slot {
+            name: self.name.clone(),
+            layer: LayerId::new(self.layer_id.clone()),
+            kind: self.kind.unwrap_or_default(),
+            description: self.description.clone(),
+            required: self.required.unwrap_or(false),
+            extra: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefineSlotArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    #[serde(flatten)]
+    pub fields: SlotFields,
+}
+
+impl DefineSlotArgs {
+    fn slot(&self) -> assemblash_core::Slot {
+        self.fields.slot()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSlotArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// Which slot to change.
+    pub name: String,
+    /// What it should become. Its `name` may differ, which renames it.
+    pub slot: SlotFields,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveSlotArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// Which slot to remove.
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

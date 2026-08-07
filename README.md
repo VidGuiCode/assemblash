@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** Pre-alpha — v0.16.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
+**Status:** Pre-alpha — v0.17.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -219,7 +219,7 @@ The dependency graph must be rechecked against this license once an implementati
 
 ## Current project status
 
-**v0.16.0.** What exists and has been run:
+**v0.17.0.** What exists and has been run:
 
 1. **Documents** — canvas, assets, and a nested tree of text, image, SVG, and group layers, saved as `document.json` plus `assets/`. Unknown fields survive a load-and-save cycle. Hand-editing the file is supported.
 2. **Operations** — thirteen typed operations (create, update, delete, duplicate, move, resize, rotate, reorder, group, ungroup, show/hide, lock/unlock, rename), each validated and applied transactionally: a refused operation leaves the document exactly as it was.
@@ -251,7 +251,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.16.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.17.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:

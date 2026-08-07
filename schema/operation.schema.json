@@ -429,6 +429,65 @@
       ]
     },
     {
+      "description": "Declares a named opening in the document, making it a template.\n\nRefused at definition time — not merely reported by validation — for a\nname already taken, a layer that is not there, a kind that does not\nmatch the layer, or **a layer that is protected or read-only**.\n\nThat last refusal is why this is an operation rather than a hand edit.\nFilling a slot is already refused on protected chrome, because a fill\nis an `Update`. Defining one is not a fill, and without this check a\ntemplate could advertise an opening that always fails: the author would\nthink they had offered something, and every variant would refuse.",
+      "type": "object",
+      "properties": {
+        "slot": {
+          "description": "The slot to declare.",
+          "$ref": "#/$defs/Slot"
+        },
+        "op": {
+          "type": "string",
+          "const": "defineSlot"
+        }
+      },
+      "required": [
+        "op",
+        "slot"
+      ]
+    },
+    {
+      "description": "Changes an existing slot, by name.\n\nThe same checks a definition faces, because the result has to be a slot\nthat could have been defined.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Which slot to change.",
+          "type": "string"
+        },
+        "slot": {
+          "description": "The slot's new content. Its `name` may differ, which renames it.",
+          "$ref": "#/$defs/Slot"
+        },
+        "op": {
+          "type": "string",
+          "const": "updateSlot"
+        }
+      },
+      "required": [
+        "op",
+        "name",
+        "slot"
+      ]
+    },
+    {
+      "description": "Removes a named opening. The layer it pointed at is untouched.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Which slot to remove.",
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "const": "removeSlot"
+        }
+      },
+      "required": [
+        "op",
+        "name"
+      ]
+    },
+    {
       "description": "Applies a named style bundle to a layer.\n\nCompiles to the [`Update`](Operation::Update) the preset describes\nbefore anything is changed, which is what makes applying a preset and\nsetting the same properties by hand the same picture — and what makes\na protected layer refuse here without a preset-specific check.",
       "type": "object",
       "properties": {
@@ -1299,6 +1358,62 @@
         }
       },
       "additionalProperties": true
+    },
+    "Slot": {
+      "description": "A named opening in a template.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "What a caller names this slot by. Unique within a document.",
+          "type": "string"
+        },
+        "layer": {
+          "description": "The layer it fills.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "kind": {
+          "description": "What may be supplied for it.",
+          "$ref": "#/$defs/SlotKind",
+          "default": "text"
+        },
+        "description": {
+          "description": "What this slot is for, for whoever is filling it — including an agent,\nwhich is the case that needs it most.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required": {
+          "description": "Whether a variant must supply it.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name",
+        "layer"
+      ],
+      "additionalProperties": true
+    },
+    "SlotKind": {
+      "description": "What a slot lets a caller supply.",
+      "oneOf": [
+        {
+          "description": "The text of a text layer.",
+          "type": "string",
+          "const": "text"
+        },
+        {
+          "description": "The asset an image layer draws.",
+          "type": "string",
+          "const": "image"
+        },
+        {
+          "description": "The fill colour of a text layer.",
+          "type": "string",
+          "const": "color"
+        }
+      ]
     }
   }
 }

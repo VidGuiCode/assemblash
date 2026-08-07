@@ -248,6 +248,24 @@ export type PresetProperties = {
   [key: string]: unknown;
 };
 
+/// A named opening in a template.
+export type Slot = {
+  /** What a caller names this slot by. Unique within a document. */
+  name: string;
+  /** The layer it fills. */
+  layer: LayerId;
+  /** What may be supplied for it. */
+  kind?: SlotKind;
+  /** What this slot is for, for whoever is filling it — including an agent, */
+  description?: string | null;
+  /** Whether a variant must supply it. */
+  required?: boolean;
+  [key: string]: unknown;
+};
+
+/// What a slot lets a caller supply.
+export type SlotKind = "text" | "image" | "color";
+
 /// One mutation of a document.
 export type Operation = CreateLayer & {
   op: "create";
@@ -367,6 +385,23 @@ export type Operation = CreateLayer & {
   /** The preset to remove. */
   name: string;
   op: "deletePreset";
+  [key: string]: unknown;
+} | {
+  /** The slot to declare. */
+  slot: Slot;
+  op: "defineSlot";
+  [key: string]: unknown;
+} | {
+  /** Which slot to change. */
+  name: string;
+  /** The slot's new content. Its `name` may differ, which renames it. */
+  slot: Slot;
+  op: "updateSlot";
+  [key: string]: unknown;
+} | {
+  /** Which slot to remove. */
+  name: string;
+  op: "removeSlot";
   [key: string]: unknown;
 } | {
   /** Layer to restyle. */

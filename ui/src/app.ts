@@ -24,6 +24,8 @@ interface State {
   document: Document | null;
   /** The presets this document offers, as last read. */
   presets: api.Preset[];
+  /** The slots this document offers, as last read. */
+  slots: api.Slot[];
   /** Ids the user has selected. The engine never hears about this. */
   selection: string[];
   /** Layer being dragged, and where the drag started. */
@@ -41,6 +43,7 @@ const state: State = {
   project: null,
   document: null,
   presets: [],
+  slots: [],
   selection: [],
   drag: null,
   busy: false,
@@ -149,6 +152,9 @@ async function refresh(): Promise<void> {
   // Read with the document, because defining or deleting one is an ordinary
   // operation and every operation refreshes.
   state.presets = await api.getPresets(state.project);
+  // Slots come with the document itself, so there is nothing extra to fetch:
+  // a template is a document that names some of its own layers.
+  state.slots = (doc.slots ?? []) as api.Slot[];
 
   drawLayers();
   drawOverlay();
@@ -402,6 +408,7 @@ function drawInspector(): void {
 
   drawEffects(layer, why !== null);
   drawPresets(layer, why !== null);
+  drawSlots(layer);
 
   const visible = document.createElement("label");
   visible.className = "field checkbox";
@@ -572,6 +579,70 @@ function drawPresets(layer: Layer, guarded: boolean): void {
   });
   save.append(button);
   dom.inspector.append(save);
+}
+
+/**
+ * The document's named openings, and a way to offer the selected layer.
+ *
+ * Authoring a template is an ordinary operation here as everywhere else, so it
+ * is journalled and undoable — and a slot aimed at protected chrome is refused
+ * by the engine, in its own words, rather than by this form knowing the rule.
+ */
+function drawSlots(layer: Layer): void {
+  const heading = document.createElement("h2");
+  heading.textContent = "Slots";
+  dom.inspector.append(heading);
+
+  for (const slot of state.slots) {
+    const row = document.createElement("div");
+    row.className = "effect-row";
+    const label = document.createElement("span");
+    label.className = "effect-name";
+    label.textContent = `${slot.name}${slot.required ? " *" : ""}`;
+    label.title = slot.description ?? `${slot.kind ?? "text"} → ${slot.layer}`;
+    if (slot.layer === layer.id) label.classList.add("slot-on-this-layer");
+    row.append(label);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "small";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () =>
+      void send(`remove slot ${slot.name}`, {
+        op: "removeSlot",
+        name: slot.name,
+      } as Operation),
+    );
+    row.append(remove);
+    dom.inspector.append(row);
+  }
+
+  const buttons = document.createElement("div");
+  buttons.className = "buttons";
+  const kind = document.createElement("select");
+  for (const option of ["text", "image", "color"]) {
+    const element = document.createElement("option");
+    element.value = option;
+    element.textContent = option;
+    kind.append(element);
+  }
+  // A text layer cannot be an image slot and vice versa; the engine refuses
+  // either way, but offering the wrong one is a form that invites a refusal.
+  kind.value = layer.type === "image" ? "image" : "text";
+
+  const offer = document.createElement("button");
+  offer.type = "button";
+  offer.textContent = "Offer as slot";
+  offer.addEventListener("click", () => {
+    const name = window.prompt("Slot name:");
+    if (!name) return;
+    void send(`offer ${name}`, {
+      op: "defineSlot",
+      slot: { name, layer: layer.id, kind: kind.value },
+    } as Operation);
+  });
+  buttons.append(kind, offer);
+  dom.inspector.append(buttons);
 }
 
 async function drawHistory(): Promise<void> {

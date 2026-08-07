@@ -176,6 +176,39 @@ pub enum Operation {
         name: String,
     },
 
+    /// Declares a named opening in the document, making it a template.
+    ///
+    /// Refused at definition time — not merely reported by validation — for a
+    /// name already taken, a layer that is not there, a kind that does not
+    /// match the layer, or **a layer that is protected or read-only**.
+    ///
+    /// That last refusal is why this is an operation rather than a hand edit.
+    /// Filling a slot is already refused on protected chrome, because a fill
+    /// is an `Update`. Defining one is not a fill, and without this check a
+    /// template could advertise an opening that always fails: the author would
+    /// think they had offered something, and every variant would refuse.
+    DefineSlot {
+        /// The slot to declare.
+        slot: crate::templates::Slot,
+    },
+
+    /// Changes an existing slot, by name.
+    ///
+    /// The same checks a definition faces, because the result has to be a slot
+    /// that could have been defined.
+    UpdateSlot {
+        /// Which slot to change.
+        name: String,
+        /// The slot's new content. Its `name` may differ, which renames it.
+        slot: crate::templates::Slot,
+    },
+
+    /// Removes a named opening. The layer it pointed at is untouched.
+    RemoveSlot {
+        /// Which slot to remove.
+        name: String,
+    },
+
     /// Applies a named style bundle to a layer.
     ///
     /// Compiles to the [`Update`](Operation::Update) the preset describes
@@ -289,6 +322,9 @@ pub fn apply(
                 ..UpdateLayer::new(id.clone())
             },
         ),
+        Operation::DefineSlot { slot } => define_slot(&mut candidate, slot, None),
+        Operation::UpdateSlot { name, slot } => define_slot(&mut candidate, slot, Some(name)),
+        Operation::RemoveSlot { name } => remove_slot(&mut candidate, name),
         Operation::DefinePreset { preset } => define_preset(&mut candidate, preset),
         Operation::DeletePreset { name } => delete_preset(&mut candidate, name),
         Operation::ApplyPreset {
@@ -398,6 +434,109 @@ fn create(
     Ok(OpOutcome::created(id))
 }
 
+/// Declares a slot, or replaces the one named by `replacing`.
+///
+/// One function for both operations because the checks are the same, and a
+/// second copy of them is a second thing to forget: an update that could
+/// produce a slot a definition would have refused is a hole.
+fn define_slot(
+    document: &mut Document,
+    slot: &crate::templates::Slot,
+    replacing: Option<&str>,
+) -> Result<OpOutcome, OpError> {
+    if slot.name.trim().is_empty() {
+        return Err(OpError::InvalidSlot {
+            name: slot.name.clone(),
+            reason: "a slot needs a name",
+        });
+    }
+
+    // Renaming onto a name another slot already has would make one of them
+    // unreachable, and `validate_slots` would then refuse the whole document.
+    let taken = document
+        .slots
+        .iter()
+        .any(|existing| existing.name == slot.name && Some(existing.name.as_str()) != replacing);
+    if taken {
+        return Err(OpError::InvalidSlot {
+            name: slot.name.clone(),
+            reason: "another slot already has that name",
+        });
+    }
+
+    if let Some(name) = replacing {
+        if !document.slots.iter().any(|existing| existing.name == name) {
+            return Err(OpError::NoSuchSlot {
+                name: name.to_owned(),
+                available: crate::templates::slot_names(document).join(", "),
+            });
+        }
+    }
+
+    let layer = tree::find(document, &slot.layer).ok_or_else(|| OpError::NoSuchLayer {
+        id: slot.layer.clone(),
+    })?;
+
+    // A slot on chrome would be an opening that always refuses when filled.
+    // Better to say so now, while somebody is looking at it, than to hand out
+    // a template whose contract is a lie.
+    if layer.protected {
+        return Err(OpError::LayerProtected {
+            id: slot.layer.clone(),
+        });
+    }
+    if layer.read_only {
+        return Err(OpError::LayerReadOnly {
+            id: slot.layer.clone(),
+        });
+    }
+
+    let found = match &layer.kind {
+        LayerKind::Text(_) => "text",
+        LayerKind::Image(_) => "image",
+        LayerKind::Svg(_) => "svg",
+        LayerKind::Group(_) => "group",
+    };
+    let wants = match slot.kind {
+        crate::templates::SlotKind::Text | crate::templates::SlotKind::Color => "text",
+        crate::templates::SlotKind::Image => "image",
+    };
+    if found != wants {
+        return Err(OpError::SlotKindMismatch {
+            name: slot.name.clone(),
+            wants,
+            id: slot.layer.clone(),
+            found,
+        });
+    }
+
+    match replacing {
+        Some(name) => {
+            if let Some(existing) = document
+                .slots
+                .iter_mut()
+                .find(|existing| existing.name == name)
+            {
+                *existing = slot.clone();
+            }
+        }
+        None => document.slots.push(slot.clone()),
+    }
+    Ok(OpOutcome::nothing())
+}
+
+fn remove_slot(document: &mut Document, name: &str) -> Result<OpOutcome, OpError> {
+    let before = document.slots.len();
+    document.slots.retain(|slot| slot.name != name);
+    if document.slots.len() == before {
+        return Err(OpError::NoSuchSlot {
+            name: name.to_owned(),
+            available: crate::templates::slot_names(document).join(", "),
+        });
+    }
+    Ok(OpOutcome::nothing())
+}
+
 /// Stores a preset, replacing any with the same name.
 ///
 /// Replacing rather than refusing a duplicate: "define this style" is what a
@@ -492,6 +631,24 @@ fn delete(document: &mut Document, id: &LayerId) -> Result<OpOutcome, OpError> {
     let mut removed = vec![id.clone()];
     if let LayerKind::Group(group) = &layer.kind {
         tree::collect_ids(&group.children, &mut removed);
+    }
+
+    // A slot pointing at a layer that is about to go would leave the document
+    // invalid, so something has to give. Refused rather than cascading: an
+    // agent deleting a layer must not silently break a contract other scripts
+    // and agents are filling, and the `removed` outcome has nowhere to say it
+    // did. The fix is one `removeSlot`, and this names which.
+    let orphaned: Vec<String> = document
+        .slots
+        .iter()
+        .filter(|slot| removed.contains(&slot.layer))
+        .map(|slot| slot.name.clone())
+        .collect();
+    if !orphaned.is_empty() {
+        return Err(OpError::LayerIsSlotTarget {
+            id: id.clone(),
+            slots: orphaned.join(", "),
+        });
     }
 
     tree::remove(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;

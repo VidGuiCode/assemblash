@@ -10,14 +10,58 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-08-06
+
+Templates can be authored, not just filled. Closes the last functional caveat
+in the evidence file.
+
+No document-model change: `slots` already existed. `schemaVersion` stays **1**,
+and three new operations are additive to the operation enum, exactly as the
+three preset operations were in 0.15.0.
+
+### Added
+
+- **`defineSlot`, `updateSlot`, `removeSlot`** as ordinary operations —
+  journalled, undoable, dry-runnable, and version-checked, because that is what
+  every operation gets. Before this, `slots` had no operation that set it, so
+  authoring a template meant editing `document.json`: the only workflow in the
+  product with no journal, no undo, and no audit trail.
+- **A slot may not be aimed at protected or read-only chrome**, refused at
+  definition time. Filling one was already impossible — a fill is an `Update` —
+  but *offering* it was not, and an opening that always refuses when filled is
+  worse than no opening, because it looks like a promise.
+- The same checks refuse a name already taken, an empty name, a layer that is
+  not in the document, and a kind that does not match the layer it names.
+  `updateSlot` faces every one of them, so an update cannot produce a slot a
+  definition would have refused.
+- `assemblash slot define|update|remove`, the same three operations over HTTP
+  and MCP, and an inspector affordance that offers the selected layer as a slot
+  and lists and removes the document's slots.
+- The journal now names the slot and preset operations rather than printing
+  them as a generic `operation`.
+
 ### Changed
 
+- **Deleting a layer a slot offers is refused**, naming the slots in the way.
+  A dangling slot makes the document invalid, so doing nothing was never an
+  option; cascading would let an agent delete a layer and silently break a
+  contract other callers are filling, with no room in the `removed` outcome to
+  say it had. The fix is one `removeSlot`, and the error says which.
+
+### Verified
+
+- A template authored, filled, and undone **without a single hand edit**: the
+  slot definition undoes byte for byte, and redo puts it back.
+- Every refusal, through the binary: protected chrome, read-only chrome, a
+  missing layer, a kind mismatch, a duplicate name, and deleting a slot's
+  layer — including when the layer is a child of the group being deleted.
+- A refused definition leaves the document byte-identical.
 - The scale test now stops the first server before restarting one over the
   same workspace, and compares the **thumbnail bytes** across the rebuild as
   well as the list and the search. Checking only the list and the search left a
   hole: a rebuilt cache could have answered those correctly and still produced
-  a different picture. Found by running the exit test by hand against the
-  v0.16.0 artifact, where a force-killed server left its project locks behind.
+  a different picture. Found by running the v0.16.0 exit test by hand against
+  the released artifact.
 
 ## [0.16.0] — 2026-08-06
 

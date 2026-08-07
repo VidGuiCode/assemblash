@@ -387,6 +387,14 @@ enum Command {
         who: ActorArgs,
     },
 
+    /// Declares, changes, and removes a template's named slots.
+    ///
+    /// Authoring a template is an ordinary operation, so it is journalled,
+    /// undoable, and refused where every other mutation is — including on
+    /// protected chrome, which may not be offered as a slot at all.
+    #[command(subcommand)]
+    Slot(SlotCommand),
+
     /// Named style bundles stored in the document.
     #[command(subcommand)]
     Preset(PresetCommand),
@@ -396,6 +404,89 @@ enum Command {
     /// The list comes from the engine rather than from documentation, so it
     /// cannot describe a mode that does not draw.
     Styles,
+}
+
+/// Authoring a template: the openings a caller may fill.
+#[derive(Debug, Subcommand)]
+enum SlotCommand {
+    /// Declares a slot on a layer.
+    Define {
+        /// Project directory.
+        project: PathBuf,
+        /// What the slot is called. Unique within the document.
+        #[arg(long)]
+        name: String,
+        /// The layer it fills.
+        #[arg(long)]
+        layer: String,
+        /// What may be supplied: text, image, or color.
+        #[arg(long, value_enum, default_value_t = SlotKindArg::Text)]
+        kind: SlotKindArg,
+        /// What this slot is for, for whoever fills it.
+        #[arg(long)]
+        description: Option<String>,
+        /// Whether a variant must supply it.
+        #[arg(long)]
+        required: bool,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Changes an existing slot. Omitted fields keep their current value.
+    Update {
+        /// Project directory.
+        project: PathBuf,
+        /// Which slot to change.
+        name: String,
+        /// A new name for it.
+        #[arg(long = "rename")]
+        rename: Option<String>,
+        /// A different layer to fill.
+        #[arg(long)]
+        layer: Option<String>,
+        /// A different kind.
+        #[arg(long, value_enum)]
+        kind: Option<SlotKindArg>,
+        /// A new description.
+        #[arg(long)]
+        description: Option<String>,
+        /// Whether a variant must supply it.
+        #[arg(long)]
+        required: Option<bool>,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Removes a slot. The layer it pointed at is untouched.
+    Remove {
+        /// Project directory.
+        project: PathBuf,
+        /// Which slot to remove.
+        name: String,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+}
+
+/// What a slot lets a caller supply.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SlotKindArg {
+    /// The text of a text layer.
+    Text,
+    /// The asset an image layer draws.
+    Image,
+    /// The fill colour of a text layer.
+    Color,
+}
+
+impl From<SlotKindArg> for assemblash_core::SlotKind {
+    fn from(kind: SlotKindArg) -> Self {
+        match kind {
+            SlotKindArg::Text => Self::Text,
+            SlotKindArg::Image => Self::Image,
+            SlotKindArg::Color => Self::Color,
+        }
+    }
 }
 
 /// Presets: named style bundles, stored in the document that uses them.
@@ -767,6 +858,9 @@ enum CliError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("no slot named {name:?} in this document")]
+    NoSuchSlot { name: String },
+
     #[error("{path} already contains a project")]
     ProjectExists { path: PathBuf },
     #[error("serialising the document: {0}")]
@@ -1263,6 +1357,8 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
+        Command::Slot(command) => run_slot(command),
+
         Command::Preset(command) => run_preset(command),
 
         Command::Styles => {
@@ -1341,6 +1437,97 @@ fn run(command: Command) -> Result<(), CliError> {
             } else {
                 println!("no lock to remove");
             }
+            Ok(())
+        }
+    }
+}
+
+/// The slot commands.
+fn run_slot(command: SlotCommand) -> Result<(), CliError> {
+    match command {
+        SlotCommand::Define {
+            project,
+            name,
+            layer,
+            kind,
+            description,
+            required,
+            who,
+        } => {
+            let mut session = Session::open(&project, now_millis())?;
+            session.apply(
+                &Operation::DefineSlot {
+                    slot: assemblash_core::Slot {
+                        name: name.clone(),
+                        layer: assemblash_core::LayerId::new(layer),
+                        kind: kind.into(),
+                        description,
+                        required,
+                        extra: Default::default(),
+                    },
+                },
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            println!("{name}");
+            Ok(())
+        }
+
+        SlotCommand::Update {
+            project,
+            name,
+            rename,
+            layer,
+            kind,
+            description,
+            required,
+            who,
+        } => {
+            let mut session = Session::open(&project, now_millis())?;
+            // Read the slot as it is and change only what was asked for: an
+            // update that silently cleared the description because it was not
+            // repeated would be a trap.
+            let current = session
+                .document()
+                .slots
+                .iter()
+                .find(|slot| slot.name == name)
+                .cloned()
+                .ok_or_else(|| CliError::NoSuchSlot { name: name.clone() })?;
+            let slot = assemblash_core::Slot {
+                name: rename.unwrap_or_else(|| current.name.clone()),
+                layer: layer
+                    .map(assemblash_core::LayerId::new)
+                    .unwrap_or_else(|| current.layer.clone()),
+                kind: kind.map_or(current.kind, Into::into),
+                description: description.or(current.description.clone()),
+                required: required.unwrap_or(current.required),
+                extra: current.extra.clone(),
+            };
+            let renamed = slot.name.clone();
+            session.apply(
+                &Operation::UpdateSlot { name, slot },
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            println!("{renamed}");
+            Ok(())
+        }
+
+        SlotCommand::Remove { project, name, who } => {
+            let mut session = Session::open(&project, now_millis())?;
+            session.apply(
+                &Operation::RemoveSlot { name: name.clone() },
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            println!("{name}");
             Ok(())
         }
     }
@@ -1513,6 +1700,12 @@ fn operation_name(operation: &Operation) -> &'static str {
         Operation::CenterOnCanvas { .. } => "centerOnCanvas",
         Operation::Distribute { .. } => "distribute",
         Operation::SnapTo { .. } => "snapTo",
+        Operation::DefineSlot { .. } => "defineSlot",
+        Operation::UpdateSlot { .. } => "updateSlot",
+        Operation::RemoveSlot { .. } => "removeSlot",
+        Operation::DefinePreset { .. } => "definePreset",
+        Operation::DeletePreset { .. } => "deletePreset",
+        Operation::ApplyPreset { .. } => "applyPreset",
         // Operation is non-exhaustive, so history written by a newer build
         // still lists rather than refusing to print.
         _ => "operation",
