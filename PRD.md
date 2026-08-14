@@ -1,7 +1,7 @@
 # Assemblash Product Requirements Document
 
 **Product:** Assemblash  
-**Status:** Pre-alpha — v0.1.0 (Phase 0 spike) released 2026-08-04  
+**Status:** **1.0.0 released 2026-08-06** — the document schema (`schemaVersion` 1) and the operation API are stable; breaking either requires a MAJOR release. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) are demonstrated on released artifacts. Use case D remains out of scope by design.  
 **Document type:** Product and technical requirements  
 **Audience:** Maintainers, contributors, downstream integrators, and coding agents  
 **Primary deployment model:** Local machine or self-hosted server  

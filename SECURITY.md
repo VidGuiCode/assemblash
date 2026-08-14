@@ -2,17 +2,27 @@
 
 ## Project status
 
-Assemblash is **pre-alpha** and currently contains no implementation. There is
-no released version, and no version is supported for production use. Treat
-anything in this repository as unfinished.
+Assemblash is **released at 1.0.0**. It is a local-first engine: by default it
+binds `127.0.0.1` and requires no account, no network, and no cloud service.
 
 ## Supported versions
 
 | Version | Supported |
 | ------- | --------- |
-| unreleased / `main` | Best effort only |
+| 1.0.x | Yes |
+| < 1.0 | No — upgrade to 1.0.x |
 
-Once a first release exists, this table will list supported versions.
+## What the built-in authentication is, and is not
+
+Binding anything other than loopback **refuses to start without an access
+token**. The token is compared in constant time, is never logged, and is never
+put in a URL. That is the whole of it: there are no users, no roles, and no
+revocation beyond rotating the single token, which logs everyone out.
+
+**The token authenticates; it does not encrypt.** Anything reachable beyond a
+trusted network belongs behind a reverse proxy that terminates TLS, and OIDC or
+SSO belongs there too — see [DEPLOYMENT.md](DEPLOYMENT.md). Assemblash is not an
+identity provider and does not try to be one.
 
 ## Reporting a vulnerability
 

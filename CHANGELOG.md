@@ -10,6 +10,62 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-08-06
+
+**Assemblash is 1.0.** Not because it is finished, but because what you build
+against will not move under you.
+
+`1.0.0` promises exactly two things:
+
+- **The document schema is stable.** `schemaVersion` has been 1 since v0.1.0
+  and has never needed a migration. Fields have only ever been added, with
+  defaults, and unknown keys survive a load-and-save cycle — which is
+  property-tested, not merely intended.
+- **The operation API is stable.** The operation set has grown; no existing
+  operation has changed shape.
+
+**Breaking either now requires a MAJOR release, with a migration.**
+
+It is not a claim of feature completeness. What exists is listed in
+`README.md`; what does not is said there too.
+
+### What 1.0 contains
+
+Everything released through v0.17.0, unchanged: the document model and its
+thirteen layer operations, layout operations, an append-only journal with undo
+and redo across restarts, protected and read-only layers, file locking and
+expected-version conflict checks, a hash-pinned font store with twelve OFL
+families, deterministic SVG and PNG rendering, fourteen blend modes, a
+non-destructive effect stack with seeded grain, presets, templates that can be
+authored as well as filled, a workspace that stays usable at two hundred
+projects, a local HTTP API, an MCP server with read and write tools, a
+reference web interface, and binaries for six targets plus a `scratch`
+container.
+
+### The three limits, stated plainly
+
+- **Fourteen blend modes, not sixteen.** `color-dodge` and `color-burn`
+  rasterize correctly but do not produce bit-identical bytes on every target.
+  Reproducibility is what the rest of the engine rests on — including the
+  content hashes a variants batch is checked by — so both are refused with a
+  typed error rather than drawn. Revisit if the upstream renderer changes.
+- **AI adapters (PRD use case D) are out of scope by design.** No adapter
+  ships and the core never requires an AI provider. Adapters are the post-1.0
+  extension point, not a missing feature.
+- **Authentication is one shared token; identity belongs in front of it.** A
+  non-loopback bind refuses to start without a token, which is compared in
+  constant time, never logged, and never put in a URL. There are no users, no
+  roles, and no revocation beyond rotating it. For OIDC or SSO, put a reverse
+  proxy in front — the token authenticates, it does not encrypt.
+
+### Verified for this release
+
+All fourteen MVP acceptance criteria (PRD §12) and primary use cases A, B, C,
+and E (PRD §6) are demonstrated by real execution against released artifacts,
+not by argument. Every release from v0.1.0 was tested on all six targets in CI
+before it was tagged, and every one was verified afterwards by downloading the
+binary and running it. The `scratch` container builds and runs.
+
 ## [0.17.0] — 2026-08-06
 
 Templates can be authored, not just filled. Closes the last functional caveat

@@ -16,8 +16,11 @@ refuses to become — scope, requirements, safety model, and the phase plan.
 Both apply to you. This file only adds what is specific to agents and stated
 nowhere else.
 
-The project is **pre-alpha with no implementation** — currently the product
-definition only.
+The project is **released at 1.0.0** and implemented: a Rust workspace of five
+crates, a reference interface in `ui/`, and released binaries for six targets.
+`1.0.0` makes the document schema and the operation API stable, so a change
+that breaks either is a MAJOR release and needs a migration — say so rather
+than making one quietly.
 
 ## Where working notes go
 

@@ -8,13 +8,15 @@ Please also read the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Project status
 
-**Early design / pre-alpha.** The repository currently contains the product
-definition only — see [README.md](README.md) and [PRD.md](PRD.md). Implementation
-starts with the Phase 0 vertical slice described in PRD §13.
+**Released at 1.0.0.** The engine is implemented and released for six targets;
+see [README.md](README.md) for what exists and [PRD.md](PRD.md) for what it is
+meant to be.
 
-Because there is no implementation yet, the most valuable contributions right
-now are design review, prototypes, and help resolving the open decisions in
-PRD §16 — not large speculative feature branches.
+`1.0.0` makes the document schema (`schemaVersion` 1) and the operation API
+stable. A change that breaks either is a MAJOR release and ships a migration —
+so a pull request that changes the shape of an existing operation, or of a
+document field, needs to say so and argue for it rather than slipping it in.
+Additive fields with defaults are the ordinary way to extend both.
 
 ## The one question to ask first
 

@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** Pre-alpha — v0.17.0 is released and runs: the document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic PNG export, a local HTTP API bound to `127.0.0.1`, an MCP server an agent can both read and write with, and a reference web interface the binary serves. See [Current project status](#current-project-status) for exactly what has been run.
+**Status:** **1.0.0 — released and working.** The document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic rendering and PNG export, a local HTTP API, an MCP server an agent can both read and write with, templates, presets, effects, and a reference web interface the binary serves. `1.0.0` is a stability promise about the **document schema and the operation API**, not a claim of feature completeness — see [What 1.0 means](#what-10-means). [Current project status](#current-project-status) lists exactly what has been run.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -36,7 +36,9 @@ The document remains editable and inspectable. Human-facing frontends and agent 
 - **Composable:** other applications should be able to embed or call Assemblash.
 - **Small before broad:** basic layers, groups, text, images, and export come before advanced image-editing features.
 
-## Planned capabilities
+## What the engine is for
+
+The sections from here to [What 1.0 means](#what-10-means) describe the product's intent and shape. [Current project status](#current-project-status) is the record of what has actually been built and run — read that one for facts.
 
 ### Document engine
 
@@ -94,11 +96,11 @@ AI adapters must not silently modify protected layers such as logos, legal text,
 
 ## Reference UI
 
-Assemblash will include a small reference web UI to make the project easy to understand, test, and use locally. The reference UI is not the only intended frontend.
+Assemblash ships a small reference web UI, served by the binary itself, to make the project easy to understand, test, and use locally. It is one client of the API and holds no privileged path — it is not the only intended frontend.
 
 A downstream application may instead provide its own interface and use the Assemblash API directly. This allows specialized applications to add their own templates, design rules, workflows, or permissions without changing the generic engine.
 
-## Proposed architecture
+## Architecture
 
 ```text
 ┌───────────────────────────────────────────────────────────┐
@@ -130,8 +132,8 @@ The engine is implemented in **Rust** and ships as a single static binary with n
 
 - Document model: `serde`, with a language-neutral JSON Schema generated via `schemars`
 - Rendering: SVG-first, rasterized with `resvg`/`tiny-skia` — pure Rust, using only explicitly provided font files, so output is reproducible across operating systems and CPU architectures
-- API: embedded Rust crate first, HTTP (`axum`) planned
-- MCP: official Rust SDK, stdio transport first
+- API: an embedded Rust crate and an HTTP surface over `axum`, both over the same operation layer
+- MCP: official Rust SDK, over stdio
 - Reference UI: web-based (TypeScript), served as static assets by the same binary
 
 The full decision record, including rejected alternatives, is in [PRD.md](PRD.md) §16.1.
@@ -149,9 +151,9 @@ Assemblash is a generic open-source engine. Downstream projects may maintain pri
 
 The public repository should contain neutral examples only. Do not commit private company assets, credentials, or customer content.
 
-## Non-goals for the first release
+## Non-goals
 
-Assemblash will not initially attempt to provide:
+Assemblash does not attempt to provide:
 
 - a complete Photoshop or GIMP replacement;
 - a professional brush engine;
@@ -164,20 +166,20 @@ Assemblash will not initially attempt to provide:
 - a full desktop application;
 - arbitrary remote filesystem access from MCP.
 
-## Development direction
+## How it was built
 
-The recommended order is:
+The order was deliberate, and steps 1–8 and 10 are done as of 1.0.0:
 
-1. Define and validate the document format.
-2. Implement pure document operations with tests.
-3. Render the document deterministically.
-4. Add PNG/SVG export.
-5. Add a local HTTP API or embedded library interface.
-6. Build the minimal reference UI.
-7. Add the MCP server with read-only tools first.
-8. Add safe write operations with versioning and undo.
-9. Add optional AI and downstream adapters.
-10. Package for local use and Docker deployment.
+1. Define and validate the document format. ✔
+2. Implement pure document operations with tests. ✔
+3. Render the document deterministically. ✔
+4. Add PNG/SVG export. ✔
+5. Add a local HTTP API and an embedded library interface. ✔
+6. Build the minimal reference UI. ✔
+7. Add the MCP server with read-only tools first. ✔
+8. Add safe write operations with versioning and undo. ✔
+9. Add optional AI and downstream adapters. — **not done, and out of scope by design**; adapters are the post-1.0 extension point (PRD use case D).
+10. Package for local use and Docker deployment. ✔
 
 ## Related projects and inspiration
 
@@ -217,9 +219,29 @@ Apache-2.0 was chosen for the generic core because it is permissive, includes an
 
 The dependency graph must be rechecked against this license once an implementation stack is chosen, and again if the renderer or canvas foundation is replaced.
 
+## What 1.0 means
+
+`1.0.0` promises two things and declines to promise a third.
+
+**The document schema is stable.** `schemaVersion` has been 1 since v0.1.0 and has never needed a migration. Fields have only ever been added, with defaults, and unknown keys are preserved verbatim through a load-and-save cycle — which is property-tested. A document written by 1.0.0 will be readable by every 1.x release.
+
+**The operation API is stable.** The operation set has grown — layer operations, layout operations, presets, slots — but no existing operation has changed shape. A client written against 1.0 keeps working across 1.x.
+
+**Breaking either now requires a MAJOR bump.** That is the whole content of the promise: not that the product is finished, but that what you build against will not move under you.
+
+**It is not a claim of feature completeness.** Styled text runs do not exist. The interface is a reference client, not a design tool. What is here is listed below, and what is not is said plainly.
+
+### Three limits worth knowing before you adopt it
+
+- **Fourteen blend modes, not sixteen.** `color-dodge` and `color-burn` rasterize correctly but do not produce bit-identical bytes on every target — the x86_64 macOS runner disagreed with the other five for the same document and fonts. Reproducibility (NFR-1) is what the rest of the engine rests on, including the content hashes a variants batch is checked by, so both are refused with a typed error rather than drawn. This will be revisited if the upstream renderer changes.
+- **AI adapters (PRD use case D) are out of scope by design.** No adapter ships, and the core never requires an AI provider. Adapters are the post-1.0 extension point, not a missing feature.
+- **Authentication is a single shared token, and identity belongs in front of it.** A non-loopback bind refuses to start without one; the token is compared in constant time, never logged, and never put in a URL. There are no users, no roles, and no revocation beyond rotating the one token. For OIDC, SSO, or per-user access, put a reverse proxy in front — see [DEPLOYMENT.md](DEPLOYMENT.md). The token authenticates; it does not encrypt.
+
+The evidence behind every claim in this document — which test, which release, which run — is kept with the project's working notes and summarised in the release notes for [v1.0.0](https://github.com/VidGuiCode/assemblash/releases/tag/v1.0.0).
+
 ## Current project status
 
-**v0.17.0.** What exists and has been run:
+**1.0.0.** What exists and has been run:
 
 1. **Documents** — canvas, assets, and a nested tree of text, image, SVG, and group layers, saved as `document.json` plus `assets/`. Unknown fields survive a load-and-save cycle. Hand-editing the file is supported.
 2. **Operations** — thirteen typed operations (create, update, delete, duplicate, move, resize, rotate, reorder, group, ungroup, show/hide, lock/unlock, rename), each validated and applied transactionally: a refused operation leaves the document exactly as it was.
@@ -238,9 +260,9 @@ The dependency graph must be rechecked against this license once an implementati
 
 12. **Presets** — named style bundles stored in the document: font, size, colour, alignment, line height, opacity, blend mode, and effect stack. Applying one compiles to exactly the update a person would send, so it is journalled, undoable, refused on protected layers, and pixel-identical to setting the same properties by hand.
 
-13. **Templates with named slots** — a document names some of its layers as slots, and `assemblash variants` (or the API, or MCP) renders one image per set of values. Protected chrome cannot be reached through a slot, because filling one is an ordinary operation and passes the same check everything else does.
+13. **Templates with named slots** — a document names some of its layers as slots, and `assemblash variants` (or the API, or MCP) renders one image per set of values. Slots are declared, changed, and removed by ordinary operations, so authoring a template is journalled and undoable like every other edit; a slot may not be aimed at protected or read-only chrome, and filling one passes the same check every other mutation does.
 
-What does not exist yet: styled text runs. Everything above this section describes where the project is going, not what it does today.
+What does not exist yet: styled text runs, and AI adapters (out of scope by design — see [What 1.0 means](#what-10-means)). Everything above this section describes where the project is going, not what it does today.
 
 The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: the same document plus the same font files produces bit-identical PNGs on all six targets.
 
@@ -251,7 +273,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v0.17.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.0.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:
