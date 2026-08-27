@@ -89,7 +89,7 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 | cc | 1.4.0 | MIT OR Apache-2.0 |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 |
 | cfg_aliases | 0.2.2 | MIT |
-| chacha20 | 0.10.1 | MIT OR Apache-2.0 |
+| chacha20 | 0.10.2 | MIT OR Apache-2.0 |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
 | clap | 4.6.5 | MIT OR Apache-2.0 |
 | clap_builder | 4.6.5 | MIT OR Apache-2.0 |
