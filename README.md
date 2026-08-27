@@ -2,7 +2,7 @@
 
 > A local-first visual document engine and MCP server for humans and AI agents.
 
-**Status:** **1.0.0 — released and working.** The document model, the operation layer with undo and history, layout operations, a hash-pinned font store, deterministic rendering and PNG export, a local HTTP API, an MCP server an agent can both read and write with, templates, presets, effects, and a reference web interface the binary serves. `1.0.0` is a stability promise about the **document schema and the operation API**, not a claim of feature completeness — see [What 1.0 means](#what-10-means). [Current project status](#current-project-status) lists exactly what has been run.
+**Status:** **1.1.0 — released and working.** The document model, operation layer, deterministic renderer, local HTTP API, CLI and MCP interfaces remain compatible with 1.0, while the reference editor now has a canvas-first creation, editing, arrangement, and export workflow. `1.0.0` remains the stability promise for the **document schema and operation API** — see [What 1.0 means](#what-10-means). [Current project status](#current-project-status) lists exactly what has been run.
 
 Assemblash is a headless system for creating, inspecting, modifying, rendering, and exporting structured visual documents. It provides a machine-readable document model, a local API, an MCP server for agent access, and an optional reference web interface.
 
@@ -237,11 +237,11 @@ The dependency graph must be rechecked against this license once an implementati
 - **AI adapters (PRD use case D) are out of scope by design.** No adapter ships, and the core never requires an AI provider. Adapters are the post-1.0 extension point, not a missing feature.
 - **Authentication is a single shared token, and identity belongs in front of it.** A non-loopback bind refuses to start without one; the token is compared in constant time, never logged, and never put in a URL. There are no users, no roles, and no revocation beyond rotating the one token. For OIDC, SSO, or per-user access, put a reverse proxy in front — see [DEPLOYMENT.md](DEPLOYMENT.md). The token authenticates; it does not encrypt.
 
-The evidence behind every claim in this document — which test, which release, which run — is kept with the project's working notes and summarised in the release notes for [v1.0.0](https://github.com/VidGuiCode/assemblash/releases/tag/v1.0.0).
+The evidence behind every claim in this document — which test, which release, which run — is kept with the project's working notes and summarised in the release notes for [v1.1.0](https://github.com/VidGuiCode/assemblash/releases/tag/v1.1.0).
 
 ## Current project status
 
-**1.0.0.** What exists and has been run:
+**1.1.0.** What exists and has been run:
 
 1. **Documents** — canvas, assets, and a nested tree of text, image, SVG, and group layers, saved as `document.json` plus `assets/`. Unknown fields survive a load-and-save cycle. Hand-editing the file is supported.
 2. **Operations** — thirteen typed operations (create, update, delete, duplicate, move, resize, rotate, reorder, group, ungroup, show/hide, lock/unlock, rename), each validated and applied transactionally: a refused operation leaves the document exactly as it was.
@@ -250,11 +250,11 @@ The evidence behind every claim in this document — which test, which release, 
 5. **Fonts** — a local store where every file is pinned by the hash of its own bytes, importing TTF, OTF, collections, WOFF, and WOFF2, with a one-time installer for twelve pinned OFL families (the Notos, Inter, Roboto, Open Sans, Montserrat, Playfair Display, Lora, and JetBrains Mono). The system font list is never consulted; a font the store does not have is an error, never a substitution.
 6. **Rendering** — document to SVG as a pure function, then to PNG through resvg, with fourteen CSS blend modes and a non-destructive per-layer effect stack (brightness, contrast, saturation, blur, and seeded grain). A blend mode or effect this build does not render is refused, never silently drawn as something else — `color-dodge` and `color-burn` are refused on exactly those grounds, because they do not produce identical bytes on every target.
 7. **Workspace** — an OS-appropriate data directory created on first run, holding `config.toml`, the font store, and projects. A project directory stays portable; the workspace is a default location, not a container. A workspace of two hundred projects stays usable through `index.db`, a rebuildable cache behind project search, recents, and thumbnails — delete it and nothing is lost.
-8. **Local HTTP API** — `assemblash serve`, on `127.0.0.1` only, over the same operation layer everything else uses: projects, document, history, validation, operations with dry run and expected-version checks, undo and redo, asset upload, and PNG preview. JSON Schemas and TypeScript declarations for the document and the operations are published at [`schema/`](schema/).
+8. **Local HTTP API** — `assemblash serve`, on `127.0.0.1` only, over the same operation layer everything else uses: projects, document, history, validation, operations with dry run and expected-version checks, atomic operation batches, undo and redo, asset upload, text layout, and PNG preview. JSON Schemas and TypeScript declarations for the document and the operations are published at [`schema/`](schema/).
 
 9. **MCP server** — `assemblash mcp`, over stdio, on the official Rust SDK. Seven read tools let an agent list projects, read a document, list and inspect layers, validate, read the history, and get a rendered PNG preview. Twenty mutating tools cover the layer and layout operations, undo and redo, and export — each with a dry run, an optional expected version, protected-layer checks, and a transaction id it can be undone by.
 
-10. **Reference interface** — served at `/` by `assemblash serve`, embedded in the binary. Project browser, canvas, layer tree, inspector, insert, drag to move and resize, undo and redo, history, export, and — for a project that declares slots — a template panel that fills slots and renders a batch of variants into a gallery. No canvas library: the canvas is the engine's own render with DOM handles over it, so what you see is byte-for-byte what you export.
+10. **Reference interface** — served at `/` by `assemblash serve`, embedded in the binary. A single Add panel, direct on-canvas text editing, a contextual toolbar, a docked Properties/Layers/History panel, multi-selection, rotation-aware resize handles, alignment and distribution, a complete context menu, keyboard shortcuts, zoom and responsive editing all compile to the same validated operations used by the CLI, API, and MCP server. No canvas library: committed preview and export pixels come from the engine's own renderer.
 
 11. **Packaging** — binaries for Windows, Linux, and macOS on x86_64 and ARM64; a 9 MB `scratch` Docker image; and friendly mode: launching the binary with no arguments creates the workspace, serves, opens a browser, and can be stopped from the page. A second launch opens the one already running.
 
@@ -273,7 +273,7 @@ The renderer gate passes on Windows, Linux, and macOS, on x86_64 and aarch64: th
 Binaries are attached for all six targets — Windows, Linux, and macOS on x86_64 and ARM64. To build from source instead, with Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.0.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.1.0 assemblash-cli
 ```
 
 The engine never uses installed system fonts, so a document has to be told where its fonts are. Install one into a font store once:

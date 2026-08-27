@@ -1070,6 +1070,7 @@ fn run(command: Command) -> Result<(), CliError> {
             for entry in session.history().entries() {
                 let what = match &entry.kind {
                     EntryKind::Applied { operation, .. } => operation_name(operation).to_owned(),
+                    EntryKind::BatchApplied { label, .. } => label.clone(),
                     EntryKind::Undone { target } => format!("undo {target}"),
                     EntryKind::Redone { target } => format!("redo {target}"),
                     // The enum is non-exhaustive so history written by a newer

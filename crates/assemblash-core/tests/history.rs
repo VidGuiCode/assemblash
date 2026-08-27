@@ -124,6 +124,75 @@ fn apply_then_undo_gives_a_byte_identical_document() {
 }
 
 #[test]
+fn a_batch_replays_and_undoes_as_one_transaction() {
+    let mut project = Project::new();
+    let before = project.document_bytes();
+    let operations = vec![new_text("heading"), new_text("body")];
+
+    let (outcome, transaction) = project
+        .session
+        .apply_batch(
+            "Add two text layers",
+            &operations,
+            &human(),
+            Some(2),
+            Some(0),
+            &mut project.ids,
+        )
+        .unwrap();
+    assert_eq!(outcome.created.len(), 2);
+    assert!(transaction.as_str().starts_with("txn_"));
+    assert_eq!(project.session.version(), 1);
+    assert!(matches!(
+        project.session.history().entries()[0].kind,
+        EntryKind::BatchApplied { .. }
+    ));
+
+    project
+        .session
+        .undo(&human(), Some(3), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), before);
+
+    project
+        .session
+        .redo(&human(), Some(4), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.session.document().layers.len(), 2);
+    assert_eq!(project.session.version(), 1);
+}
+
+#[test]
+fn a_refused_batch_changes_neither_document_nor_history() {
+    let mut project = Project::new();
+    let before = project.document_bytes();
+    let operations = vec![
+        new_text("temporary"),
+        Operation::Delete {
+            id: LayerId::new("layer_missing"),
+        },
+    ];
+
+    let error = project
+        .session
+        .apply_batch(
+            "Must roll back",
+            &operations,
+            &human(),
+            Some(2),
+            Some(0),
+            &mut project.ids,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        SessionError::Operation(OpError::NoSuchLayer { .. })
+    ));
+    assert_eq!(project.document_bytes(), before);
+    assert_eq!(project.session.history().position(), 0);
+}
+
+#[test]
 fn undo_and_redo_walk_the_whole_history() {
     let mut project = Project::new();
     let empty = project.document_bytes();
@@ -689,6 +758,21 @@ fn force_unlock_clears_a_lock_left_behind() {
     ));
     assert!(assemblash_core::session::force_unlock(dir.path()).unwrap());
     Session::open(dir.path(), Some(3)).unwrap();
+}
+
+#[test]
+fn conditional_unlock_never_removes_a_changed_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let lock = dir.path().join(assemblash_core::session::LOCK_FILE);
+    std::fs::write(&lock, "{\"pid\":123}").unwrap();
+
+    let error = assemblash_core::session::force_unlock_if_pid(dir.path(), 122).unwrap_err();
+    assert!(matches!(error, SessionError::Locked { pid: 123, .. }));
+    assert!(lock.exists());
+
+    assert!(assemblash_core::session::force_unlock_if_pid(dir.path(), 123).unwrap());
+    assert!(!lock.exists());
+    assert!(!assemblash_core::session::force_unlock_if_pid(dir.path(), 123).unwrap());
 }
 
 /// The v0.3 guarantee has to hold for the operations added in v0.4 too.

@@ -10,6 +10,69 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-27
+
+The reference interface is now a practical canvas-first editor while the
+stable document schema and operation API remain unchanged. Existing 1.0
+documents and clients continue to work without migration.
+
+### Added
+
+- A unified editor shell with one Add panel, direct on-canvas text editing, a
+  contextual toolbar, and one docked Properties/Layers/History panel.
+- Heading, subheading, and body presets; image and SVG drop/upload flows;
+  synchronized canvas/layer selection; inline layer rename, visibility, lock,
+  grouping, reordering, and protected/read-only states.
+- Separate horizontal and vertical canvas centring, nine canvas anchors, six
+  selection alignments, distribution, ordering, and numeric transform fields.
+- A shared accessible context menu for canvas and layer rows, standard
+  clipboard/grouping/nudge shortcuts, multi-selection handles, marquee and
+  additive selection, smart guides, zoom, fit, 100%, and responsive panels.
+- `POST /api/projects/{id}/operation-batches` for atomic UI commands. Existing
+  operations are validated and journalled as one transaction; the
+  project-local `insertLayerTree` clipboard macro expands into ordinary
+  operations with fresh IDs and validated asset references.
+- `GET /api/projects/{id}/text-layout` and pinned-font text measurement so a
+  resized text box wraps and grows to its content instead of stretching glyphs.
+- Explicit PID-matched stale-lock recovery at
+  `POST /api/projects/{id}/recover-lock`.
+- Offline browser journeys for the compiled editor plus focused geometry,
+  export, API, batch, wrapping, and lock-recovery tests.
+
+### Changed
+
+- Dragging, resizing, and rotating update locally while the pointer moves and
+  commit one operation batch when interaction ends. Interactive previews render
+  only the pixels needed at the displayed scale; final export stays full-size
+  and deterministic.
+- Rotated selection boxes, resize handles, snapping, alignment, and
+  multi-selection bounds use visible geometry. A rotated resize follows the
+  layer's local axes and keeps the opposite anchor fixed.
+- Export has an explicit workflow with named output sizes while retaining
+  original-size PNG and SVG output from the Rust renderer.
+- Development builds use light optimization so local raster previews respond
+  quickly without disabling debug assertions.
+
+### Fixed
+
+- Text overflow, stretched text during resize, delayed drag feedback, editing
+  overlays that did not rotate, and selection boxes that did not follow their
+  layers.
+- Duplicate editing/creation surfaces, overlapping panels, inaccessible
+  arrangement actions, inert sidebar modes, and mobile panel overflow.
+- Project-open failures caused by stale process locks. Recovery removes only
+  the exact claim the user was shown and never steals a changed or live lock.
+- A missing `geometry.js` server allowlist entry that prevented the editor
+  module—and therefore both sidebars—from initializing in the real binary.
+
+### Compatibility and safety
+
+- `schemaVersion` stays **1**.
+- The existing `Operation` union is unchanged.
+- Existing single-operation endpoints and clients remain supported.
+- Batch commands preserve expected-version checks, protected/read-only layer
+  rules, atomic rollback, deterministic replay, and one-step undo/redo.
+
 ## [1.0.0] — 2026-08-06
 
 **Assemblash is 1.0.** Not because it is finished, but because what you build

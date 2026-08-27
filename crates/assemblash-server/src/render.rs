@@ -81,8 +81,17 @@ pub fn svg_for(
     project_dir: &Path,
     store: &FontStore,
 ) -> Result<Rendered, ApiError> {
-    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
     let fonts = fonts_for(document, store)?;
+    svg_for_loaded(document, project_dir, &fonts)
+}
+
+/// Renders a document to SVG with an already loaded deterministic font set.
+pub fn svg_for_loaded(
+    document: &Document,
+    project_dir: &Path,
+    fonts: &LoadedFonts,
+) -> Result<Rendered, ApiError> {
+    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
     let svg = doc_to_svg(document, fonts.font_set(), &hrefs)?;
     Ok(Rendered {
         bytes: svg.into_bytes(),
@@ -98,11 +107,21 @@ pub fn png_for(
     store: &FontStore,
     scale: f32,
 ) -> Result<Rendered, ApiError> {
-    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
     let fonts = fonts_for(document, store)?;
+    png_for_loaded(document, project_dir, &fonts, scale)
+}
+
+/// Renders a document to PNG with an already loaded deterministic font set.
+pub fn png_for_loaded(
+    document: &Document,
+    project_dir: &Path,
+    fonts: &LoadedFonts,
+    scale: f32,
+) -> Result<Rendered, ApiError> {
+    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
     let png = document_to_png(
         document,
-        &fonts,
+        fonts,
         &hrefs,
         scale,
         // No timestamp: two renders of an unchanged document are identical,
@@ -125,11 +144,23 @@ pub fn export_into_project(
     scale: f32,
     name: Option<&str>,
 ) -> Result<Exported, ApiError> {
+    let fonts = fonts_for(document, store)?;
+    export_into_project_loaded(document, project_dir, &fonts, scale, name)
+}
+
+/// Renders a PNG export with an already loaded deterministic font set.
+pub fn export_into_project_loaded(
+    document: &Document,
+    project_dir: &Path,
+    fonts: &LoadedFonts,
+    scale: f32,
+    name: Option<&str>,
+) -> Result<Exported, ApiError> {
     let stem = match name {
         Some(name) => safe_stem(name)?,
         None => "export".to_owned(),
     };
-    let rendered = png_for(document, project_dir, store, scale)?;
+    let rendered = png_for_loaded(document, project_dir, fonts, scale)?;
 
     let directory = project_dir.join(EXPORTS_DIR);
     std::fs::create_dir_all(&directory).map_err(|source| io(&directory, "creating", source))?;
@@ -265,6 +296,18 @@ pub fn render_variants(
     scale: f32,
     variants: &[Variant],
 ) -> Result<RenderedVariants, ApiError> {
+    let fonts = fonts_for(template, store)?;
+    render_variants_loaded(template, project_dir, &fonts, scale, variants)
+}
+
+/// Renders template variants with an already loaded deterministic font set.
+pub fn render_variants_loaded(
+    template: &Document,
+    project_dir: &Path,
+    fonts: &LoadedFonts,
+    scale: f32,
+    variants: &[Variant],
+) -> Result<RenderedVariants, ApiError> {
     // Checked once, before anything renders: a broken template should be one
     // clear error rather than the same error N times.
     assemblash_core::templates::validate_slots(template).map_err(template_error)?;
@@ -291,7 +334,7 @@ pub fn render_variants(
             .map_err(|source| ApiError::from(SessionError::from(source)))?;
         }
 
-        let png = png_for(&filled, project_dir, store, scale)?;
+        let png = png_for_loaded(&filled, project_dir, fonts, scale)?;
         let file = format!("{stem}.png");
         let path = directory.join(&file);
         std::fs::write(&path, &png.bytes).map_err(|source| io(&path, "writing", source))?;

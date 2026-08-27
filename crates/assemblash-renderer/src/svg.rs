@@ -138,7 +138,18 @@ fn write_layer(
                 blend = blend_attribute(layer)?,
             );
 
-            for (index, line) in text.text.split('\n').enumerate() {
+            for (index, line) in layout_text(
+                &text.text,
+                t.width,
+                text.font_size,
+                text.line_height,
+                &text.font_family,
+                fonts,
+            )
+            .lines
+            .iter()
+            .enumerate()
+            {
                 let dy = if index == 0 {
                     0.0
                 } else {
@@ -236,6 +247,107 @@ fn write_layer(
     }
 
     Ok(())
+}
+
+/// Wraps text at the layer width, preserving explicit line breaks.
+///
+/// Widths come from the pinned font file. A single word that is wider than
+/// the box is split at character boundaries so even pasted URLs cannot paint
+/// across neighbouring layers.
+/// Deterministic text layout for a rectangular text layer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextLayout {
+    /// Lines after explicit breaks and width wrapping.
+    pub lines: Vec<String>,
+    /// Minimum layer height that contains every resulting line.
+    pub height: f64,
+}
+
+/// Measures and wraps text with the same pinned metrics used by rendering.
+pub fn layout_text(
+    text: &str,
+    width: f64,
+    font_size: f64,
+    line_height: f64,
+    family: &str,
+    fonts: &FontSet,
+) -> TextLayout {
+    let Some(_) = fonts.text_advance_ratio(family, "") else {
+        let lines = text.split('\n').map(str::to_owned).collect::<Vec<_>>();
+        return TextLayout {
+            height: text_height(lines.len(), font_size, line_height, family, fonts),
+            lines,
+        };
+    };
+    let max_ratio = width / font_size;
+    let measure = |value: &str| {
+        fonts
+            .text_advance_ratio(family, value)
+            .unwrap_or(f64::INFINITY)
+    };
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        wrap_paragraph(paragraph, max_ratio, &measure, &mut lines);
+    }
+    TextLayout {
+        height: text_height(lines.len(), font_size, line_height, family, fonts),
+        lines,
+    }
+}
+
+fn text_height(
+    line_count: usize,
+    font_size: f64,
+    line_height: f64,
+    family: &str,
+    fonts: &FontSet,
+) -> f64 {
+    let extra_lines = line_count.saturating_sub(1) as f64;
+    font_size
+        * (fonts.ascent_ratio(family) + fonts.descent_ratio(family) + extra_lines * line_height)
+}
+
+fn wrap_paragraph(
+    paragraph: &str,
+    max_width: f64,
+    measure: &impl Fn(&str) -> f64,
+    lines: &mut Vec<String>,
+) {
+    let words = paragraph.split_whitespace().collect::<Vec<_>>();
+    if words.is_empty() {
+        lines.push(String::new());
+        return;
+    }
+
+    let mut current = String::new();
+    for word in words {
+        let candidate = if current.is_empty() {
+            word.to_owned()
+        } else {
+            format!("{current} {word}")
+        };
+        if measure(&candidate) <= max_width {
+            current = candidate;
+            continue;
+        }
+        if !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+        }
+        if measure(word) <= max_width {
+            current.push_str(word);
+            continue;
+        }
+
+        for character in word.chars() {
+            let mut candidate = current.clone();
+            candidate.push(character);
+            if !current.is_empty() && measure(&candidate) > max_width {
+                lines.push(std::mem::take(&mut current));
+            }
+            current.push(character);
+        }
+    }
+    lines.push(current);
 }
 
 /// A `mix-blend-mode` for a layer that asks for one.

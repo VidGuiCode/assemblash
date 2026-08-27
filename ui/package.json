@@ -7,9 +7,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc && node copy-static.mjs",
-    "check": "npm run typecheck && npm run build"
+    "test": "node --test *.test.mjs",
+    "check": "npm run typecheck && npm run build && npm test"
   },
   "devDependencies": {
+    "@phosphor-icons/web": "2.1.2",
     "typescript": "5.9.3"
   }
 }

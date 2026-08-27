@@ -159,6 +159,36 @@ pub fn force_unlock(project_dir: &Path) -> Result<bool, SessionError> {
     }
 }
 
+/// Removes a lock only when it is still the one the caller inspected.
+///
+/// This is the safe primitive for an interactive recovery flow: the UI first
+/// receives the owning PID in [`SessionError::Locked`], asks the person to
+/// confirm that process is gone, then presents that PID here. If another
+/// process acquired the project in between, its different claim is preserved.
+pub fn force_unlock_if_pid(project_dir: &Path, expected_pid: u32) -> Result<bool, SessionError> {
+    let path = project_dir.join(LOCK_FILE);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => {
+            return Err(SessionError::Storage(StorageError::Io {
+                operation: "reading",
+                path,
+                source,
+            }))
+        }
+    };
+    let actual_pid = serde_json::from_str::<LockContents>(&text).map_or(0, |lock| lock.pid);
+    if actual_pid != expected_pid {
+        return Err(SessionError::Locked {
+            pid: actual_pid,
+            path,
+        });
+    }
+
+    force_unlock(project_dir)
+}
+
 /// An open project.
 #[derive(Debug)]
 pub struct Session {
@@ -332,6 +362,48 @@ impl Session {
         Ok((outcome, transaction))
     }
 
+    /// Applies ordinary operations atomically and journals them as one step.
+    ///
+    /// Every member still passes through [`ops::apply`]. The only new
+    /// semantic is transaction scope: validation happens against a cloned
+    /// document, nothing is persisted if any member fails, and one undo
+    /// restores the state before the whole batch.
+    pub fn apply_batch(
+        &mut self,
+        label: &str,
+        operations: &[Operation],
+        actor: &Actor,
+        now: Option<u64>,
+        expected_version: Option<u64>,
+        ids: &mut dyn IdSource,
+    ) -> Result<(OpOutcome, TransactionId), SessionError> {
+        self.check_version(expected_version)?;
+        self.history.ensure_base(&self.document)?;
+
+        let mut candidate = self.document.clone();
+        let mut aggregate = OpOutcome::default();
+        for operation in operations {
+            let outcome = ops::apply(&mut candidate, operation, ids)?;
+            extend_unique(&mut aggregate.created, outcome.created);
+            extend_unique(&mut aggregate.changed, outcome.changed);
+            extend_unique(&mut aggregate.removed, outcome.removed);
+        }
+        candidate.version = self.history.position() + 1;
+
+        let transaction = self.history.record_applied_batch(
+            (label, operations),
+            &aggregate,
+            &candidate,
+            actor,
+            now,
+            ids,
+        )?;
+        crate::crash_point("journal-appended");
+        storage::save(&candidate, &self.project_dir)?;
+        self.document = candidate;
+        Ok((aggregate, transaction))
+    }
+
     /// Adds an imported asset to the document.
     ///
     /// Importing is not an operation: it changes the project directory rather
@@ -401,6 +473,14 @@ impl Session {
                 })
             }
             _ => Ok(()),
+        }
+    }
+}
+
+fn extend_unique<T: PartialEq>(target: &mut Vec<T>, values: Vec<T>) {
+    for value in values {
+        if !target.contains(&value) {
+            target.push(value);
         }
     }
 }

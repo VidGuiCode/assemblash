@@ -8,11 +8,11 @@
 //! transport that reached around it would quietly lose every one of them.
 
 use assemblash_core::history::{Actor, ActorKind};
-use assemblash_core::ids::UlidIdSource;
-use assemblash_core::ops::OpOutcome;
+use assemblash_core::ids::{IdSource, UlidIdSource};
+use assemblash_core::ops::{CreateLayer, LayerPosition, NewLayerKind, OpOutcome, UpdateLayer};
 use assemblash_core::storage;
 use assemblash_core::workspace::ProjectId;
-use assemblash_core::{Color, Document, Operation};
+use assemblash_core::{Color, Document, Layer, LayerKind, Operation, SessionError};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
@@ -57,15 +57,24 @@ pub fn router(
         .route("/api/projects/recent", get(recent_projects))
         .route("/api/projects/{id}", get(project_summary))
         .route("/api/projects/{id}/document", get(get_document))
+        .route(
+            "/api/projects/{id}/recover-lock",
+            post(recover_project_lock),
+        )
         .route("/api/projects/{id}/history", get(get_history))
         .route("/api/projects/{id}/validate", get(validate_project))
         .route("/api/projects/{id}/operations", post(apply_operation))
+        .route(
+            "/api/projects/{id}/operation-batches",
+            post(apply_operation_batch),
+        )
         .route("/api/projects/{id}/undo", post(undo))
         .route("/api/projects/{id}/redo", post(redo))
         .route("/api/projects/{id}/assets", post(upload_asset))
         .route("/api/projects/{id}/thumbnail.png", get(thumbnail))
         .route("/api/projects/{id}/preview.png", get(preview))
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
+        .route("/api/projects/{id}/text-layout", get(text_layout))
         .route("/api/projects/{id}/export", post(export_document))
         .route("/api/projects/{id}/exports/{file}", get(get_export))
         .route("/api/projects/{id}/presets", get(get_presets))
@@ -172,6 +181,32 @@ async fn version(axum::Extension(policy): axum::Extension<crate::Shutdown>) -> J
         schema_version: assemblash_core::SCHEMA_VERSION,
         can_shutdown: policy == crate::Shutdown::Allowed,
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoverLockRequest {
+    expected_pid: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct RecoverLockResponse {
+    unlocked: bool,
+}
+
+/// Recovers from a process that exited without dropping its project session.
+///
+/// This remains an explicit human decision. The expected PID makes the
+/// request compare-and-remove: it cannot erase a different process's newer
+/// claim after the client has shown the warning.
+async fn recover_project_lock(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(request): ApiJson<RecoverLockRequest>,
+) -> Result<Json<RecoverLockResponse>, ApiError> {
+    let id = ProjectId::new(id)?;
+    let unlocked = state.recover_project_lock(&id, request.expected_pid)?;
+    Ok(Json(RecoverLockResponse { unlocked }))
 }
 
 /// The document JSON Schema, served from the same generator that writes the
@@ -369,7 +404,8 @@ async fn thumbnail(
     }
 
     let scale = (THUMBNAIL_WIDTH / document.canvas.width.max(1.0)).min(1.0) as f32;
-    let rendered = render::png_for(&document, &directory, &state.font_store()?, scale)?;
+    let fonts = state.fonts_for(&document)?;
+    let rendered = render::png_for_loaded(&document, &directory, &fonts, scale)?;
     state.with_index(|index| index.set_thumbnail(&project_id, version, &rendered.bytes));
     Ok(png_response(rendered.bytes))
 }
@@ -581,6 +617,307 @@ async fn apply_operation(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum OperationBatchCommand {
+    Operation(Box<Operation>),
+    Macro(OperationBatchMacro),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
+enum OperationBatchMacro {
+    InsertLayerTree {
+        source_project: String,
+        layers: Vec<Layer>,
+        #[serde(default)]
+        position: LayerPosition,
+        #[serde(default)]
+        offset_x: f64,
+        #[serde(default)]
+        offset_y: f64,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationBatchRequest {
+    expected_version: u64,
+    label: String,
+    commands: Vec<OperationBatchCommand>,
+    #[serde(default)]
+    actor: ActorRequest,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationBatchResponse {
+    version: u64,
+    transaction_id: String,
+    #[serde(flatten)]
+    outcome: OpOutcome,
+}
+
+/// Applies several existing operations as one reversible UI command.
+///
+/// The clipboard macro is transport sugar only. It is expanded against a
+/// cloned document into ordinary create/update operations, then the exact
+/// expanded sequence is validated again, journalled, and saved atomically by
+/// `Session::apply_batch`.
+async fn apply_operation_batch(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(request): ApiJson<OperationBatchRequest>,
+) -> Result<Json<OperationBatchResponse>, ApiError> {
+    if request.commands.is_empty() {
+        return Err(ApiError::bad_request(
+            "an operation batch needs at least one command",
+        ));
+    }
+    if request.commands.len() > 500 {
+        return Err(ApiError::bad_request(
+            "an operation batch may contain at most 500 commands",
+        ));
+    }
+    let label = request.label.trim();
+    if label.is_empty() || label.len() > 120 {
+        return Err(ApiError::bad_request(
+            "an operation batch label must contain 1 to 120 characters",
+        ));
+    }
+
+    let id = ProjectId::new(id)?;
+    let actor = request.actor.actor()?;
+    let project = state.project(&id, now_millis())?;
+    let mut session = lock_project(&project)?;
+    if request.expected_version != session.version() {
+        return Err(SessionError::VersionConflict {
+            expected: request.expected_version,
+            actual: session.version(),
+        }
+        .into());
+    }
+
+    let mut candidate = session.document().clone();
+    let mut compiled = Vec::new();
+    let mut generated = RecordingIds::default();
+    for command in request.commands {
+        match command {
+            OperationBatchCommand::Operation(operation) => {
+                apply_compiled(&mut candidate, *operation, &mut compiled, &mut generated)?;
+            }
+            OperationBatchCommand::Macro(OperationBatchMacro::InsertLayerTree {
+                source_project,
+                layers,
+                position,
+                offset_x,
+                offset_y,
+            }) => {
+                if source_project != id.as_str() {
+                    return Err(ApiError::bad_request(
+                        "insertLayerTree is restricted to the current project",
+                    ));
+                }
+                if layers.is_empty() {
+                    return Err(ApiError::bad_request(
+                        "insertLayerTree needs at least one layer",
+                    ));
+                }
+                insert_layer_tree(
+                    &mut candidate,
+                    &layers,
+                    &position,
+                    offset_x,
+                    offset_y,
+                    &mut compiled,
+                    &mut generated,
+                )?;
+            }
+        }
+    }
+
+    let mut replay = ReplayThenUlid::new(generated.raws);
+    let (outcome, transaction) = session.apply_batch(
+        label,
+        &compiled,
+        &actor,
+        now_millis(),
+        Some(request.expected_version),
+        &mut replay,
+    )?;
+    Ok(Json(OperationBatchResponse {
+        version: session.version(),
+        transaction_id: transaction.to_string(),
+        outcome,
+    }))
+}
+
+#[derive(Debug, Default)]
+struct RecordingIds {
+    raws: Vec<String>,
+}
+
+impl IdSource for RecordingIds {
+    fn next_raw(&mut self) -> String {
+        let raw = UlidIdSource.next_raw();
+        self.raws.push(raw.clone());
+        raw
+    }
+}
+
+#[derive(Debug)]
+struct ReplayThenUlid {
+    raws: std::collections::VecDeque<String>,
+}
+
+impl ReplayThenUlid {
+    fn new(raws: Vec<String>) -> Self {
+        Self { raws: raws.into() }
+    }
+}
+
+impl IdSource for ReplayThenUlid {
+    fn next_raw(&mut self) -> String {
+        self.raws
+            .pop_front()
+            .unwrap_or_else(|| UlidIdSource.next_raw())
+    }
+}
+
+fn apply_compiled(
+    document: &mut Document,
+    operation: Operation,
+    compiled: &mut Vec<Operation>,
+    ids: &mut dyn IdSource,
+) -> Result<OpOutcome, ApiError> {
+    let outcome = assemblash_core::apply(document, &operation, ids)
+        .map_err(|error| ApiError::from(SessionError::Operation(error)))?;
+    compiled.push(operation);
+    Ok(outcome)
+}
+
+fn insert_layer_tree(
+    document: &mut Document,
+    layers: &[Layer],
+    position: &LayerPosition,
+    offset_x: f64,
+    offset_y: f64,
+    compiled: &mut Vec<Operation>,
+    ids: &mut dyn IdSource,
+) -> Result<(), ApiError> {
+    for (index, layer) in layers.iter().enumerate() {
+        let position = indexed_position(position, index);
+        insert_layer(document, layer, position, offset_x, offset_y, compiled, ids)?;
+    }
+    Ok(())
+}
+
+fn indexed_position(position: &LayerPosition, offset: usize) -> LayerPosition {
+    match position {
+        LayerPosition::Root { index } => LayerPosition::Root {
+            index: index.map(|index| index + offset),
+        },
+        LayerPosition::In { parent, index } => LayerPosition::In {
+            parent: parent.clone(),
+            index: index.map(|index| index + offset),
+        },
+    }
+}
+
+fn insert_layer(
+    document: &mut Document,
+    layer: &Layer,
+    position: LayerPosition,
+    offset_x: f64,
+    offset_y: f64,
+    compiled: &mut Vec<Operation>,
+    ids: &mut dyn IdSource,
+) -> Result<(), ApiError> {
+    let mut transform = layer.transform.clone();
+    transform.x += offset_x;
+    transform.y += offset_y;
+    let kind = match &layer.kind {
+        LayerKind::Text(text) => NewLayerKind::Text {
+            text: text.text.clone(),
+            font_family: text.font_family.clone(),
+            font_size: text.font_size,
+            color: text.color.clone(),
+            align: text.align,
+            line_height: text.line_height,
+        },
+        LayerKind::Image(image) => NewLayerKind::Image {
+            asset: image.asset.clone(),
+            fit: image.fit,
+        },
+        LayerKind::Svg(svg) => NewLayerKind::Svg {
+            asset: svg.asset.clone(),
+            fit: svg.fit,
+        },
+        LayerKind::Group(_) => NewLayerKind::Group,
+    };
+    let created = apply_compiled(
+        document,
+        Operation::Create(CreateLayer {
+            position,
+            transform,
+            name: layer.name.clone(),
+            kind,
+        }),
+        compiled,
+        ids,
+    )?;
+    let id = created
+        .created
+        .first()
+        .cloned()
+        .ok_or_else(|| ApiError::bad_request("insertLayerTree failed to create a layer"))?;
+
+    if let LayerKind::Group(group) = &layer.kind {
+        for (index, child) in group.children.iter().enumerate() {
+            insert_layer(
+                document,
+                child,
+                LayerPosition::In {
+                    parent: id.clone(),
+                    index: Some(index),
+                },
+                0.0,
+                0.0,
+                compiled,
+                ids,
+            )?;
+        }
+    }
+
+    let mut update = UpdateLayer::new(id.clone());
+    update.opacity = (layer.opacity != 1.0).then_some(layer.opacity);
+    update.blend_mode = (layer.blend_mode != Default::default()).then(|| layer.blend_mode.clone());
+    update.effects = (!layer.effects.is_empty()).then(|| layer.effects.clone());
+    if update.opacity.is_some() || update.blend_mode.is_some() || update.effects.is_some() {
+        apply_compiled(document, Operation::Update(update), compiled, ids)?;
+    }
+    if !layer.visible {
+        apply_compiled(
+            document,
+            Operation::SetVisible {
+                id: id.clone(),
+                visible: false,
+            },
+            compiled,
+            ids,
+        )?;
+    }
+    if layer.locked {
+        apply_compiled(
+            document,
+            Operation::SetLocked { id, locked: true },
+            compiled,
+            ids,
+        )?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HistoryStepRequest {
@@ -755,6 +1092,14 @@ fn extension_of(filename: &str) -> Result<String, ApiError> {
 struct PreviewQuery {
     #[serde(default = "one")]
     scale: f32,
+    /// Render just these layers (and the groups that contain them) on a
+    /// transparent canvas. Used by the editor's local drag compositor.
+    #[serde(default)]
+    only: Option<String>,
+    /// Render the canvas with these layers omitted. Paired with `only` so a
+    /// dragged layer can move immediately without leaving a ghost behind.
+    #[serde(default)]
+    exclude: Option<String>,
 }
 
 fn one() -> f32 {
@@ -773,7 +1118,9 @@ async fn preview(
     Query(query): Query<PreviewQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (document, directory) = read_for_render(&state, id)?;
-    let rendered = render::png_for(&document, &directory, &state.font_store()?, query.scale)?;
+    let document = filtered_preview(document, query.only.as_deref(), query.exclude.as_deref())?;
+    let fonts = state.fonts_for(&document)?;
+    let rendered = render::png_for_loaded(&document, &directory, &fonts, query.scale)?;
     Ok((
         [
             (header::CONTENT_TYPE, "image/png"),
@@ -781,6 +1128,97 @@ async fn preview(
         ],
         rendered.bytes,
     ))
+}
+
+fn filtered_preview(
+    mut document: Document,
+    only: Option<&str>,
+    exclude: Option<&str>,
+) -> Result<Document, ApiError> {
+    if only.is_some() && exclude.is_some() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalidPreviewFilter",
+            "only and exclude cannot be used together",
+        ));
+    }
+    let Some(raw) = only.or(exclude) else {
+        return Ok(document);
+    };
+    let ids = raw
+        .split(',')
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>();
+    if ids.is_empty() || ids.len() > 100 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalidPreviewFilter",
+            "a preview filter must name between 1 and 100 layers",
+        ));
+    }
+    let mut known = std::collections::BTreeSet::new();
+    document.walk_layers(&mut |layer| {
+        known.insert(layer.id.to_string());
+    });
+    if let Some(unknown) = ids.iter().find(|id| !known.contains(*id)) {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "layerNotFound",
+            format!("layer {unknown} does not exist"),
+        ));
+    }
+
+    if only.is_some() {
+        document.canvas.background = None;
+        for layer in &mut document.layers {
+            keep_only_preview_layer(layer, &ids, false);
+        }
+    } else {
+        for layer in &mut document.layers {
+            exclude_preview_layer(layer, &ids);
+        }
+    }
+    Ok(document)
+}
+
+/// Returns whether this subtree contains a requested layer. Ancestor groups
+/// stay present because their transforms, opacity, and effects are part of a
+/// nested layer's appearance; unrelated siblings are hidden.
+fn keep_only_preview_layer(
+    layer: &mut Layer,
+    ids: &std::collections::BTreeSet<String>,
+    ancestor_selected: bool,
+) -> bool {
+    let selected = ids.contains(&layer.id.to_string());
+    if ancestor_selected || selected {
+        return true;
+    }
+    let contains = if let LayerKind::Group(group) = &mut layer.kind {
+        let mut found = false;
+        for child in &mut group.children {
+            found |= keep_only_preview_layer(child, ids, false);
+        }
+        found
+    } else {
+        false
+    };
+    if !contains {
+        layer.visible = false;
+    }
+    contains
+}
+
+fn exclude_preview_layer(layer: &mut Layer, ids: &std::collections::BTreeSet<String>) {
+    if ids.contains(&layer.id.to_string()) {
+        layer.visible = false;
+        return;
+    }
+    if let LayerKind::Group(group) = &mut layer.kind {
+        for child in &mut group.children {
+            exclude_preview_layer(child, ids);
+        }
+    }
 }
 
 /// Renders a project to SVG.
@@ -793,7 +1231,8 @@ async fn preview_svg(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (document, directory) = read_for_render(&state, id)?;
-    let rendered = render::svg_for(&document, &directory, &state.font_store()?)?;
+    let fonts = state.fonts_for(&document)?;
+    let rendered = render::svg_for_loaded(&document, &directory, &fonts)?;
     Ok((
         [
             (header::CONTENT_TYPE, "image/svg+xml"),
@@ -801,6 +1240,66 @@ async fn preview_svg(
         ],
         rendered.bytes,
     ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TextLayoutQuery {
+    id: String,
+    width: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextLayoutResponse {
+    line_count: usize,
+    height: f64,
+}
+
+/// Measures a text layer with the renderer's pinned font metrics. This is a
+/// read-only layout aid for horizontal resize handles; the eventual resize is
+/// still one ordinary operation batch and one journal transaction.
+async fn text_layout(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<TextLayoutQuery>,
+) -> Result<Json<TextLayoutResponse>, ApiError> {
+    if !query.width.is_finite() || query.width <= 0.0 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalidTextWidth",
+            "text width must be a finite positive number",
+        ));
+    }
+    let (document, _) = read_for_render(&state, id)?;
+    let layer_id = assemblash_core::LayerId::new(query.id.clone());
+    let layer = document.find_layer(&layer_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "layerNotFound",
+            format!("layer {} does not exist", query.id),
+        )
+    })?;
+    let LayerKind::Text(text) = &layer.kind else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "notTextLayer",
+            format!("layer {} is not text", query.id),
+        ));
+    };
+    let fonts = state.fonts_for(&document)?;
+    let layout = assemblash_renderer::layout_text(
+        &text.text,
+        query.width,
+        text.font_size,
+        text.line_height,
+        &text.font_family,
+        fonts.font_set(),
+    );
+    Ok(Json(TextLayoutResponse {
+        line_count: layout.lines.len(),
+        height: layout.height,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -822,10 +1321,11 @@ async fn export_document(
     ApiJson(request): ApiJson<ExportRequest>,
 ) -> Result<Json<render::Exported>, ApiError> {
     let (document, directory) = read_for_render(&state, id)?;
-    Ok(Json(render::export_into_project(
+    let fonts = state.fonts_for(&document)?;
+    Ok(Json(render::export_into_project_loaded(
         &document,
         &directory,
-        &state.font_store()?,
+        &fonts,
         request.scale,
         request.name.as_deref(),
     )?))
@@ -938,10 +1438,11 @@ async fn render_variants(
     ApiJson(request): ApiJson<VariantsRequest>,
 ) -> Result<Json<render::RenderedVariants>, ApiError> {
     let (document, directory) = read_for_render(&state, id)?;
-    Ok(Json(render::render_variants(
+    let fonts = state.fonts_for(&document)?;
+    Ok(Json(render::render_variants_loaded(
         &document,
         &directory,
-        &state.font_store()?,
+        &fonts,
         request.scale,
         &request.variants,
     )?))

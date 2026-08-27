@@ -70,16 +70,21 @@ impl LoadedFonts {
         // the whole render failing.
         let mut faces = Vec::new();
         for face in database.faces() {
-            let metrics = database
-                .with_face_data(face.id, crate::fonts::read_metrics)
-                .flatten();
+            let (metrics, advances) = database
+                .with_face_data(face.id, |data, index| {
+                    (
+                        crate::fonts::read_metrics(data, index),
+                        crate::fonts::read_advances(data, index),
+                    )
+                })
+                .unwrap_or((None, None));
             for (name, _) in &face.families {
-                faces.push((name.clone(), metrics));
+                faces.push((name.clone(), metrics, advances.clone()));
             }
         }
         Self {
             database: Arc::new(database),
-            families: FontSet::measured(faces),
+            families: FontSet::measured_with_advances(faces),
         }
     }
 

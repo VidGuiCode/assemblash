@@ -1,0 +1,95 @@
+function rotate(x, y, degrees) {
+    const radians = (degrees * Math.PI) / 180;
+    const sin = Math.sin(radians);
+    const cos = Math.cos(radians);
+    return { x: x * cos - y * sin, y: x * sin + y * cos };
+}
+/** The canvas-axis box occupied by a rectangle rotated about its centre. */
+export function rotatedRectBounds(rect) {
+    const radians = (rect.rotation * Math.PI) / 180;
+    const sin = Math.abs(Math.sin(radians));
+    const cos = Math.abs(Math.cos(radians));
+    const width = rect.width * cos + rect.height * sin;
+    const height = rect.width * sin + rect.height * cos;
+    const centreX = rect.x + rect.width / 2;
+    const centreY = rect.y + rect.height / 2;
+    return {
+        x: centreX - width / 2,
+        y: centreY - height / 2,
+        width,
+        height,
+    };
+}
+/** The canvas-axis box containing every rotated item in a multi-selection. */
+export function selectionBounds(rects) {
+    if (rects.length === 0)
+        return { x: 0, y: 0, width: 0, height: 0 };
+    const boxes = rects.map(rotatedRectBounds);
+    const left = Math.min(...boxes.map((rect) => rect.x));
+    const top = Math.min(...boxes.map((rect) => rect.y));
+    const right = Math.max(...boxes.map((rect) => rect.x + rect.width));
+    const bottom = Math.max(...boxes.map((rect) => rect.y + rect.height));
+    return { x: left, y: top, width: right - left, height: bottom - top };
+}
+/** Resize an unrotated rectangle using a canvas-axis pointer delta. */
+export function resizedBounds(bounds, handle, dx, dy) {
+    let { x, y, width, height } = bounds;
+    if (handle.includes("e"))
+        width = Math.max(1, width + dx);
+    if (handle.includes("s"))
+        height = Math.max(1, height + dy);
+    if (handle.includes("w")) {
+        const next = Math.max(1, width - dx);
+        x += width - next;
+        width = next;
+    }
+    if (handle.includes("n")) {
+        const next = Math.max(1, height - dy);
+        y += height - next;
+        height = next;
+    }
+    return { x, y, width, height };
+}
+/**
+ * Resize a rotated rectangle in its own axes.
+ *
+ * Pointer movement is projected into the layer's local coordinate system.
+ * The changed local box is then rotated back around the original centre,
+ * which keeps the handle's opposite anchor fixed on the canvas.
+ */
+export function resizedRotatedBounds(bounds, rotation, handle, dx, dy) {
+    if (rotation === 0)
+        return resizedBounds(bounds, handle, dx, dy);
+    const localDelta = rotate(dx, dy, -rotation);
+    const local = resizedBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height }, handle, localDelta.x, localDelta.y);
+    const localCentreShift = {
+        x: local.x + local.width / 2 - bounds.width / 2,
+        y: local.y + local.height / 2 - bounds.height / 2,
+    };
+    const centreShift = rotate(localCentreShift.x, localCentreShift.y, rotation);
+    const centreX = bounds.x + bounds.width / 2 + centreShift.x;
+    const centreY = bounds.y + bounds.height / 2 + centreShift.y;
+    return {
+        x: centreX - local.width / 2,
+        y: centreY - local.height / 2,
+        width: local.width,
+        height: local.height,
+    };
+}
+/** Scale one layer around its centre within a selection's canvas-axis box. */
+export function resizeItemInSelection(item, selection, resizedSelection) {
+    const scaleX = resizedSelection.width / Math.max(1, selection.width);
+    const scaleY = resizedSelection.height / Math.max(1, selection.height);
+    const centreX = resizedSelection.x +
+        (item.x + item.width / 2 - selection.x) * scaleX;
+    const centreY = resizedSelection.y +
+        (item.y + item.height / 2 - selection.y) * scaleY;
+    const width = Math.max(1, item.width * scaleX);
+    const height = Math.max(1, item.height * scaleY);
+    return {
+        x: centreX - width / 2,
+        y: centreY - height / 2,
+        width,
+        height,
+    };
+}

@@ -21,7 +21,7 @@ use assemblash_renderer::install::{
     install_family, install_pack, FontFetcher, InstallError, Manifest,
 };
 use assemblash_renderer::store::{FontStore, FontStoreError, INDEX_FILE};
-use assemblash_renderer::{document_to_png, AssetHrefs, PngMetadata};
+use assemblash_renderer::{doc_to_svg, document_to_png, AssetHrefs, LoadedFonts, PngMetadata};
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fonts")
@@ -55,6 +55,21 @@ fn document(family: &str) -> Document {
         }),
     ));
     doc
+}
+
+#[test]
+fn text_wraps_using_the_loaded_fonts_advances() {
+    let fonts = LoadedFonts::from_files([fixture("NotoSans-Subset.ttf")]).unwrap();
+    let mut doc = document("Noto Sans");
+    let layer = doc.layers.first_mut().unwrap();
+    layer.transform.width = 150.0;
+    if let LayerKind::Text(text) = &mut layer.kind {
+        text.text = "Direct editing works".to_owned();
+    }
+
+    let svg = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+    assert!(svg.matches("<tspan").count() >= 2, "{svg}");
+    assert!(!svg.contains(">Direct editing works</tspan>"), "{svg}");
 }
 
 /// A fetcher serving files from a directory, so the install path can be

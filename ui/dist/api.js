@@ -94,6 +94,15 @@ export async function createProject(id, width, height, background, name) {
 export async function getDocument(project) {
     return request(`/api/projects/${encodeURIComponent(project)}/document`);
 }
+/** Remove only the stale lock claim that the server just reported. */
+export async function recoverProjectLock(project, expectedPid) {
+    const result = await request(`/api/projects/${encodeURIComponent(project)}/recover-lock`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedPid }),
+    });
+    return result.unlocked;
+}
 export async function getHistory(project) {
     return request(`/api/projects/${encodeURIComponent(project)}/history`);
 }
@@ -115,6 +124,19 @@ export async function applyOperation(project, operation, expectedVersion, dryRun
             operation,
             expectedVersion,
             dryRun,
+            actor: { kind: "human", name: "reference UI" },
+        }),
+    });
+}
+/** Applies existing operations as one atomic, one-undo UI command. */
+export async function applyOperationBatch(project, label, commands, expectedVersion) {
+    return request(`/api/projects/${encodeURIComponent(project)}/operation-batches`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            expectedVersion,
+            label,
+            commands,
             actor: { kind: "human", name: "reference UI" },
         }),
     });
@@ -353,8 +375,18 @@ export async function imageObjectUrl(url) {
  * at the same scale — the preview and the export cannot disagree because they
  * are the same render (PRD §16.3, R3).
  */
-export function pngUrl(project, version, scale = 1) {
-    return `/api/projects/${encodeURIComponent(project)}/preview.png?scale=${scale}&v=${version}`;
+export function pngUrl(project, version, scale = 1, filter) {
+    const query = new URLSearchParams({ scale: String(scale), v: String(version) });
+    if (filter?.only?.length)
+        query.set("only", filter.only.join(","));
+    if (filter?.exclude?.length)
+        query.set("exclude", filter.exclude.join(","));
+    return `/api/projects/${encodeURIComponent(project)}/preview.png?${query.toString()}`;
+}
+/** Exact wrapped text height from the pinned-font renderer. */
+export async function textLayout(project, id, width) {
+    const query = new URLSearchParams({ id, width: String(width) });
+    return request(`/api/projects/${encodeURIComponent(project)}/text-layout?${query.toString()}`);
 }
 /** Every layer, flattened, with the group each one sits in. */
 export function flatten(layers, parent = null, depth = 0, out = []) {

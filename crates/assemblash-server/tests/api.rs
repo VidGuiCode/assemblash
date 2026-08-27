@@ -384,6 +384,172 @@ fn a_dry_run_reports_without_changing_anything() {
 }
 
 #[test]
+fn an_operation_batch_is_atomic_and_undoes_in_one_step() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operation-batches"),
+        &json!({
+            "expectedVersion": 0,
+            "label": "Add heading and body",
+            "actor": { "kind": "human", "name": "batch test" },
+            "commands": [
+                {
+                    "op": "create",
+                    "position": { "at": "root" },
+                    "transform": { "x": 10.0, "y": 10.0, "width": 300.0, "height": 40.0 },
+                    "type": "text",
+                    "text": "Heading",
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 32.0
+                },
+                {
+                    "op": "create",
+                    "position": { "at": "root" },
+                    "transform": { "x": 10.0, "y": 60.0, "width": 300.0, "height": 30.0 },
+                    "type": "text",
+                    "text": "Body",
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 16.0
+                }
+            ]
+        }),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    let body = response.json();
+    assert_eq!(body["version"], 1);
+    assert_eq!(body["created"].as_array().unwrap().len(), 2);
+    assert!(body["transactionId"].as_str().unwrap().starts_with("txn_"));
+
+    let history = http::get(&harness.url("/api/projects/poster/history")).json();
+    assert_eq!(history["position"], 1);
+    assert_eq!(history["entries"][0]["kind"], "batchApplied");
+    assert_eq!(history["entries"][0]["label"], "Add heading and body");
+
+    http::post_json(&harness.url("/api/projects/poster/undo"), &json!({}));
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/document")).json()["layers"],
+        json!([])
+    );
+    http::post_json(&harness.url("/api/projects/poster/redo"), &json!({}));
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/document")).json()["layers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn a_refused_batch_rolls_back_every_earlier_command() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let before = http::get(&harness.url("/api/projects/poster/document")).json();
+
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operation-batches"),
+        &json!({
+            "expectedVersion": 0,
+            "label": "This must roll back",
+            "commands": [
+                {
+                    "op": "create",
+                    "position": { "at": "root" },
+                    "transform": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 40.0 },
+                    "type": "text",
+                    "text": "temporary",
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 16.0
+                },
+                { "op": "delete", "id": "layer_missing" }
+            ]
+        }),
+    );
+    assert_eq!(response.status, 422, "{}", response.json());
+    assert_eq!(error_code(&response), "operationRefused");
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/document")).json(),
+        before
+    );
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/history")).json()["position"],
+        0
+    );
+}
+
+#[test]
+fn insert_layer_tree_rebuilds_nested_groups_and_validates_assets() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+
+    let nested = json!({
+        "id": "layer_source_group",
+        "name": "Copied group",
+        "transform": { "x": 20.0, "y": 30.0, "width": 200.0, "height": 100.0 },
+        "type": "group",
+        "children": [{
+            "id": "layer_source_text",
+            "name": "Copied text",
+            "transform": { "x": 5.0, "y": 6.0, "width": 180.0, "height": 40.0 },
+            "type": "text",
+            "text": "Nested",
+            "fontFamily": "Noto Sans",
+            "fontSize": 18.0
+        }]
+    });
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operation-batches"),
+        &json!({
+            "expectedVersion": 0,
+            "label": "Paste layers",
+            "commands": [{
+                "op": "insertLayerTree",
+                "sourceProject": "poster",
+                "layers": [nested],
+                "offsetX": 12.0,
+                "offsetY": 8.0
+            }]
+        }),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    assert_eq!(response.json()["created"].as_array().unwrap().len(), 2);
+    let document = http::get(&harness.url("/api/projects/poster/document")).json();
+    assert_ne!(document["layers"][0]["id"], "layer_source_group");
+    assert_ne!(
+        document["layers"][0]["children"][0]["id"],
+        "layer_source_text"
+    );
+    assert_eq!(document["layers"][0]["children"][0]["text"], "Nested");
+    assert_eq!(document["layers"][0]["transform"]["x"], 32.0);
+
+    let before = document;
+    let missing_asset = http::post_json(
+        &harness.url("/api/projects/poster/operation-batches"),
+        &json!({
+            "expectedVersion": 1,
+            "label": "Invalid paste",
+            "commands": [{
+                "op": "insertLayerTree",
+                "sourceProject": "poster",
+                "layers": [{
+                    "id": "layer_image",
+                    "transform": { "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 },
+                    "type": "image",
+                    "asset": "asset_missing"
+                }]
+            }]
+        }),
+    );
+    assert_eq!(missing_asset.status, 422, "{}", missing_asset.json());
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/document")).json(),
+        before
+    );
+}
+
+#[test]
 fn path_escape_attempts_are_rejected() {
     let harness = Harness::start();
     create_project(&harness, "poster");
@@ -539,6 +705,45 @@ fn rendering_needs_a_font_the_store_actually_has() {
     assert_eq!(again.body, response.body);
 }
 
+#[test]
+fn preview_filters_support_the_editors_local_drag_compositor() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../assemblash-renderer/tests/fonts/NotoSans-Subset.ttf");
+    let mut store =
+        assemblash_renderer::store::FontStore::open(harness.root().join(FONTS_DIR)).unwrap();
+    store
+        .import_file(&fixture, None, Some("OFL-1.1".into()))
+        .unwrap();
+    let created = add_text(&harness, "poster", "Noto Sans");
+    let layer = created["created"][0].as_str().unwrap();
+
+    let normal = http::get(&harness.url("/api/projects/poster/preview.png"));
+    let base =
+        http::get(&harness.url(&format!("/api/projects/poster/preview.png?exclude={layer}")));
+    let selected =
+        http::get(&harness.url(&format!("/api/projects/poster/preview.png?only={layer}")));
+    assert_eq!(normal.status, 200);
+    assert_eq!(base.status, 200);
+    assert_eq!(selected.status, 200);
+    assert_ne!(normal.body, base.body);
+    assert_ne!(normal.body, selected.body);
+
+    let layout = http::get(&harness.url(&format!(
+        "/api/projects/poster/text-layout?id={layer}&width=90"
+    )));
+    assert_eq!(layout.status, 200, "{}", layout.json());
+    assert!(layout.json()["lineCount"].as_u64().unwrap() >= 2);
+    assert!(layout.json()["height"].as_f64().unwrap() > 32.0);
+
+    let both = http::get(&harness.url(&format!(
+        "/api/projects/poster/preview.png?only={layer}&exclude={layer}"
+    )));
+    assert_eq!(both.status, 400);
+    assert_eq!(error_code(&both), "invalidPreviewFilter");
+}
+
 /// Writes a template project straight onto disk, before the server opens it.
 ///
 /// `slots` is a document field with no operation that sets it — a template is
@@ -589,6 +794,40 @@ fn install_test_font(harness: &Harness) {
     store
         .import_file(&fixture, None, Some("OFL-1.1".into()))
         .unwrap();
+}
+
+#[test]
+fn a_reported_stale_lock_can_be_recovered_without_removing_a_changed_claim() {
+    let harness = Harness::start();
+    let directory = harness.root().join(PROJECTS_DIR).join("stale");
+    let mut ids = assemblash_core::SequentialIdSource::new();
+    let document = assemblash_core::Document::new(&mut ids, 320.0, 180.0);
+    drop(assemblash_core::Session::create(&directory, document, None).unwrap());
+    let lock = directory.join(assemblash_core::session::LOCK_FILE);
+    std::fs::write(&lock, "{\"pid\":424242}").unwrap();
+
+    let refused = http::get(&harness.url("/api/projects/stale/document"));
+    assert_eq!(refused.status, 409);
+    assert_eq!(error_code(&refused), "projectLocked");
+    assert_eq!(refused.json()["error"]["details"]["pid"], 424242);
+
+    let changed = http::post_json(
+        &harness.url("/api/projects/stale/recover-lock"),
+        &json!({ "expectedPid": 7 }),
+    );
+    assert_eq!(changed.status, 409);
+    assert!(lock.exists(), "a different claim must be preserved");
+
+    let recovered = http::post_json(
+        &harness.url("/api/projects/stale/recover-lock"),
+        &json!({ "expectedPid": 424242 }),
+    );
+    assert_eq!(recovered.status, 200, "{}", recovered.json());
+    assert_eq!(recovered.json()["unlocked"], true);
+    assert!(!lock.exists());
+
+    let opened = http::get(&harness.url("/api/projects/stale/document"));
+    assert_eq!(opened.status, 200, "{}", opened.json());
 }
 
 #[test]

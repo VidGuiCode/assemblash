@@ -47,6 +47,19 @@ export interface OperationResult {
   removed?: string[];
 }
 
+export type OperationBatchCommand = Operation | {
+  op: "insertLayerTree";
+  sourceProject: string;
+  layers: Layer[];
+  position?: { at: "root"; index?: number } | { at: "in"; parent: string; index?: number };
+  offsetX?: number;
+  offsetY?: number;
+};
+
+export interface OperationBatchResult extends Omit<OperationResult, "dryRun" | "transaction"> {
+  transactionId: string;
+}
+
 /** One entry of a project's journal. */
 export interface HistoryEntry {
   transaction: string;
@@ -153,6 +166,19 @@ export async function getDocument(project: string): Promise<Document> {
   return request<Document>(`/api/projects/${encodeURIComponent(project)}/document`);
 }
 
+/** Remove only the stale lock claim that the server just reported. */
+export async function recoverProjectLock(project: string, expectedPid: number): Promise<boolean> {
+  const result = await request<{ unlocked: boolean }>(
+    `/api/projects/${encodeURIComponent(project)}/recover-lock`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedPid }),
+    },
+  );
+  return result.unlocked;
+}
+
 export async function getHistory(
   project: string,
 ): Promise<{ position: number; head: number; entries: HistoryEntry[] }> {
@@ -187,6 +213,28 @@ export async function applyOperation(
         operation,
         expectedVersion,
         dryRun,
+        actor: { kind: "human", name: "reference UI" },
+      }),
+    },
+  );
+}
+
+/** Applies existing operations as one atomic, one-undo UI command. */
+export async function applyOperationBatch(
+  project: string,
+  label: string,
+  commands: OperationBatchCommand[],
+  expectedVersion: number,
+): Promise<OperationBatchResult> {
+  return request<OperationBatchResult>(
+    `/api/projects/${encodeURIComponent(project)}/operation-batches`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion,
+        label,
+        commands,
         actor: { kind: "human", name: "reference UI" },
       }),
     },
@@ -255,7 +303,7 @@ export async function serverInfo(): Promise<ServerInfo> {
 export async function uploadAsset(
   project: string,
   file: File,
-): Promise<{ asset: { id: string }; version: number }> {
+): Promise<{ asset: { id: string; mediaType: string }; version: number }> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(project)}/assets?filename=${encodeURIComponent(file.name)}`,
     {
@@ -280,7 +328,10 @@ export async function uploadAsset(
     }
     throw new ApiError(code, message, null);
   }
-  return (await response.json()) as { asset: { id: string }; version: number };
+  return (await response.json()) as {
+    asset: { id: string; mediaType: string };
+    version: number;
+  };
 }
 
 /** One effect in a layer's stack, as the document stores it. */
@@ -526,8 +577,28 @@ export async function imageObjectUrl(url: string): Promise<string> {
  * at the same scale — the preview and the export cannot disagree because they
  * are the same render (PRD §16.3, R3).
  */
-export function pngUrl(project: string, version: number, scale = 1): string {
-  return `/api/projects/${encodeURIComponent(project)}/preview.png?scale=${scale}&v=${version}`;
+export function pngUrl(
+  project: string,
+  version: number,
+  scale = 1,
+  filter?: { only?: readonly string[]; exclude?: readonly string[] },
+): string {
+  const query = new URLSearchParams({ scale: String(scale), v: String(version) });
+  if (filter?.only?.length) query.set("only", filter.only.join(","));
+  if (filter?.exclude?.length) query.set("exclude", filter.exclude.join(","));
+  return `/api/projects/${encodeURIComponent(project)}/preview.png?${query.toString()}`;
+}
+
+/** Exact wrapped text height from the pinned-font renderer. */
+export async function textLayout(
+  project: string,
+  id: string,
+  width: number,
+): Promise<{ lineCount: number; height: number }> {
+  const query = new URLSearchParams({ id, width: String(width) });
+  return request<{ lineCount: number; height: number }>(
+    `/api/projects/${encodeURIComponent(project)}/text-layout?${query.toString()}`,
+  );
 }
 
 /** Every layer, flattened, with the group each one sits in. */

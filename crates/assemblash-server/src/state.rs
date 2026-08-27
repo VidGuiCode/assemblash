@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use assemblash_core::session::Session;
 use assemblash_core::workspace::{ProjectId, Workspace};
+use assemblash_core::Document;
 use assemblash_renderer::store::FontStore;
+use assemblash_renderer::LoadedFonts;
 
 use crate::error::ApiError;
 
@@ -39,6 +41,14 @@ struct Inner {
     /// Sessions opened so far. A `BTreeMap` rather than a hash map so that
     /// anything derived from iterating it is in the same order every run.
     open: Mutex<BTreeMap<String, OpenProject>>,
+    /// Parsed font databases and measured glyph advances, keyed by the exact
+    /// content-addressed font records used to build them.
+    ///
+    /// Building this data is deliberately thorough and can take seconds for a
+    /// large Unicode font. The store is immutable from the server API, so
+    /// repeating that work for every preview only adds latency; reopening the
+    /// index to form the key still notices fonts installed by another process.
+    fonts: Mutex<BTreeMap<Vec<String>, LoadedFonts>>,
 }
 
 impl AppState {
@@ -56,6 +66,7 @@ impl AppState {
                 workspace,
                 index,
                 open: Mutex::new(BTreeMap::new()),
+                fonts: Mutex::new(BTreeMap::new()),
             }),
         }
     }
@@ -88,6 +99,51 @@ impl AppState {
         Ok(FontStore::open(self.inner.workspace.fonts_dir())?)
     }
 
+    /// Loads the exact fonts a document names, reusing their parsed database
+    /// and measured advances across previews, exports, and text layout calls.
+    pub fn fonts_for(&self, document: &Document) -> Result<LoadedFonts, ApiError> {
+        let families = crate::render::families_used(document);
+        if families.is_empty() {
+            return Ok(LoadedFonts::from_bytes([]));
+        }
+
+        let store = self.font_store()?;
+        let mut key = Vec::new();
+        for family in &families {
+            key.push(format!("family\0{family}"));
+            for record in store
+                .records()
+                .iter()
+                .filter(|record| &record.family == family)
+            {
+                key.push(format!(
+                    "face\0{}\0{}\0{}\0{}\0{}\0{}",
+                    record.family,
+                    record.style,
+                    record.weight,
+                    record.file,
+                    record.hash,
+                    record.face_index
+                ));
+            }
+        }
+
+        let mut cache = self.inner.fonts.lock().map_err(|_| {
+            ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "poisoned",
+                "the server's font cache is in an unknown state; restart it",
+            )
+        })?;
+        if let Some(fonts) = cache.get(&key) {
+            return Ok(fonts.clone());
+        }
+
+        let fonts = store.load_families(&families)?;
+        cache.insert(key, fonts.clone());
+        Ok(fonts)
+    }
+
     /// The open session for a project, opening it the first time it is asked
     /// for.
     ///
@@ -103,6 +159,31 @@ impl AppState {
         let session = Arc::new(Mutex::new(Session::open(&directory, now)?));
         open.insert(id.to_string(), Arc::clone(&session));
         Ok(session)
+    }
+
+    /// Removes the exact project lock an interactive client already saw.
+    ///
+    /// Holding the registry while comparing and removing prevents this server
+    /// from opening the project between those two steps. A project this server
+    /// already owns is never unlocked through the recovery route.
+    pub fn recover_project_lock(
+        &self,
+        id: &ProjectId,
+        expected_pid: u32,
+    ) -> Result<bool, ApiError> {
+        let open = self.lock_registry()?;
+        let directory = self.inner.workspace.existing_project_dir(id)?;
+        if open.contains_key(id.as_str()) {
+            return Err(assemblash_core::SessionError::Locked {
+                pid: std::process::id(),
+                path: directory.join(assemblash_core::session::LOCK_FILE),
+            }
+            .into());
+        }
+        Ok(assemblash_core::session::force_unlock_if_pid(
+            &directory,
+            expected_pid,
+        )?)
     }
 
     /// Closes every open project, releasing the lock each one holds.

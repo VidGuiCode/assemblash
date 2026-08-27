@@ -42,6 +42,21 @@ const ASSETS: &[Asset] = &[
         body: include_bytes!("../../../ui/dist/style.css"),
     },
     Asset {
+        name: "studio.css",
+        content_type: "text/css; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/studio.css"),
+    },
+    Asset {
+        name: "phosphor.css",
+        content_type: "text/css; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/phosphor.css"),
+    },
+    Asset {
+        name: "Phosphor.woff2",
+        content_type: "font/woff2",
+        body: include_bytes!("../../../ui/dist/Phosphor.woff2"),
+    },
+    Asset {
         name: "app.js",
         content_type: "text/javascript; charset=utf-8",
         body: include_bytes!("../../../ui/dist/app.js"),
@@ -50,6 +65,16 @@ const ASSETS: &[Asset] = &[
         name: "api.js",
         content_type: "text/javascript; charset=utf-8",
         body: include_bytes!("../../../ui/dist/api.js"),
+    },
+    Asset {
+        name: "export.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/export.js"),
+    },
+    Asset {
+        name: "geometry.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/geometry.js"),
     },
     Asset {
         name: "templates.js",
@@ -162,6 +187,22 @@ mod tests {
             ASSETS.iter().all(|asset| !asset.body.is_empty()),
             "an empty asset means the UI build did not run"
         );
+        let modules: String = ASSETS
+            .iter()
+            .filter(|asset| asset.content_type.starts_with("text/javascript"))
+            .map(|asset| String::from_utf8_lossy(asset.body).into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for referenced in modules
+            .split("\"./")
+            .skip(1)
+            .filter_map(|tail| tail.split('"').next())
+        {
+            assert!(
+                ASSETS.iter().any(|asset| asset.name == referenced),
+                "{referenced} is referenced by the UI but missing from the server allowlist"
+            );
+        }
     }
 
     #[test]

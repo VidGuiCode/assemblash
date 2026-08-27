@@ -40,6 +40,15 @@ impl FontMetrics {
             1.0
         }
     }
+
+    /// Descent below the baseline as a positive multiple of font size.
+    pub fn descent_ratio(&self) -> f64 {
+        if self.units_per_em > 0.0 && self.descender.is_finite() {
+            (-self.descender / self.units_per_em).max(0.0)
+        } else {
+            0.2
+        }
+    }
 }
 
 /// The ascent used when nothing has measured the font: one whole font size.
@@ -54,7 +63,17 @@ pub const UNMEASURED_ASCENT_RATIO: f64 = 1.0;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FontSet {
     families: BTreeMap<String, Option<FontMetrics>>,
+    advances: BTreeMap<String, FontAdvances>,
     accept_any: bool,
+}
+
+/// Horizontal advances for the default face of one family, expressed as
+/// multiples of the font size. These are measured from the same pinned font
+/// file that usvg rasterizes, so line breaking is deterministic too.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct FontAdvances {
+    average: f64,
+    characters: BTreeMap<char, f64>,
 }
 
 impl FontSet {
@@ -69,6 +88,7 @@ impl FontSet {
                 .into_iter()
                 .map(|family| (family.into(), None))
                 .collect(),
+            advances: BTreeMap::new(),
             accept_any: false,
         }
     }
@@ -94,6 +114,29 @@ impl FontSet {
         }
         Self {
             families,
+            advances: BTreeMap::new(),
+            accept_any: false,
+        }
+    }
+
+    /// A measured set including the horizontal metrics used for wrapping.
+    pub(crate) fn measured_with_advances<I, S>(faces: I) -> Self
+    where
+        I: IntoIterator<Item = (S, Option<FontMetrics>, Option<FontAdvances>)>,
+        S: Into<String>,
+    {
+        let mut families = BTreeMap::new();
+        let mut advances = BTreeMap::new();
+        for (family, metrics, widths) in faces {
+            let family = family.into();
+            families.entry(family.clone()).or_insert(metrics);
+            if let Some(widths) = widths {
+                advances.entry(family).or_insert(widths);
+            }
+        }
+        Self {
+            families,
+            advances,
             accept_any: false,
         }
     }
@@ -107,6 +150,7 @@ impl FontSet {
     pub fn unchecked() -> Self {
         Self {
             families: BTreeMap::new(),
+            advances: BTreeMap::new(),
             accept_any: true,
         }
     }
@@ -125,6 +169,31 @@ impl FontSet {
     pub fn ascent_ratio(&self, family: &str) -> f64 {
         self.metrics(family)
             .map_or(UNMEASURED_ASCENT_RATIO, FontMetrics::ascent_ratio)
+    }
+
+    /// How far glyphs may extend below the baseline, in em units.
+    pub fn descent_ratio(&self, family: &str) -> f64 {
+        self.metrics(family).map_or(0.2, FontMetrics::descent_ratio)
+    }
+
+    /// Measures a string in em units using the pinned face's glyph advances.
+    ///
+    /// This deliberately returns `None` for name-only font sets. Structural
+    /// SVG callers keep the pre-wrapping behaviour; real preview/export paths
+    /// always load font files and therefore always have exact source metrics.
+    pub(crate) fn text_advance_ratio(&self, family: &str, text: &str) -> Option<f64> {
+        let advances = self.advances.get(family)?;
+        Some(
+            text.chars()
+                .map(|character| {
+                    advances
+                        .characters
+                        .get(&character)
+                        .copied()
+                        .unwrap_or(advances.average)
+                })
+                .sum(),
+        )
     }
 
     /// The families in the set, sorted.
@@ -156,6 +225,38 @@ pub fn read_metrics(data: &[u8], index: u32) -> Option<FontMetrics> {
         ascender: f64::from(metrics.ascent),
         descender: f64::from(metrics.descent),
         line_gap: f64::from(metrics.leading),
+    })
+}
+
+/// Reads every Unicode character advance from one face.
+pub(crate) fn read_advances(data: &[u8], index: u32) -> Option<FontAdvances> {
+    use skrifa::MetadataProvider as _;
+
+    let font = skrifa::FontRef::from_index(data, index).ok()?;
+    let location = skrifa::instance::LocationRef::default();
+    let global = font.metrics(skrifa::instance::Size::unscaled(), location);
+    let units = f64::from(global.units_per_em);
+    if units <= 0.0 {
+        return None;
+    }
+    let glyphs = font.glyph_metrics(skrifa::instance::Size::unscaled(), location);
+    let mut characters = BTreeMap::new();
+    for (codepoint, glyph) in font.charmap().mappings() {
+        let Some(character) = char::from_u32(codepoint) else {
+            continue;
+        };
+        if let Some(advance) = glyphs.advance_width(glyph) {
+            characters.insert(character, f64::from(advance) / units);
+        }
+    }
+    let average = global
+        .average_width
+        .map(|width| f64::from(width) / units)
+        .filter(|width| width.is_finite() && *width > 0.0)
+        .unwrap_or(0.5);
+    Some(FontAdvances {
+        average,
+        characters,
     })
 }
 

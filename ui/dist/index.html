@@ -3,100 +3,297 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Assemblash — structured visual composition with precise, reversible edits."
+    />
     <title>Assemblash</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="phosphor.css" />
+    <link rel="stylesheet" href="studio.css" />
   </head>
   <body>
-    <header>
-      <h1>Assemblash</h1>
-      <select id="projects" aria-label="Project"></select>
-      <button id="new-project" type="button">New project</button>
-      <button id="reload" type="button">Reload</button>
-      <input id="project-search" type="search" placeholder="Search projects" aria-label="Search projects" />
-      <span class="spacer"></span>
-      <span class="version-label">version <span id="version">–</span></span>
-      <button id="shutdown" type="button" hidden>Stop Assemblash</button>
-    </header>
-
-    <main>
-      <section class="panel left">
-        <!-- Recently modified projects, from the engine's workspace cache. -->
-        <div id="recents" hidden></div>
-        <h2>Layers</h2>
-        <ul id="layers"></ul>
-        <div class="buttons">
-          <button id="add-text" type="button">Add text</button>
-          <button id="add-image" type="button">Add image</button>
-          <input id="image-file" type="file" accept="image/*,.svg" hidden />
-          <button id="group-layers" type="button" disabled>Group</button>
-          <button id="delete-layer" type="button" disabled>Delete</button>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Assemblash home">
+          <i class="ph ph-circles-three-plus" aria-hidden="true"></i>
+          <span>Assemblash</span>
+        </a>
+        <div class="project-control">
+          <label class="sr-only" for="projects">Open project</label>
+          <select id="projects" aria-label="Open project"></select>
+          <button id="new-project" class="icon-button" type="button" title="New project">
+            <i class="ph ph-plus" aria-hidden="true"></i><span class="sr-only">New project</span>
+          </button>
+          <input id="project-search" type="search" placeholder="Search projects" aria-label="Search projects" />
         </div>
-      </section>
-
-      <section class="stage">
-        <!--
-          The engine's own render, as an image. The page never interprets
-          document content as markup, and what is shown is byte-for-byte what
-          an export at the same scale writes.
-        -->
-        <div id="canvas">
-          <img id="canvas-image" alt="" />
-          <div id="overlay"></div>
+        <div class="topbar-history" aria-label="Document history">
+          <button id="undo" class="icon-button" type="button" disabled title="Undo">
+            <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i><span class="sr-only">Undo</span>
+          </button>
+          <button id="redo" class="icon-button" type="button" disabled title="Redo">
+            <i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span class="sr-only">Redo</span>
+          </button>
+          <button id="history-shortcut" class="version-pill" type="button" title="Show history">
+            <i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i>
+            <span>Version <span id="version">–</span></span>
+          </button>
+          <span id="save-state" class="save-state">
+            <i class="ph ph-check-circle" aria-hidden="true"></i><span>All changes saved</span>
+          </span>
         </div>
-        <div class="buttons">
-          <button id="undo" type="button" disabled>Undo</button>
-          <button id="redo" type="button" disabled>Redo</button>
-          <button id="export" type="button">Export PNG</button>
-          <a id="download" href="#" download="assemblash.png" hidden>Download PNG</a>
-          <a id="download-svg" href="#" download="assemblash.svg" hidden>Download SVG</a>
+        <div class="topbar-actions">
+          <button id="reload" class="icon-button" type="button" title="Reload project">
+            <i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span class="sr-only">Reload project</span>
+          </button>
+          <button id="shutdown" class="icon-button" type="button" hidden title="Stop Assemblash">
+            <i class="ph ph-power" aria-hidden="true"></i><span class="sr-only">Stop Assemblash</span>
+          </button>
+          <button id="export" class="button button-primary export-button" type="button" aria-label="Export">
+            <i class="ph ph-export" aria-hidden="true"></i><span>Export</span>
+            <i class="ph ph-caret-down" aria-hidden="true"></i>
+          </button>
         </div>
-        <div id="status" data-kind="info">Loading…</div>
-        <p class="hint shortcuts">
-          Arrows nudge · Shift+arrows nudge by 10 · Delete removes ·
-          Ctrl/Cmd+Z undo · Ctrl/Cmd+Shift+Z redo
-        </p>
-      </section>
+      </header>
 
-      <section class="panel right">
-        <h2>Inspector</h2>
-        <div id="inspector"></div>
-        <h2>History</h2>
-        <ol id="history"></ol>
-      </section>
-    </main>
+      <main class="workspace">
+        <nav class="toolrail" aria-label="Editor tools">
+          <button class="tool active" id="add-toggle" type="button" aria-label="Add content" aria-pressed="true" aria-controls="add-panel">
+            <i class="ph ph-plus-circle" aria-hidden="true"></i><span>Add</span>
+          </button>
+          <button class="tool" id="select-tool" type="button" aria-label="Select" aria-pressed="false">
+            <i class="ph ph-cursor" aria-hidden="true"></i><span>Select</span>
+          </button>
+          <button class="tool" id="add-text" type="button" aria-label="Open text presets" aria-pressed="false" aria-controls="add-panel">
+            <i class="ph ph-text-t" aria-hidden="true"></i><span>Text</span>
+          </button>
+          <button class="tool" id="add-image" type="button" aria-label="Open uploads" aria-pressed="false" aria-controls="add-panel">
+            <i class="ph ph-image" aria-hidden="true"></i><span>Uploads</span>
+          </button>
+          <button class="tool" id="add-vector" type="button" aria-label="Open vector tools" aria-pressed="false" aria-controls="add-panel">
+            <i class="ph ph-pen-nib" aria-hidden="true"></i><span>Vector</span>
+          </button>
+          <button class="tool" id="templates-toggle" type="button" aria-label="Open templates" aria-pressed="false" aria-controls="add-panel">
+            <i class="ph ph-layout" aria-hidden="true"></i><span>Templates</span>
+          </button>
+          <span class="toolrail-spacer"></span>
+          <button class="tool" id="dock-toggle" type="button" aria-label="Toggle properties and layers" aria-expanded="true" aria-controls="structure-panel">
+            <i class="ph ph-sidebar-simple" aria-hidden="true"></i><span>Panels</span>
+          </button>
+        </nav>
 
-    <!--
-      Templates. Hidden entirely unless the open project declares slots: a
-      panel offering to fill nothing is worse than no panel. Filling here is
-      the same operation the CLI and MCP build, so protected layers refuse
-      from this form exactly as they refuse everywhere else.
-    -->
-    <section class="templates" id="templates" hidden>
-      <div class="template-fill">
-        <h2>Template</h2>
-        <div id="slot-form"></div>
-        <input id="slot-image-file" type="file" accept="image/*,.svg" hidden />
-        <div class="buttons">
-          <button id="preview-variant" type="button">Preview</button>
-          <input id="variant-name" type="text" placeholder="variant name" aria-label="Variant name" />
-          <button id="add-variant" type="button">Add to batch</button>
+        <aside id="add-panel" class="add-panel" aria-label="Add content">
+          <div class="panel-heading">
+            <h2 id="add-panel-title">Add</h2>
+            <button id="add-panel-close" class="icon-button" type="button" title="Collapse Add panel">
+              <i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Collapse Add panel</span>
+            </button>
+          </div>
+          <section class="add-section" id="add-text-section">
+            <div class="section-title"><h3>Text</h3><i class="ph ph-caret-up" aria-hidden="true"></i></div>
+            <button class="text-preset heading" type="button" data-text-preset="heading">Heading</button>
+            <button class="text-preset subheading" type="button" data-text-preset="subheading">Subheading</button>
+            <button class="text-preset body" type="button" data-text-preset="body">Body text</button>
+          </section>
+          <section class="add-section" id="add-upload-section">
+            <div class="section-title"><h3>Uploads</h3></div>
+            <button id="upload-dropzone" class="upload-dropzone" type="button">
+              <i class="ph ph-cloud-arrow-up" aria-hidden="true"></i>
+              <strong>Drop files here</strong><span>or browse images and SVG</span>
+            </button>
+            <div id="upload-feedback" class="upload-feedback" aria-live="polite"></div>
+          </section>
+          <section class="add-section" id="add-vector-section">
+            <div class="section-title"><h3>Vector</h3></div>
+            <button id="browse-vector" class="wide-action" type="button"><i class="ph ph-file-svg" aria-hidden="true"></i> Upload SVG</button>
+          </section>
+          <section class="add-section" id="add-template-section">
+            <div class="section-title"><h3>Templates</h3></div>
+            <p class="hint">Fill project slots and render variants from this workspace.</p>
+            <button id="open-templates" class="wide-action" type="button"><i class="ph ph-layout" aria-hidden="true"></i> Open template tools</button>
+          </section>
+        </aside>
+
+        <section class="editor" aria-label="Document editor">
+          <div id="inspector" class="contextual-toolbar" aria-label="Contextual selection toolbar">
+            <div class="inspector-empty"><i class="ph ph-cursor-click" aria-hidden="true"></i><span>Select a layer to edit it</span></div>
+          </div>
+          <div class="stage-viewport" id="stage-viewport">
+            <div class="stage" id="stage">
+              <div id="canvas-empty" class="canvas-empty">
+                <div class="empty-mark"><i class="ph ph-sparkle" aria-hidden="true"></i></div>
+                <p class="eyebrow">Structured by design</p>
+                <h1>Create precisely.<br />Keep control.</h1>
+                <p>Build layered visuals, make reversible edits, and export the exact pixels you see.</p>
+                <button id="empty-create" class="button button-primary" type="button"><i class="ph ph-plus" aria-hidden="true"></i> Create a project</button>
+                <div id="recents" class="recents" hidden aria-label="Recent projects"></div>
+              </div>
+              <div id="canvas" hidden tabindex="0" aria-label="Canvas">
+                <img id="canvas-image" alt="" />
+                <div id="overlay"></div>
+              </div>
+            </div>
+            <div class="zoom-controls" role="group" aria-label="Canvas zoom">
+              <button id="zoom-out" type="button" title="Zoom out"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Zoom out</span></button>
+              <button id="zoom-value" type="button" title="Set zoom to 100%">Fit</button>
+              <button id="zoom-in" type="button" title="Zoom in"><i class="ph ph-plus" aria-hidden="true"></i><span class="sr-only">Zoom in</span></button>
+              <button id="zoom-fit" type="button">Fit</button>
+              <button id="zoom-100" type="button">100%</button>
+            </div>
+          </div>
+        </section>
+
+        <aside id="structure-panel" class="structure" aria-label="Properties, layers and history">
+          <div class="tabs dock-tabs" role="tablist" aria-label="Editor panels">
+            <button id="properties-tab" role="tab" aria-selected="false" aria-controls="properties-panel">Properties</button>
+            <button id="layers-tab" role="tab" aria-selected="true" aria-controls="layers-view">Layers</button>
+            <button id="history-tab" role="tab" aria-selected="false" aria-controls="history-view">History</button>
+          </div>
+          <section id="properties-panel" class="dock-view" role="tabpanel" aria-labelledby="properties-tab" hidden>
+            <div id="advanced-inspector"></div>
+          </section>
+          <section id="layers-view" class="dock-view layers-view" role="tabpanel" aria-labelledby="layers-tab">
+            <div class="layer-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><input id="layer-search" type="search" placeholder="Search layers" aria-label="Search layers" /></div>
+            <ul id="layers"></ul>
+            <div class="structure-actions">
+              <button id="group-layers" type="button" disabled><i class="ph ph-stack" aria-hidden="true"></i> Group</button>
+              <button id="delete-layer" class="danger-action" type="button" disabled><i class="ph ph-trash" aria-hidden="true"></i> Delete</button>
+            </div>
+          </section>
+          <section id="history-view" class="dock-view" role="tabpanel" aria-labelledby="history-tab" hidden><ol id="history"></ol></section>
+        </aside>
+      </main>
+
+      <footer class="statusbar">
+        <div id="status" data-kind="info" aria-live="polite">Starting Assemblash…</div>
+        <span class="status-divider" aria-hidden="true"></span>
+        <span class="local-status"><i class="ph ph-check-circle" aria-hidden="true"></i> Saved locally</span>
+        <span class="statusbar-spacer"></span>
+        <span class="pixel-status"><i class="ph ph-eye" aria-hidden="true"></i> Pixel-true preview</span>
+        <span id="document-dimensions">No project open</span>
+        <span class="status-divider" aria-hidden="true"></span><span>Fit</span>
+      </footer>
+    </div>
+
+    <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+    <input id="vector-file" type="file" accept="image/svg+xml,.svg" hidden />
+    <div id="position-popover" class="position-popover" hidden>
+      <div class="popover-heading"><strong>Position</strong><button id="position-close" class="icon-button" type="button"><i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Close position</span></button></div>
+      <section><h3>Align to canvas</h3><div class="anchor-grid">
+        <button type="button" data-canvas-anchor="top-left" title="Top left"><i class="ph ph-arrow-up-left" aria-hidden="true"></i></button><button type="button" data-canvas-anchor="top-center" title="Top centre"><i class="ph ph-arrow-up" aria-hidden="true"></i></button><button type="button" data-canvas-anchor="top-right" title="Top right"><i class="ph ph-arrow-up-right" aria-hidden="true"></i></button>
+        <button type="button" data-canvas-anchor="middle-left" title="Middle left"><i class="ph ph-arrow-left" aria-hidden="true"></i></button><button type="button" data-canvas-anchor="center" title="Dead centre"><i class="ph ph-crosshair-simple" aria-hidden="true"></i></button><button type="button" data-canvas-anchor="middle-right" title="Middle right"><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+        <button type="button" data-canvas-anchor="bottom-left" title="Bottom left"><i class="ph ph-arrow-down-left" aria-hidden="true"></i></button><button type="button" data-canvas-anchor="bottom-center" title="Bottom centre"><i class="ph ph-arrow-down" aria-hidden="true"></i></button><button type="button" data-canvas-anchor="bottom-right" title="Bottom right"><i class="ph ph-arrow-down-right" aria-hidden="true"></i></button>
+      </div></section>
+      <section><h3>Align selection</h3><div class="popover-actions">
+        <button type="button" data-layout="align-left">Left</button><button type="button" data-layout="align-center-horizontal">Centres</button><button type="button" data-layout="align-right">Right</button>
+        <button type="button" data-layout="align-top">Top</button><button type="button" data-layout="align-center-vertical">Middles</button><button type="button" data-layout="align-bottom">Bottom</button>
+      </div></section>
+      <section><h3>Distribute</h3><div class="popover-actions two"><button type="button" data-layout="distribute-horizontal"><i class="ph ph-columns" aria-hidden="true"></i> Horizontal</button><button type="button" data-layout="distribute-vertical"><i class="ph ph-rows" aria-hidden="true"></i> Vertical</button></div></section>
+      <section><h3>Position &amp; size</h3><div id="position-fields" class="position-fields"></div></section>
+    </div>
+
+    <div id="context-menu" class="context-menu" role="menu" hidden tabindex="-1"></div>
+
+    <dialog id="new-project-dialog" class="modal">
+      <form id="new-project-form" method="dialog">
+        <div class="modal-heading">
+          <div><p class="eyebrow">New project</p><h2>Start with the right canvas</h2></div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">
+            <i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Close</span>
+          </button>
         </div>
+        <label><span>Name</span><input id="new-project-name" name="name" autocomplete="off" placeholder="Campaign concept" required /></label>
+        <fieldset>
+          <legend>Canvas</legend>
+          <div class="preset-grid" id="canvas-presets">
+            <button type="button" data-size="1080x1080" class="selected"><i class="ph ph-square" aria-hidden="true"></i><b>Square</b><span>1080 × 1080</span></button>
+            <button type="button" data-size="1920x1080"><i class="ph ph-rectangle" aria-hidden="true"></i><b>Landscape</b><span>1920 × 1080</span></button>
+            <button type="button" data-size="1080x1350"><i class="ph ph-rectangle" aria-hidden="true"></i><b>Portrait</b><span>1080 × 1350</span></button>
+            <button type="button" data-size="1080x1920"><i class="ph ph-device-mobile" aria-hidden="true"></i><b>Story</b><span>1080 × 1920</span></button>
+          </div>
+        </fieldset>
+        <div class="dimension-fields">
+          <label><span>Width</span><input id="new-project-width" type="number" min="1" value="1080" required /></label>
+          <span aria-hidden="true">×</span>
+          <label><span>Height</span><input id="new-project-height" type="number" min="1" value="1080" required /></label>
+          <label class="color-field"><span>Background</span><input id="new-project-background" type="color" value="#ffffff" /></label>
+        </div>
+        <div class="modal-actions">
+          <button class="button button-quiet" value="cancel" formnovalidate>Cancel</button>
+          <button id="create-project-confirm" class="button button-primary" value="default">Create project</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="export-dialog" class="modal export-modal">
+      <form id="export-form" method="dialog">
+        <div class="modal-heading">
+          <div><p class="eyebrow">Pixel-true export</p><h2>Choose your output</h2></div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">
+            <i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Close</span>
+          </button>
+        </div>
+        <div id="export-options" class="export-options" role="radiogroup" aria-label="Resolution"></div>
+        <label><span>File name</span><input id="export-name" name="export-name" value="assemblash-export" pattern="[A-Za-z0-9_-]+" maxlength="60" required /></label>
+        <div id="export-summary" class="export-summary"></div>
+        <div class="modal-actions">
+          <a id="download-svg" class="button button-quiet" href="#" download="assemblash.svg" hidden>
+            <i class="ph ph-file-svg" aria-hidden="true"></i> SVG
+          </a>
+          <a id="export-download" class="button button-quiet" href="#" download hidden>
+            <i class="ph ph-download-simple" aria-hidden="true"></i> Download
+          </a>
+          <span class="modal-spacer"></span>
+          <button class="button button-quiet" value="cancel" formnovalidate>Cancel</button>
+          <button id="export-confirm" class="button button-primary" value="default">
+            <i class="ph ph-export" aria-hidden="true"></i> Export PNG
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="name-dialog" class="modal name-modal">
+      <form id="name-dialog-form" method="dialog">
+        <div class="modal-heading">
+          <div><p class="eyebrow">Document setup</p><h2 id="name-dialog-title">Name item</h2></div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">
+            <i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Close</span>
+          </button>
+        </div>
+        <label><span id="name-dialog-label">Name</span><input id="name-dialog-input" autocomplete="off" maxlength="80" required /></label>
+        <div class="modal-actions">
+          <button class="button button-quiet" value="cancel" formnovalidate>Cancel</button>
+          <button id="name-dialog-confirm" class="button button-primary" value="default">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <section class="templates" id="templates" hidden aria-label="Template variants">
+      <div class="drawer-heading">
+        <div><p class="eyebrow">Template workspace</p><h2>Build variants</h2></div>
+        <button id="templates-close" class="icon-button" type="button" title="Close templates">
+          <i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Close</span>
+        </button>
       </div>
-
-      <div class="template-batch">
-        <h2>Batch</h2>
-        <ol id="variant-rows"></ol>
-        <div class="buttons">
-          <button id="load-values" type="button">Load values file…</button>
-          <input id="values-file" type="file" accept="application/json,.json" hidden />
-          <button id="render-batch" type="button" disabled>Render batch</button>
-          <button id="clear-batch" type="button" disabled>Clear</button>
+      <div class="template-columns">
+        <div class="template-fill">
+          <h3>Fill slots</h3><div id="slot-form"></div>
+          <input id="slot-image-file" type="file" accept="image/*,.svg" hidden />
+          <div class="buttons">
+            <button id="preview-variant" type="button">Preview</button>
+            <input id="variant-name" type="text" placeholder="Variant name" aria-label="Variant name" />
+            <button id="add-variant" type="button">Add to batch</button>
+          </div>
         </div>
-      </div>
-
-      <div class="template-gallery">
-        <h2>Variants</h2>
-        <div id="gallery"></div>
+        <div class="template-batch">
+          <h3>Batch</h3><ol id="variant-rows"></ol>
+          <div class="buttons">
+            <button id="load-values" type="button">Load JSON…</button>
+            <input id="values-file" type="file" accept="application/json,.json" hidden />
+            <button id="render-batch" type="button" disabled>Render batch</button>
+            <button id="clear-batch" type="button" disabled>Clear</button>
+          </div>
+        </div>
+        <div class="template-gallery"><h3>Rendered variants</h3><div id="gallery"></div></div>
       </div>
     </section>
 

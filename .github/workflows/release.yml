@@ -80,7 +80,7 @@ jobs:
           else
             cp target/release/assemblash "dist/$name/"
           fi
-          cp LICENSE NOTICE README.md CHANGELOG.md "dist/$name/"
+          cp LICENSE NOTICE THIRD_PARTY_LICENSES.md README.md CHANGELOG.md "dist/$name/"
           cd dist
           if [ "${{ matrix.archive }}" = "zip" ]; then
             7z a "$name.zip" "$name" >/dev/null

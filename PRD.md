@@ -1,7 +1,7 @@
 # Assemblash Product Requirements Document
 
 **Product:** Assemblash  
-**Status:** **1.0.0 released 2026-08-06** — the document schema (`schemaVersion` 1) and the operation API are stable; breaking either requires a MAJOR release. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) are demonstrated on released artifacts. Use case D remains out of scope by design.  
+**Status:** **1.1.0 released 2026-08-27** — the document schema remains `schemaVersion` 1 and the operation API remains compatible with 1.0; breaking either requires a MAJOR release. The reference editor now provides the unified canvas-first workflow described by FR-10 while preserving the same deterministic renderer and operation layer. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) remain demonstrated. Use case D remains out of scope by design.
 **Document type:** Product and technical requirements  
 **Audience:** Maintainers, contributors, downstream integrators, and coding agents  
 **Primary deployment model:** Local machine or self-hosted server  

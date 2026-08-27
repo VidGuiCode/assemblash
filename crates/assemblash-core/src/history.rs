@@ -107,6 +107,19 @@ pub enum EntryKind {
         /// What it did.
         outcome: OpOutcome,
     },
+    /// Several ordinary operations applied as one user-visible transaction.
+    ///
+    /// The operation API remains the only mutation language. This wrapper is
+    /// journal metadata: replay runs the stored operations in order, while
+    /// undo moves back one logical position for the whole command.
+    BatchApplied {
+        /// Human-readable description shown by history clients.
+        label: String,
+        /// The validated operations, in execution order.
+        operations: Vec<Operation>,
+        /// Their aggregate result.
+        outcome: OpOutcome,
+    },
     /// The document was moved back to an earlier position.
     Undone {
         /// The transaction that was undone.
@@ -154,6 +167,19 @@ impl JournalEntry {
             EntryKind::Applied { operation, .. } => Some(operation),
             _ => None,
         }
+    }
+
+    /// The operations applied by this entry, if it is a mutation.
+    pub fn operations(&self) -> &[Operation] {
+        match &self.kind {
+            EntryKind::Applied { operation, .. } => std::slice::from_ref(operation.as_ref()),
+            EntryKind::BatchApplied { operations, .. } => operations,
+            _ => &[],
+        }
+    }
+
+    fn is_applied(&self) -> bool {
+        !self.operations().is_empty()
     }
 }
 
@@ -271,7 +297,7 @@ impl History {
         self.entries
             .iter()
             .rev()
-            .find(|entry| matches!(entry.kind, EntryKind::Applied { .. }))
+            .find(|entry| entry.is_applied())
             .map_or(0, |entry| entry.position)
     }
 
@@ -296,7 +322,7 @@ impl History {
         self.entries
             .iter()
             .rev()
-            .find(|entry| entry.position == position && entry.operation().is_some())
+            .find(|entry| entry.position == position && entry.is_applied())
     }
 
     /// Records that an operation was applied, and snapshots when due.
@@ -325,6 +351,35 @@ impl History {
 
         // Snapshot on the interval, and always at position 1, so a rebuild
         // never has to start from nothing.
+        if position == 1 || position.is_multiple_of(SNAPSHOT_INTERVAL) {
+            self.write_snapshot(position, document)?;
+        }
+        Ok(transaction)
+    }
+
+    /// Records a validated sequence as one logical history position.
+    pub fn record_applied_batch(
+        &mut self,
+        batch: (&str, &[Operation]),
+        outcome: &OpOutcome,
+        document: &Document,
+        actor: &Actor,
+        recorded_at: Option<u64>,
+        ids: &mut dyn IdSource,
+    ) -> Result<TransactionId, HistoryError> {
+        let position = self.position() + 1;
+        let transaction = TransactionId::generate(ids);
+        self.append(JournalEntry {
+            transaction: transaction.clone(),
+            position,
+            actor: actor.clone(),
+            recorded_at,
+            kind: EntryKind::BatchApplied {
+                label: batch.0.to_owned(),
+                operations: batch.1.to_vec(),
+                outcome: outcome.clone(),
+            },
+        })?;
         if position == 1 || position.is_multiple_of(SNAPSHOT_INTERVAL) {
             self.write_snapshot(position, document)?;
         }
@@ -444,19 +499,18 @@ impl History {
             let Some(entry) = self.effective(step) else {
                 continue;
             };
-            let Some(operation) = entry.operation() else {
-                continue;
-            };
             // Replayed with the ids the journal recorded, not fresh ones: a
             // rebuilt document has to equal the original byte for byte, and
             // newly minted ids would defeat that before anything else did.
             let mut ids = ReplayIds::from_outcome(entry);
-            crate::ops::apply(&mut document, operation, &mut ids).map_err(|source| {
-                HistoryError::ReplayFailed {
-                    transaction: entry.transaction.clone(),
-                    source,
-                }
-            })?;
+            for operation in entry.operations() {
+                crate::ops::apply(&mut document, operation, &mut ids).map_err(|source| {
+                    HistoryError::ReplayFailed {
+                        transaction: entry.transaction.clone(),
+                        source,
+                    }
+                })?;
+            }
         }
 
         document.version = position;
@@ -545,7 +599,7 @@ struct ReplayIds {
 impl ReplayIds {
     fn from_outcome(entry: &JournalEntry) -> Self {
         let bodies = match &entry.kind {
-            EntryKind::Applied { outcome, .. } => outcome
+            EntryKind::Applied { outcome, .. } | EntryKind::BatchApplied { outcome, .. } => outcome
                 .created
                 .iter()
                 .map(|id| {

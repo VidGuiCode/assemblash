@@ -200,6 +200,9 @@ fn the_interface_opens_edits_and_exports_the_same_document() {
     assert!(html.contains("app.js"), "the entry point is missing");
     assert_eq!(harness.get("/app.js").status, 200);
     assert_eq!(harness.get("/api.js").status, 200);
+    assert_eq!(harness.get("/export.js").status, 200);
+    assert_eq!(harness.get("/geometry.js").status, 200);
+    assert_eq!(harness.get("/templates.js").status, 200);
     assert_eq!(harness.get("/style.css").status, 200);
 
     // Something the API wrote, exactly as another client would have.

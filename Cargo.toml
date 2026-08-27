@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.92"
 license = "Apache-2.0"
@@ -17,10 +17,10 @@ repository = "https://github.com/VidGuiCode/assemblash"
 authors = ["VidGuiCode"]
 
 [workspace.dependencies]
-assemblash-core = { path = "crates/assemblash-core", version = "1.0.0" }
-assemblash-renderer = { path = "crates/assemblash-renderer", version = "1.0.0" }
-assemblash-server = { path = "crates/assemblash-server", version = "1.0.0" }
-assemblash-mcp = { path = "crates/assemblash-mcp", version = "1.0.0" }
+assemblash-core = { path = "crates/assemblash-core", version = "1.1.0" }
+assemblash-renderer = { path = "crates/assemblash-renderer", version = "1.1.0" }
+assemblash-server = { path = "crates/assemblash-server", version = "1.1.0" }
+assemblash-mcp = { path = "crates/assemblash-mcp", version = "1.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -33,6 +33,13 @@ unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
 todo = "warn"
+
+[profile.dev]
+# The editor renders through Rust after every committed visual action. Keeping
+# debug assertions while enabling light optimization makes direct manipulation
+# responsive during development instead of making each 1080p preview wait on
+# debug-speed rasterization and PNG encoding.
+opt-level = 1
 
 [profile.release]
 # One small static binary is the deployment story (PRD §14).
