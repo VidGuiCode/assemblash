@@ -108,7 +108,6 @@ const dom = {
     zoomOut: el("zoom-out"),
     zoomValue: el("zoom-value"),
     zoomIn: el("zoom-in"),
-    zoomFit: el("zoom-fit"),
     zoom100: el("zoom-100"),
     templatesPanel: el("templates"),
     templatesToggle: el("templates-toggle"),
@@ -290,10 +289,32 @@ function interactivePreviewScale() {
 }
 function drawLayers() {
     dom.layers.replaceChildren();
-    if (!state.document)
+    if (!state.document) {
+        dom.layerSearch.disabled = true;
         return;
+    }
     const query = dom.layerSearch.value.trim().toLowerCase();
     const flat = api.flatten(api.layersOf(state.document));
+    dom.layerSearch.disabled = flat.length === 0;
+    dom.layerSearch.placeholder = flat.length === 0 ? "No layers to search" : "Search layers";
+    const appendEmptyState = (title, hint, compact = false) => {
+        const item = document.createElement("li");
+        item.className = `layers-empty${compact ? " compact" : ""}`;
+        const icon = document.createElement("i");
+        icon.className = `ph ${compact ? "ph-magnifying-glass" : "ph-stack-simple"}`;
+        icon.setAttribute("aria-hidden", "true");
+        const heading = document.createElement("strong");
+        heading.textContent = title;
+        const copy = document.createElement("span");
+        copy.textContent = hint;
+        item.append(icon, heading, copy);
+        dom.layers.append(item);
+    };
+    if (flat.length === 0) {
+        dom.layerSearch.value = "";
+        appendEmptyState("No layers yet", "Add text, upload an image, or drop an SVG to begin.");
+        return;
+    }
     const appendLayer = (layer, depth, parent) => {
         const visibleName = layer.name ?? (layer.type === "text" ? layer.text : layer.type) ?? layer.type;
         const childMatches = layer.type === "group" &&
@@ -450,6 +471,9 @@ function drawLayers() {
     };
     for (const layer of [...api.layersOf(state.document)].reverse()) {
         appendLayer(layer, 0, null);
+    }
+    if (dom.layers.childElementCount === 0) {
+        appendEmptyState("No matching layers", "Try a different search.", true);
     }
 }
 function beginLayerRename(layer, label) {
@@ -2609,7 +2633,6 @@ dom.templatesClose.addEventListener("click", () => {
 });
 dom.zoomOut.addEventListener("click", () => setZoom((state.zoom ?? dragScale() ** -1) / 1.2));
 dom.zoomIn.addEventListener("click", () => setZoom((state.zoom ?? dragScale() ** -1) * 1.2));
-dom.zoomFit.addEventListener("click", () => setZoom(null));
 dom.zoomValue.addEventListener("click", () => setZoom(null));
 dom.zoom100.addEventListener("click", () => setZoom(1));
 dom.stageViewport.addEventListener("wheel", (event) => {

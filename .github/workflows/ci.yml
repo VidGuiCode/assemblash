@@ -48,12 +48,13 @@ jobs:
           # checks the file a reader expects to find is actually there.
           test -f DEPENDENCIES.md
 
-      - name: No AI working directory committed
+      - name: No local AI working directories committed
         run: |
-          # .ai/ is local-only scratch space for agent handoffs, roadmaps, notes.
-          bad=$(git ls-files | grep -E '^\.ai/' || true)
+          # .ai/ holds working notes; .agents/ holds per-tool installed skills.
+          # Reusable public agent guidance belongs under skills/ instead.
+          bad=$(git ls-files | grep -E '^(\.ai|\.agents)/' || true)
           if [ -n "$bad" ]; then
-            echo "::error::.ai/ is local-only and must stay untracked:"
+            echo "::error::local AI working directories must stay untracked:"
             echo "$bad"
             exit 1
           fi

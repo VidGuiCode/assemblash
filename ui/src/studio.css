@@ -14,11 +14,11 @@
   --color-surface-hover: #f1efeb;
   --color-ink: #181816;
   --color-ink-soft: #5f5e59;
-  --color-ink-faint: #8a8983;
-  --color-line: #dfddd7;
-  --color-line-strong: #c8c5bd;
-  --color-accent: #ef3325;
-  --color-accent-hover: #d9271b;
+  --color-ink-faint: #76746e;
+  --color-line: #d7d4cd;
+  --color-line-strong: #bbb7ae;
+  --color-accent: #dc2f23;
+  --color-accent-hover: #c4261a;
   --color-accent-soft: #fff0ed;
   --color-success: #168d86;
   --color-success-soft: #eaf7f5;
@@ -157,13 +157,11 @@ button:disabled {
   text-decoration: none;
 }
 
-.brand > i {
+.brand-mark {
   display: grid;
   place-items: center;
   width: 2rem;
   height: 2rem;
-  color: var(--color-accent);
-  font-size: 1.85rem;
 }
 
 .project-control {
@@ -1835,6 +1833,21 @@ body.stopped .topbar-actions {
   border-right: 1px solid var(--color-line);
   background: var(--color-surface);
   transition: width var(--transition-medium), opacity var(--transition-fast);
+  scrollbar-color: var(--color-line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.add-panel::-webkit-scrollbar,
+.dock-view::-webkit-scrollbar {
+  width: 0.5rem;
+}
+
+.add-panel::-webkit-scrollbar-thumb,
+.dock-view::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--color-line-strong);
+  background-clip: padding-box;
 }
 
 .add-panel.collapsed {
@@ -2237,6 +2250,13 @@ body.stopped .topbar-actions {
   cursor: pointer;
 }
 
+#zoom-value {
+  min-width: 3.5rem;
+  color: var(--color-ink-soft);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
 .zoom-controls button:last-child { border-right: 0; }
 .zoom-controls button:hover { background: var(--color-surface-hover); }
 
@@ -2288,6 +2308,50 @@ body.stopped .topbar-actions {
 
 ul#layers {
   padding: 0 0.65rem 0.75rem;
+}
+
+.layers-empty {
+  display: grid;
+  min-height: 13rem;
+  place-items: center;
+  align-content: center;
+  gap: 0.45rem;
+  padding: 1.5rem;
+  color: var(--color-ink-soft);
+  text-align: center;
+}
+
+.layers-empty i {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-bottom: 0.25rem;
+  place-items: center;
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  background: var(--color-surface-subtle);
+  color: var(--color-accent);
+  font-size: 1.35rem;
+}
+
+.layers-empty strong {
+  color: var(--color-ink);
+  font-size: 0.82rem;
+}
+
+.layers-empty span {
+  max-width: 13rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.layers-empty.compact {
+  min-height: 8rem;
+}
+
+.layer-search input:disabled {
+  color: var(--color-ink-faint);
+  cursor: not-allowed;
 }
 
 li.layer {

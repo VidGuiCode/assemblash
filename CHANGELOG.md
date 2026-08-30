@@ -10,6 +10,52 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-30
+
+Assemblash is easier to recognize, understand, and use without changing the
+stable document or operation contracts. This release integrates the finished
+identity, tightens the editor's everyday interaction details, and turns the
+repository into a complete public entry point with a real editable example.
+
+### Added
+
+- The finished Assemblash mark in the reference editor and public repository,
+  using the same compact layered identity at application and documentation
+  sizes.
+- A neutral launch-card example under `examples/launch-card`, stored as an
+  ordinary structured project with sanitized SVG assets and operation history.
+  Its README image is exported by Assemblash itself and can be reproduced with
+  the manifest-pinned Noto Sans font.
+- A public `skills/assemblash/SKILL.md` for agents working with Assemblash
+  documents or integrations. Tool-local `.agents/` installations remain
+  ignored and are rejected by repository hygiene checks if committed.
+- Direct README paths for questions, reproducible bug reports, feature ideas,
+  deployment guidance, schemas, and the editable example project.
+
+### Changed
+
+- Rewrote the README around the released product: a short explanation, real
+  quick start, six-target compatibility table, interface choices, architecture,
+  safety model, stability promise, current limits, and contribution workflow.
+- Simplified the editor's zoom controls, improved contrast and scrollbar
+  treatment, and made an empty Layers panel explain how to create the first
+  layer instead of presenting an unexplained blank state.
+- Aligned the private UI package metadata, security policy, issue form, agent
+  guidance, and release packaging with the product release. Release archives
+  now carry the public image assets used by their README.
+- Expanded ignore and CI hygiene rules so local AI workspaces, credentials,
+  private downstream content, build output, and sync artifacts stay outside the
+  public repository and Docker build context.
+
+### Compatibility and safety
+
+- `schemaVersion` stays **1**.
+- The existing `Operation` union is unchanged.
+- Existing 1.0 and 1.1 documents and clients require no migration.
+- The example was created through the validated CLI and re-exported
+  byte-identically from its committed document, assets, history, and pinned
+  font bytes.
+
 ## [1.1.0] — 2026-08-27
 
 The reference interface is now a practical canvas-first editor while the

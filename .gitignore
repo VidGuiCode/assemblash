@@ -86,6 +86,7 @@ env/
 # --- Agent tool config ------------------------------------------------------
 # AGENTS.md is committed on purpose (shared project rules). Tool-specific
 # pointer files and per-machine tool state are not.
+/.agents/
 /CLAUDE.md
 /GEMINI.md
 /.cursorrules

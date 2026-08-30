@@ -478,7 +478,7 @@ test("editor interaction journeys use the real compiled interface", async (t) =>
     assert.deepEqual(await page.evaluate(`({ value: document.querySelector("#zoom-value").textContent, width: document.querySelector("#canvas").style.width })`), { value: "100%", width: "1000px" });
     await page.click("#zoom-in");
     assert.equal(await page.evaluate(`document.querySelector("#zoom-value").textContent`), "120%");
-    await page.click("#zoom-fit");
+    await page.click("#zoom-value");
     assert.equal(await page.evaluate(`document.querySelector("#zoom-value").textContent`), "Fit");
 
     await page.send("Emulation.setDeviceMetricsOverride", { width: 800, height: 900, deviceScaleFactor: 1, mobile: false });

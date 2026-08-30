@@ -4,6 +4,7 @@ target/
 .git/
 .github/
 .ai/
+.agents/
 ui/node_modules/
 *.md
 !DEPENDENCIES.md

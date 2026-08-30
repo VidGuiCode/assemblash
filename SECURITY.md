@@ -2,15 +2,17 @@
 
 ## Project status
 
-Assemblash is **released at 1.0.0**. It is a local-first engine: by default it
+Assemblash is **released at 1.2.0**. It is a local-first engine: by default it
 binds `127.0.0.1` and requires no account, no network, and no cloud service.
 
 ## Supported versions
 
 | Version | Supported |
 | ------- | --------- |
+| 1.2.x | Yes |
+| 1.1.x | Yes |
 | 1.0.x | Yes |
-| < 1.0 | No — upgrade to 1.0.x |
+| < 1.0 | No — upgrade to the latest release |
 
 ## What the built-in authentication is, and is not
 
@@ -75,9 +77,10 @@ in scope and treated as security issues, not bugs:
 
 ## Out of scope
 
-- Vulnerabilities in a deployment you have exposed to an untrusted network
-  yourself. Assemblash is designed to run locally or self-hosted behind your own
-  authentication; the project ships no authentication layer.
+- Vulnerabilities caused solely by exposing plain HTTP to an untrusted network
+  against the deployment guidance. Assemblash provides a shared access token,
+  not transport encryption or per-user identity; internet-facing deployments
+  need TLS and, where required, an identity-aware reverse proxy.
 - Missing hardening in features that are documented as not yet implemented.
 - Reports generated solely by an automated scanner with no demonstrated impact.
 - Attacks requiring an already-compromised host or a malicious local user with
@@ -86,9 +89,10 @@ in scope and treated as security issues, not bugs:
 ## Deployment guidance for users
 
 - Run Assemblash locally or on a trusted host. Do not expose it directly to the
-  internet without your own authentication and TLS in front of it.
+  internet without its access token and TLS in front of it; add an identity-aware
+  proxy when you need users, roles, OIDC, or SSO.
 - Configure the project root explicitly and give the process access to nothing
   beyond it.
 - Treat documents and assets from other people as untrusted input.
-- Keep AI provider credentials, if you use optional adapters, out of the
-  repository and out of documents.
+- Keep provider credentials used by downstream adapters out of the repository
+  and out of documents. No AI provider adapter ships in the core.

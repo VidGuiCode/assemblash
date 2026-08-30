@@ -15,7 +15,12 @@
     <div class="app-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="Assemblash home">
-          <i class="ph ph-circles-three-plus" aria-hidden="true"></i>
+          <svg class="brand-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+            <path d="M32 6 57 19 32 32 7 19 32 6Z" fill="#ef3325" opacity=".28" />
+            <path d="M32 19 57 32 32 45 7 32l25-13Z" fill="#ef3325" opacity=".58" />
+            <path d="M32 32 57 45 32 58 7 45l25-13Z" fill="#ef3325" />
+            <path d="m32 17 10 5.2-10 5.2-10-5.2L32 17Z" fill="white" opacity=".94" />
+          </svg>
           <span>Assemblash</span>
         </a>
         <div class="project-control">
@@ -134,10 +139,9 @@
             </div>
             <div class="zoom-controls" role="group" aria-label="Canvas zoom">
               <button id="zoom-out" type="button" title="Zoom out"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Zoom out</span></button>
-              <button id="zoom-value" type="button" title="Set zoom to 100%">Fit</button>
+              <button id="zoom-value" type="button" title="Current zoom; reset to Fit">Fit</button>
               <button id="zoom-in" type="button" title="Zoom in"><i class="ph ph-plus" aria-hidden="true"></i><span class="sr-only">Zoom in</span></button>
-              <button id="zoom-fit" type="button">Fit</button>
-              <button id="zoom-100" type="button">100%</button>
+              <button id="zoom-100" type="button" title="Set zoom to 100%">100%</button>
             </div>
           </div>
         </section>
@@ -170,7 +174,6 @@
         <span class="statusbar-spacer"></span>
         <span class="pixel-status"><i class="ph ph-eye" aria-hidden="true"></i> Pixel-true preview</span>
         <span id="document-dimensions">No project open</span>
-        <span class="status-divider" aria-hidden="true"></span><span>Fit</span>
       </footer>
     </div>
 

@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Assemblash is pre-alpha. Please check first that the behavior is actually
-        implemented — a feature described in `PRD.md` is a plan, not a promise.
+        Assemblash is released at 1.2.0. Please check the current README and
+        changelog first; the PRD also contains product boundaries and future work.
 
         **Do not report security issues here.** See `SECURITY.md`.
 
@@ -68,7 +68,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      placeholder: "e.g. Windows 11, Node 22.3.0, commit abc1234"
+      placeholder: "e.g. Assemblash 1.2.0, Windows 11 ARM64, release archive"
     validations:
       required: true
 
