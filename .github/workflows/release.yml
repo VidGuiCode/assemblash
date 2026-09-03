@@ -8,6 +8,12 @@ on:
       tag:
         description: Existing tag to build and attach binaries to
         required: true
+      ref:
+        description: >-
+          Commit or branch to build from. Defaults to the tag itself. Use it
+          only when the packaging changed and the program did not, so the
+          binary is still the one the tag names.
+        required: false
 
 permissions:
   contents: write
@@ -47,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -89,10 +95,53 @@ jobs:
             tar -czf "$name.tar.gz" "$name"
           fi
 
+      # A bare executable next to the archive. The binary is self-contained —
+      # the editor is compiled into it — so this runs with nothing beside it,
+      # and a double-click is the friendly launch. The archive stays the
+      # download that carries the licence texts.
+      - name: Bare executable (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          name="assemblash-${{ inputs.tag || github.ref_name }}-${{ matrix.target-name }}"
+          cp target/release/assemblash.exe "dist/$name.exe"
+
+      # A .deb so `apt install ./assemblash_*.deb` puts the binary on PATH and
+      # the desktop entry in the application menu. cargo-deb reads
+      # [package.metadata.deb] in crates/assemblash-cli/Cargo.toml.
+      - name: Install cargo-deb
+        if: runner.os == 'Linux'
+        run: cargo install cargo-deb --version 3.8.0 --locked
+
+      - name: Build the Debian package
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          # --no-build reuses the release binary already checked above;
+          # --no-strip because the release profile already strips it.
+          cargo deb --package assemblash-cli --no-build --no-strip
+          cp target/debian/*.deb dist/
+
+      - name: Check the Debian package installs
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get install -y ./dist/*.deb
+          # Installed from the package, not from target/: PATH resolves it.
+          assemblash --version
+          test -f /usr/share/applications/assemblash.desktop
+          test -f /usr/share/doc/assemblash/THIRD_PARTY_LICENSES.md
+          sudo apt-get remove -y assemblash
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target-name }}
-          path: dist/*.${{ matrix.archive }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.exe
+            dist/*.deb
           if-no-files-found: error
 
   attach:

@@ -37,3 +37,34 @@ assemblash-core = { workspace = true, features = ["fault-injection"] }
 png = "0.18.1"
 serde_json = "1.0.151"
 tempfile = "3.27.0"
+
+# Debian package, built by `cargo deb -p assemblash-cli`. The binary is
+# self-contained — the editor is compiled into it — so the package is the
+# executable, its licence texts, and a desktop entry. The entry runs the
+# binary with no arguments, which is the launch that creates a workspace,
+# serves, and opens the editor.
+[package.metadata.deb]
+name = "assemblash"
+# This repository publishes no contact address. GitHub's noreply form keeps it
+# that way while still satisfying Debian's required maintainer field.
+maintainer = "VidGuiCode <VidGuiCode@users.noreply.github.com>"
+copyright = "Copyright 2026 The Assemblash Authors"
+license-file = ["../../LICENSE", "0"]
+section = "graphics"
+priority = "optional"
+extended-description = """
+Assemblash is a structured document engine with a browser-based editor served
+by the executable itself. Every visual change is an operation: journalled,
+deterministic, and reversible. It also speaks the Model Context Protocol, so
+an agent can edit the same documents a person does.
+Running `assemblash` with no arguments creates a local workspace, starts the
+server on loopback, and opens the editor in a browser."""
+assets = [
+    ["target/release/assemblash", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/assemblash/README.md", "644"],
+    ["../../CHANGELOG.md", "usr/share/doc/assemblash/CHANGELOG.md", "644"],
+    ["../../NOTICE", "usr/share/doc/assemblash/NOTICE", "644"],
+    ["../../THIRD_PARTY_LICENSES.md", "usr/share/doc/assemblash/THIRD_PARTY_LICENSES.md", "644"],
+    ["../../packaging/linux/assemblash.desktop", "usr/share/applications/assemblash.desktop", "644"],
+    ["../../assets/assemblash-mark.svg", "usr/share/icons/hicolor/scalable/apps/assemblash.svg", "644"],
+]

@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Assemblash
+GenericName=Document Editor
+Comment=Structured document engine with a local browser-based editor
+# No arguments is the friendly launch: create the workspace if it is missing,
+# serve on loopback, and open the editor. A second launch reuses the server
+# that is already running.
+Exec=assemblash
+Icon=assemblash
+# The editor is a browser page served by this binary, not a terminal program.
+Terminal=false
+StartupNotify=true
+Categories=Graphics;Publishing;2DGraphics;
+Keywords=design;canvas;layout;poster;render;
