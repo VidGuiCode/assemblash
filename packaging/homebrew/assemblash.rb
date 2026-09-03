@@ -25,22 +25,22 @@ class Assemblash < Formula
   on_macos do
     on_arm do
       url "https://github.com/VidGuiCode/assemblash/releases/download/v1.2.0/assemblash-v1.2.0-macos-aarch64.tar.gz"
-      sha256 "c5120f1ff33285fe20d52b54c397ccdd81f43bcad13baf0c4b2094dd92cc83f0"
+      sha256 "b6301852698d2b1bc8ebe217254511dd49aad7aadc0daf59c7104885f4ace014"
     end
     on_intel do
       url "https://github.com/VidGuiCode/assemblash/releases/download/v1.2.0/assemblash-v1.2.0-macos-x86_64.tar.gz"
-      sha256 "d959a8ba75e8e2ce222fb2646b48c50237acce2de2a7c45f6db68f9bad488c59"
+      sha256 "b53b9b2a877f433ebe751d2721e380c0ef87cfd64cd7399eeab6d5b47bc60b20"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/VidGuiCode/assemblash/releases/download/v1.2.0/assemblash-v1.2.0-linux-aarch64.tar.gz"
-      sha256 "fe9f5f02aeefc1f1af165ebb1b5afa277c65e416889ed2fa0d1c352929b66162"
+      sha256 "986110b87edd9b09eade0c8edcd0835b4df0d9f3265f90130d623b02800d5525"
     end
     on_intel do
       url "https://github.com/VidGuiCode/assemblash/releases/download/v1.2.0/assemblash-v1.2.0-linux-x86_64.tar.gz"
-      sha256 "11c79546932677750946f10e81de46c4efb6de6304db01914bf0a4fe32393b76"
+      sha256 "c24cb668ea79f822d0d987016d834bd31c9c1a020f4ab20c2c624690f06617a0"
     end
   end
 

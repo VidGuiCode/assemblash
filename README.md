@@ -67,7 +67,7 @@ Pick the download that fits your machine from
 | --- | --- | --- |
 | Windows | `assemblash-<version>-windows-<arch>.exe` | Double-click it. |
 | Debian, Ubuntu | `assemblash_<version>_<arch>.deb` | `sudo apt install ./assemblash_<version>_<arch>.deb`, then pick Assemblash from the application menu. |
-| macOS | `brew install VidGuiCode/tap/assemblash` — **untested, see below** | Run `assemblash`. |
+| macOS | the `.tar.gz` archive | Unpack it, then see the note below before first launch. |
 | Anything else | the `.zip` or `.tar.gz` archive | Unpack it and launch `assemblash`. |
 
 The executable is self-contained — the editor is compiled into it — so the
@@ -79,11 +79,16 @@ and opens the editor in your browser. A second launch opens the server that is
 already running. You can stop it from the editor.
 
 The macOS binaries are not signed with an Apple Developer ID, so macOS
-quarantines them. Homebrew is expected to clear that flag, which is why the
-tap exists — but **the tap has not been run on a Mac by anyone here**, and it
-is offered on that basis. The macOS `.tar.gz` is built and version-checked by
-CI like every other target; it is the quarantine flag, not the binary, that is
-untested. If a download refuses to open, that flag is why. Reports welcome.
+quarantines them on download and Gatekeeper refuses the first launch. Clear
+the flag yourself after unpacking:
+
+```sh
+xattr -d com.apple.quarantine ./assemblash
+```
+
+A Homebrew tap would remove that step, since Homebrew clears the flag on what
+it installs. The formula is written and lives in `packaging/homebrew/`, but
+the tap is **not published yet**, so there is no `brew install` to run today.
 
 ### Install from source
 
@@ -119,8 +124,8 @@ The same six platforms are built, tested, and included in every release:
 | Linux | ✅ `.deb`, `.tar.gz` | ✅ `.deb`, `.tar.gz` |
 | macOS | ✅ Intel `.tar.gz` | ✅ Apple silicon `.tar.gz` |
 
-macOS is also served by a Homebrew tap, which installs the same archive this
-table lists. The tap is new and unverified on a Mac.
+The `.exe` and `.deb` are new in the 1.2.0 release assets. macOS has no
+installer of its own yet — see the note above about the quarantine flag.
 
 The release workflow checks that every binary starts before attaching it. CI
 also runs the Rust workspace tests on all six targets. The reference editor
