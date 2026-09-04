@@ -191,6 +191,21 @@ pub enum OpError {
         operation: &'static str,
     },
 
+    /// A property was sent that the operation does not have.
+    ///
+    /// Refused rather than ignored, because ignoring it is a false success:
+    /// the caller is told the layer changed, the version moves, and the
+    /// journal records an edit with nothing in it. A client that misspells a
+    /// property should hear about it from the engine, not from a picture that
+    /// never changed.
+    #[error("unknown property {property:?} on {} {op} operation", article(op))]
+    UnknownProperty {
+        /// The operation it was sent on — `create` or `update`.
+        op: &'static str,
+        /// The property that is not one this operation has.
+        property: String,
+    },
+
     /// A layout question could not be answered.
     #[error(transparent)]
     Layout(#[from] crate::layout::LayoutError),
@@ -198,4 +213,17 @@ pub enum OpError {
     /// The result would not have been a valid document.
     #[error(transparent)]
     Invalid(#[from] ValidationErrors),
+}
+
+/// The indefinite article that reads correctly before `word`.
+///
+/// Two operations reach [`OpError::UnknownProperty`] and they need different
+/// articles — "an update", "a create" — so the message picks rather than
+/// settling for a wooden "on operation update".
+fn article(word: &str) -> &'static str {
+    if word.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        "an"
+    } else {
+        "a"
+    }
 }

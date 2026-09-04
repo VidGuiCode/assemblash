@@ -235,13 +235,17 @@
             <i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Close</span>
           </button>
         </div>
-        <div id="export-options" class="export-options" role="radiogroup" aria-label="Resolution"></div>
+        <div class="export-row">
+          <span class="export-row-label">Format</span>
+          <div id="export-formats" class="export-options" role="radiogroup" aria-label="Format"></div>
+        </div>
+        <div id="export-resolution-row" class="export-row">
+          <span class="export-row-label">Resolution</span>
+          <div id="export-options" class="export-options" role="radiogroup" aria-label="Resolution"></div>
+        </div>
         <label><span>File name</span><input id="export-name" name="export-name" value="assemblash-export" pattern="[A-Za-z0-9_-]+" maxlength="60" required /></label>
         <div id="export-summary" class="export-summary"></div>
         <div class="modal-actions">
-          <a id="download-svg" class="button button-quiet" href="#" download="assemblash.svg" hidden>
-            <i class="ph ph-file-svg" aria-hidden="true"></i> SVG
-          </a>
           <a id="export-download" class="button button-quiet" href="#" download hidden>
             <i class="ph ph-download-simple" aria-hidden="true"></i> Download
           </a>
@@ -299,6 +303,11 @@
         <div class="template-gallery"><h3>Rendered variants</h3><div id="gallery"></div></div>
       </div>
     </section>
+
+    <!-- Filled from GET /api/fonts. A suggestion list rather than a closed
+         menu: a document may name a family this machine has not installed,
+         and it must stay editable rather than silently retyped. -->
+    <datalist id="font-families"></datalist>
 
     <script type="module" src="app.js"></script>
   </body>

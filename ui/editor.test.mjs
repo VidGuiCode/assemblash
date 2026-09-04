@@ -16,6 +16,10 @@ const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Xj4aAAAAAElFTkSuQmCC",
   "base64",
 );
+const svg = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700"></svg>',
+  "utf8",
+);
 
 const editableText = {
   id: "layer_text",
@@ -69,7 +73,24 @@ function findLayer(document, id) {
   return null;
 }
 
-function applyMockOperation(document, operation) {
+function applyMockOperation(document, operation, created) {
+  if (operation.op === "create") {
+    const { op, position, ...rest } = operation;
+    const made = {
+      id: `layer_made_${document.layers.length + 1}`,
+      name: rest.type,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      protected: false,
+      readOnly: false,
+      effects: [],
+      ...rest,
+    };
+    document.layers.push(made);
+    created.push(made.id);
+    return;
+  }
   const layer = operation.id ? findLayer(document, operation.id) : null;
   if (operation.op === "update" && layer) Object.assign(layer, operation);
   if (operation.op === "move" && layer) {
@@ -91,9 +112,11 @@ function json(response, status, body) {
 async function startFixtureServer() {
   let document = freshDocument();
   const writes = [];
+  const reads = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     const send = (status, body) => json(response, status, body);
+    if (request.method === "GET" && url.pathname.startsWith("/api/")) reads.push(url.pathname);
 
     if (request.method === "GET" && url.pathname === "/api/version") {
       return send(200, { name: "assemblash", version: "ui-test", schemaVersion: 1, canShutdown: false });
@@ -123,8 +146,32 @@ async function startFixtureServer() {
       response.writeHead(200, { "content-type": "image/png" });
       return response.end(png);
     }
+    if (request.method === "GET" && url.pathname.endsWith("/preview.svg")) {
+      response.writeHead(200, { "content-type": "image/svg+xml" });
+      return response.end(svg);
+    }
     if (request.method === "GET" && url.pathname.endsWith("/text-layout")) {
       return send(200, { lineCount: 1, height: 58 });
+    }
+
+    // The importer records an asset's own pixel size, which is what the upload
+    // path sizes the new layer from.
+    if (request.method === "POST" && url.pathname.endsWith("/assets")) {
+      request.resume();
+      request.on("end", () => {
+        document.version += 1;
+        const asset = {
+          id: "asset_fixture",
+          path: "asset_fixture.png",
+          hash: "sha256:fixture",
+          mediaType: "image/png",
+          width: 800,
+          height: 400,
+        };
+        document.assets.push(asset);
+        send(201, { asset, version: document.version });
+      });
+      return;
     }
 
     if (request.method === "POST" && (url.pathname.endsWith("/operations") || url.pathname.endsWith("/operation-batches"))) {
@@ -135,11 +182,12 @@ async function startFixtureServer() {
         const body = JSON.parse(raw);
         writes.push({ path: url.pathname, body });
         const operations = body.commands ?? [body.operation];
-        for (const operation of operations) applyMockOperation(document, operation);
+        const created = [];
+        for (const operation of operations) applyMockOperation(document, operation, created);
         document.version += 1;
         send(200, url.pathname.endsWith("operation-batches")
-          ? { version: document.version, transactionId: `tx_${document.version}`, created: [], changed: [], removed: [] }
-          : { version: document.version, dryRun: false, transaction: `tx_${document.version}`, created: [], changed: [], removed: [] });
+          ? { version: document.version, transactionId: `tx_${document.version}`, created, changed: [], removed: [] }
+          : { version: document.version, dryRun: false, transaction: `tx_${document.version}`, created, changed: [], removed: [] });
       });
       return;
     }
@@ -165,9 +213,12 @@ async function startFixtureServer() {
   return {
     url: `http://127.0.0.1:${address.port}`,
     writes,
+    reads,
+    layers: () => structuredClone(document.layers),
     reset() {
       document = freshDocument();
       writes.length = 0;
+      reads.length = 0;
     },
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
@@ -473,6 +524,116 @@ test("editor interaction journeys use the real compiled interface", async (t) =>
     assert.equal(fixture.writes[0].body.commands[0].dy, 500);
   });
 
+  await t.test("the font field offers the families the engine reported", async () => {
+    await selectLayer(page, "layer_text");
+    assert.deepEqual(await page.evaluate(`({
+      tag: document.querySelector('[aria-label="Font family"]').tagName,
+      list: document.querySelector('[aria-label="Font family"]').getAttribute("list"),
+      families: [...document.querySelector("#font-families").options].map((one) => one.value)
+    })`), { tag: "INPUT", list: "font-families", families: ["Noto Sans"] });
+  });
+
+  await t.test("effects reorder in place, carrying their numbers with them", async () => {
+    await selectLayer(page, "layer_text");
+    fixture.writes.length = 0;
+    for (const type of ["blur", "grain"]) {
+      await page.evaluate(`(() => { document.querySelector(".effect-chooser").value = ${JSON.stringify(type)}; })()`);
+      await page.click(".effect-add");
+      await waitForSaved(page);
+    }
+    await waitForWrites(fixture, 2);
+    assert.deepEqual(fixture.writes[1].body.operation.effects, [
+      { type: "blur", radius: 0 },
+      { type: "grain", amount: 0, seed: 1, scale: 1 },
+    ]);
+
+    fixture.writes.length = 0;
+    await page.click('.effect-row[data-effect="grain"] .effect-up');
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation.effects, [
+      { type: "grain", amount: 0, seed: 1, scale: 1 },
+      { type: "blur", radius: 0 },
+    ]);
+
+    fixture.writes.length = 0;
+    await page.click('.effect-row[data-effect="grain"] .effect-down');
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation.effects.map((one) => one.type), ["blur", "grain"]);
+    // The ends of the stack say so rather than silently doing nothing.
+    assert.deepEqual(await page.evaluate(`({
+      firstUp: document.querySelector('.effect-row[data-effect="blur"] .effect-up').disabled,
+      lastDown: document.querySelector('.effect-row[data-effect="grain"] .effect-down').disabled
+    })`), { firstUp: true, lastDown: true });
+  });
+
+  await t.test("an upload is sized from the asset's recorded dimensions", async () => {
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array([1, 2, 3])], "wide.png", { type: "image/png" }));
+      const input = document.querySelector("#image-file");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    const create = fixture.writes[0].body.operation;
+    assert.equal(create.op, "create");
+    assert.equal(create.type, "image");
+    // 800x400 fits the 1000x700 canvas, so it arrives at its own size and
+    // centred — not at the old fixed 300x200 that squashed it.
+    assert.deepEqual(create.transform, { x: 100, y: 150, width: 800, height: 400 });
+  });
+
+  await t.test("the fit control sends one update on an image layer", async () => {
+    await selectLayer(page, "layer_made_3");
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const select = document.querySelector('[aria-label="Fit"]');
+      select.value = "cover";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update",
+      id: "layer_made_3",
+      fit: "cover",
+    });
+  });
+
+  await t.test("the export dialog hands over the engine's vector render", async () => {
+    fixture.reads.length = 0;
+    await page.click("#export");
+    await page.waitFor(`document.querySelector("#export-dialog").open`, "export dialog");
+    await page.click('#export-formats [data-format="svg"]');
+    assert.deepEqual(await page.evaluate(`({
+      checked: document.querySelector('#export-formats [data-format="svg"]').getAttribute("aria-checked"),
+      rowOff: document.querySelector("#export-resolution-row").classList.contains("disabled"),
+      scalesOff: [...document.querySelectorAll("#export-options button")].every((one) => one.disabled),
+      confirm: document.querySelector("#export-confirm").textContent.trim()
+    })`), { checked: "true", rowOff: true, scalesOff: true, confirm: "Export SVG" });
+
+    await page.click("#export-confirm");
+    await page.waitFor(`!document.querySelector("#export-download").hidden`, "svg download offered");
+    assert.deepEqual(await page.evaluate(`({
+      name: document.querySelector("#export-download").download,
+      blob: document.querySelector("#export-download").href.startsWith("blob:")
+    })`), { name: "ui-test-project.svg", blob: true });
+    assert.ok(
+      fixture.reads.some((path) => path.endsWith("/preview.svg")),
+      "the vector render was fetched",
+    );
+    assert.ok(
+      !fixture.reads.some((path) => path.includes("/exports/")),
+      "an SVG download writes no PNG into the project",
+    );
+    await page.evaluate(`document.querySelector("#export-dialog").close("cancel")`);
+  });
+
   await t.test("zoom and responsive panels expose deterministic states", async () => {
     await page.click("#zoom-100");
     assert.deepEqual(await page.evaluate(`({ value: document.querySelector("#zoom-value").textContent, width: document.querySelector("#canvas").style.width })`), { value: "100%", width: "1000px" });
@@ -482,6 +643,14 @@ test("editor interaction journeys use the real compiled interface", async (t) =>
     assert.equal(await page.evaluate(`document.querySelector("#zoom-value").textContent`), "Fit");
 
     await page.send("Emulation.setDeviceMetricsOverride", { width: 800, height: 900, deviceScaleFactor: 1, mobile: false });
+    // The override's own resize event has to land before anything is asserted:
+    // the page syncs its panels on resize, so an event still in flight would
+    // undo whatever the next click did. Waiting for the new width and then for
+    // two frames is what makes this journey deterministic rather than lucky.
+    await page.waitFor(`window.innerWidth === 800`, "the compact viewport");
+    await page.evaluate(
+      `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+    );
     await page.evaluate(`window.dispatchEvent(new Event("resize"))`);
     assert.deepEqual(await page.evaluate(`({
       addCollapsed: document.querySelector("#add-panel").classList.contains("collapsed"),

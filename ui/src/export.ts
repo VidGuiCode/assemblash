@@ -29,6 +29,46 @@ export interface ExportDimensions {
   scale: number;
 }
 
+/** Which of the engine's two renders is being taken away. */
+export type ExportFormat = "png" | "svg";
+
+interface Format {
+  id: ExportFormat;
+  label: string;
+  detail: string;
+  icon: string;
+}
+
+/**
+ * The two things the engine can hand over.
+ *
+ * PNG goes through `export`, which writes a file into the project and is what
+ * every other surface produces. SVG is the same render one stage earlier, read
+ * straight from `preview.svg`: there is no rasterizing left to choose a size
+ * for, which is why picking it puts the resolution row out of use rather than
+ * quietly ignoring it.
+ */
+export const FORMATS: readonly Format[] = [
+  { id: "png", label: "PNG", detail: "Rasterized by the engine", icon: "ph-image" },
+  { id: "svg", label: "SVG", detail: "Vector, document size", icon: "ph-file-svg" },
+] as const;
+
+/** Where a chosen format's bytes are read from, and what they are called. */
+export function downloadTargetFor(
+  format: ExportFormat,
+  project: string,
+  document: Document,
+  name: string,
+): { url: string; filename: string } {
+  if (format === "svg") {
+    return {
+      url: api.svgUrl(project, api.versionOf(document)),
+      filename: `${name}.svg`,
+    };
+  }
+  return { url: api.exportUrl(project, name), filename: `${name}.png` };
+}
+
 export const RESOLUTIONS: readonly Resolution[] = [
   {
     id: "original",
@@ -84,7 +124,9 @@ export function mountExport(host: ExportHost): { open: () => void } {
   const dom = {
     dialog: el<HTMLDialogElement>("export-dialog"),
     form: el<HTMLFormElement>("export-form"),
+    formats: el<HTMLDivElement>("export-formats"),
     options: el<HTMLDivElement>("export-options"),
+    resolutionRow: el<HTMLDivElement>("export-resolution-row"),
     name: el<HTMLInputElement>("export-name"),
     summary: el<HTMLDivElement>("export-summary"),
     confirm: el<HTMLButtonElement>("export-confirm"),
@@ -92,6 +134,7 @@ export function mountExport(host: ExportHost): { open: () => void } {
   };
 
   let selected: Resolution["id"] = "8k";
+  let format: ExportFormat = "png";
   let heldDownload: string | null = null;
 
   function selectedResolution(): Resolution {
@@ -111,8 +154,10 @@ export function mountExport(host: ExportHost): { open: () => void } {
       dom.summary.textContent = "Open a project to export.";
       return;
     }
-    const resolution = selectedResolution();
-    const output = dimensionsFor(document, resolution);
+    const output =
+      format === "svg"
+        ? { width: document.canvas.width, height: document.canvas.height }
+        : dimensionsFor(document, selectedResolution());
     dom.summary.replaceChildren();
 
     const icon = window.document.createElement("i");
@@ -123,21 +168,68 @@ export function mountExport(host: ExportHost): { open: () => void } {
     dimensions.textContent = `${output.width.toLocaleString()} × ${output.height.toLocaleString()}`;
     copy.append(
       dimensions,
-      window.document.createTextNode(" PNG · rendered locally by the deterministic engine"),
+      window.document.createTextNode(
+        format === "svg"
+          ? " SVG · the engine's own vector render"
+          : " PNG · rendered locally by the deterministic engine",
+      ),
     );
     dom.summary.append(icon, copy);
   }
 
+  function drawFormats(): void {
+    dom.formats.replaceChildren();
+    for (const one of FORMATS) {
+      const button = window.document.createElement("button");
+      button.type = "button";
+      button.className = "export-option";
+      button.dataset["format"] = one.id;
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-checked", String(one.id === format));
+      if (one.id === format) button.classList.add("selected");
+
+      const icon = window.document.createElement("i");
+      icon.className = `ph ${one.icon}`;
+      icon.setAttribute("aria-hidden", "true");
+      const label = window.document.createElement("b");
+      label.textContent = one.label;
+      const detail = window.document.createElement("span");
+      detail.textContent = one.detail;
+      button.append(icon, label, detail);
+
+      button.addEventListener("click", () => {
+        if (format === one.id) return;
+        format = one.id;
+        releaseDownload();
+        drawFormats();
+        drawOptions();
+        drawSummary();
+        drawConfirm();
+      });
+      dom.formats.append(button);
+    }
+  }
+
+  function drawConfirm(): void {
+    dom.confirm.innerHTML = `<i class="ph ph-export" aria-hidden="true"></i> Export ${format.toUpperCase()}`;
+  }
+
   function drawOptions(): void {
+    // A scale means nothing to a vector, so the row is put out of use rather
+    // than left looking as though it still decides something.
+    const vector = format === "svg";
+    dom.resolutionRow.classList.toggle("disabled", vector);
+    dom.options.setAttribute("aria-disabled", String(vector));
     dom.options.replaceChildren();
     for (const resolution of RESOLUTIONS) {
       const output = host.document() ? dimensionsFor(host.document()!, resolution) : null;
       const button = window.document.createElement("button");
       button.type = "button";
       button.className = "export-option";
+      button.disabled = vector;
       button.setAttribute("role", "radio");
-      button.setAttribute("aria-checked", String(resolution.id === selected));
-      if (resolution.id === selected) button.classList.add("selected");
+      button.setAttribute("aria-checked", String(resolution.id === selected && !vector));
+      if (resolution.id === selected && !vector) button.classList.add("selected");
 
       const icon = window.document.createElement("i");
       icon.className = `ph ${resolution.icon}`;
@@ -169,8 +261,10 @@ export function mountExport(host: ExportHost): { open: () => void } {
     }
     releaseDownload();
     dom.name.value = safeName(document.name ?? project);
+    drawFormats();
     drawOptions();
     drawSummary();
+    drawConfirm();
     dom.dialog.showModal();
   }
 
@@ -186,10 +280,14 @@ export function mountExport(host: ExportHost): { open: () => void } {
     const document = host.document();
     if (!project || !document) return;
 
-    const resolution = selectedResolution();
-    const output = dimensionsFor(document, resolution);
+    const chosen = format;
+    const output =
+      chosen === "svg"
+        ? { width: document.canvas.width, height: document.canvas.height, scale: 1 }
+        : dimensionsFor(document, selectedResolution());
     const name = safeName(dom.name.value);
     dom.name.value = name;
+    const target = downloadTargetFor(chosen, project, document, name);
 
     void host.guard("export", async () => {
       releaseDownload();
@@ -197,18 +295,27 @@ export function mountExport(host: ExportHost): { open: () => void } {
       dom.confirm.innerHTML = '<i class="ph ph-circle-notch" aria-hidden="true"></i> Rendering…';
       dom.summary.textContent = `Rendering ${output.width.toLocaleString()} × ${output.height.toLocaleString()}…`;
       try {
-        const result = await api.exportDocument(project, name, output.scale);
-        heldDownload = await api.imageObjectUrl(api.exportUrl(project, name));
+        // PNG is written into the project first, because that is what every
+        // other surface's export does and the file is meant to stay there.
+        // SVG is read straight off the render route: nothing is written, so
+        // there is nothing to leave behind.
+        const result =
+          chosen === "svg"
+            ? { width: output.width, height: output.height, bytes: 0 }
+            : await api.exportDocument(project, name, output.scale);
+        const blob = await api.fetchBlob(target.url);
+        heldDownload = URL.createObjectURL(blob);
         dom.download.href = heldDownload;
-        dom.download.download = `${name}.png`;
+        dom.download.download = target.filename;
         dom.download.hidden = false;
-        dom.summary.innerHTML = `<strong>${result.width.toLocaleString()} × ${result.height.toLocaleString()}</strong> PNG · ${humanBytes(result.bytes)} · ready to download`;
+        const bytes = chosen === "svg" ? blob.size : result.bytes;
+        dom.summary.innerHTML = `<strong>${result.width.toLocaleString()} × ${result.height.toLocaleString()}</strong> ${chosen.toUpperCase()} · ${humanBytes(bytes)} · ready to download`;
         host.say(
-          `Exported ${result.width.toLocaleString()} × ${result.height.toLocaleString()} PNG.`,
+          `Exported ${result.width.toLocaleString()} × ${result.height.toLocaleString()} ${chosen.toUpperCase()}.`,
         );
       } finally {
         dom.confirm.disabled = false;
-        dom.confirm.innerHTML = '<i class="ph ph-export" aria-hidden="true"></i> Export PNG';
+        drawConfirm();
       }
     });
   });

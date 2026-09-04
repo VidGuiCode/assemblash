@@ -493,6 +493,464 @@ async fn protected_and_locked_layers_refuse_every_mutating_tool() {
     client.cancel().await.unwrap();
 }
 
+/// An SVG asset in the project, drawing text in a family nothing has.
+///
+/// Imported through the library before the server starts, because importing a
+/// file from a path is deliberately not something a tool does.
+fn import_svg_asset(root: &Path) -> String {
+    let directory = root.join("projects/poster");
+    let source_dir = tempfile::tempdir().unwrap();
+    let source = source_dir.path().join("badge.svg");
+    std::fs::write(
+        &source,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"50\">\
+         <rect width=\"100\" height=\"50\" fill=\"#c8102e\"/>\
+         <text x=\"6\" y=\"30\" font-family=\"Nowhere Sans\" font-size=\"16\">new</text>\
+         </svg>",
+    )
+    .unwrap();
+
+    let mut ids = SequentialIdSource::new();
+    let asset = assemblash_core::storage::import_asset(&directory, &source, &mut ids).unwrap();
+    let id = asset.id.to_string();
+
+    let mut document = assemblash_core::storage::load(&directory).unwrap();
+    document.assets.push(asset);
+    assemblash_core::storage::save(&document, &directory).unwrap();
+    id
+}
+
+/// The document as it is on disk, for computing an expected answer the way the
+/// other surfaces compute theirs.
+fn document_on_disk(root: &Path) -> Document {
+    assemblash_core::storage::load(&root.join("projects/poster")).unwrap()
+}
+
+/// A layer of a document state response, by id.
+fn layer_of(state: &Value, id: &str) -> Value {
+    fn find(layers: &[Value], id: &str) -> Option<Value> {
+        for layer in layers {
+            if layer["id"] == id {
+                return Some(layer.clone());
+            }
+            if let Some(children) = layer["children"].as_array() {
+                if let Some(found) = find(children, id) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    find(state["document"]["layers"].as_array().unwrap(), id)
+        .unwrap_or_else(|| panic!("no layer {id} in {state:#?}"))
+}
+
+/// `add_svg_layer` draws an asset that is already in the document.
+///
+/// The image tool's twin, and refused in the same place when the asset was
+/// never imported — there is still no tool that reads a file from a path.
+#[tokio::test]
+async fn add_svg_layer_draws_an_imported_asset() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let asset = import_svg_asset(&root);
+
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+
+    let before = document_bytes(&root);
+    let dry = structured(
+        &client
+            .call_tool(call(
+                "add_svg_layer",
+                args(json!({
+                    "x": 10.0, "y": 10.0, "width": 100.0, "height": 50.0,
+                    "asset": asset,
+                    "fit": "cover",
+                    "dryRun": true
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(dry["dryRun"], true);
+    assert_eq!(
+        document_bytes(&root),
+        before,
+        "a dry run must change nothing"
+    );
+
+    let applied = structured(
+        &client
+            .call_tool(call(
+                "add_svg_layer",
+                args(json!({
+                    "x": 10.0, "y": 10.0, "width": 100.0, "height": 50.0,
+                    "asset": asset,
+                    "fit": "cover",
+                    "name": "the badge"
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let created = applied["created"][0].as_str().unwrap().to_owned();
+
+    let state = structured(
+        &client
+            .call_tool(call("get_document_state", None))
+            .await
+            .unwrap(),
+    );
+    let layer = layer_of(&state, &created);
+    assert_eq!(layer["type"], "svg");
+    assert_eq!(layer["asset"], asset.as_str());
+    assert_eq!(layer["fit"], "cover");
+    assert_eq!(layer["name"], "the badge");
+
+    // An asset nobody imported is refused by the operation layer, naming it.
+    let refused = client
+        .call_tool(call(
+            "add_svg_layer",
+            args(json!({
+                "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0,
+                "asset": "asset_00000000000000000000000099"
+            })),
+        ))
+        .await
+        .expect_err("an asset that is not in the document must be refused");
+    let text = format!("{refused:?}");
+    assert!(text.contains("operationRefused"), "{text}");
+    assert!(
+        text.contains("asset_00000000000000000000000099"),
+        "the refusal should name the asset asked for: {text}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+/// `update_layer` sets line height, the one `UpdateLayer` field it omitted.
+#[tokio::test]
+async fn update_layer_sets_line_height() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+
+    let changed = structured(
+        &client
+            .call_tool(call(
+                "update_layer",
+                args(json!({ "layerId": PLAIN, "lineHeight": 2.5 })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(changed["changed"][0], PLAIN);
+
+    let state = structured(
+        &client
+            .call_tool(call("get_document_state", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        layer_of(&state, PLAIN)["lineHeight"],
+        2.5,
+        "the one property the MCP update could not reach"
+    );
+
+    // And it is a change like any other: undo puts it back.
+    client.call_tool(call("undo", None)).await.unwrap();
+    let state = structured(
+        &client
+            .call_tool(call("get_document_state", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(layer_of(&state, PLAIN)["lineHeight"], 1.2);
+
+    client.cancel().await.unwrap();
+}
+
+/// `render_document` returns exactly what `GET .../preview.svg` serves.
+#[tokio::test]
+async fn render_document_returns_the_svg_the_http_preview_serves() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let client = connect(&root).await;
+    let rendered = structured(
+        &client
+            .call_tool(call(
+                "render_document",
+                args(json!({ "project": "poster" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let svg = rendered["svg"].as_str().expect("SVG source").to_owned();
+    assert_eq!(rendered["width"], 400);
+    assert_eq!(rendered["height"], 300);
+
+    // The expected answer is produced by the function the HTTP route calls, on
+    // the document that is on disk, so the two surfaces cannot drift.
+    let workspace = Workspace::open_or_create(&root).unwrap();
+    let store = assemblash_renderer::store::FontStore::open(workspace.fonts_dir()).unwrap();
+    let expected = assemblash_server::render::svg_for(
+        &document_on_disk(&root),
+        &root.join("projects/poster"),
+        &store,
+    )
+    .unwrap();
+    assert_eq!(
+        svg.as_bytes(),
+        expected.bytes.as_slice(),
+        "MCP and HTTP must serve the same SVG"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+/// `find_overlaps` reports the pairs the HTTP route and the command report.
+#[tokio::test]
+async fn find_overlaps_matches_the_http_route() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+
+    // Two layers that certainly overlap, added through the tools.
+    for y in [10.0_f64, 20.0] {
+        client
+            .call_tool(call(
+                "add_text_layer",
+                args(json!({
+                    "x": 40.0, "y": y, "width": 120.0, "height": 60.0,
+                    "text": "on top", "fontFamily": "Noto Sans", "fontSize": 12.0
+                })),
+            ))
+            .await
+            .unwrap();
+    }
+
+    let document = document_on_disk(&root);
+    let ids = assemblash_core::layout::all_layer_ids(&document);
+    let expected = assemblash_core::layout::find_overlaps(&document, &ids).unwrap();
+    assert!(!expected.is_empty(), "the fixture should overlap somewhere");
+
+    let reported = structured(&client.call_tool(call("find_overlaps", None)).await.unwrap());
+    assert_eq!(
+        reported["pairs"],
+        serde_json::to_value(&expected).unwrap(),
+        "MCP must report the same pairs, in the same order"
+    );
+
+    // Narrowing works the way the route's `?layers=` does.
+    let narrowed = structured(
+        &client
+            .call_tool(call(
+                "find_overlaps",
+                args(json!({ "layerIds": [PLAIN, LOCKED] })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let chosen = vec![LayerId::new(PLAIN), LayerId::new(LOCKED)];
+    assert_eq!(
+        narrowed["pairs"],
+        serde_json::to_value(assemblash_core::layout::find_overlaps(&document, &chosen).unwrap())
+            .unwrap()
+    );
+
+    // A layer that is not there is refused, not answered about.
+    let refused = client
+        .call_tool(call(
+            "find_overlaps",
+            args(json!({ "layerIds": ["layer_00000000000000000000000099"] })),
+        ))
+        .await
+        .expect_err("a layer that does not exist must be refused");
+    assert!(
+        format!("{refused:?}").contains("operationRefused"),
+        "{refused:?}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+/// `create_project` makes a project the other tools can then use.
+#[tokio::test]
+async fn create_project_makes_an_openable_project() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let client = connect(&root).await;
+    let made = structured(
+        &client
+            .call_tool(call(
+                "create_project",
+                args(json!({
+                    "project": "flyer",
+                    "width": 320.0,
+                    "height": 180.0,
+                    "background": "#101820",
+                    "name": "Made by an agent"
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(made["id"], "flyer");
+    assert_eq!(made["version"], 0);
+    assert_eq!(made["layers"], 0);
+
+    // It is on disk, with the canvas it was asked for.
+    let document = assemblash_core::storage::load(&root.join("projects/flyer")).unwrap();
+    assert_eq!(document.canvas.width, 320.0);
+    assert_eq!(document.canvas.height, 180.0);
+    assert_eq!(
+        document.canvas.background.as_ref().map(Color::as_str),
+        Some("#101820")
+    );
+
+    // And the rest of the server can see it: listed, opened, and written to.
+    let projects = structured(&client.call_tool(call("list_projects", None)).await.unwrap());
+    let ids: Vec<&str> = projects["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|project| project["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"flyer"), "{ids:?}");
+
+    let opened = structured(
+        &client
+            .call_tool(call("open_project", args(json!({ "project": "flyer" }))))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(opened["project"], "flyer");
+    client
+        .call_tool(call(
+            "add_text_layer",
+            args(json!({
+                "x": 10.0, "y": 10.0, "width": 200.0, "height": 40.0,
+                "text": "hello", "fontFamily": "Noto Sans", "fontSize": 18.0
+            })),
+        ))
+        .await
+        .expect("a new project takes changes like any other");
+
+    // A name that is really a path never reaches the filesystem, and a name
+    // that is taken is refused rather than overwriting a project.
+    let escaped = client
+        .call_tool(call(
+            "create_project",
+            args(json!({ "project": "../../etc", "width": 10.0, "height": 10.0 })),
+        ))
+        .await
+        .expect_err("a path-shaped project name must be refused");
+    assert!(
+        format!("{escaped:?}").contains("invalidProjectId"),
+        "{escaped:?}"
+    );
+    let taken = client
+        .call_tool(call(
+            "create_project",
+            args(json!({ "project": "poster", "width": 10.0, "height": 10.0 })),
+        ))
+        .await
+        .expect_err("a project that already exists must not be overwritten");
+    assert!(!format!("{taken:?}").is_empty());
+
+    client.cancel().await.unwrap();
+}
+
+/// `export_document` reports what the export noticed (FR-11).
+///
+/// Advisory: the file is written either way, and the warnings never change a
+/// pixel. The same three producers the CLI and the HTTP API report.
+#[tokio::test]
+async fn export_document_reports_export_warnings() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let asset = import_svg_asset(&root);
+
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+
+    // Nothing to say yet, and the field is there anyway.
+    let quiet = structured(
+        &client
+            .call_tool(call("export_document", args(json!({ "name": "quiet" }))))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        quiet["warnings"],
+        json!([]),
+        "warnings is always present, empty when there is nothing to say"
+    );
+
+    // An SVG asset drawing text in a family nothing loaded: the DEF-2 symptom,
+    // made loud rather than fixed.
+    let added = structured(
+        &client
+            .call_tool(call(
+                "add_svg_layer",
+                args(json!({
+                    "x": 10.0, "y": 10.0, "width": 100.0, "height": 50.0,
+                    "asset": asset
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let created = added["created"][0].as_str().unwrap().to_owned();
+
+    let noisy = structured(
+        &client
+            .call_tool(call("export_document", args(json!({ "name": "noisy" }))))
+            .await
+            .unwrap(),
+    );
+    let warnings = noisy["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    assert_eq!(warnings[0]["code"], "svgAssetTextWithoutFont");
+    assert_eq!(warnings[0]["layerId"], created.as_str());
+    assert!(warnings[0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Nowhere Sans"));
+
+    // Advisory: the file was written regardless.
+    assert_eq!(noisy["path"], "exports/noisy.png");
+    assert!(root.join("projects/poster/exports/noisy.png").is_file());
+
+    client.cancel().await.unwrap();
+}
+
 /// Convenience for asserting a JSON value is a non-empty string.
 trait IsSomeStr {
     fn is_some_and_str(&self) -> bool;

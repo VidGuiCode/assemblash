@@ -19,6 +19,7 @@ import * as api from "./api.js";
 import type { Document, Layer, Operation } from "./api.js";
 import { mountExport } from "./export.js";
 import {
+  placedAssetSize,
   resizeItemInSelection,
   resizedBounds,
   resizedRotatedBounds,
@@ -140,7 +141,7 @@ const dom = {
   undo: el<HTMLButtonElement>("undo"),
   redo: el<HTMLButtonElement>("redo"),
   exportButton: el<HTMLButtonElement>("export"),
-  downloadSvg: el<HTMLAnchorElement>("download-svg"),
+  fontFamilies: el<HTMLDataListElement>("font-families"),
   shutdown: el<HTMLButtonElement>("shutdown"),
   emptyCreate: el<HTMLButtonElement>("empty-create"),
   newProjectDialog: el<HTMLDialogElement>("new-project-dialog"),
@@ -207,6 +208,24 @@ dom.nameDialogForm.addEventListener("submit", (event) => {
 function say(message: string, kind: "info" | "error" = "info"): void {
   dom.status.textContent = message;
   dom.status.dataset["kind"] = kind;
+}
+
+/**
+ * Fills the font suggestion list from the engine's font store.
+ *
+ * Read once, at startup: the store is a directory the server scanned when it
+ * began, so the answer cannot change while this page is open. A suggestion
+ * list rather than a closed menu — a document may name a family this machine
+ * does not have, and typing that name back in has to stay possible.
+ */
+async function loadFontFamilies(): Promise<void> {
+  const families = await api.fonts();
+  dom.fontFamilies.replaceChildren();
+  for (const family of families) {
+    const option = document.createElement("option");
+    option.value = family;
+    dom.fontFamilies.append(option);
+  }
 }
 
 /** Runs something that talks to the engine, reporting whatever it refuses. */
@@ -331,8 +350,6 @@ async function refresh(): Promise<void> {
   dom.canvasImage.alt = `Preview of ${doc.name ?? state.project}`;
   dom.canvas.style.aspectRatio = `${doc.canvas.width} / ${doc.canvas.height}`;
   applyZoom();
-  dom.downloadSvg.href = api.svgUrl(state.project, api.versionOf(doc));
-  dom.downloadSvg.hidden = false;
   // Read with the document, because defining or deleting one is an ordinary
   // operation and every operation refreshes.
   state.presets = await api.getPresets(state.project);
@@ -800,6 +817,10 @@ function drawInspector(): void {
     const fontInput = document.createElement("input");
     fontInput.value = layer.fontFamily;
     fontInput.disabled = guarded;
+    // The families this machine has, offered rather than imposed: a typo used
+    // to become a render error several steps later, and a family the document
+    // names but this machine lacks must still be typeable.
+    fontInput.setAttribute("list", "font-families");
     fontInput.setAttribute("aria-label", "Font family");
     fontInput.addEventListener("change", () => {
       if (fontInput.value !== layer.fontFamily) {
@@ -899,6 +920,7 @@ function drawInspector(): void {
     value: string,
     apply: (next: string) => Operation | null,
     type = "number",
+    list?: string,
   ): void => {
     const wrapper = document.createElement("label");
     wrapper.className = "field";
@@ -907,6 +929,7 @@ function drawInspector(): void {
     input.type = type;
     input.value = value;
     input.disabled = why !== null;
+    if (list) input.setAttribute("list", list);
     input.addEventListener("change", () => {
       if (input.value === value) return;
       const operation = apply(input.value);
@@ -954,10 +977,37 @@ function drawInspector(): void {
     const heading = document.createElement("h2");
     heading.textContent = "Typography";
     dom.advancedInspector.append(heading);
-    field("Font", layer.fontFamily, (next) => ({ op: "update", id: layer.id, fontFamily: next }) as Operation, "text");
+    field("Font", layer.fontFamily, (next) => ({ op: "update", id: layer.id, fontFamily: next }) as Operation, "text", "font-families");
     field("Font size", String(layer.fontSize), (next) => ({ op: "update", id: layer.id, fontSize: Number(next) }) as Operation);
     field("Line height", String(layer.lineHeight ?? 1.2), (next) => ({ op: "update", id: layer.id, lineHeight: Number(next) }) as Operation);
     field("Colour", layer.color ?? "#000000", (next) => ({ op: "update", id: layer.id, color: next }) as Operation, "color");
+  }
+
+  if (layer.type === "image" || layer.type === "svg") {
+    // How the asset meets its box. The engine's default is `fill`, which
+    // stretches; until now the only way to ask for anything else was to edit
+    // the file, and an upload was silently given `contain` with no way back.
+    const heading = document.createElement("h2");
+    heading.textContent = "Media";
+    dom.advancedInspector.append(heading);
+    const fit = document.createElement("label");
+    fit.className = "field";
+    fit.append(document.createTextNode("Fit"));
+    const fitSelect = document.createElement("select");
+    fitSelect.disabled = why !== null;
+    fitSelect.setAttribute("aria-label", "Fit");
+    for (const mode of api.IMAGE_FITS) {
+      const option = document.createElement("option");
+      option.value = mode;
+      option.textContent = mode;
+      fitSelect.append(option);
+    }
+    fitSelect.value = layer.fit ?? "fill";
+    fitSelect.addEventListener("change", () =>
+      void send("change fit", { op: "update", id: layer.id, fit: fitSelect.value } as Operation),
+    );
+    fit.append(fitSelect);
+    dom.advancedInspector.append(fit);
   }
 
   const appearanceHeading = document.createElement("h2");
@@ -1034,6 +1084,7 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
   for (const [index, effect] of effects.entries()) {
     const row = document.createElement("div");
     row.className = "effect-row";
+    row.dataset["effect"] = effect.type;
 
     const label = document.createElement("span");
     label.className = "effect-name";
@@ -1061,6 +1112,35 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
       row.append(input);
     }
 
+    // Order is part of the meaning — a blur before a grain is not the same
+    // picture as a grain before a blur — so the stack can be rearranged
+    // without deleting and re-adding, which would lose the numbers.
+    const swap = (with_: number): void => {
+      const next = [...effects];
+      const here = next[index];
+      const there = next[with_];
+      if (!here || !there) return;
+      next[index] = there;
+      next[with_] = here;
+      setStack(next);
+    };
+
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "small effect-up";
+    up.textContent = "Up";
+    up.title = `Move ${effect.type} earlier in the stack`;
+    up.disabled = guarded || index === 0;
+    up.addEventListener("click", () => swap(index - 1));
+
+    const down = document.createElement("button");
+    down.type = "button";
+    down.className = "small effect-down";
+    down.textContent = "Down";
+    down.title = `Move ${effect.type} later in the stack`;
+    down.disabled = guarded || index === effects.length - 1;
+    down.addEventListener("click", () => swap(index + 1));
+
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "small";
@@ -1069,13 +1149,15 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
     remove.addEventListener("click", () =>
       setStack(effects.filter((_, at) => at !== index)),
     );
-    row.append(remove);
+    row.append(up, down, remove);
     target.append(row);
   }
 
   const add = document.createElement("div");
   add.className = "buttons";
   const chooser = document.createElement("select");
+  chooser.className = "effect-chooser";
+  chooser.setAttribute("aria-label", "Effect to add");
   chooser.disabled = guarded;
   for (const type of api.EFFECT_TYPES) {
     const option = document.createElement("option");
@@ -1085,6 +1167,7 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
   }
   const button = document.createElement("button");
   button.type = "button";
+  button.className = "effect-add";
   button.textContent = "Add effect";
   button.disabled = guarded;
   button.addEventListener("click", () => {
@@ -2406,8 +2489,12 @@ function addAssetFile(
     try {
     const uploaded = await api.uploadAsset(state.project, file);
     const isSvg = uploaded.asset.mediaType === "image/svg+xml" || preferredType === "svg";
-    const layerWidth = 300;
-    const layerHeight = 200;
+    // The importer recorded the file's own dimensions, so the layer arrives at
+    // the picture's shape rather than at a fixed box that squashed it.
+    const { width: layerWidth, height: layerHeight } = placedAssetSize(
+      uploaded.asset,
+      state.document.canvas,
+    );
     const x = Math.round(point?.x ?? (state.document.canvas.width - layerWidth) / 2);
     const y = Math.round(point?.y ?? (state.document.canvas.height - layerHeight) / 2);
     const create = isSvg
@@ -2949,6 +3036,12 @@ void guard("start", async () => {
   // manager or in a container owns its own lifetime.
   const info = await api.serverInfo();
   dom.shutdown.hidden = !info.canShutdown;
+  try {
+    await loadFontFamilies();
+  } catch {
+    // A server with no readable font store still edits documents; only the
+    // suggestion list is poorer for it, and the field still takes any name.
+  }
   await loadProjects();
   say(`ready — Assemblash ${info.version}`);
 });

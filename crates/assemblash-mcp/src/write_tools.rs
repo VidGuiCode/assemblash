@@ -22,6 +22,7 @@ use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::backend::ProjectSummary;
 use crate::server::{to_error, AssemblashMcp};
 use crate::writes::{ExportResult, OpenedProject, WriteEnvelope, WriteOutcome};
 
@@ -127,6 +128,28 @@ pub struct AddImageArgs {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct AddSvgArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    #[serde(flatten)]
+    pub placement: PlacementArgs,
+    #[serde(flatten)]
+    pub box_: BoxArgs,
+    /// Id of an SVG asset already in the document, as `get_document_state`
+    /// reports it. There is no tool that imports a file from a path, and none
+    /// that takes markup: an asset is sanitised when it is imported, so
+    /// everything drawn from one is safe by construction.
+    pub asset: String,
+    /// How the graphic fills its box: `fill`, `contain`, or `cover`.
+    #[serde(default)]
+    pub fit: Option<ImageFit>,
+    /// Human-facing layer name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateArgs {
     #[serde(flatten)]
     pub write: WriteEnvelope,
@@ -150,6 +173,9 @@ pub struct UpdateArgs {
     /// New alignment, for a text layer.
     #[serde(default)]
     pub align: Option<TextAlign>,
+    /// New line height, as a multiple of the font size, for a text layer.
+    #[serde(default)]
+    pub line_height: Option<f64>,
     /// New fit, for an image or SVG layer.
     #[serde(default)]
     pub fit: Option<ImageFit>,
@@ -319,6 +345,26 @@ pub struct OpenProjectArgs {
     pub project: String,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewProjectArgs {
+    /// Name for the new project, and the name every later call passes as
+    /// `project`. Letters, digits, hyphens, and underscores; a name that is
+    /// really a path is refused, and so is one already taken.
+    pub project: String,
+    /// Canvas width in pixels.
+    pub width: f64,
+    /// Canvas height in pixels.
+    pub height: f64,
+    /// Canvas background, `#rrggbb` or `#rrggbbaa`. Omit for none, which
+    /// exports as transparent.
+    #[serde(default)]
+    pub background: Option<String>,
+    /// Human-facing document name. Not an identifier.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 #[tool_router(router = write_tool_router, vis = "pub(crate)")]
 impl AssemblashMcp {
     /// Adds a text layer.
@@ -368,6 +414,29 @@ impl AssemblashMcp {
         self.write(&args.write, operation)
     }
 
+    /// Adds an SVG layer for an asset already in the document.
+    #[tool(
+        description = "Add a vector graphic layer for an SVG asset already imported into the \
+                       project. There is no tool that imports a file from a path, and none \
+                       that takes markup: an SVG is sanitised on the way in, so a layer can \
+                       only ever draw one that already was."
+    )]
+    async fn add_svg_layer(
+        &self,
+        Parameters(args): Parameters<AddSvgArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        let operation = Operation::Create(CreateLayer {
+            position: (&args.placement).into(),
+            transform: (&args.box_).into(),
+            name: args.name.clone(),
+            kind: NewLayerKind::Svg {
+                asset: AssetId::new(args.asset.clone()),
+                fit: args.fit.unwrap_or_default(),
+            },
+        });
+        self.write(&args.write, operation)
+    }
+
     /// Changes a layer's properties.
     #[tool(
         description = "Change properties of an existing layer. Only the fields you pass are \
@@ -384,6 +453,7 @@ impl AssemblashMcp {
             font_size: args.font_size,
             color: args.color.clone().map(Color::new),
             align: args.align,
+            line_height: args.line_height,
             fit: args.fit,
             blend_mode: args.blend_mode.clone(),
             effects: args.effects.clone(),
@@ -702,6 +772,31 @@ impl AssemblashMcp {
             .map_err(to_error)?;
         self.set_current_project(&args.project);
         Ok(Json(opened))
+    }
+
+    /// Makes an empty project in the workspace.
+    #[tool(
+        description = "Create an empty project with the canvas size you give it, and use it \
+                       for later calls. Nothing else here creates a document: every other \
+                       tool changes one that exists, quoting the version it read. A server \
+                       started for a single project has no workspace to put one in and says so."
+    )]
+    async fn create_project(
+        &self,
+        Parameters(args): Parameters<NewProjectArgs>,
+    ) -> Result<Json<ProjectSummary>, ErrorData> {
+        let summary = self
+            .backend()
+            .create_project(
+                &args.project,
+                args.width,
+                args.height,
+                args.background.as_deref(),
+                args.name.as_deref(),
+            )
+            .map_err(to_error)?;
+        self.set_current_project(&args.project);
+        Ok(Json(summary))
     }
 }
 

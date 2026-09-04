@@ -75,6 +75,7 @@ pub fn router(
         .route("/api/projects/{id}/preview.png", get(preview))
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
         .route("/api/projects/{id}/text-layout", get(text_layout))
+        .route("/api/projects/{id}/overlaps", get(overlaps))
         .route("/api/projects/{id}/export", post(export_document))
         .route("/api/projects/{id}/exports/{file}", get(get_export))
         .route("/api/projects/{id}/presets", get(get_presets))
@@ -558,13 +559,36 @@ impl ActorRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OperationRequest {
-    operation: Operation,
+    /// The operation, still as JSON.
+    ///
+    /// Not an `Operation` yet, because the unknown-property check has to see
+    /// the keys the client actually sent — serde has already discarded them
+    /// by the time it hands back a typed value.
+    operation: serde_json::Value,
     #[serde(default)]
     actor: ActorRequest,
     #[serde(default)]
     expected_version: Option<u64>,
     #[serde(default)]
     dry_run: bool,
+}
+
+/// Checks an operation's property names, then parses it.
+///
+/// Two different answers, deliberately. A property the operation does not
+/// have is a **refused operation** — the request was well formed and the
+/// engine declined it, so `422`. Anything else the parser objects to is a
+/// **malformed request**, so `400`, which is what the extractor would have
+/// said before this check existed.
+fn parse_operation(value: serde_json::Value) -> Result<Operation, ApiError> {
+    assemblash_core::ops::check_properties(&value).map_err(SessionError::Operation)?;
+    serde_json::from_value(value).map_err(|error| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "malformedRequest",
+            error.to_string(),
+        )
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -585,15 +609,12 @@ async fn apply_operation(
 ) -> Result<Json<OperationResponse>, ApiError> {
     let id = ProjectId::new(id)?;
     let actor = request.actor.actor()?;
+    let operation = parse_operation(request.operation)?;
     let project = state.project(&id, now_millis())?;
     let mut session = lock_project(&project)?;
 
     if request.dry_run {
-        let outcome = session.dry_run(
-            &request.operation,
-            request.expected_version,
-            &mut UlidIdSource,
-        )?;
+        let outcome = session.dry_run(&operation, request.expected_version, &mut UlidIdSource)?;
         return Ok(Json(OperationResponse {
             version: session.version(),
             dry_run: true,
@@ -603,7 +624,7 @@ async fn apply_operation(
     }
 
     let (outcome, transaction) = session.apply(
-        &request.operation,
+        &operation,
         &actor,
         now_millis(),
         request.expected_version,
@@ -644,7 +665,10 @@ enum OperationBatchMacro {
 struct OperationBatchRequest {
     expected_version: u64,
     label: String,
-    commands: Vec<OperationBatchCommand>,
+    /// The commands, still as JSON, for the same reason as
+    /// [`OperationRequest::operation`]: each one is property-checked before
+    /// it is parsed.
+    commands: Vec<serde_json::Value>,
     #[serde(default)]
     actor: ActorRequest,
 }
@@ -702,6 +726,14 @@ async fn apply_operation_batch(
     let mut compiled = Vec::new();
     let mut generated = RecordingIds::default();
     for command in request.commands {
+        assemblash_core::ops::check_properties(&command).map_err(SessionError::Operation)?;
+        let command: OperationBatchCommand = serde_json::from_value(command).map_err(|error| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "malformedRequest",
+                error.to_string(),
+            )
+        })?;
         match command {
             OperationBatchCommand::Operation(operation) => {
                 apply_compiled(&mut candidate, *operation, &mut compiled, &mut generated)?;
@@ -1300,6 +1332,47 @@ async fn text_layout(
         line_count: layout.lines.len(),
         height: layout.height,
     }))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OverlapsResponse {
+    pairs: Vec<(assemblash_core::LayerId, assemblash_core::LayerId)>,
+}
+
+/// Which of a document's layers sit on top of one another.
+///
+/// The same question `assemblash overlaps` answers, over the same
+/// [`layout::find_overlaps`](assemblash_core::layout::find_overlaps), so the
+/// two surfaces cannot report different pairs or a different order.
+///
+/// `?layers=` narrows the set the way the command's positional list does, and
+/// may be repeated or comma-separated; without it every layer in the document
+/// is considered. A layer that is not there is a refused operation, not an
+/// empty answer — silently ignoring a typo would report "nothing overlaps"
+/// about layers nobody looked at.
+async fn overlaps(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Result<Json<OverlapsResponse>, ApiError> {
+    let (document, _) = read_for_render(&state, id)?;
+    let chosen = query
+        .iter()
+        .filter(|(key, _)| key == "layers")
+        .flat_map(|(_, value)| value.split(','))
+        .filter(|value| !value.is_empty())
+        .map(assemblash_core::LayerId::new)
+        .collect::<Vec<_>>();
+    let ids = if chosen.is_empty() {
+        assemblash_core::layout::all_layer_ids(&document)
+    } else {
+        chosen
+    };
+    let pairs = assemblash_core::layout::find_overlaps(&document, &ids)
+        .map_err(assemblash_core::ops::OpError::from)
+        .map_err(SessionError::from)?;
+    Ok(Json(OverlapsResponse { pairs }))
 }
 
 #[derive(Debug, Deserialize)]

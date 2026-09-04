@@ -22,7 +22,7 @@ use assemblash_core::{Color, Document};
 use assemblash_renderer::install::{self, HttpFetcher, InstallError, Manifest};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
 use assemblash_renderer::store::{FontStore, FontStoreError};
-use assemblash_renderer::{doc_to_svg, svg_to_pixmap};
+use assemblash_renderer::{doc_to_svg, svg_to_pixmap, ExportWarning};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
@@ -73,6 +73,9 @@ enum Command {
         /// Horizontal alignment inside the layer box.
         #[arg(long, value_enum, default_value_t = Align::Left)]
         align: Align,
+        /// Line height, as a multiple of the font size.
+        #[arg(long, default_value_t = 1.2)]
+        line_height: f64,
         /// Font store to check the family against.
         ///
         /// Optional, and only a check: naming a font that is not installed is
@@ -91,8 +94,11 @@ enum Command {
         /// Project directory.
         project: PathBuf,
         /// Image file to import. It is copied into the project.
-        #[arg(long)]
-        file: PathBuf,
+        #[arg(value_name = "FILE", required_unless_present = "file")]
+        input: Option<PathBuf>,
+        /// Image file to import. The older spelling of the same thing.
+        #[arg(long, conflicts_with = "input")]
+        file: Option<PathBuf>,
         /// How the image fills its box.
         #[arg(long, value_enum, default_value_t = Fit::Contain)]
         fit: Fit,
@@ -110,8 +116,11 @@ enum Command {
         /// Project directory.
         project: PathBuf,
         /// SVG file to import. It is copied into the project.
-        #[arg(long)]
-        file: PathBuf,
+        #[arg(value_name = "FILE", required_unless_present = "file")]
+        input: Option<PathBuf>,
+        /// SVG file to import. The older spelling of the same thing.
+        #[arg(long, conflicts_with = "input")]
+        file: Option<PathBuf>,
         /// How the graphic fills its box.
         #[arg(long, value_enum, default_value_t = Fit::Contain)]
         fit: Fit,
@@ -122,23 +131,37 @@ enum Command {
     },
 
     /// Writes the document as SVG.
+    ///
+    /// Prints the file it wrote and that file's sha256, separated by a tab,
+    /// so a script can compare what came out of here with what came out of
+    /// the HTTP API without shelling out to a hasher.
     Render {
         /// Project directory.
         project: PathBuf,
-        /// Output file.
-        #[arg(long)]
-        out: PathBuf,
+        /// Where to write it.
+        #[arg(value_name = "OUT", required_unless_present = "out")]
+        output: Option<PathBuf>,
+        /// Where to write it. The older spelling of the same thing.
+        #[arg(long, conflicts_with = "output")]
+        out: Option<PathBuf>,
+        #[command(flatten)]
+        warnings: WarningArgs,
         #[command(flatten)]
         fonts: FontArgs,
     },
 
     /// Writes the document as PNG.
+    ///
+    /// Prints the file it wrote and that file's sha256, separated by a tab.
     Export {
         /// Project directory.
         project: PathBuf,
-        /// Output file.
-        #[arg(long)]
-        out: PathBuf,
+        /// Where to write it.
+        #[arg(value_name = "OUT", required_unless_present = "out")]
+        output: Option<PathBuf>,
+        /// Where to write it. The older spelling of the same thing.
+        #[arg(long, conflicts_with = "output")]
+        out: Option<PathBuf>,
         /// Multiplier on the canvas size.
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
@@ -146,6 +169,8 @@ enum Command {
         /// that two exports of the same document are byte-identical.
         #[arg(long)]
         timestamp: Option<String>,
+        #[command(flatten)]
+        warnings: WarningArgs,
         #[command(flatten)]
         fonts: FontArgs,
     },
@@ -355,6 +380,99 @@ enum Command {
         project: PathBuf,
     },
 
+    /// Changes any property of a layer.
+    ///
+    /// One `update` operation however many flags are given: journalled once,
+    /// undone once, refused on a protected layer, and checked against the
+    /// same version you read. A property the layer's kind does not have —
+    /// `--size` on an image, say — is refused by name rather than ignored.
+    ///
+    /// The box flags are read against the transform the layer already has, so
+    /// `--x` on its own moves a layer without resizing it.
+    Set {
+        /// Project directory.
+        project: PathBuf,
+        /// The layer to change.
+        #[arg(long)]
+        layer: String,
+        /// Layer name. An empty string removes it.
+        #[arg(long)]
+        name: Option<String>,
+        /// Left edge.
+        #[arg(long)]
+        x: Option<f64>,
+        /// Top edge.
+        #[arg(long)]
+        y: Option<f64>,
+        /// Box width.
+        #[arg(long)]
+        width: Option<f64>,
+        /// Box height.
+        #[arg(long)]
+        height: Option<f64>,
+        /// Clockwise rotation in degrees about the box centre.
+        #[arg(long)]
+        rotation: Option<f64>,
+        /// Opacity from 0 to 1.
+        #[arg(long)]
+        opacity: Option<f64>,
+        /// Show or hide it.
+        #[arg(long)]
+        visible: Option<bool>,
+        /// Lock or unlock it. Unlocking a locked layer needs
+        /// `--allow-locked` as well.
+        #[arg(long)]
+        locked: Option<bool>,
+        /// How it composites onto what is beneath it.
+        #[arg(long)]
+        blend: Option<String>,
+        /// The whole effect stack, as JSON:
+        /// `[{"type":"blur","radius":3}]`. `[]` clears it.
+        #[arg(long)]
+        effects: Option<String>,
+        /// Read the effect stack from a JSON file instead.
+        #[arg(long, conflicts_with = "effects")]
+        effects_file: Option<PathBuf>,
+        /// Text layers: the text. `\n` is a line break.
+        #[arg(long)]
+        text: Option<String>,
+        /// Read the text from a file instead, verbatim.
+        ///
+        /// A file is the only way to set text containing a line break from a
+        /// shell that will not pass one through.
+        #[arg(long, conflicts_with = "text")]
+        text_file: Option<PathBuf>,
+        /// Text layers: font family.
+        #[arg(long)]
+        font: Option<String>,
+        /// Text layers: font size in pixels.
+        #[arg(long)]
+        size: Option<f64>,
+        /// Text layers: fill colour.
+        #[arg(long)]
+        color: Option<String>,
+        /// Text layers: horizontal alignment inside the box.
+        #[arg(long, value_enum)]
+        align: Option<Align>,
+        /// Text layers: line height, as a multiple of the font size.
+        #[arg(long)]
+        line_height: Option<f64>,
+        /// Image and SVG layers: how the picture fills its box.
+        #[arg(long, value_enum)]
+        fit: Option<Fit>,
+        /// Image and SVG layers: draw a different asset instead.
+        ///
+        /// The asset must already be in the document: importing copies a
+        /// file, which is not something an undo could take back.
+        #[arg(long)]
+        asset: Option<String>,
+        /// Change a locked layer.
+        #[arg(long)]
+        allow_locked: bool,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
     /// Sets a layer's blend mode and effect stack.
     ///
     /// Both are ordinary properties of a layer, so this is one `update`
@@ -364,6 +482,9 @@ enum Command {
     /// Effects are given as JSON, the same shape the document stores and the
     /// API takes — a list, applied in order, because a blurred thing
     /// desaturated is not a desaturated thing blurred.
+    ///
+    /// `set` reaches these two properties and every other one; this command
+    /// is the older name for them and builds exactly the same update.
     Style {
         /// Project directory.
         project: PathBuf,
@@ -508,8 +629,14 @@ enum PresetCommand {
         description: Option<String>,
         /// The properties it sets, as JSON:
         /// `{"fontSize":48,"color":"#101820"}`.
-        #[arg(long)]
-        properties: String,
+        #[arg(long, required_unless_present = "properties_file")]
+        properties: Option<String>,
+        /// Read the properties from a JSON file instead.
+        ///
+        /// A file rather than a quoted argument, because a shell that eats
+        /// the quotes turns valid JSON into a parse error several words long.
+        #[arg(long, conflicts_with = "properties")]
+        properties_file: Option<PathBuf>,
         #[command(flatten)]
         who: ActorArgs,
     },
@@ -776,6 +903,19 @@ struct BoxArgs {
     layer_name: Option<String>,
 }
 
+/// How an export says what it noticed (FR-11).
+///
+/// A warning is never a failure and never changes a byte of the file, so the
+/// default is one line each on standard error, where it cannot be confused
+/// with the hash a script is reading off standard output.
+#[derive(Debug, Args)]
+struct WarningArgs {
+    /// Print what the export noticed as a JSON array on standard output,
+    /// under the hash, instead of one line each on standard error.
+    #[arg(long = "warnings-json")]
+    warnings_json: bool,
+}
+
 #[derive(Debug, Args)]
 struct FontArgs {
     /// Directory of font files to load. Repeatable. Only fonts named here are
@@ -814,6 +954,16 @@ enum Fit {
     Cover,
 }
 
+impl From<Align> for TextAlign {
+    fn from(align: Align) -> Self {
+        match align {
+            Align::Left => Self::Left,
+            Align::Center => Self::Center,
+            Align::Right => Self::Right,
+        }
+    }
+}
+
 impl From<Fit> for ImageFit {
     fn from(fit: Fit) -> Self {
         match fit {
@@ -822,6 +972,198 @@ impl From<Fit> for ImageFit {
             Fit::Cover => Self::Cover,
         }
     }
+}
+
+/// Everything `set` can change, with the file-valued flags already read.
+///
+/// One struct rather than a long argument list because `style` builds one of
+/// these too: the two commands then cannot drift apart, whatever either of
+/// them grows next.
+#[derive(Debug, Default)]
+struct LayerChange {
+    name: Option<String>,
+    x: Option<f64>,
+    y: Option<f64>,
+    width: Option<f64>,
+    height: Option<f64>,
+    rotation: Option<f64>,
+    opacity: Option<f64>,
+    visible: Option<bool>,
+    locked: Option<bool>,
+    blend: Option<String>,
+    /// The effect stack as JSON, from `--effects` or `--effects-file`.
+    effects: Option<String>,
+    /// The text, from `--text` or `--text-file`.
+    text: Option<String>,
+    font: Option<String>,
+    size: Option<f64>,
+    color: Option<String>,
+    align: Option<Align>,
+    line_height: Option<f64>,
+    fit: Option<Fit>,
+    asset: Option<String>,
+    allow_locked: bool,
+}
+
+impl LayerChange {
+    /// The single `update` these flags mean, against the layer as it stands.
+    ///
+    /// Every field is listed rather than filled in from a default, so a new
+    /// property on `UpdateLayer` stops this compiling until the CLI decides
+    /// what to do about it.
+    fn into_update(
+        self,
+        document: &Document,
+        layer: String,
+    ) -> Result<assemblash_core::ops::UpdateLayer, CliError> {
+        let id = assemblash_core::LayerId::new(layer);
+        let effects = self
+            .effects
+            .as_deref()
+            .map(serde_json::from_str::<Vec<assemblash_core::document::Effect>>)
+            .transpose()?;
+        let transform = self.transform_for(document, &id);
+        Ok(assemblash_core::ops::UpdateLayer {
+            id,
+            // An empty string is how a name is removed: `Some(None)` on the
+            // wire, and nothing else on a command line can say it.
+            name: self
+                .name
+                .map(|name| if name.is_empty() { None } else { Some(name) }),
+            transform,
+            opacity: self.opacity,
+            visible: self.visible,
+            locked: self.locked,
+            blend_mode: self.blend.map(blend_mode),
+            effects,
+            text: self.text,
+            font_family: self.font,
+            font_size: self.size,
+            color: self.color.map(Color::new),
+            align: self.align.map(Into::into),
+            line_height: self.line_height,
+            fit: self.fit.map(Into::into),
+            asset: self.asset.map(assemblash_core::AssetId::new),
+            allow_locked: self.allow_locked,
+        })
+    }
+
+    /// The whole transform, when any part of it was named.
+    ///
+    /// An `update` replaces the transform outright, so the fields nobody
+    /// mentioned are read back off the layer: `--x` has to move a layer
+    /// without also resizing it. A layer that is not there yields nothing,
+    /// and the operation layer refuses the update by id, as it would anyway.
+    fn transform_for(
+        &self,
+        document: &Document,
+        id: &assemblash_core::LayerId,
+    ) -> Option<Transform> {
+        if self.x.is_none()
+            && self.y.is_none()
+            && self.width.is_none()
+            && self.height.is_none()
+            && self.rotation.is_none()
+        {
+            return None;
+        }
+        let current = document.find_layer(id)?.transform.clone();
+        Some(Transform {
+            x: self.x.unwrap_or(current.x),
+            y: self.y.unwrap_or(current.y),
+            width: self.width.unwrap_or(current.width),
+            height: self.height.unwrap_or(current.height),
+            rotation: self.rotation.unwrap_or(current.rotation),
+            extra: current.extra,
+        })
+    }
+}
+
+/// A blend mode name, parsed the way the document format parses it.
+///
+/// Through serde so the CLI accepts exactly what the document format accepts,
+/// including the kebab-case spellings, and an unknown name becomes `Other` —
+/// which the operation layer then refuses by name.
+fn blend_mode(raw: String) -> assemblash_core::BlendMode {
+    serde_json::from_value(serde_json::Value::String(raw.clone()))
+        .unwrap_or(assemblash_core::BlendMode::Other(raw))
+}
+
+/// Whichever of an inline flag and its `--…-file` twin was given.
+///
+/// They conflict at the parser, so at most one is ever `Some`.
+fn inline_or_file(
+    inline: Option<String>,
+    file: Option<PathBuf>,
+) -> Result<Option<String>, CliError> {
+    match (inline, file) {
+        (Some(text), _) => Ok(Some(text)),
+        (None, Some(path)) => read_text_file(&path).map(Some),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Says what was written, and what the export noticed on the way.
+///
+/// The path and its hash go to standard output, because comparing that hash
+/// across transports is how the release proves three surfaces drive one
+/// engine. Warnings go to standard error unless they were asked for as JSON,
+/// so nothing can mistake one for the other — and neither changes the exit
+/// status, because a warning is not a failure (FR-11).
+fn report_written(
+    path: &Path,
+    bytes: &[u8],
+    noticed: &[ExportWarning],
+    args: &WarningArgs,
+) -> Result<(), CliError> {
+    println!("{}\t{}", path.display(), storage::hash_bytes(bytes));
+    if args.warnings_json {
+        println!("{}", serde_json::to_string(noticed)?);
+    } else {
+        for warning in noticed {
+            eprintln!(
+                "{}\t{}\t{}",
+                warning.code,
+                warning
+                    .layer_id
+                    .as_ref()
+                    .map(assemblash_core::LayerId::as_str)
+                    .unwrap_or_default(),
+                warning.message
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Reads a file a flag named, saying which path failed and what it was for.
+fn read_text_file(path: &Path) -> Result<String, CliError> {
+    std::fs::read_to_string(path).map_err(|source| CliError::Read {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Applies one `update` built from `set`'s flags, and names what changed.
+fn run_set(
+    project: &Path,
+    layer: String,
+    change: LayerChange,
+    who: &ActorArgs,
+) -> Result<(), CliError> {
+    let mut session = Session::open(project, now_millis())?;
+    let update = change.into_update(session.document(), layer)?;
+    let (outcome, _) = session.apply(
+        &Operation::Update(update),
+        &who.actor(),
+        now_millis(),
+        who.expect_version,
+        &mut UlidIdSource,
+    )?;
+    for id in &outcome.changed {
+        println!("{id}");
+    }
+    Ok(())
 }
 
 fn main() -> ExitCode {
@@ -858,6 +1200,11 @@ enum CliError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("reading {path}: {source}")]
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("no slot named {name:?} in this document")]
     NoSuchSlot { name: String },
 
@@ -875,6 +1222,12 @@ enum CliError {
     NoFonts,
     #[error("say which font to install: a family name, or --pack")]
     InstallTarget,
+    #[error("say where to write it: a path, or --out")]
+    NoOutput,
+    #[error("say which file to import: a path, or --file")]
+    NoInput,
+    #[error("say what the preset sets: --properties, or --properties-file")]
+    NoProperties,
     #[error("say where the font store is: --font-store")]
     NoStore,
     #[error("{message} ({code})")]
@@ -922,6 +1275,7 @@ fn run(command: Command) -> Result<(), CliError> {
             size,
             color,
             align,
+            line_height,
             font_store,
             box_,
             who,
@@ -937,12 +1291,8 @@ fn run(command: Command) -> Result<(), CliError> {
                     font_family: font,
                     font_size: size,
                     color: Color::new(color),
-                    align: match align {
-                        Align::Left => TextAlign::Left,
-                        Align::Center => TextAlign::Center,
-                        Align::Right => TextAlign::Right,
-                    },
-                    line_height: 1.2,
+                    align: align.into(),
+                    line_height,
                 },
                 &box_,
                 &who,
@@ -953,11 +1303,13 @@ fn run(command: Command) -> Result<(), CliError> {
 
         Command::AddImage {
             project,
+            input,
             file,
             fit,
             box_,
             who,
         } => {
+            let file = input.or(file).ok_or(CliError::NoInput)?;
             let mut session = open_session(&project)?;
             let asset_id = import_into(&mut session, &file)?.0;
             let outcome = add_layer(
@@ -975,11 +1327,13 @@ fn run(command: Command) -> Result<(), CliError> {
 
         Command::AddSvg {
             project,
+            input,
             file,
             fit,
             box_,
             who,
         } => {
+            let file = input.or(file).ok_or(CliError::NoInput)?;
             let mut session = open_session(&project)?;
             let (asset_id, report) = import_into(&mut session, &file)?;
             let outcome = add_layer(
@@ -1015,24 +1369,34 @@ fn run(command: Command) -> Result<(), CliError> {
 
         Command::Render {
             project,
+            output,
             out,
+            warnings,
             fonts,
         } => {
+            let out = output.or(out).ok_or(CliError::NoOutput)?;
             let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assemblash_renderer::data_uris(&document, &project)?;
             let loaded = load_fonts(&fonts, &document)?;
             let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
             write_file(&out, svg.as_bytes())?;
-            Ok(())
+            // The CLI has its own export path, so it asks the renderer for
+            // the warnings itself rather than inheriting the server's.
+            let noticed =
+                assemblash_renderer::export_warnings(&document, loaded.font_set(), &project);
+            report_written(&out, svg.as_bytes(), &noticed, &warnings)
         }
 
         Command::Export {
             project,
+            output,
             out,
             scale,
             timestamp,
+            warnings,
             fonts,
         } => {
+            let out = output.or(out).ok_or(CliError::NoOutput)?;
             let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assemblash_renderer::data_uris(&document, &project)?;
             let loaded = load_fonts(&fonts, &document)?;
@@ -1042,7 +1406,9 @@ fn run(command: Command) -> Result<(), CliError> {
             metadata.created = timestamp;
             let png = assemblash_renderer::pixmap_to_png(&pixmap, &metadata)?;
             write_file(&out, &png)?;
-            Ok(())
+            let noticed =
+                assemblash_renderer::export_warnings(&document, loaded.font_set(), &project);
+            report_written(&out, &png, &noticed, &warnings)
         }
 
         Command::Show { project } => {
@@ -1226,10 +1592,7 @@ fn run(command: Command) -> Result<(), CliError> {
             scale,
             font_store,
         } => {
-            let text = std::fs::read_to_string(&values).map_err(|source| CliError::Write {
-                path: values.clone(),
-                source,
-            })?;
+            let text = read_text_file(&values)?;
             let variants: Vec<assemblash_server::render::Variant> = serde_json::from_str(&text)?;
 
             let session = Session::open_read_only(&project)?;
@@ -1381,6 +1744,58 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
+        Command::Set {
+            project,
+            layer,
+            name,
+            x,
+            y,
+            width,
+            height,
+            rotation,
+            opacity,
+            visible,
+            locked,
+            blend,
+            effects,
+            effects_file,
+            text,
+            text_file,
+            font,
+            size,
+            color,
+            align,
+            line_height,
+            fit,
+            asset,
+            allow_locked,
+            who,
+        } => {
+            let change = LayerChange {
+                name,
+                x,
+                y,
+                width,
+                height,
+                rotation,
+                opacity,
+                visible,
+                locked,
+                blend,
+                effects: inline_or_file(effects, effects_file)?,
+                text: inline_or_file(text, text_file)?,
+                font,
+                size,
+                color,
+                align,
+                line_height,
+                fit,
+                asset,
+                allow_locked,
+            };
+            run_set(&project, layer, change, &who)
+        }
+
         Command::Style {
             project,
             layer,
@@ -1390,46 +1805,15 @@ fn run(command: Command) -> Result<(), CliError> {
             allow_locked,
             who,
         } => {
-            let effects_json =
-                match (effects, effects_file) {
-                    (Some(text), _) => Some(text),
-                    (None, Some(path)) => Some(std::fs::read_to_string(&path).map_err(
-                        |source| CliError::Write {
-                            path: path.clone(),
-                            source,
-                        },
-                    )?),
-                    (None, None) => None,
-                };
-            let effects = effects_json
-                .map(|text| serde_json::from_str::<Vec<assemblash_core::document::Effect>>(&text))
-                .transpose()?;
-
-            let mut session = Session::open(&project, now_millis())?;
-            let update = assemblash_core::ops::UpdateLayer {
-                blend_mode: blend.map(|raw| {
-                    // Parsed through serde so the CLI accepts exactly what the
-                    // document format accepts, including the kebab-case
-                    // spellings, and an unknown name becomes `Other` — which
-                    // the operation layer then refuses by name.
-                    serde_json::from_value(serde_json::Value::String(raw.clone()))
-                        .unwrap_or(assemblash_core::BlendMode::Other(raw))
-                }),
-                effects,
+            // The same builder `set` uses, so the two commands write the same
+            // update for the properties they share.
+            let change = LayerChange {
+                blend,
+                effects: inline_or_file(effects, effects_file)?,
                 allow_locked,
-                ..assemblash_core::ops::UpdateLayer::new(assemblash_core::LayerId::new(layer))
+                ..LayerChange::default()
             };
-            let (outcome, _) = session.apply(
-                &Operation::Update(update),
-                &who.actor(),
-                now_millis(),
-                who.expect_version,
-                &mut UlidIdSource,
-            )?;
-            for id in &outcome.changed {
-                println!("{id}");
-            }
-            Ok(())
+            run_set(&project, layer, change, &who)
         }
 
         Command::Unlock { project } => {
@@ -1542,8 +1926,11 @@ fn run_preset(command: PresetCommand) -> Result<(), CliError> {
             name,
             description,
             properties,
+            properties_file,
             who,
         } => {
+            let properties =
+                inline_or_file(properties, properties_file)?.ok_or(CliError::NoProperties)?;
             let properties: assemblash_core::PresetProperties = serde_json::from_str(&properties)?;
             let mut session = Session::open(&project, now_millis())?;
             session.apply(

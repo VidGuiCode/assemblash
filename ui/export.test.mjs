@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { RESOLUTIONS, dimensionsFor } from "./dist/export.js";
+import { FORMATS, RESOLUTIONS, dimensionsFor, downloadTargetFor } from "./dist/export.js";
 
 function resolution(id) {
   const found = RESOLUTIONS.find((one) => one.id === id);
@@ -49,5 +49,21 @@ test("non-standard canvases round to whole output pixels", () => {
     width: 2048,
     height: 682,
     scale: 2.048,
+  });
+});
+
+test("the dialog offers exactly the two renders the engine produces", () => {
+  assert.deepEqual(FORMATS.map((one) => one.id), ["png", "svg"]);
+});
+
+test("choosing SVG downloads the vector render, not a rasterized export", () => {
+  const document = { canvas: { width: 1920, height: 1080 }, version: 7 };
+  assert.deepEqual(downloadTargetFor("svg", "poster shop", document, "spring-sale"), {
+    url: "/api/projects/poster%20shop/preview.svg?v=7",
+    filename: "spring-sale.svg",
+  });
+  assert.deepEqual(downloadTargetFor("png", "poster shop", document, "spring-sale"), {
+    url: "/api/projects/poster%20shop/exports/spring-sale.png",
+    filename: "spring-sale.png",
   });
 });

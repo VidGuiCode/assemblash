@@ -443,6 +443,109 @@ fn png_size(png: &[u8]) -> (u32, u32) {
     (width, height)
 }
 
+/// The 1.3.0 tools are advertised, and each one answers.
+///
+/// The count is asserted as well as the names. Nothing else in this repository
+/// says how many tools this server offers, so a tool added without a thought
+/// for what it lets an agent do has nowhere to hide: adding one means changing
+/// this number on purpose.
+#[tokio::test]
+async fn every_new_tool_is_advertised_and_callable() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let tools = client.list_all_tools().await.unwrap();
+    let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
+    for expected in [
+        "add_svg_layer",
+        "render_document",
+        "find_overlaps",
+        "create_project",
+    ] {
+        assert!(names.contains(&expected), "no {expected} in {names:?}");
+    }
+    assert_eq!(
+        tools.len(),
+        43,
+        "the tool count is a deliberate number, not an accident: {names:?}"
+    );
+
+    // create_project: a project that was not there before, made from nothing
+    // but arguments.
+    let made = structured(
+        &client
+            .call_tool(call(
+                "create_project",
+                arguments(json!({
+                    "project": "flyer",
+                    "width": 300.0,
+                    "height": 150.0,
+                    "background": "#101820",
+                    "name": "Made by an agent"
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(made["id"], "flyer");
+    assert_eq!(made["name"], "Made by an agent");
+    assert_eq!(made["version"], 0);
+
+    // render_document: the same render as the export, one step before pixels.
+    let rendered = structured(
+        &client
+            .call_tool(call(
+                "render_document",
+                arguments(json!({ "project": "poster" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let svg = rendered["svg"].as_str().expect("SVG source");
+    assert!(svg.starts_with("<svg"), "{svg:.80}");
+    assert_eq!(rendered["width"], 400);
+    assert_eq!(rendered["height"], 200);
+
+    // find_overlaps: an answer about the whole document when none is narrowed.
+    let overlaps = structured(
+        &client
+            .call_tool(call(
+                "find_overlaps",
+                arguments(json!({ "project": "poster" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert!(
+        overlaps["pairs"].is_array(),
+        "pairs should be an array: {overlaps:#?}"
+    );
+
+    // add_svg_layer: wired to the operation layer, which is what refuses an
+    // asset nobody imported. Drawing a real one is `tests/writes.rs`.
+    let refused = client
+        .call_tool(call(
+            "add_svg_layer",
+            arguments(json!({
+                "project": "poster",
+                "x": 0.0, "y": 0.0, "width": 50.0, "height": 50.0,
+                "asset": "asset_00000000000000000000000009"
+            })),
+        ))
+        .await
+        .expect_err("an asset that was never imported must be refused");
+    let text = format!("{refused:?}");
+    assert!(text.contains("operationRefused"), "{text}");
+    assert!(text.contains("no asset"), "{text}");
+
+    client.cancel().await.unwrap();
+}
+
 /// Every tool's schemas are the shape the protocol requires.
 ///
 /// MCP says a tool's `inputSchema` and `outputSchema` describe *objects*. Two

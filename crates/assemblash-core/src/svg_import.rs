@@ -352,6 +352,58 @@ pub fn sanitize(source: &str) -> Result<(String, SvgImportReport), SvgImportErro
     Ok((out, report))
 }
 
+/// The font families the `<text>` elements of an SVG asset ask for.
+///
+/// One entry per `<text>` element that has anything to draw, holding the
+/// `font-family` on the element itself or on its nearest ancestor that
+/// carries one — and the empty string when nothing does, because a `<text>`
+/// naming no family is exactly the case that renders as nothing without
+/// saying so.
+///
+/// **What this deliberately does not read.** A family named in a `style="…"`
+/// attribute or in a `<style>` block, and the individual names inside a
+/// comma-separated list: the value is taken verbatim. It is a way of noticing
+/// that an asset wants a font, not a CSS cascade, and it does not load
+/// anything — the renderer still only resolves families that text *layers*
+/// name.
+pub fn text_families(source: &str) -> Result<BTreeSet<String>, SvgImportError> {
+    check_before_parsing(source)?;
+
+    let document = roxmltree::Document::parse(source)
+        .map_err(|error| SvgImportError::Malformed(error.to_string()))?;
+    let root = document.root_element();
+    if local_name(root.tag_name().name()) != "svg" {
+        return Err(SvgImportError::NotSvg);
+    }
+
+    let mut families = BTreeSet::new();
+    for node in root.descendants() {
+        if !node.is_element() || local_name(node.tag_name().name()) != "text" {
+            continue;
+        }
+        let draws_something = node
+            .descendants()
+            .filter(roxmltree::Node::is_text)
+            .any(|text| !text.text().unwrap_or_default().trim().is_empty());
+        if !draws_something {
+            continue;
+        }
+        families.insert(nearest_font_family(node).unwrap_or_default().to_owned());
+    }
+    Ok(families)
+}
+
+/// The `font-family` on this element or on the closest ancestor that has one.
+fn nearest_font_family<'a>(node: roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+    node.ancestors()
+        .find_map(|ancestor| {
+            ancestor
+                .attributes()
+                .find(|attribute| local_name(attribute.name()) == "font-family")
+        })
+        .map(|attribute| attribute.value().trim())
+}
+
 fn write_element(
     node: roxmltree::Node<'_, '_>,
     out: &mut String,
@@ -650,5 +702,31 @@ mod tests {
         );
 
         assert_eq!(check_before_parsing("<svg></svg>"), Ok(()));
+    }
+
+    #[test]
+    fn svg_asset_text_with_no_loaded_font_is_reported() {
+        // One family on the element, one inherited from a group, and one
+        // `<text>` that names nothing at all — the empty string, which is
+        // the case that always warns because no font set can contain it.
+        let source = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">"#,
+            r#"<text x="0" y="10" font-family="Inter">named</text>"#,
+            r#"<g font-family="Noto Sans"><text x="0" y="20"><tspan>inherited</tspan></text></g>"#,
+            r#"<text x="0" y="30">bare</text>"#,
+            r#"<text x="0" y="40" font-family="Ignored">   </text>"#,
+            "</svg>"
+        );
+        let families = text_families(source).unwrap();
+        assert_eq!(
+            families,
+            BTreeSet::from([String::new(), "Inter".to_owned(), "Noto Sans".to_owned()]),
+            "a <text> with nothing to draw asks for no font"
+        );
+
+        // An asset with no text at all asks for nothing, so nothing warns.
+        let silent =
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>"#;
+        assert!(text_families(silent).unwrap().is_empty());
     }
 }

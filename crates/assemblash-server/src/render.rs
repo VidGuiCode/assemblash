@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use assemblash_core::session::SessionError;
 use assemblash_core::{Document, LayerKind};
 use assemblash_renderer::raster::PngMetadata;
-use assemblash_renderer::{doc_to_svg, document_to_png, FontStore, LoadedFonts};
+use assemblash_renderer::{doc_to_svg, document_to_png, ExportWarning, FontStore, LoadedFonts};
 
 use crate::error::ApiError;
 
@@ -49,6 +49,13 @@ pub struct Exported {
     pub width: u32,
     /// Pixel height.
     pub height: u32,
+    /// What the export noticed and did not refuse (FR-11).
+    ///
+    /// Always present, empty when there is nothing to say, so a client can
+    /// read it without checking whether the field exists. A warning never
+    /// changes a pixel and never changes the outcome: the file above was
+    /// written either way.
+    pub warnings: Vec<ExportWarning>,
 }
 
 /// Every font family the document asks for, sorted and deduplicated.
@@ -173,6 +180,9 @@ pub fn export_into_project_loaded(
         bytes: rendered.bytes.len(),
         width: rendered.width,
         height: rendered.height,
+        // Measured after the file is written, on purpose: an export that has
+        // something to say is still an export that happened.
+        warnings: assemblash_renderer::export_warnings(document, fonts.font_set(), project_dir),
     })
 }
 

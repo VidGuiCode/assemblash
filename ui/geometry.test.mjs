@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  placedAssetSize,
   resizeItemInSelection,
   resizedRotatedBounds,
   rotatedRectBounds,
@@ -83,4 +84,31 @@ test("multi-selection resize scales layer centres instead of raw top-lefts", () 
   closeTo(resized.y, 40);
   closeTo(resized.width, 10);
   closeTo(resized.height, 80);
+});
+
+test("an uploaded asset keeps its own size when it fits the canvas", () => {
+  assert.deepEqual(
+    placedAssetSize({ width: 800, height: 400 }, { width: 1000, height: 700 }),
+    { width: 800, height: 400 },
+  );
+});
+
+test("an uploaded asset larger than the canvas is scaled down, not squashed", () => {
+  assert.deepEqual(
+    placedAssetSize({ width: 4000, height: 3000 }, { width: 1000, height: 700 }),
+    { width: 933, height: 700 },
+  );
+});
+
+test("an asset with no recorded dimensions falls back to 300x200", () => {
+  const canvas = { width: 1000, height: 700 };
+  assert.deepEqual(placedAssetSize({}, canvas), { width: 300, height: 200 });
+  assert.deepEqual(placedAssetSize({ width: 512, height: null }, canvas), {
+    width: 300,
+    height: 200,
+  });
+  assert.deepEqual(placedAssetSize({ width: 0, height: 0 }, canvas), {
+    width: 300,
+    height: 200,
+  });
 });

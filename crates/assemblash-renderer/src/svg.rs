@@ -261,6 +261,12 @@ pub struct TextLayout {
     pub lines: Vec<String>,
     /// Minimum layer height that contains every resulting line.
     pub height: f64,
+    /// Whether a single word had to be split at a character boundary.
+    ///
+    /// The split itself is not a failure — it is what stops a pasted URL
+    /// painting across its neighbours — but it is never what an author
+    /// intended, so an export says it happened.
+    pub broke_mid_word: bool,
 }
 
 /// Measures and wraps text with the same pinned metrics used by rendering.
@@ -277,6 +283,8 @@ pub fn layout_text(
         return TextLayout {
             height: text_height(lines.len(), font_size, line_height, family, fonts),
             lines,
+            // Nothing was measured, so nothing was broken.
+            broke_mid_word: false,
         };
     };
     let max_ratio = width / font_size;
@@ -286,12 +294,14 @@ pub fn layout_text(
             .unwrap_or(f64::INFINITY)
     };
     let mut lines = Vec::new();
+    let mut broke_mid_word = false;
     for paragraph in text.split('\n') {
-        wrap_paragraph(paragraph, max_ratio, &measure, &mut lines);
+        broke_mid_word |= wrap_paragraph(paragraph, max_ratio, &measure, &mut lines);
     }
     TextLayout {
         height: text_height(lines.len(), font_size, line_height, family, fonts),
         lines,
+        broke_mid_word,
     }
 }
 
@@ -307,18 +317,20 @@ fn text_height(
         * (fonts.ascent_ratio(family) + fonts.descent_ratio(family) + extra_lines * line_height)
 }
 
+/// Wraps one paragraph, reporting whether a word had to be split.
 fn wrap_paragraph(
     paragraph: &str,
     max_width: f64,
     measure: &impl Fn(&str) -> f64,
     lines: &mut Vec<String>,
-) {
+) -> bool {
     let words = paragraph.split_whitespace().collect::<Vec<_>>();
     if words.is_empty() {
         lines.push(String::new());
-        return;
+        return false;
     }
 
+    let mut broke_mid_word = false;
     let mut current = String::new();
     for word in words {
         let candidate = if current.is_empty() {
@@ -338,6 +350,9 @@ fn wrap_paragraph(
             continue;
         }
 
+        // Reaching here is the detection: the word does not fit its box on a
+        // line of its own, so it is split at character boundaries.
+        broke_mid_word = true;
         for character in word.chars() {
             let mut candidate = current.clone();
             candidate.push(character);
@@ -348,6 +363,7 @@ fn wrap_paragraph(
         }
     }
     lines.push(current);
+    broke_mid_word
 }
 
 /// A `mix-blend-mode` for a layer that asks for one.
@@ -608,7 +624,7 @@ fn color(color: &Color) -> Result<String, RenderError> {
 /// Rounded to six decimals — far finer than a pixel — so that arithmetic
 /// tails like `0.30000000000000004` cannot reach the output and make two
 /// otherwise identical renders differ.
-fn number(value: f64) -> String {
+pub(crate) fn number(value: f64) -> String {
     if !value.is_finite() {
         return "0".to_owned();
     }

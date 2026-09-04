@@ -12,14 +12,17 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use assemblash_core::document::{
     BlendMode, Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
 };
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::{Asset, Color, Document, Layer, LayerKind};
-use assemblash_renderer::{doc_to_svg, AssetHrefs, FontMetrics, FontSet};
+use assemblash_renderer::warnings::{TEXT_OVERFLOWS_BOX, WORD_BROKEN_MID_WORD};
+use assemblash_renderer::{
+    doc_to_svg, export_warnings, AssetHrefs, FontMetrics, FontSet, LoadedFonts,
+};
 
 fn fonts() -> FontSet {
     FontSet::new(["Inter", "Noto Sans"])
@@ -451,4 +454,105 @@ fn an_invalid_document_is_refused() {
         ),
         "{error:?}"
     );
+}
+
+/// The bundled subset, loaded with the glyph advances wrapping needs.
+///
+/// `FontSet::new` names families without measuring them, which is enough for
+/// the snapshots above and not enough here: nothing wraps until something has
+/// been measured.
+fn measured_fonts() -> LoadedFonts {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/NotoSans-Subset.ttf");
+    LoadedFonts::from_files([fixture]).unwrap()
+}
+
+fn noto(id: &str, transform: Transform, body: &str) -> Layer {
+    let mut layer = text(id, transform, body);
+    if let LayerKind::Text(t) = &mut layer.kind {
+        t.font_family = "Noto Sans".to_owned();
+    }
+    layer
+}
+
+#[test]
+fn a_word_wider_than_its_box_is_reported() {
+    let fonts = measured_fonts();
+    let mut doc = document(400.0, 400.0);
+    doc.layers.push(noto(
+        "layer_1",
+        Transform::new(0.0, 0.0, 40.0, 300.0),
+        "Supercalifragilistic",
+    ));
+
+    let warnings = export_warnings(&doc, fonts.font_set(), Path::new("."));
+    let broken = warnings
+        .iter()
+        .find(|warning| warning.code == WORD_BROKEN_MID_WORD)
+        .expect("a word wider than a 40 pixel box is split");
+    assert_eq!(broken.layer_id, Some(LayerId::new("layer_1")));
+    assert!(broken.message.contains("layer_1"), "{}", broken.message);
+
+    // The same words in a box wide enough for them say nothing.
+    let mut roomy = document(400.0, 400.0);
+    roomy.layers.push(noto(
+        "layer_1",
+        Transform::new(0.0, 0.0, 380.0, 300.0),
+        "Supercalifragilistic",
+    ));
+    assert_eq!(
+        export_warnings(&roomy, fonts.font_set(), Path::new(".")),
+        []
+    );
+}
+
+#[test]
+fn text_taller_than_its_box_is_reported() {
+    let fonts = measured_fonts();
+    let mut doc = document(400.0, 400.0);
+    doc.layers.push(noto(
+        "layer_1",
+        Transform::new(0.0, 0.0, 380.0, 20.0),
+        "one
+two
+three
+four",
+    ));
+
+    let warnings = export_warnings(&doc, fonts.font_set(), Path::new("."));
+    let overflow = warnings
+        .iter()
+        .find(|warning| warning.code == TEXT_OVERFLOWS_BOX)
+        .expect("four lines do not fit a 20 pixel box");
+    assert_eq!(overflow.layer_id, Some(LayerId::new("layer_1")));
+
+    // A box tall enough for the same four lines is silent — and warnings
+    // never touch a pixel, so both documents render identically to the
+    // renderer's own SVG apart from the height they were given.
+    let mut tall = document(400.0, 400.0);
+    tall.layers.push(noto(
+        "layer_1",
+        Transform::new(0.0, 0.0, 380.0, 300.0),
+        "one
+two
+three
+four",
+    ));
+    assert_eq!(export_warnings(&tall, fonts.font_set(), Path::new(".")), []);
+}
+
+#[test]
+fn warnings_never_change_what_is_drawn() {
+    let fonts = measured_fonts();
+    let mut doc = document(400.0, 400.0);
+    doc.layers.push(noto(
+        "layer_1",
+        Transform::new(0.0, 0.0, 40.0, 20.0),
+        "Supercalifragilistic",
+    ));
+
+    let before = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+    let warnings = export_warnings(&doc, fonts.font_set(), Path::new("."));
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    let after = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+    assert_eq!(before, after);
 }

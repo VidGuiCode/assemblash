@@ -11,10 +11,11 @@
 
 use std::path::PathBuf;
 
+use assemblash_core::ids::UlidIdSource;
 use assemblash_core::workspace::{ProjectId, Workspace};
-use assemblash_core::{Document, Layer, LayerKind};
+use assemblash_core::{Color, Document, Layer, LayerId, LayerKind};
 use assemblash_renderer::raster::PngMetadata;
-use assemblash_renderer::{document_to_png, LoadedFonts};
+use assemblash_renderer::{document_to_png, ExportWarning, LoadedFonts};
 use assemblash_server::state::{lock_project, AppState};
 use assemblash_server::ApiError;
 use schemars::JsonSchema;
@@ -219,6 +220,72 @@ pub struct Preview {
     pub height: u32,
 }
 
+/// A document rendered to SVG source.
+///
+/// The same render the PNG is rasterized from, one step earlier, so what a
+/// client takes away is what an export would have drawn.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SvgRender {
+    /// The SVG source, as text.
+    pub svg: String,
+    /// Canvas width in pixels.
+    pub width: u32,
+    /// Canvas height in pixels.
+    pub height: u32,
+}
+
+/// Which layers sit on top of one another.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlapReport {
+    /// Every overlapping pair, each reported once, in the order the layers
+    /// were given.
+    pub pairs: Vec<(LayerId, LayerId)>,
+}
+
+/// A document, where it lives, and exactly the fonts it names.
+///
+/// The three things every render needs, gathered once. Resolving them
+/// separately per render is how a preview and an export come to disagree —
+/// and how a project ends up locked twice for one answer.
+pub(crate) struct Loaded {
+    /// The document as it is on disk.
+    pub document: Document,
+    /// The project directory, which assets are resolved against.
+    pub directory: PathBuf,
+    /// Exactly the families the document names, and nothing else.
+    pub fonts: LoadedFonts,
+}
+
+impl Loaded {
+    /// The canvas as a PNG.
+    pub(crate) fn preview(&self, scale: f32) -> Result<Preview, ApiError> {
+        let hrefs = assemblash_renderer::data_uris(&self.document, &self.directory)?;
+        let png = document_to_png(
+            &self.document,
+            &self.fonts,
+            &hrefs,
+            scale,
+            // No timestamp: two previews of an unchanged document are
+            // identical, which is what makes a client's cache trustworthy.
+            &PngMetadata::for_document(&self.document),
+        )?;
+        let width = (f64::from(scale) * self.document.canvas.width).round() as u32;
+        let height = (f64::from(scale) * self.document.canvas.height).round() as u32;
+        Ok(Preview { png, width, height })
+    }
+
+    /// What an export of this document would want to say (FR-11).
+    ///
+    /// Produced here rather than taken from a response type, because the three
+    /// export paths — the command line's, the HTTP API's, and this one — each
+    /// write their own file and would otherwise each notice different things.
+    pub(crate) fn warnings(&self) -> Vec<ExportWarning> {
+        assemblash_renderer::export_warnings(&self.document, self.fonts.font_set(), &self.directory)
+    }
+}
+
 impl Backend {
     /// Serves a workspace.
     pub fn workspace(workspace: Workspace) -> Self {
@@ -348,37 +415,110 @@ impl Backend {
 
     /// A rendered PNG of the canvas.
     ///
-    /// Fonts come from the store and only the families the document names are
-    /// loaded, so installing something unrelated cannot change what an
-    /// existing document renders as. A family the store lacks is a structured
-    /// error, never a substitution.
+    /// Fonts are resolved by [`Backend::loaded`], which is where the promise
+    /// that a missing family is an error rather than a substitution lives.
     pub fn preview(&self, project: Option<&str>, scale: f32) -> Result<Preview, ApiError> {
-        let opened = self.open(project)?;
-        let session = lock_project(&opened)?;
-        let document = session.document().clone();
-        let directory = session.project_dir().to_path_buf();
-        drop(session);
+        self.loaded(project)?.preview(scale)
+    }
 
-        let hrefs = assemblash_renderer::data_uris(&document, &directory)?;
-        let families = families_used(&document);
-        let fonts = if families.is_empty() {
-            LoadedFonts::from_bytes([])
+    /// The canvas as SVG source.
+    ///
+    /// The render one step before rasterization, through the same function
+    /// `GET /api/projects/{id}/preview.svg` serves, so the two surfaces cannot
+    /// hand out different pictures of the same document.
+    pub fn svg(&self, project: Option<&str>) -> Result<SvgRender, ApiError> {
+        let loaded = self.loaded(project)?;
+        let rendered = assemblash_server::render::svg_for_loaded(
+            &loaded.document,
+            &loaded.directory,
+            &loaded.fonts,
+        )?;
+        // The writer built a `String` and the shared type carries bytes; this
+        // cannot fail, and saying so beats a lossy conversion that would hide
+        // it if it ever did.
+        let svg = String::from_utf8(rendered.bytes).map_err(|_| {
+            ApiError::new(
+                axum_status_internal(),
+                "renderFailed",
+                "the renderer produced SVG that is not text",
+            )
+        })?;
+        Ok(SvgRender {
+            svg,
+            width: rendered.width,
+            height: rendered.height,
+        })
+    }
+
+    /// Which of a document's layers sit on top of one another.
+    ///
+    /// The same question `assemblash overlaps` and
+    /// `GET /api/projects/{id}/overlaps` answer, over the same
+    /// [`layout::find_overlaps`](assemblash_core::layout::find_overlaps), so
+    /// the three surfaces cannot report different pairs or a different order.
+    /// An empty list of layers means the whole document; a layer that is not
+    /// there is a refused operation rather than an empty answer, because
+    /// silently ignoring a typo would report "nothing overlaps" about layers
+    /// nobody looked at.
+    pub fn overlaps(
+        &self,
+        project: Option<&str>,
+        layers: &[String],
+    ) -> Result<OverlapReport, ApiError> {
+        let (_, document) = self.read(project)?;
+        let ids = if layers.is_empty() {
+            assemblash_core::layout::all_layer_ids(&document)
         } else {
-            self.fonts()?.load_families(&families)?
+            layers.iter().map(LayerId::new).collect()
+        };
+        let pairs = assemblash_core::layout::find_overlaps(&document, &ids)
+            .map_err(assemblash_core::ops::OpError::from)
+            .map_err(assemblash_core::session::SessionError::from)?;
+        Ok(OverlapReport { pairs })
+    }
+
+    /// Creates a project in the workspace and registers it for later calls.
+    ///
+    /// What `POST /api/projects` does, and the one tool here with no operation
+    /// behind it: a document that does not exist yet has no version to quote
+    /// and nothing to undo to. A server holding a single directory has no
+    /// workspace to put a project in, so it says so rather than inventing one
+    /// beside the folder it was pointed at.
+    pub fn create_project(
+        &self,
+        project: &str,
+        width: f64,
+        height: f64,
+        background: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<ProjectSummary, ApiError> {
+        let state = match &self.root {
+            Root::Workspace(state) => state,
+            Root::SingleProject { name, .. } => {
+                return Err(ApiError::new(
+                    assemblash_server::StatusCode::BAD_REQUEST,
+                    "noWorkspace",
+                    format!(
+                        "this server holds only {name:?}, so there is no workspace to \
+                         create a project in: start it with --workspace"
+                    ),
+                ))
+            }
         };
 
-        let png = document_to_png(
-            &document,
-            &fonts,
-            &hrefs,
-            scale,
-            // No timestamp: two previews of an unchanged document are
-            // identical, which is what makes a client's cache trustworthy.
-            &PngMetadata::for_document(&document),
-        )?;
-        let width = (f64::from(scale) * document.canvas.width).round() as u32;
-        let height = (f64::from(scale) * document.canvas.height).round() as u32;
-        Ok(Preview { png, width, height })
+        let id = ProjectId::new(project)?;
+        let directory = state.workspace().create_project_dir(&id)?;
+
+        let mut document = Document::new(&mut UlidIdSource, width, height);
+        document.name = name.map(ToOwned::to_owned);
+        document.canvas.background = background.map(Color::new);
+
+        let session = assemblash_core::Session::create(&directory, document, now_millis())?;
+        let summary = summarise(id.as_str(), session.document());
+        // Adopted rather than reopened: the session already holds the lock,
+        // and a second open would have to wait for a lock this call owns.
+        state.adopt(&id, session)?;
+        Ok(summary)
     }
 
     /// The font store this server renders with.
@@ -466,6 +606,32 @@ impl Backend {
         )?));
         cache.insert(directory.to_path_buf(), std::sync::Arc::clone(&session));
         Ok(session)
+    }
+
+    /// Everything a render needs, with the lock held only for the read.
+    ///
+    /// Fonts come from the store and only the families the document names are
+    /// loaded, so installing something unrelated cannot change what an
+    /// existing document renders as. A family the store lacks is a structured
+    /// error, never a substitution.
+    pub(crate) fn loaded(&self, project: Option<&str>) -> Result<Loaded, ApiError> {
+        let opened = self.open(project)?;
+        let session = lock_project(&opened)?;
+        let document = session.document().clone();
+        let directory = session.project_dir().to_path_buf();
+        drop(session);
+
+        let families = families_used(&document);
+        let fonts = if families.is_empty() {
+            LoadedFonts::from_bytes([])
+        } else {
+            self.fonts()?.load_families(&families)?
+        };
+        Ok(Loaded {
+            document,
+            directory,
+            fonts,
+        })
     }
 
     /// Reads a project's document without holding the lock any longer than the

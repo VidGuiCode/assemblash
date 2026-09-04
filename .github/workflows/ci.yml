@@ -89,14 +89,12 @@ jobs:
 
       # The interface is typed against the declarations generated from the
       # Rust types, so a change to the document model that the UI has not
-      # caught up with fails here rather than at runtime.
-      - name: Typecheck
+      # caught up with fails here rather than at runtime. `check` runs the
+      # typecheck, the build, and the test suite (ubuntu-latest ships the
+      # Chrome the browser journeys need).
+      - name: Check (typecheck, build, test)
         working-directory: ui
-        run: npm run typecheck
-
-      - name: Build
-        working-directory: ui
-        run: npm run build
+        run: npm run check
 
       # ui/dist is committed because the binary embeds it: `cargo build` must
       # work with no Node involved. This is what keeps the committed copy

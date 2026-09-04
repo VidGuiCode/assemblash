@@ -928,6 +928,264 @@ fn an_export_name_never_becomes_a_path() {
 }
 
 #[test]
+fn overlaps_over_http_match_the_cli() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+
+    // Three boxes that pile up, and one on its own.
+    let mut ids = Vec::new();
+    for (x, y, width, height) in [
+        (0.0, 0.0, 100.0, 100.0),
+        (50.0, 50.0, 100.0, 100.0),
+        (80.0, 80.0, 100.0, 100.0),
+        (300.0, 150.0, 50.0, 40.0),
+    ] {
+        let created = http::post_json(
+            &harness.url("/api/projects/poster/operations"),
+            &json!({
+                "operation": {
+                    "op": "create",
+                    "position": { "at": "root" },
+                    "transform": { "x": x, "y": y, "width": width, "height": height },
+                    "type": "text",
+                    "text": "box",
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 12.0
+                }
+            }),
+        );
+        assert_eq!(created.status, 200, "{}", created.json());
+        ids.push(created.json()["created"][0].as_str().unwrap().to_owned());
+    }
+
+    // What `assemblash overlaps <project>` computes, through the same two
+    // functions the command calls.
+    let project = harness.root().join(PROJECTS_DIR).join("poster");
+    let session = assemblash_core::Session::open_read_only(&project).unwrap();
+    let expected = assemblash_core::layout::find_overlaps(
+        session.document(),
+        &assemblash_core::layout::all_layer_ids(session.document()),
+    )
+    .unwrap()
+    .into_iter()
+    .map(|(first, second)| json!([first.to_string(), second.to_string()]))
+    .collect::<Vec<_>>();
+    assert_eq!(
+        expected,
+        vec![
+            json!([ids[0], ids[1]]),
+            json!([ids[0], ids[2]]),
+            json!([ids[1], ids[2]])
+        ],
+        "the fixture is not three overlapping layers and one disjoint one"
+    );
+
+    let response = http::get(&harness.url("/api/projects/poster/overlaps"));
+    assert_eq!(response.status, 200, "{}", response.json());
+    assert_eq!(response.json()["pairs"], json!(expected));
+
+    // `?layers=` narrows the set, exactly as the command's positional list
+    // does — repeated or comma-separated, either spelling.
+    let narrowed = http::get(&harness.url(&format!(
+        "/api/projects/poster/overlaps?layers={}&layers={}",
+        ids[0], ids[3]
+    )));
+    assert_eq!(narrowed.status, 200, "{}", narrowed.json());
+    assert_eq!(narrowed.json()["pairs"], json!([]));
+
+    let commas = http::get(&harness.url(&format!(
+        "/api/projects/poster/overlaps?layers={},{}",
+        ids[1], ids[2]
+    )));
+    assert_eq!(commas.json()["pairs"], json!([[ids[1], ids[2]]]));
+
+    // A layer that is not there is refused, not answered with an empty list.
+    let missing = http::get(&harness.url("/api/projects/poster/overlaps?layers=layer_nope"));
+    assert_eq!(missing.status, 422, "{}", missing.json());
+    assert_eq!(error_code(&missing), "operationRefused");
+}
+
+#[test]
+fn svg_asset_text_with_no_loaded_font_is_reported() {
+    let harness = Harness::start();
+    install_test_font(&harness);
+    create_project(&harness, "poster");
+
+    // An asset whose `<text>` names a family nothing loaded. Fonts are
+    // resolved from the families *text layers* name, so this draws as
+    // nothing and always has — the export now says so rather than exiting
+    // successfully with a hole in the picture (DEF-2 is still open; this is
+    // the symptom made loud, not the fix).
+    let svg = concat!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">"#,
+        r##"<rect width="100" height="50" fill="#eeeeee"/>"##,
+        r#"<text x="4" y="30" font-family="Nowhere Sans" font-size="20">label</text>"#,
+        "</svg>"
+    );
+    let uploaded = http::post_bytes(
+        &harness.url("/api/projects/poster/assets?filename=label.svg"),
+        "image/svg+xml",
+        svg.as_bytes(),
+    );
+    assert_eq!(uploaded.status, 201, "{}", uploaded.json());
+    let asset = uploaded.json()["asset"]["id"].as_str().unwrap().to_owned();
+
+    let created = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({
+            "operation": {
+                "op": "create",
+                "position": { "at": "root" },
+                "transform": { "x": 10.0, "y": 10.0, "width": 100.0, "height": 50.0 },
+                "type": "svg",
+                "asset": asset,
+                "fit": "contain"
+            }
+        }),
+    );
+    assert_eq!(created.status, 200, "{}", created.json());
+    let layer = created.json()["created"][0].as_str().unwrap().to_owned();
+
+    let exported = http::post_json(
+        &harness.url("/api/projects/poster/export"),
+        &json!({ "name": "with-svg" }),
+    );
+    // Still a success: a warning is not a failure.
+    assert_eq!(exported.status, 200, "{}", exported.json());
+    let body = exported.json();
+    assert_eq!(body["path"], "exports/with-svg.png");
+    let warnings = body["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0]["code"], "svgAssetTextWithoutFont");
+    assert_eq!(warnings[0]["layerId"], layer);
+    assert!(warnings[0]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Nowhere Sans"));
+}
+
+#[test]
+fn a_document_with_nothing_to_say_exports_an_empty_warnings_array() {
+    let harness = Harness::start();
+    install_test_font(&harness);
+    create_project(&harness, "poster");
+    add_text(&harness, "poster", "Noto Sans");
+
+    let exported = http::post_json(
+        &harness.url("/api/projects/poster/export"),
+        &json!({ "name": "quiet" }),
+    );
+    assert_eq!(exported.status, 200, "{}", exported.json());
+    assert_eq!(
+        exported.json()["warnings"],
+        json!([]),
+        "the field is always there, so a client need not test for it"
+    );
+
+    // And warnings touch no pixel: the same document exported twice is the
+    // same bytes, warnings channel or no warnings channel.
+    let first = http::get(&harness.url("/api/projects/poster/exports/quiet.png"));
+    let again = http::post_json(
+        &harness.url("/api/projects/poster/export"),
+        &json!({ "name": "quiet-again" }),
+    );
+    assert_eq!(again.status, 200, "{}", again.json());
+    let second = http::get(&harness.url("/api/projects/poster/exports/quiet-again.png"));
+    assert_eq!(first.body, second.body);
+}
+
+/// How many entries the journal holds, and what version the document is at.
+fn journal_and_version(harness: &Harness, project: &str) -> (usize, u64) {
+    let history = http::get(&harness.url(&format!("/api/projects/{project}/history"))).json();
+    let document = http::get(&harness.url(&format!("/api/projects/{project}/document"))).json();
+    (
+        history["entries"].as_array().map_or(0, Vec::len),
+        document["version"].as_u64().unwrap_or_default(),
+    )
+}
+
+#[test]
+fn an_unknown_property_on_an_update_is_refused() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let created = add_text(&harness, "poster", "Noto Sans");
+    let layer = created["created"][0].as_str().unwrap().to_owned();
+    let before = journal_and_version(&harness, "poster");
+
+    // Against 1.2.0 this was `200 OK`, a version bump, the layer in
+    // `changed`, and a journal entry with no properties in it. A false
+    // success is worse than a refusal, so it is a refusal now.
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": { "op": "update", "id": layer, "letterSpacing": 4 } }),
+    );
+    assert_eq!(response.status, 422, "{}", response.json());
+    assert_eq!(error_code(&response), "operationRefused");
+    let message = response.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        message.contains("letterSpacing"),
+        "the message must name the property: {message}"
+    );
+
+    assert_eq!(
+        journal_and_version(&harness, "poster"),
+        before,
+        "a refused operation moves neither the version nor the journal"
+    );
+}
+
+#[test]
+fn an_unknown_property_on_a_create_is_refused() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let before = journal_and_version(&harness, "poster");
+
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({
+            "operation": {
+                "op": "create",
+                "position": { "at": "root" },
+                "transform": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 40.0 },
+                "type": "text",
+                "text": "over http",
+                "fontFamily": "Noto Sans",
+                "fontSize": 32.0,
+                "letterSpacing": 9
+            }
+        }),
+    );
+    assert_eq!(response.status, 422, "{}", response.json());
+    assert_eq!(error_code(&response), "operationRefused");
+    assert!(response.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("letterSpacing"));
+
+    assert_eq!(journal_and_version(&harness, "poster"), before);
+
+    // And the same refusal inside a batch, which parses commands its own way.
+    let batch = http::post_json(
+        &harness.url("/api/projects/poster/operation-batches"),
+        &json!({
+            "expectedVersion": before.1,
+            "label": "Add a heading",
+            "commands": [{ "op": "update", "id": "layer_nope", "cornerRadius": 8 }]
+        }),
+    );
+    assert_eq!(batch.status, 422, "{}", batch.json());
+    assert_eq!(error_code(&batch), "operationRefused");
+    assert!(batch.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("cornerRadius"));
+    assert_eq!(journal_and_version(&harness, "poster"), before);
+}
+
+#[test]
 fn refused_operations_and_bad_requests_are_typed() {
     let harness = Harness::start();
     create_project(&harness, "poster");

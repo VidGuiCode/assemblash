@@ -21,7 +21,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::backend::{
-    Backend, DocumentState, HistoryReport, LayerList, LayerSummary, ProjectList, ValidationReport,
+    Backend, DocumentState, HistoryReport, LayerList, LayerSummary, OverlapReport, ProjectList,
+    SvgRender, ValidationReport,
 };
 
 /// Which project a tool is about.
@@ -64,6 +65,19 @@ pub struct PreviewArgs {
     /// Multiplier on the canvas size. 1 renders at the document's own size.
     #[serde(default)]
     pub scale: Option<f32>,
+}
+
+/// Which layers to ask about.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlapArgs {
+    /// Project to read. Omit when this server holds a single project.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Layers to consider, as `list_layers` reports the ids. Omit to consider
+    /// every layer in the document.
+    #[serde(default)]
+    pub layer_ids: Option<Vec<String>>,
 }
 
 /// The MCP server.
@@ -299,6 +313,43 @@ impl AssemblashMcp {
             ContentBlock::text(format!("{}x{} PNG", preview.width, preview.height)),
             ContentBlock::image(base64(&preview.png), "image/png".to_owned()),
         ]))
+    }
+
+    /// The canvas as SVG source.
+    #[tool(
+        description = "Render a project's canvas to SVG and return the source as text. The \
+                       same render the PNG is rasterized from, one step earlier, so it is what \
+                       an export would draw \u{2014} useful to read or to take away, where \
+                       get_canvas_preview is what to call to look at the picture."
+    )]
+    async fn render_document(
+        &self,
+        Parameters(args): Parameters<ProjectArgs>,
+    ) -> Result<Json<SvgRender>, ErrorData> {
+        self.backend
+            .svg(self.read_project(args.project).as_deref())
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// Which layers sit on top of one another.
+    #[tool(
+        description = "Report every pair of layers whose boxes overlap, so a layout can be \
+                       checked rather than eyeballed. Considers the whole document unless \
+                       layerIds narrows it; a layer id that is not in the document is refused \
+                       rather than quietly left out of the answer."
+    )]
+    async fn find_overlaps(
+        &self,
+        Parameters(args): Parameters<OverlapArgs>,
+    ) -> Result<Json<OverlapReport>, ErrorData> {
+        self.backend
+            .overlaps(
+                self.read_project(args.project).as_deref(),
+                &args.layer_ids.unwrap_or_default(),
+            )
+            .map(Json)
+            .map_err(to_error)
     }
 }
 

@@ -39,6 +39,37 @@ fn run_failing(args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// Both streams of a command that must succeed: stdout, then stderr.
+///
+/// Warnings go to stderr and the exported file's hash goes to stdout, so a
+/// test about warnings has to read both and keep them apart.
+#[track_caller]
+fn run_output(args: &[&str]) -> (String, String) {
+    let output = Command::new(binary())
+        .args(args)
+        .output()
+        .expect("the binary runs");
+    assert!(
+        output.status.success(),
+        "assemblash {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// The `<path>\t<sha256:…>` line `render` and `export` print.
+#[track_caller]
+fn hash_line(printed: &str) -> (String, String) {
+    let line = printed.lines().next().unwrap_or_default();
+    let (path, hash) = line
+        .split_once('\t')
+        .unwrap_or_else(|| panic!("expected `<path>\\t<sha256:…>`, got {printed:?}"));
+    (path.to_owned(), hash.to_owned())
+}
+
 fn write_test_png(path: &Path) {
     let file = std::fs::File::create(path).unwrap();
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), 2, 2);
@@ -645,4 +676,270 @@ fn add_text_checks_the_font_family_against_the_store() {
         "--height",
         "30",
     ]);
+}
+
+/// DEF-10: an output path is a positional argument, and both commands say
+/// what they wrote by printing its hash.
+///
+/// The hash is what lets the exit test compare transports without shelling
+/// out to a hasher: the same document exported over the CLI, over HTTP and
+/// over MCP must produce the same bytes, and this is how the CLI says which
+/// bytes it produced.
+#[test]
+fn export_accepts_a_positional_output_and_prints_its_hash() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&[
+        "new",
+        project_arg,
+        "--width",
+        "40",
+        "--height",
+        "40",
+        "--background",
+        "#ffffff",
+    ]);
+
+    let positional = workspace.path().join("positional.png");
+    let (path, hash) = hash_line(&run(&["export", project_arg, positional.to_str().unwrap()]));
+    assert_eq!(path, positional.to_string_lossy());
+    assert_eq!(
+        hash,
+        assemblash_core::storage::hash_bytes(&std::fs::read(&positional).unwrap()),
+        "the printed hash is not the hash of the file on disk"
+    );
+
+    // `--out` is the older spelling of the same thing and prints the same
+    // hash, because it is the same document.
+    let flagged = workspace.path().join("flagged.png");
+    let (path, flagged_hash) = hash_line(&run(&[
+        "export",
+        project_arg,
+        "--out",
+        flagged.to_str().unwrap(),
+    ]));
+    assert_eq!(path, flagged.to_string_lossy());
+    assert_eq!(flagged_hash, hash, "the same document exported differently");
+
+    // `render` does both as well.
+    let svg = workspace.path().join("out.svg");
+    let (path, svg_hash) = hash_line(&run(&["render", project_arg, svg.to_str().unwrap()]));
+    assert_eq!(path, svg.to_string_lossy());
+    assert_eq!(
+        svg_hash,
+        assemblash_core::storage::hash_bytes(&std::fs::read(&svg).unwrap())
+    );
+
+    // Saying where twice is a mistake worth catching, and saying it not at
+    // all is the error it always was.
+    let refused = run_failing(&[
+        "export",
+        project_arg,
+        positional.to_str().unwrap(),
+        "--out",
+        flagged.to_str().unwrap(),
+    ]);
+    assert!(refused.contains("cannot be used with"), "{refused}");
+    let refused = run_failing(&["export", project_arg]);
+    assert!(refused.contains("required"), "{refused}");
+}
+
+/// DEF-12: the file an import reads is a positional argument.
+///
+/// `font add` already took one, so `assemblash add-svg p logo.svg` looked as
+/// though it should work and exited 2 with `unexpected argument`.
+#[test]
+fn add_svg_accepts_a_positional_file_and_the_flag() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "200"]);
+
+    let logo = workspace.path().join("logo.svg");
+    std::fs::write(
+        &logo,
+        concat!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">",
+            "<circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"#3355ff\"/></svg>",
+        ),
+    )
+    .unwrap();
+
+    let positional = run(&["add-svg", project_arg, logo.to_str().unwrap()])
+        .trim()
+        .to_owned();
+    assert!(positional.starts_with("layer_"), "{positional}");
+
+    let flagged = run(&["add-svg", project_arg, "--file", logo.to_str().unwrap()])
+        .trim()
+        .to_owned();
+    assert!(flagged.starts_with("layer_"), "{flagged}");
+
+    // Images too, and saying it both ways is refused rather than half-obeyed.
+    let swatch = workspace.path().join("swatch.png");
+    write_test_png(&swatch);
+    let image = run(&["add-image", project_arg, swatch.to_str().unwrap()])
+        .trim()
+        .to_owned();
+    assert!(image.starts_with("layer_"), "{image}");
+
+    let refused = run_failing(&[
+        "add-image",
+        project_arg,
+        swatch.to_str().unwrap(),
+        "--file",
+        swatch.to_str().unwrap(),
+    ]);
+    assert!(refused.contains("cannot be used with"), "{refused}");
+
+    // Naming no file at all is a parser error, not a panic.
+    let refused = run_failing(&["add-svg", project_arg]);
+    assert!(refused.contains("required"), "{refused}");
+}
+
+/// DEF-12: inline JSON is what a shell mangles, so a file may say it instead.
+#[test]
+fn preset_define_reads_properties_from_a_file() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg]);
+
+    let properties = workspace.path().join("heading.json");
+    std::fs::write(&properties, r##"{"fontSize":48,"color":"#101820"}"##).unwrap();
+
+    run(&[
+        "preset",
+        "define",
+        project_arg,
+        "--name",
+        "heading",
+        "--properties-file",
+        properties.to_str().unwrap(),
+    ]);
+
+    let listed = run(&["preset", "list", project_arg]);
+    assert!(listed.contains("heading"), "{listed}");
+    assert!(listed.contains("48"), "{listed}");
+    assert!(listed.contains("#101820"), "{listed}");
+
+    // Both spellings at once is refused, and neither is a parser error.
+    let refused = run_failing(&[
+        "preset",
+        "define",
+        project_arg,
+        "--name",
+        "other",
+        "--properties",
+        "{}",
+        "--properties-file",
+        properties.to_str().unwrap(),
+    ]);
+    assert!(refused.contains("cannot be used with"), "{refused}");
+    let refused = run_failing(&["preset", "define", project_arg, "--name", "other"]);
+    assert!(refused.contains("required"), "{refused}");
+}
+
+/// FR-11 on the command line: an export says what it noticed, and succeeds
+/// anyway. A warning is not a failure — the file is exactly what the document
+/// says; it is the document that is surprising.
+#[test]
+fn overflowing_text_warns_on_stderr_and_still_exits_zero() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "200"]);
+
+    let layer = run(&[
+        "add-text",
+        project_arg,
+        "--text",
+        "Assemblash renders more text than this box can hold",
+        "--font",
+        "Noto Sans",
+        "--size",
+        "24",
+        "--x",
+        "0",
+        "--y",
+        "0",
+        "--width",
+        "180",
+        "--height",
+        "20",
+    ])
+    .trim()
+    .to_owned();
+
+    let png = workspace.path().join("out.png");
+    let (printed, complaints) = run_output(&[
+        "export",
+        project_arg,
+        png.to_str().unwrap(),
+        "--font-dir",
+        font_dir().to_str().unwrap(),
+    ]);
+    assert!(
+        complaints.contains("textOverflowsBox") && complaints.contains(&layer),
+        "the overflow should be one line on stderr: {complaints:?}"
+    );
+    // Nothing about the warning may reach stdout, which carries the hash.
+    assert_eq!(printed.lines().count(), 1, "{printed:?}");
+    assert!(!printed.contains("textOverflowsBox"), "{printed:?}");
+    assert!(png.is_file(), "the export still wrote its file");
+
+    // Asked for as JSON, the array goes to stdout under the hash, and stderr
+    // stays quiet.
+    let (printed, complaints) = run_output(&[
+        "export",
+        project_arg,
+        png.to_str().unwrap(),
+        "--warnings-json",
+        "--font-dir",
+        font_dir().to_str().unwrap(),
+    ]);
+    assert!(
+        !complaints.contains("textOverflowsBox"),
+        "asked for JSON, stderr should stay quiet: {complaints:?}"
+    );
+    let mut lines = printed.lines();
+    assert!(lines.next().unwrap_or_default().contains("sha256:"));
+    let warnings: serde_json::Value = serde_json::from_str(lines.next().unwrap_or_default())
+        .unwrap_or_else(|error| panic!("stdout should end in a JSON array: {printed:?} ({error})"));
+    let first = &warnings[0];
+    assert_eq!(first["code"], "textOverflowsBox", "{warnings}");
+    assert_eq!(first["layerId"], layer, "{warnings}");
+    assert!(first["message"].as_str().is_some(), "{warnings}");
+
+    // `render` says the same things about the same document.
+    let svg = workspace.path().join("out.svg");
+    let (printed, _) = run_output(&[
+        "render",
+        project_arg,
+        svg.to_str().unwrap(),
+        "--warnings-json",
+        "--font-dir",
+        font_dir().to_str().unwrap(),
+    ]);
+    assert!(printed.contains("textOverflowsBox"), "{printed:?}");
+
+    // A document with nothing to say says nothing at all.
+    let quiet = workspace.path().join("quiet");
+    run(&[
+        "new",
+        quiet.to_str().unwrap(),
+        "--width",
+        "20",
+        "--height",
+        "20",
+    ]);
+    let (printed, complaints) = run_output(&[
+        "export",
+        quiet.to_str().unwrap(),
+        workspace.path().join("quiet.png").to_str().unwrap(),
+        "--warnings-json",
+    ]);
+    assert_eq!(printed.lines().nth(1), Some("[]"), "{printed:?}");
+    assert!(complaints.is_empty(), "{complaints:?}");
 }

@@ -10,6 +10,127 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-09-04
+
+Nothing new that the engine can draw; everything it could already draw becomes
+reachable from every interface. A layer property only the HTTP API could set is
+now a CLI flag. A query only the CLI could answer is now an HTTP route and an
+MCP tool. An export now says what it could not do well instead of staying
+quiet. And an operation carrying a property it does not define is refused,
+where it used to be accepted and silently discarded.
+
+### Added
+
+- **`assemblash set`**, one command for every updatable layer property:
+  `--name`, `--x`, `--y`, `--width`, `--height`, `--rotation`, `--opacity`,
+  `--visible`, `--locked`, `--blend`, `--effects`, `--effects-file`, `--text`,
+  `--text-file`, `--font`, `--size`, `--color`, `--align`, `--line-height`,
+  `--fit`, `--asset` and `--allow-locked`. However many flags an invocation
+  carries, it is one `update` operation: journalled once, undone once. Position
+  and size flags are merged into the layer's current transform, so `--x` alone
+  moves without resizing, and `--name ""` removes a name. `assemblash style` is
+  unchanged and now calls the same builder, so the two cannot drift.
+- **`--line-height` on `assemblash add-text`**, and **`lineHeight` on the MCP
+  `update_layer` tool** — the last updatable property those two surfaces could
+  not set.
+- **Export warnings.** An export now reports what it could not do well:
+  `wordBrokenMidWord` (a single word too wide for its box, split to fit),
+  `textOverflowsBox` (laid-out text taller than the box holding it) and
+  `svgAssetTextWithoutFont` (an imported SVG asset drawing text in a family no
+  loaded font provides). Each carries `code`, `message` and, where one applies,
+  `layerId`. `POST /api/projects/{id}/export` and the MCP `export_document`
+  result carry a `warnings` array; the CLI prints one line per warning on
+  stderr, or the whole array as JSON on stdout with the new `--warnings-json`
+  flag on `render` and `export`. A warning is advisory: it changes no pixel and
+  no exit status.
+- **`GET /api/projects/{id}/overlaps`**, returning `{"pairs": …}` in the same
+  order as `assemblash overlaps`, narrowable with a repeated or
+  comma-separated `?layers=`. A layer id that is not in the document is
+  refused, not ignored.
+- **Four MCP tools — `create_project`, `add_svg_layer`, `render_document` and
+  `find_overlaps`** — taking the server from 39 tools to 43. `render_document`
+  returns the same SVG the HTTP preview route serves; `find_overlaps` returns
+  the same pairs as the CLI and the new route; `add_svg_layer` draws an asset
+  that was already imported, because a layer can only ever draw a sanitized
+  one.
+- **Positional output paths on `assemblash render` and `assemblash export`**,
+  beside the existing `--out`, and both now print the written path and its
+  `sha256:` digest as one tab-separated line on stdout — the same digest form
+  `variants` already prints — so two interfaces can be compared without
+  hashing the files.
+- **Positional input files on `assemblash add-svg` and `assemblash
+  add-image`**, beside the existing `--file`, matching `assemblash font add`.
+- **`assemblash preset define --properties-file`**, so a preset's JSON can come
+  from a file rather than from a shell that may rewrite it on the way through.
+- **An SVG choice in the reference editor's export dialog.** Choosing SVG
+  downloads the engine's vector render and disables the resolution row, since a
+  scale means nothing for a vector; nothing is written into the project.
+- **Reference-editor inspector controls** for image and SVG `fit`, and for
+  reordering the effect stack, where order is part of what the stack means. The
+  font fields gained a suggestion list of the families the server reports, with
+  free text still accepted so a document naming a family this machine lacks
+  stays editable. An uploaded image or SVG now arrives at its own recorded
+  dimensions, scaled down to fit the canvas, instead of always 300×200.
+
+### Changed
+
+- The reference editor's export dialog no longer carries its bare SVG download
+  link. The link could not carry an access token, so it failed on any server
+  started with one, and the new format choice is the working version of the
+  same affordance.
+- CI's `ui` job now runs `npm run check`, which typechecks, builds and runs the
+  interface's unit tests and browser journeys in one step. Those tests existed
+  but had never been invoked in CI. The check that the committed build output
+  is the build output still runs after it, unchanged.
+
+### Fixed
+
+- **An operation carrying a property it does not define used to succeed.**
+  `{"op":"update","id":"layer_…","letterSpacing":4}` returned `200 OK`, bumped
+  the document version, reported the layer as changed, and journalled an update
+  carrying no properties at all — a false success that told a client its edit
+  had landed when nothing had happened. `create` behaved the same way. Both now
+  return `422` with code `operationRefused`, naming the property; the document
+  version does not move and no journal entry is written. The known keys are
+  derived from the same definitions the published operation schema is generated
+  from, and the `create` check uses the payload's own `type`, so a text
+  property on an image create is refused as precisely as a misspelt one. Three
+  spellings that predate 0.6.0 — `font_family`, `font_size` and `line_height`
+  on a text `create` — are still accepted, so journals written before then
+  still replay.
+
+  This affects only a newer client talking to this server. It is a refusal of
+  what is sent, never of what is stored: no document, journal or existing
+  client behaviour changes meaning. **MCP is unaffected** — every MCP tool
+  builds a typed operation in Rust, so a property the operation does not define
+  could never reach the operation layer from there.
+
+### Compatibility and safety
+
+- `schemaVersion` stays **1**.
+- The existing `Operation` union is unchanged, and no operation changed shape.
+  `set` and all four new MCP tools compile to variants that already existed.
+  `schema/document.schema.json`, `schema/operation.schema.json` and both
+  generated TypeScript declaration files are unchanged.
+- **A document written by 1.2.x is unchanged by this release**, and every 1.x
+  build — back to 1.0.0 — reads a document produced with this release's
+  capabilities exactly as it read one before it. No document field was added
+  and none changed shape.
+- `warnings` is a new field on an export response, not on a document, so it is
+  additive for any client that ignores unknown response fields.
+- The published operation schema does not state whether extra keys are allowed
+  on `create` and `update`. The refusal lives in the operation layer, so a
+  client author should read this behaviour rather than the schema's silence.
+- Export warnings are not displayed in the reference editor in this release.
+  They are reported by the CLI, the HTTP API and the MCP server.
+- `svgAssetTextWithoutFont` makes a silent failure loud; it does not fix it. An
+  imported SVG asset drawing text in a family the loaded fonts do not provide
+  still renders that text as nothing. The check reads `font-family` attributes
+  only — not a `style="…"` attribute and not a `<style>` block.
+- Every renderer gate golden is unmoved: this release adds no paint path.
+- Every existing CLI flag and subcommand, HTTP route and MCP tool still works.
+  `--out`, `--file` and `assemblash style` are all still accepted.
+
 ## [1.2.1] — 2026-09-04
 
 A bugfix release on 1.2.0. Five defects found by auditing the released build

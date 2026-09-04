@@ -104,6 +104,33 @@ export function resizedRotatedBounds(
   };
 }
 
+/**
+ * The box a newly imported asset is given on a canvas.
+ *
+ * The engine records an asset's pixel dimensions at import, so an upload can
+ * arrive at its own shape instead of a fixed 300×200 that squashed everything
+ * that was not 3:2. Scaled down to fit the canvas but never up: a small icon
+ * dropped onto a poster should stay a small icon.
+ *
+ * The fallback matters as much as the sizing. `width` and `height` are
+ * optional in the document model — an SVG without a `viewBox` genuinely has no
+ * pixel size — and guessing one from the markup would be inventing a number
+ * the engine did not record.
+ */
+export function placedAssetSize(
+  asset: { width?: number | null; height?: number | null },
+  canvas: { width: number; height: number },
+): { width: number; height: number } {
+  const width = asset.width ?? 0;
+  const height = asset.height ?? 0;
+  if (!(width > 0) || !(height > 0)) return { width: 300, height: 200 };
+  const scale = Math.min(canvas.width / width, canvas.height / height, 1);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 /** Scale one layer around its centre within a selection's canvas-axis box. */
 export function resizeItemInSelection(
   item: Rect,

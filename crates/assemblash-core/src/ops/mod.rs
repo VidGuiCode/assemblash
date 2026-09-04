@@ -383,6 +383,128 @@ pub fn dry_run(
     apply(&mut copy, operation, ids)
 }
 
+/// Refuses an operation carrying a property the operation does not have.
+///
+/// Called by a transport on the raw JSON, *before* it is deserialised into an
+/// [`Operation`]. Two reasons it lives here rather than in an extractor.
+/// Serde cannot do it: `CreateLayer` flattens the tagged `NewLayerKind`, and
+/// `deny_unknown_fields` beside a flattened field is not supported. And a
+/// refusal raised after parsing is a refused *operation* — the request was
+/// well formed, the engine declined it — which is what every other typed
+/// refusal in this module is, and what a transport maps onto its own
+/// "refused" status rather than its "malformed" one.
+///
+/// Only `create` and `update` are checked. They are the two whose properties
+/// live at the top level of the payload, and the two the false success was
+/// observed on; every other variant is a plain struct whose shape the parser
+/// settles by itself.
+///
+/// The known keys are read out of the generated schema rather than listed
+/// here, so a field added to [`UpdateLayer`] in a later release is accepted
+/// without anybody remembering a second list.
+/// `check_properties_accepts_every_operation_the_schema_describes` is what
+/// keeps that promise honest.
+pub fn check_properties(value: &serde_json::Value) -> Result<(), OpError> {
+    let Some(object) = value.as_object() else {
+        return Ok(());
+    };
+    let (op, known) = match object.get("op").and_then(serde_json::Value::as_str) {
+        Some("create") => (
+            "create",
+            create_keys(object.get("type").and_then(serde_json::Value::as_str)),
+        ),
+        Some("update") => ("update", update_keys().clone()),
+        _ => return Ok(()),
+    };
+    for key in object.keys() {
+        if !known.contains(key.as_str()) {
+            return Err(OpError::UnknownProperty {
+                op,
+                property: key.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Spellings `NewLayerKind::Text` accepts as aliases, which the schema
+/// therefore does not name (`requests.rs:63-75`).
+///
+/// They were the wire format before 0.6.0 and are still read, so a journal
+/// written by an older build replays through this check unchanged.
+const TEXT_ALIASES: &[&str] = &["font_family", "font_size", "line_height"];
+
+/// Top-level keys an `update` may carry.
+fn update_keys() -> &'static std::collections::BTreeSet<String> {
+    static KEYS: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    KEYS.get_or_init(|| {
+        let schema = schema_value(schemars::schema_for!(UpdateLayer));
+        let mut keys = property_names(&schema);
+        keys.insert("op".to_owned());
+        keys
+    })
+}
+
+/// Top-level keys a `create` of the given layer `type` may carry.
+///
+/// The flattened `NewLayerKind` is tagged, so the payload's own `type` picks
+/// one branch of the union: a `fontSize` on an image create is refused as
+/// precisely as a `letterSpacing` is. A `type` that names no branch — missing,
+/// or misspelled — falls back to the union of all four, because the parser is
+/// about to refuse it as an unknown variant and saying so twice, differently,
+/// would be worse than saying it once.
+fn create_keys(kind: Option<&str>) -> std::collections::BTreeSet<String> {
+    static SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    let schema = SCHEMA.get_or_init(|| schema_value(schemars::schema_for!(CreateLayer)));
+
+    let mut keys = property_names(schema);
+    keys.insert("op".to_owned());
+
+    let branches = schema
+        .get("oneOf")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    let selected = branches
+        .iter()
+        .filter(|branch| kind.is_some_and(|kind| branch_tag(branch) == Some(kind)))
+        .collect::<Vec<_>>();
+    let selected = if selected.is_empty() {
+        branches.iter().collect()
+    } else {
+        selected
+    };
+    for branch in selected {
+        keys.extend(property_names(branch));
+        if branch_tag(branch) == Some("text") {
+            keys.extend(TEXT_ALIASES.iter().map(|alias| (*alias).to_owned()));
+        }
+    }
+    keys
+}
+
+/// The `type` a `NewLayerKind` branch of the schema is for.
+fn branch_tag(branch: &serde_json::Value) -> Option<&str> {
+    branch
+        .get("properties")?
+        .get("type")?
+        .get("const")?
+        .as_str()
+}
+
+/// The names in a schema object's `properties`.
+fn property_names(schema: &serde_json::Value) -> std::collections::BTreeSet<String> {
+    schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .map(|properties| properties.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn schema_value(schema: schemars::Schema) -> serde_json::Value {
+    serde_json::to_value(schema).unwrap_or_default()
+}
+
 /// Refuses a mutation the document's own flags forbid (PRD §10.2).
 ///
 /// One function, called by every operation, because a protection that each
@@ -919,6 +1041,232 @@ mod tests {
         let predicted = dry_run(&doc, &operation, &mut ids).unwrap();
         assert!(doc.layers.is_empty());
         assert_eq!(predicted.created.len(), 1);
+    }
+
+    /// Every variant of the union, one instance each.
+    ///
+    /// Listed rather than derived, because the point is to notice when the
+    /// union grows: a new variant does not appear here until somebody adds
+    /// it, and adding it is what runs it through `check_properties`.
+    fn one_of_every_operation() -> Vec<Operation> {
+        let id = LayerId::new("layer_one");
+        let other = LayerId::new("layer_two");
+        let asset = crate::ids::AssetId::new("asset_one");
+        let slot = crate::templates::Slot {
+            name: "headline".to_owned(),
+            layer: id.clone(),
+            kind: crate::templates::SlotKind::Text,
+            description: None,
+            required: false,
+            extra: Extras::new(),
+        };
+        vec![
+            create_text(LayerPosition::Root { index: None }),
+            Operation::Create(CreateLayer {
+                position: LayerPosition::Root { index: None },
+                transform: Transform::new(0.0, 0.0, 10.0, 10.0),
+                name: None,
+                kind: NewLayerKind::Image {
+                    asset: asset.clone(),
+                    fit: crate::document::ImageFit::Contain,
+                },
+            }),
+            Operation::Create(CreateLayer {
+                position: LayerPosition::Root { index: None },
+                transform: Transform::new(0.0, 0.0, 10.0, 10.0),
+                name: None,
+                kind: NewLayerKind::Group,
+            }),
+            Operation::Create(CreateLayer {
+                position: LayerPosition::Root { index: None },
+                transform: Transform::new(0.0, 0.0, 10.0, 10.0),
+                name: None,
+                kind: NewLayerKind::Svg {
+                    asset: asset.clone(),
+                    fit: crate::document::ImageFit::Contain,
+                },
+            }),
+            Operation::Update(UpdateLayer {
+                name: Some(Some("named".to_owned())),
+                transform: Some(Transform::new(1.0, 2.0, 3.0, 4.0)),
+                opacity: Some(0.5),
+                visible: Some(true),
+                locked: Some(false),
+                blend_mode: Some(crate::document::BlendMode::Multiply),
+                effects: Some(Vec::new()),
+                text: Some("changed".to_owned()),
+                font_family: Some("Inter".to_owned()),
+                font_size: Some(12.0),
+                color: Some(Color::new("#ffffff")),
+                align: Some(TextAlign::Center),
+                line_height: Some(1.5),
+                fit: Some(crate::document::ImageFit::Cover),
+                asset: Some(asset),
+                allow_locked: true,
+                ..UpdateLayer::new(id.clone())
+            }),
+            Operation::Delete { id: id.clone() },
+            Operation::Duplicate { id: id.clone() },
+            Operation::Move {
+                id: id.clone(),
+                dx: 1.0,
+                dy: 2.0,
+            },
+            Operation::Resize {
+                id: id.clone(),
+                width: 10.0,
+                height: 20.0,
+            },
+            Operation::Rotate {
+                id: id.clone(),
+                degrees: 90.0,
+            },
+            Operation::Reorder {
+                id: id.clone(),
+                to: LayerPosition::Root { index: Some(0) },
+            },
+            Operation::Group {
+                ids: vec![id.clone(), other.clone()],
+                name: Some("pair".to_owned()),
+            },
+            Operation::Ungroup { id: id.clone() },
+            Operation::SetVisible {
+                id: id.clone(),
+                visible: false,
+            },
+            Operation::SetLocked {
+                id: id.clone(),
+                locked: true,
+            },
+            Operation::Rename {
+                id: id.clone(),
+                name: None,
+            },
+            Operation::Align {
+                ids: vec![id.clone(), other.clone()],
+                edge: AlignEdge::Left,
+            },
+            Operation::CenterOnCanvas {
+                ids: vec![id.clone()],
+                axis: Axis::Horizontal,
+            },
+            Operation::Distribute {
+                ids: vec![id.clone(), other],
+                axis: Axis::Vertical,
+            },
+            Operation::SnapTo {
+                id: id.clone(),
+                target: SnapTarget::Canvas {
+                    edge: AlignEdge::Left,
+                },
+            },
+            Operation::DefinePreset {
+                preset: crate::presets::Preset {
+                    name: "heading".to_owned(),
+                    description: None,
+                    properties: crate::presets::PresetProperties::default(),
+                    extra: Extras::new(),
+                },
+            },
+            Operation::DeletePreset {
+                name: "heading".to_owned(),
+            },
+            Operation::DefineSlot { slot: slot.clone() },
+            Operation::UpdateSlot {
+                name: "headline".to_owned(),
+                slot,
+            },
+            Operation::RemoveSlot {
+                name: "headline".to_owned(),
+            },
+            Operation::ApplyPreset {
+                id,
+                preset: "heading".to_owned(),
+                allow_locked: false,
+            },
+        ]
+    }
+
+    #[test]
+    fn check_properties_accepts_every_operation_the_schema_describes() {
+        for operation in one_of_every_operation() {
+            let value = serde_json::to_value(&operation).unwrap();
+            assert_eq!(
+                check_properties(&value),
+                Ok(()),
+                "the check refuses an operation this build itself writes: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_property_is_refused_naming_itself() {
+        let update = serde_json::json!({
+            "op": "update",
+            "id": "layer_one",
+            "letterSpacing": 4
+        });
+        assert_eq!(
+            check_properties(&update),
+            Err(OpError::UnknownProperty {
+                op: "update",
+                property: "letterSpacing".to_owned(),
+            })
+        );
+        assert_eq!(
+            check_properties(&update).unwrap_err().to_string(),
+            r#"unknown property "letterSpacing" on an update operation"#
+        );
+
+        let create = serde_json::json!({
+            "op": "create",
+            "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+            "type": "text",
+            "text": "hi",
+            "fontFamily": "Inter",
+            "fontSize": 12,
+            "letterSpacing": 9
+        });
+        assert_eq!(
+            check_properties(&create).unwrap_err().to_string(),
+            r#"unknown property "letterSpacing" on a create operation"#
+        );
+    }
+
+    #[test]
+    fn a_create_is_checked_against_the_kind_it_names() {
+        // `fontSize` is a real property — of a text create. On an image
+        // create it is as wrong as a property nothing has.
+        let image = serde_json::json!({
+            "op": "create",
+            "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+            "type": "image",
+            "asset": "asset_one",
+            "fontSize": 12
+        });
+        assert_eq!(
+            check_properties(&image),
+            Err(OpError::UnknownProperty {
+                op: "create",
+                property: "fontSize".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn the_spellings_that_predate_0_6_0_are_still_accepted() {
+        // Aliases the schema does not name, kept so an old journal replays.
+        let create = serde_json::json!({
+            "op": "create",
+            "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+            "type": "text",
+            "text": "hi",
+            "font_family": "Inter",
+            "font_size": 12,
+            "line_height": 1.4
+        });
+        assert_eq!(check_properties(&create), Ok(()));
+        assert!(serde_json::from_value::<Operation>(create).is_ok());
     }
 
     #[test]

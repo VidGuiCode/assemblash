@@ -52,6 +52,14 @@ image nobody can comfortably refine. Assemblash sits in the middle.
 - **Easy to embed.** Use the Rust crates, HTTP API, CLI, or MCP server instead
   of driving the reference interface with clicks.
 
+The AI story is deliberately small, and it is the whole story: an MCP server
+and an attributed history. An agent connects over MCP and brings its own model.
+No provider adapter ships with Assemblash, and the core never requires one — a
+document is created, edited, rendered, and exported with no model involved at
+all. What an agent does goes through the same validated operation layer as a
+click or a shell command and lands in the journal with its actor, so its work
+is reviewable and undoable rather than merely trusted.
+
 Assemblash is deliberately not a Photoshop, GIMP, or Figma replacement. It is
 a focused composition engine for repeatable visual assets, templates, and
 agent-assisted workflows.
@@ -114,6 +122,27 @@ Already have a font file? Use `--font /path/to/SomeFont.ttf` or
 `--font-dir /path/to/fonts` instead. Run `assemblash --help` or
 `assemblash <command> --help` for the complete command reference.
 
+To change a layer afterwards, `assemblash set` reaches every updatable
+property — name, position, size, rotation, opacity, visibility, lock, blend
+mode, effect stack, text, font, size, colour, alignment, line height, fit, and
+asset:
+
+```sh
+assemblash set ./poster --layer <LAYER_ID> --color '#1d1d1f' --size 72 --line-height 1.4
+```
+
+However many flags you give it, one invocation is one operation: journalled
+once, undone once.
+
+`render` and `export` take the output path positionally as well as through
+`--out`, and both print the written path and its `sha256:` digest as one
+tab-separated line, so a script can compare what two interfaces produced
+without hashing the file itself:
+
+```sh
+assemblash export ./poster poster.png --font-store ./assemblash-fonts
+```
+
 ## Platform compatibility
 
 The same six platforms are built, tested, and included in every release:
@@ -168,6 +197,16 @@ Fonts are loaded only from files you explicitly provide or install into the
 font store. Their bytes are hashed and pinned, which keeps typography and
 export pixels consistent across operating systems.
 
+An export also reports what it could not do well. Three warnings are produced:
+`wordBrokenMidWord` when a single word is too wide for its box and has to be
+split, `textOverflowsBox` when laid-out text is taller than the box holding it,
+and `svgAssetTextWithoutFont` when an imported SVG asset draws text in a family
+no loaded font provides. Each carries a `code`, a `message`, and the `layerId`
+where one applies. A warning is advisory: it changes no pixel and no exit
+status. The HTTP export response and the MCP `export_document` result carry a
+`warnings` array; the CLI prints one line per warning on stderr, or the whole
+array as JSON on stdout with `--warnings-json`.
+
 ### History and safety
 
 Every mutation uses the same transactional operation layer. A refused
@@ -208,6 +247,14 @@ Add `--project /path/to/project` to expose one project instead of the workspace.
 The MCP server provides read tools for documents, layers, validation, history,
 and rendered previews, plus mutation tools with dry run, version checks,
 protection checks, and undo transaction IDs.
+
+An agent can also start a project with `create_project`, add a layer drawing an
+already-imported SVG asset with `add_svg_layer`, ask for the document's vector
+render as text with `render_document`, and query overlapping layers with
+`find_overlaps` — the same pairs, in the same order, that the CLI and the HTTP
+API report. `update_layer` sets `lineHeight` beside the other text properties,
+and `export_document` returns the same `warnings` array the other interfaces
+report.
 
 For agents working from a repository checkout, a reusable public skill is in
 [`skills/assemblash/SKILL.md`](skills/assemblash/SKILL.md). It explains the

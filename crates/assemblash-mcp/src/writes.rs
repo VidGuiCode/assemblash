@@ -76,6 +76,32 @@ pub struct ExportResult {
     pub width: u32,
     /// Pixel height.
     pub height: u32,
+    /// What the export noticed and did not refuse (FR-11).
+    ///
+    /// Always present, empty when there is nothing to say. A warning never
+    /// changes a pixel and never changes the outcome: the file above was
+    /// written either way.
+    #[schemars(with = "Vec<ExportWarningShape>")]
+    pub warnings: Vec<assemblash_renderer::ExportWarning>,
+}
+
+/// The shape of an [`ExportWarning`](assemblash_renderer::ExportWarning), for
+/// the tool's output schema.
+///
+/// The renderer's warning derives `Serialize` but not `JsonSchema`, and this
+/// crate does not change the renderer. Nothing constructs this type: it exists
+/// so an agent is told what the field holds, and
+/// `the_warning_shape_matches_the_warning_that_is_sent` keeps the two honest.
+#[derive(Debug, Clone, JsonSchema)]
+#[schemars(rename_all = "camelCase")]
+pub struct ExportWarningShape {
+    /// Machine-readable code: `wordBrokenMidWord`, `textOverflowsBox`, or
+    /// `svgAssetTextWithoutFont`. Switch on this; the message is for a person.
+    pub code: String,
+    /// What happened, in the voice the operation layer refuses in.
+    pub message: String,
+    /// The layer responsible, when one layer is.
+    pub layer_id: Option<String>,
 }
 
 /// Which project later calls should assume.
@@ -196,12 +222,9 @@ impl Backend {
             Some(name) => safe_stem(name)?,
             None => "export".to_owned(),
         };
-        let preview = self.preview(project, scale)?;
-
-        let opened = self.open(project)?;
-        let session = lock_project(&opened)?;
-        let directory = session.project_dir().join(EXPORTS_DIR);
-        drop(session);
+        let loaded = self.loaded(project)?;
+        let preview = loaded.preview(scale)?;
+        let directory = loaded.directory.join(EXPORTS_DIR);
 
         let file = format!("{stem}.png");
         std::fs::create_dir_all(&directory).map_err(|source| {
@@ -225,6 +248,9 @@ impl Backend {
             bytes: preview.png.len(),
             width: preview.width,
             height: preview.height,
+            // Measured after the file is written, on purpose: an export that
+            // has something to say is still an export that happened.
+            warnings: loaded.warnings(),
         })
     }
 
@@ -282,6 +308,32 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    /// The schema of a warning describes the warning that is actually sent.
+    ///
+    /// [`ExportWarningShape`] exists only because the renderer's own type does
+    /// not derive `JsonSchema`, which makes it a second description of one
+    /// thing — the kind of pair that drifts. This is what stops it.
+    #[test]
+    fn the_warning_shape_matches_the_warning_that_is_sent() {
+        let warning = assemblash_renderer::ExportWarning {
+            code: assemblash_renderer::warnings::TEXT_OVERFLOWS_BOX,
+            message: "the text spills past the bottom".to_owned(),
+            layer_id: Some(assemblash_core::LayerId::new("layer_1")),
+        };
+        let sent = serde_json::to_value(&warning).unwrap();
+        let described = serde_json::to_value(schemars::schema_for!(ExportWarningShape)).unwrap();
+
+        let mut fields: Vec<&String> = sent.as_object().unwrap().keys().collect();
+        let mut properties: Vec<&String> = described["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        fields.sort();
+        properties.sort();
+        assert_eq!(fields, properties);
+    }
 
     #[test]
     fn an_export_name_is_a_name_and_never_a_path() {

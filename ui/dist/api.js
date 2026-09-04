@@ -207,6 +207,8 @@ export async function uploadAsset(project, file) {
     }
     return (await response.json());
 }
+/** The fit modes the engine draws an image or SVG asset with. */
+export const IMAGE_FITS = ["fill", "contain", "cover"];
 /**
  * The blend modes this build renders.
  *
@@ -358,6 +360,16 @@ export function svgUrl(project, version) {
  * fetched properly and handed to the element as a blob.
  */
 export async function imageObjectUrl(url) {
+    return URL.createObjectURL(await fetchBlob(url));
+}
+/**
+ * The bytes behind a rendered file, carrying the token.
+ *
+ * Separate from `imageObjectUrl` because a download wants to say how big the
+ * file is, and a blob URL has thrown that away by the time it is handed to an
+ * anchor.
+ */
+export async function fetchBlob(url) {
     const response = await fetch(url, { headers: withToken() });
     if (response.status === 401) {
         goToLogin();
@@ -366,7 +378,7 @@ export async function imageObjectUrl(url) {
     if (!response.ok) {
         throw new ApiError(`http${response.status}`, response.statusText, null);
     }
-    return URL.createObjectURL(await response.blob());
+    return await response.blob();
 }
 /**
  * Where the rendered PNG lives.

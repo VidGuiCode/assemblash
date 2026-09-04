@@ -5,11 +5,11 @@
 // has no second idea of what a document is, and no code path that edits one
 // locally and syncs later (PRD §7.2).
 
-import type { Document, Slot } from "../../schema/document.js";
+import type { Asset, Document, ImageFit, Slot } from "../../schema/document.js";
 import type { Operation } from "../../schema/operation.js";
 import { goToLogin, withToken } from "./token.js";
 
-export type { Document, Operation, Slot };
+export type { Asset, Document, ImageFit, Operation, Slot };
 
 /** A layer, as the document model defines it.
  *
@@ -303,7 +303,7 @@ export async function serverInfo(): Promise<ServerInfo> {
 export async function uploadAsset(
   project: string,
   file: File,
-): Promise<{ asset: { id: string; mediaType: string }; version: number }> {
+): Promise<{ asset: Asset; version: number }> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(project)}/assets?filename=${encodeURIComponent(file.name)}`,
     {
@@ -328,11 +328,11 @@ export async function uploadAsset(
     }
     throw new ApiError(code, message, null);
   }
-  return (await response.json()) as {
-    asset: { id: string; mediaType: string };
-    version: number;
-  };
+  return (await response.json()) as { asset: Asset; version: number };
 }
+
+/** The fit modes the engine draws an image or SVG asset with. */
+export const IMAGE_FITS = ["fill", "contain", "cover"] as const;
 
 /** One effect in a layer's stack, as the document stores it. */
 export type Effect = NonNullable<Layer["effects"]>[number] & {
@@ -559,6 +559,17 @@ export function svgUrl(project: string, version: number): string {
  * fetched properly and handed to the element as a blob.
  */
 export async function imageObjectUrl(url: string): Promise<string> {
+  return URL.createObjectURL(await fetchBlob(url));
+}
+
+/**
+ * The bytes behind a rendered file, carrying the token.
+ *
+ * Separate from `imageObjectUrl` because a download wants to say how big the
+ * file is, and a blob URL has thrown that away by the time it is handed to an
+ * anchor.
+ */
+export async function fetchBlob(url: string): Promise<Blob> {
   const response = await fetch(url, { headers: withToken() });
   if (response.status === 401) {
     goToLogin();
@@ -567,7 +578,7 @@ export async function imageObjectUrl(url: string): Promise<string> {
   if (!response.ok) {
     throw new ApiError(`http${response.status}`, response.statusText, null);
   }
-  return URL.createObjectURL(await response.blob());
+  return await response.blob();
 }
 
 /**
