@@ -10,6 +10,70 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-09-04
+
+A bugfix release on 1.2.0. Five defects found by auditing the released build
+against what it claims to do, four of them cases where something was quietly
+discarded or quietly duplicated rather than reported. Nothing new was added,
+and this is the 1.2 release to install.
+
+### Fixed
+
+- **A font that names its family in more than one language arrived as more
+  than one family.** `assemblash font add` wrote one index record per
+  name-table language record, so a font naming itself in English and Japanese
+  filled `font list` with families nobody had installed. One file's face is now
+  one record, under the name the English record gives, or the first record when
+  there is none.
+- **The same font bytes under a different filename were added twice.** A stored
+  record compared equal only when its `source` and `license` matched too, so
+  re-adding a renamed copy — or the same file again with `--license` filled in
+  — appended a second row describing a file already in the store. Records are
+  now matched on what they identify: family, style, weight, file, hash and face
+  index. The first import's source and licence are kept.
+- **SVG import destroyed the accessibility metadata an author had written.**
+  `role`, `aria-label`, `aria-labelledby` and `aria-describedby` were not on
+  the import allowlist and were stripped without appearing in the removal
+  report. They are now kept. None of them references anything outside the
+  document, so nothing about the import threat model changes.
+- **`prune_unused_assets` treated an `svg` layer's asset as an orphan** and
+  would have deleted a file the document was still drawing. It now counts every
+  layer kind that names an asset, and does so exhaustively, so a layer kind
+  added later cannot be forgotten here silently.
+- **The published schema described `blendMode` wrongly.** Its description still
+  read "Reserved (v0.5): only `normal` is rendered today", fourteen releases
+  after fourteen modes started rendering, and that sentence was in
+  `schema/document.schema.json` and `schema/document.d.ts` as well as the Rust.
+  It now says what the renderer does, including why `color-dodge` and
+  `color-burn` are deliberately absent and what happens to a mode this build
+  does not draw.
+
+### Changed
+
+- Removed `drawInspectorLegacy` from the reference interface. It was superseded
+  and called from nowhere; the committed bundle is smaller by its size.
+- `crates/assemblash-renderer/tests/fonts/TwoFamilyNames-Subset.ttf`, a Noto
+  Sans subset carrying two Unicode family-name records, is committed as a test
+  fixture for the first of the font-store fixes. Like the other fixtures there
+  it is under the SIL Open Font License 1.1; it is renamed rather than keeping
+  the original family name, because it is a modified version. `subset.py`
+  rebuilds it from the committed Latin subset.
+
+### Compatibility and safety
+
+- `schemaVersion` stays **1**.
+- The existing `Operation` union is unchanged, and no operation changed shape.
+- No CLI flag or subcommand, HTTP route, MCP tool or interface control was
+  added, changed or removed.
+- **A document written by 1.2.0 is unchanged by this release**: it loads,
+  saves, renders and exports exactly as it did, byte for byte. The only change
+  to a published artefact is a corrected description string in the generated
+  schema and TypeScript declarations, which no document depends on.
+- Every renderer gate golden is unmoved. No dependency was bumped.
+- Documents whose SVG assets were imported by an earlier build are unaffected;
+  the accessibility fix applies to imports made from now on, and re-importing
+  the original file recovers what an earlier import dropped.
+
 ## [1.2.0] — 2026-08-30
 
 Assemblash is easier to recognize, understand, and use without changing the

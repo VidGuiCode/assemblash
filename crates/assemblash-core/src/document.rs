@@ -239,8 +239,14 @@ pub struct Layer {
     /// Whether the layer is inspectable but never mutable through the API.
     #[serde(default)]
     pub read_only: bool,
-    /// Reserved (v0.5): only `normal` is rendered today; other values
-    /// round-trip but do not yet change output.
+    /// How this layer composites with what is underneath it.
+    ///
+    /// Fourteen modes are drawn. `color-dodge` and `color-burn` are
+    /// deliberately not among them: they are not bit-identical on every
+    /// target, and a mode that breaks determinism on one machine is worse
+    /// than a mode that says no. Those two, and any mode a newer build
+    /// writes, round-trip as written and are refused when something tries to
+    /// draw them, rather than being silently composited as `normal`.
     #[serde(default)]
     pub blend_mode: BlendMode,
     /// Adjustments applied to this layer when it is drawn, in order.

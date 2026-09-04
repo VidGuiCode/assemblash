@@ -301,19 +301,24 @@ pub fn import_asset_reporting(
     ))
 }
 
-/// Removes asset files under `assets/` that no image layer refers to.
+/// Removes asset files under `assets/` that no layer refers to.
 ///
 /// Returns the paths removed. Assets are copied in, so an orphan is a real
 /// waste of disk rather than someone else's file.
+///
+/// Every layer kind that names an asset has to be counted here. A kind that is
+/// missed does not make this cautious, it makes it destructive: the asset an
+/// `svg` layer draws would be read as an orphan and deleted out from under a
+/// document that still needs it.
 pub fn prune_unused_assets(
     document: &Document,
     project_dir: &Path,
 ) -> Result<Vec<PathBuf>, StorageError> {
     let mut referenced = Vec::new();
-    document.walk_layers(&mut |layer| {
-        if let LayerKind::Image(image) = &layer.kind {
-            referenced.push(image.asset.clone());
-        }
+    document.walk_layers(&mut |layer| match &layer.kind {
+        LayerKind::Image(image) => referenced.push(image.asset.clone()),
+        LayerKind::Svg(svg) => referenced.push(svg.asset.clone()),
+        LayerKind::Text(_) | LayerKind::Group(_) => {}
     });
 
     let mut removed = Vec::new();
@@ -372,7 +377,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use crate::document::{ImageFit, ImageLayer, Layer, Transform};
+    use crate::document::{Extras, ImageFit, ImageLayer, Layer, SvgLayer, Transform};
     use crate::ids::{LayerId, SequentialIdSource};
 
     fn project() -> (tempfile::TempDir, Document) {
@@ -579,5 +584,33 @@ mod tests {
         let removed = prune_unused_assets(&document, dir.path()).unwrap();
         assert_eq!(removed.len(), 1);
         assert!(used_file.is_file());
+    }
+
+    #[test]
+    fn pruning_keeps_the_asset_an_svg_layer_draws() {
+        let (dir, mut document) = project();
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = write_source_image(
+            source_dir.path(),
+            "logo.svg",
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#,
+        );
+        let asset = import_asset(dir.path(), &source, &mut SequentialIdSource::new()).unwrap();
+
+        document.layers.push(Layer::new(
+            LayerId::new("layer_1"),
+            Transform::new(0.0, 0.0, 10.0, 10.0),
+            LayerKind::Svg(SvgLayer {
+                asset: asset.id.clone(),
+                fit: ImageFit::Fill,
+                extra: Extras::new(),
+            }),
+        ));
+        let file = asset_path(dir.path(), &asset);
+        document.assets.push(asset);
+
+        let removed = prune_unused_assets(&document, dir.path()).unwrap();
+        assert!(removed.is_empty(), "nothing is unreferenced: {removed:?}");
+        assert!(file.is_file(), "the layer still draws it");
     }
 }

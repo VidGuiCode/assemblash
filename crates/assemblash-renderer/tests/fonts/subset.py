@@ -48,6 +48,47 @@ def instance_japanese():
 
 def rename(path, family):
     font = TTFont(path)
+    rename_records(font, family)
+    font.save(path)
+
+
+def reflavour():
+    """Writes the WOFF and WOFF2 copies the font-store import tests read."""
+    for flavor in ("woff", "woff2"):
+        font = TTFont("NotoSans-Subset.ttf")
+        font.flavor = flavor
+        destination = f"NotoSans-Subset.{flavor}"
+        font.save(destination)
+        print("wrote", destination)
+
+
+def two_names():
+    """Writes the fixture that carries two Unicode family-name records.
+
+    A real font often names its family once per language, and the store used
+    to write one index line for each of those records — one file arriving as
+    several families. Reproducing that needs a font with more than one name
+    record, and every other fixture here has exactly one, so this builds the
+    case deliberately: the same subset renamed, plus a Japanese-language
+    family record naming the same family in Japanese.
+
+    Derived from the committed `NotoSans-Subset.ttf`, so it needs no upstream
+    download and can be rebuilt from this repository alone.
+    """
+    family = "Assemblash Two Names"
+    japanese_family = "アセンブラッシュ二名"
+    font = TTFont("NotoSans-Subset.ttf")
+    rename_records(font, family)
+    # Windows platform, Unicode BMP, Japanese — a second family record the
+    # name table is perfectly entitled to carry.
+    font["name"].setName(japanese_family, 1, 3, 1, 0x0411)
+    destination = "TwoFamilyNames-Subset.ttf"
+    font.save(destination)
+    print("wrote", destination)
+
+
+def rename_records(font, family):
+    """Rewrites the basic naming records of an open font in place."""
     full = f"{family} Regular"
     postscript = family.replace(" ", "") + "-Regular"
     for record in font["name"].names:
@@ -62,17 +103,6 @@ def rename(path, family):
     # Typographic family/subfamily would otherwise keep the variable font's
     # naming and win over the basic records.
     font["name"].names = [n for n in font["name"].names if n.nameID not in (16, 17)]
-    font.save(path)
-
-
-def reflavour():
-    """Writes the WOFF and WOFF2 copies the font-store import tests read."""
-    for flavor in ("woff", "woff2"):
-        font = TTFont("NotoSans-Subset.ttf")
-        font.flavor = flavor
-        destination = f"NotoSans-Subset.{flavor}"
-        font.save(destination)
-        print("wrote", destination)
 
 
 def main():
@@ -97,6 +127,7 @@ def main():
             rename(destination, family)
         print("wrote", destination)
     reflavour()
+    two_names()
 
 
 if __name__ == "__main__":

@@ -158,6 +158,21 @@ pub struct FontRecord {
     pub license: Option<String>,
 }
 
+impl FontRecord {
+    /// Whether two records describe the same face of the same stored file.
+    ///
+    /// Everything except `source` and `license`, which say where a copy was
+    /// found and under what terms rather than what it is.
+    fn identifies_same_face_as(&self, other: &Self) -> bool {
+        self.family == other.family
+            && self.style == other.style
+            && self.weight == other.weight
+            && self.file == other.file
+            && self.hash == other.hash
+            && self.face_index == other.face_index
+    }
+}
+
 /// The contents of `index.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -311,27 +326,38 @@ impl FontStore {
 
         let mut added = Vec::new();
         for face in database.faces() {
-            for (family, _) in &face.families {
-                let record = FontRecord {
-                    family: family.clone(),
-                    style: match face.style {
-                        fontdb::Style::Normal => "normal",
-                        fontdb::Style::Italic => "italic",
-                        fontdb::Style::Oblique => "oblique",
-                    }
-                    .to_owned(),
-                    weight: face.weight.0,
-                    file: file.clone(),
-                    hash: hash.clone(),
-                    face_index: face.index,
-                    source: source.clone(),
-                    license: license.clone(),
-                };
-                if !self.index.fonts.contains(&record) {
-                    self.index.fonts.push(record.clone());
+            let Some(family) = primary_family(&face.families) else {
+                continue;
+            };
+            let record = FontRecord {
+                family,
+                style: match face.style {
+                    fontdb::Style::Normal => "normal",
+                    fontdb::Style::Italic => "italic",
+                    fontdb::Style::Oblique => "oblique",
                 }
-                added.push(record);
+                .to_owned(),
+                weight: face.weight.0,
+                file: file.clone(),
+                hash: hash.clone(),
+                face_index: face.index,
+                source: source.clone(),
+                license: license.clone(),
+            };
+            // Matched on what the record identifies rather than on the whole
+            // record: `source` and `license` describe where a copy came from,
+            // so the same bytes offered again from a renamed file, or a second
+            // time with the licence filled in, are the same face and not a new
+            // one. The first import's description is the one kept.
+            if !self
+                .index
+                .fonts
+                .iter()
+                .any(|existing| existing.identifies_same_face_as(&record))
+            {
+                self.index.fonts.push(record.clone());
             }
+            added.push(record);
         }
 
         self.write_index()?;
@@ -472,7 +498,9 @@ impl FontStore {
                 b.face_index,
             ))
         });
-        self.index.fonts.dedup();
+        self.index
+            .fonts
+            .dedup_by(|a, b| a.identifies_same_face_as(b));
         self.index.version = INDEX_VERSION;
 
         std::fs::create_dir_all(&self.directory)
@@ -495,6 +523,23 @@ impl FontStore {
             .map_err(|e| FontStoreError::io("replacing", &path, e))?;
         Ok(())
     }
+}
+
+/// The one family name a face is recorded under.
+///
+/// A name table may name the same family once per language — "Assemblash Two
+/// Names" and its Japanese spelling are one family, not two — so recording
+/// every record made one file arrive as several families in `font list` and
+/// several lines in `index.json`. English is preferred because that is the
+/// spelling a document is written with here and the one the renderer's own
+/// font database reports first; failing that the first record wins, which is
+/// the order the file itself sets and so is the same on every platform.
+fn primary_family(families: &[(String, fontdb::Language)]) -> Option<String> {
+    families
+        .iter()
+        .find(|(_, language)| matches!(language, fontdb::Language::English_UnitedStates))
+        .or_else(|| families.first())
+        .map(|(family, _)| family.clone())
 }
 
 /// Turns WOFF/WOFF2 bytes into plain OpenType bytes, passing anything else

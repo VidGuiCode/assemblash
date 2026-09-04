@@ -125,6 +125,15 @@ const ALLOWED_ATTRIBUTES: &[&str] = &[
     "visibility",
     "xmlns",
     "version",
+    // Accessibility. An author who labelled their own graphic said something
+    // about it that nothing else in the file records, and dropping it made an
+    // import quietly lossy. None of these names anything to fetch: `role` is a
+    // token and the other three are either literal text or ids inside the same
+    // document, so they cost the threat model nothing.
+    "role",
+    "aria-label",
+    "aria-labelledby",
+    "aria-describedby",
 ];
 
 /// Attributes that name something to fetch, and so need their value checked
@@ -507,6 +516,25 @@ mod tests {
         assert!(report.removed_elements.contains("foreignObject"));
         assert!(report.removed_attributes.contains("onload"));
         assert!(!report.is_clean());
+    }
+
+    #[test]
+    fn accessibility_metadata_survives_import() {
+        let labelled = r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" role="img" aria-label="Logo">
+            <title id="t">Logo</title>
+            <rect width="10" height="10" fill="#ff0000" aria-labelledby="t" aria-describedby="t"/>
+        </svg>"##;
+
+        let (clean, report) = sanitize(labelled).unwrap();
+
+        assert!(clean.contains(r#"role="img""#), "{clean}");
+        assert!(clean.contains(r#"aria-label="Logo""#), "{clean}");
+        assert!(clean.contains(r#"aria-labelledby="t""#), "{clean}");
+        assert!(clean.contains(r#"aria-describedby="t""#), "{clean}");
+        assert!(
+            report.is_clean(),
+            "a labelled graphic loses nothing: {report:?}"
+        );
     }
 
     #[test]

@@ -23,6 +23,14 @@ use assemblash_renderer::install::{
 use assemblash_renderer::store::{FontStore, FontStoreError, INDEX_FILE};
 use assemblash_renderer::{doc_to_svg, document_to_png, AssetHrefs, LoadedFonts, PngMetadata};
 
+/// The fixture that names one family twice, in two languages.
+///
+/// Built by `tests/fonts/subset.py` from the committed `NotoSans-Subset.ttf`,
+/// so it is a Noto Sans subset under the SIL Open Font License 1.1 like every
+/// other font here (`tests/fonts/OFL.txt`), renamed because a derived font
+/// should not claim to be the original.
+const TWO_NAMES: &str = "TwoFamilyNames-Subset.ttf";
+
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fonts")
 }
@@ -167,6 +175,45 @@ fn importing_the_same_bytes_twice_adds_nothing() {
     store
         .import_file(&fixture("NotoSans-Subset.ttf"), None, None)
         .unwrap();
+    assert_eq!(store.records(), after_first);
+}
+
+#[test]
+fn a_font_naming_its_family_in_two_languages_is_one_record() {
+    // `TwoFamilyNames-Subset.ttf` carries two Unicode family-name records for
+    // the same face — an English one and a Japanese one, which is ordinary in
+    // a shipped font. One file provides one family, so importing it must add
+    // one record, not one per name-table language.
+    let (_dir, mut store) = new_store();
+    let added = store
+        .import_file(&fixture(TWO_NAMES), None, Some("OFL-1.1".into()))
+        .unwrap();
+
+    assert_eq!(added.len(), 1, "one face, one record: {added:?}");
+    assert_eq!(added[0].family, "Assemblash Two Names");
+    assert_eq!(store.families(), vec!["Assemblash Two Names".to_owned()]);
+    assert_eq!(store.records().len(), 1);
+}
+
+#[test]
+fn the_same_bytes_under_another_name_add_nothing() {
+    // A user who keeps a copy of a font under a different filename, or adds it
+    // a second time with the licence filled in, is adding the same face. The
+    // file is already pinned by its hash, so a second index record would
+    // describe the same bytes twice.
+    let (_dir, mut store) = new_store();
+    store
+        .import_file(&fixture("NotoSans-Subset.ttf"), None, None)
+        .unwrap();
+    let after_first = store.records().to_vec();
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    let renamed = elsewhere.path().join("my-favourite-font.ttf");
+    std::fs::copy(fixture("NotoSans-Subset.ttf"), &renamed).unwrap();
+    store
+        .import_file(&renamed, None, Some("OFL-1.1".into()))
+        .unwrap();
+
     assert_eq!(store.records(), after_first);
 }
 

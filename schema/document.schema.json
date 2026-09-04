@@ -207,7 +207,7 @@
           "default": false
         },
         "blendMode": {
-          "description": "Reserved (v0.5): only `normal` is rendered today; other values\nround-trip but do not yet change output.",
+          "description": "How this layer composites with what is underneath it.\n\nFourteen modes are drawn. `color-dodge` and `color-burn` are\ndeliberately not among them: they are not bit-identical on every\ntarget, and a mode that breaks determinism on one machine is worse\nthan a mode that says no. Those two, and any mode a newer build\nwrites, round-trip as written and are refused when something tries to\ndraw them, rather than being silently composited as `normal`.",
           "$ref": "#/$defs/BlendMode",
           "default": "normal"
         },

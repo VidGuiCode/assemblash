@@ -1,7 +1,7 @@
 {
   "name": "assemblash-ui",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "description": "Reference interface for Assemblash. Built with tsc alone; the output is committed so the binary embeds it without needing Node.",
   "scripts": {

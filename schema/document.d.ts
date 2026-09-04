@@ -72,7 +72,7 @@ export type Layer = (TextLayer & {
   protected?: boolean;
   /** Whether the layer is inspectable but never mutable through the API. */
   readOnly?: boolean;
-  /** Reserved (v0.5): only `normal` is rendered today; other values */
+  /** How this layer composites with what is underneath it. */
   blendMode?: BlendMode;
   /** Adjustments applied to this layer when it is drawn, in order. */
   effects?: Effect[];
