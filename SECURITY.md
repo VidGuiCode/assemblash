@@ -2,7 +2,7 @@
 
 ## Project status
 
-Assemblash is **released at 1.2.1**. It is a local-first engine: by default it
+Assemblash is **released at 1.3.0**. It is a local-first engine: by default it
 binds `127.0.0.1` and requires no account, no network, and no cloud service.
 
 ## Supported versions

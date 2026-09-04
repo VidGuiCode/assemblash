@@ -25,8 +25,8 @@ interface, a local HTTP API, an embedded Rust API, and an MCP server. Every
 interface goes through the same validated operation layer, so a change made by
 an agent behaves like a change made by a person.
 
-**Current release: 1.2.1.** The document schema and operation API have been
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.2.1)
+**Current release: 1.3.0.** The document schema and operation API have been
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.3.0)
 or [changelog](CHANGELOG.md) for the full history.
 
 <p align="center">
@@ -103,7 +103,7 @@ the tap is **not published yet**, so there is no `brew install` to run today.
 Building requires [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.2.1 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.3.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -153,8 +153,9 @@ The same six platforms are built, tested, and included in every release:
 | Linux | ✅ `.deb`, `.tar.gz` | ✅ `.deb`, `.tar.gz` |
 | macOS | ✅ Intel `.tar.gz` | ✅ Apple silicon `.tar.gz` |
 
-The `.exe` and `.deb` are new in the 1.2.0 release assets. macOS has no
-installer of its own yet — see the note above about the quarantine flag.
+Every release carries a bare `.exe` per Windows target and a `.deb` per Linux
+target beside the archives. macOS has no installer of its own yet — see the
+note above about the quarantine flag.
 
 The release workflow checks that every binary starts before attaching it. CI
 also runs the Rust workspace tests on all six targets. The reference editor

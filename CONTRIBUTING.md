@@ -8,7 +8,7 @@ Please also read the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Project status
 
-**Released at 1.2.1.** The engine is implemented and released for six targets;
+**Released at 1.3.0.** The engine is implemented and released for six targets;
 see [README.md](README.md) for what exists and [PRD.md](PRD.md) for what it is
 meant to be.
 
