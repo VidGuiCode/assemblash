@@ -25,8 +25,8 @@ interface, a local HTTP API, an embedded Rust API, and an MCP server. Every
 interface goes through the same validated operation layer, so a change made by
 an agent behaves like a change made by a person.
 
-**Current release: 1.3.0.** The document schema and operation API have been
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.3.0)
+**Current release: 1.3.1.** The document schema and operation API have been
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.3.1)
 or [changelog](CHANGELOG.md) for the full history.
 
 <p align="center">
@@ -103,7 +103,7 @@ the tap is **not published yet**, so there is no `brew install` to run today.
 Building requires [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.3.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.3.1 assemblash-cli
 ```
 
 ### Create and export from the CLI
