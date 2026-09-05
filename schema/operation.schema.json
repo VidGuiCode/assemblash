@@ -4,6 +4,20 @@
   "description": "One mutation of a document.",
   "oneOf": [
     {
+      "description": "Changes the canvas without scaling layers.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "updateCanvas"
+        }
+      },
+      "$ref": "#/$defs/UpdateCanvas",
+      "required": [
+        "op"
+      ]
+    },
+    {
       "description": "Adds a layer.",
       "type": "object",
       "properties": {
@@ -516,6 +530,66 @@
     }
   ],
   "$defs": {
+    "Color": {
+      "description": "An sRGB colour, `#rrggbb` or `#rrggbbaa`.\n\nStored as written so a document round-trips exactly; validation checks the\nshape and [`Color::to_rgba`] parses it.",
+      "type": "string"
+    },
+    "CanvasAnchor": {
+      "description": "The point of the old canvas that stays fixed when its dimensions change.",
+      "type": "string",
+      "enum": [
+        "top-left",
+        "top",
+        "top-right",
+        "left",
+        "center",
+        "right",
+        "bottom-left",
+        "bottom",
+        "bottom-right"
+      ]
+    },
+    "UpdateCanvas": {
+      "description": "Changes canvas properties without scaling any layer.",
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "height": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "background": {
+          "description": "Absent preserves the background; null clears it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CanvasAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "LayerPosition": {
       "description": "Where a new layer goes.",
       "oneOf": [
@@ -612,10 +686,6 @@
         "height"
       ],
       "additionalProperties": true
-    },
-    "Color": {
-      "description": "An sRGB colour, `#rrggbb` or `#rrggbbaa`.\n\nStored as written so a document round-trips exactly; validation checks the\nshape and [`Color::to_rgba`] parses it.",
-      "type": "string"
     },
     "TextAlign": {
       "description": "Horizontal text alignment inside the layer box.",

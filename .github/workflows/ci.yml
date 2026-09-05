@@ -168,3 +168,10 @@ jobs:
           python scripts/release_smoke.py
           --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
           --workspace "${{ runner.temp }}/assemblash-ci-smoke"
+
+      - name: Verify canvas resize, transparency and undo across transports
+        run: >-
+          python scripts/canvas_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-canvas-smoke"
+          --font crates/assemblash-renderer/tests/fonts/NotoSans-Subset.ttf

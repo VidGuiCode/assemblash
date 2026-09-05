@@ -25,8 +25,8 @@ interface, a local HTTP API, an embedded Rust API, and an MCP server. Every
 interface goes through the same validated operation layer, so a change made by
 an agent behaves like a change made by a person.
 
-**Current release: 1.3.1.** The document schema and operation API have been
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.3.1)
+**Current release: 1.4.0.** The document schema and operation API have been
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.4.0)
 or [changelog](CHANGELOG.md) for the full history.
 
 <p align="center">
@@ -103,7 +103,7 @@ the tap is **not published yet**, so there is no `brew install` to run today.
 Building requires [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.3.1 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.4.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -298,6 +298,30 @@ The token authenticates requests; it does not encrypt traffic. Put Assemblash
 behind a TLS reverse proxy when it is reachable beyond a trusted network. See
 [DEPLOYMENT.md](DEPLOYMENT.md) for Docker, Caddy, Traefik, nginx, and identity
 provider guidance.
+
+## Edit the canvas
+
+Use the **Canvas** button to open the editor's Properties panel.
+Set dimensions, choose a background or transparency, select a resize anchor,
+and apply the changes together. Layers keep their sizes; the anchor controls
+only their positions. The CLI equivalent is:
+
+```sh
+assemblash canvas set ./poster --width 1200 --height 900 --background "#102030" --anchor center
+assemblash canvas set ./poster --no-background
+assemblash undo ./poster
+```
+
+MCP exposes `update_canvas` with `width`, `height`, `background`, `anchor`,
+`expectedVersion` and `dryRun`. HTTP accepts the same canvas fields in an
+`updateCanvas` operation at `POST /api/projects/{id}/operations`. Omit
+`background` to preserve it or send `null` to clear it. A resize that would
+move locked, protected or read-only content is refused atomically.
+
+Canvas editing requires 1.4.0 or newer. Once a project records
+`updateCanvas`, 1.3.1 refuses both `show` and `history` because it cannot parse
+that journal operation, even after undo. Continue using the newer binary;
+do not edit the journal. The document schema remains version 1.
 
 ## Stability and current limits
 

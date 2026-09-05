@@ -111,6 +111,12 @@ function findLayer(document, id) {
 }
 
 function applyMockOperation(document, operation, created) {
+  if (operation.op === "updateCanvas") {
+    for (const key of ["width", "height", "background"]) {
+      if (Object.hasOwn(operation, key)) document.canvas[key] = operation[key];
+    }
+    return;
+  }
   if (operation.op === "create") {
     const { op, position, ...rest } = operation;
     const made = {
@@ -777,4 +783,43 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     await page.click("#dock-toggle");
     assert.equal(await page.evaluate(`document.querySelector("#structure-panel").classList.contains("mobile-open")`), true);
   });
+  await t.test("canvas settings apply one resize and can clear the background", async () => {
+    fixture.reset();
+    await openProject(page);
+    await page.click("#edit-canvas");
+    assert.equal(await page.evaluate(`document.querySelector("#canvas-apply").disabled`), true);
+    assert.equal(await page.evaluate(`document.querySelectorAll('[name="canvas-anchor"]').length`), 9);
+    await page.evaluate(`(() => {
+      const width = document.querySelector("#canvas-width");
+      width.value = "0";
+      width.dispatchEvent(new Event("input", { bubbles: true }));
+      document.querySelector("#canvas-settings").requestSubmit();
+    })()`);
+    assert.equal(fixture.writes.length, 0);
+    assert.equal(await page.evaluate(`document.querySelector("#canvas-width").validity.valid`), false);
+    await page.evaluate(`(() => {
+      for (const [id, value] of [["canvas-width", "1200"], ["canvas-height", "900"], ["canvas-background", "#102030"]]) {
+        const input = document.getElementById(id);
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    })()`);
+    await page.click("#canvas-apply");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "updateCanvas", width: 1200, height: 900, anchor: "top-left", background: "#102030",
+    });
+    assert.equal(await page.evaluate(`document.querySelector("#canvas-width").value`), "1200");
+    fixture.writes.length = 0;
+    await page.click("#canvas-transparent");
+    await page.click("#canvas-apply");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation, { op: "updateCanvas", background: null });
+    assert.equal(await page.evaluate(`document.querySelector("#canvas-background").disabled`), true);
+    assert.equal(await page.evaluate(`document.querySelector("#canvas-transparent").checked`), true);
+  });
+
 });

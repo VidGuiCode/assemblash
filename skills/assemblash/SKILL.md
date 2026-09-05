@@ -92,6 +92,19 @@ kits, customer assets, or downstream workflow data.
 For exact arguments, payloads, and supported properties, use
 `assemblash --help` and the committed schemas instead of guessing.
 
+## Canvas editing (1.4.0 and newer)
+
+Check the running binary's help or MCP tool list before using `canvas set` or
+`update_canvas`; 1.3.1 does not include them. Canvas resizing never
+scales layers. The default `top-left` anchor preserves positions; other anchors
+translate root layers. Respect a refusal caused by locked or protected content.
+Omit `background` to preserve it, send JSON `null` or use `--no-background` to
+clear it. Apply dimensions and background together for one undoable change.
+
+After `updateCanvas` enters a project's journal, 1.3.1 refuses both `show` and
+`history`, including after undo. Keep using the newer binary and preserve the
+journal. The document schema version remains 1.
+
 ## Pass JSON in a file, not on the command line
 
 PowerShell rewrites an inline JSON argument, so a payload typed after a flag

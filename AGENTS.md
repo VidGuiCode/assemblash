@@ -16,7 +16,7 @@ refuses to become — scope, requirements, safety model, and the phase plan.
 Both apply to you. This file only adds what is specific to agents and stated
 nowhere else.
 
-The project is **released at 1.3.1** and implemented: a Rust workspace of five
+The project is **released at 1.4.0** and implemented: a Rust workspace of five
 crates, a reference interface in `ui/`, and released binaries for six targets.
 `1.0.0` established the document schema and operation API stability promise, so
 a change that breaks either is a MAJOR release and needs a migration — say so

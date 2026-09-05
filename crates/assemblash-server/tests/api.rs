@@ -1337,3 +1337,84 @@ fn urlencode(value: &str) -> String {
     }
     out
 }
+
+#[test]
+fn unknown_typed_envelope_fields_are_bad_requests_without_mutation() {
+    let harness = Harness::start();
+    let create = http::post_json(
+        &harness.url("/api/projects"),
+        &json!({"id":"bad","width":100.0,"height":100.0,"unknown":true}),
+    );
+    assert_eq!(create.status, 400);
+    create_project(&harness, "poster");
+    let before = document_and_history_bytes(&harness, "poster");
+    for (path, body) in [
+        (
+            "/api/projects/poster/operations",
+            json!({"operation":{"op":"updateCanvas","width":200.0},"unknown":true}),
+        ),
+        (
+            "/api/projects/poster/operation-batches",
+            json!({"expectedVersion":0,"label":"bad","commands":[],"unknown":true}),
+        ),
+        (
+            "/api/projects/poster/operation-batches",
+            json!({"expectedVersion":0,"label":"bad macro","commands":[{"op":"insertLayerTree","sourceProject":"poster","layers":[],"offsetx":10}]}),
+        ),
+        (
+            "/api/projects/poster/export",
+            json!({"name":"bad","unknown":true}),
+        ),
+    ] {
+        let response = http::post_json(&harness.url(path), &body);
+        assert_eq!(response.status, 400, "{path}: {}", response.json());
+        assert_eq!(document_and_history_bytes(&harness, "poster"), before);
+    }
+}
+
+#[test]
+fn update_canvas_clears_background_and_undoes_over_http() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let before = http::get(&harness.url("/api/projects/poster/document")).body;
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({"operation":{"op":"updateCanvas","width":500.0,"background":null,"anchor":"center"}}),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    let document = http::get(&harness.url("/api/projects/poster/document")).json();
+    assert_eq!(document["canvas"]["width"], 500.0);
+    assert!(document["canvas"]["background"].is_null());
+    let undone = http::post_json(&harness.url("/api/projects/poster/undo"), &json!({}));
+    assert_eq!(undone.status, 200, "{}", undone.json());
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/document")).body,
+        before
+    );
+}
+
+fn document_and_history_bytes(harness: &Harness, project: &str) -> (Vec<u8>, Vec<u8>) {
+    (
+        http::get(&harness.url(&format!("/api/projects/{project}/document"))).body,
+        http::get(&harness.url(&format!("/api/projects/{project}/history"))).body,
+    )
+}
+
+#[test]
+fn actor_detail_alias_is_recorded_in_history() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({
+            "operation": {"op":"updateCanvas","width":500},
+            "actor": {"kind":"agent","detail":"canvas integration"}
+        }),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    let history = http::get(&harness.url("/api/projects/poster/history")).json();
+    assert_eq!(
+        history["entries"][0]["actor"]["detail"],
+        "canvas integration"
+    );
+}

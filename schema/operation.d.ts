@@ -2,6 +2,25 @@
 // Generated from the Rust types — do not edit. Regenerate with:
 //   cargo run -p assemblash-core --example generate-schema
 
+/// An sRGB colour, `#rrggbb` or `#rrggbbaa`.
+///
+/// Stored as written so a document round-trips exactly; validation checks the
+/// shape and [`Color::to_rgba`] parses it.
+export type Color = string;
+
+/// The point of the old canvas that stays fixed when its dimensions change.
+export type CanvasAnchor = "top-left" | "top" | "top-right" | "left" | "center" | "right" | "bottom-left" | "bottom" | "bottom-right";
+
+/// Changes canvas properties without scaling any layer.
+export type UpdateCanvas = {
+  width?: number | null;
+  height?: number | null;
+  /** Absent preserves the background; null clears it. */
+  background?: Color | null;
+  anchor?: CanvasAnchor | null;
+  [key: string]: unknown;
+};
+
 /// Where a new layer goes.
 export type LayerPosition = {
   /** Index in the layer list; `None` means on top of everything. */
@@ -34,12 +53,6 @@ export type Transform = {
   rotation?: number;
   [key: string]: unknown;
 };
-
-/// An sRGB colour, `#rrggbb` or `#rrggbbaa`.
-/// 
-/// Stored as written so a document round-trips exactly; validation checks the
-/// shape and [`Color::to_rgba`] parses it.
-export type Color = string;
 
 /// Horizontal text alignment inside the layer box.
 export type TextAlign = "left" | "center" | "right";
@@ -94,11 +107,11 @@ export type CreateLayer = ({
 };
 
 /// How a layer composites onto what is beneath it.
-/// 
+///
 /// The whole CSS separable-and-non-separable set, every one of which was
 /// checked to rasterize before it was named here — a mode that only
 /// round-trips would be a promise the pixels do not keep.
-/// 
+///
 /// [`BlendMode::Other`] is what a mode written by some newer build becomes:
 /// preserved verbatim, because losing it would mean a document came back
 /// damaged, but **refused at render time** rather than quietly composited as
@@ -107,11 +120,11 @@ export type CreateLayer = ({
 export type BlendMode = "normal" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "color-dodge" | "color-burn" | "hard-light" | "soft-light" | "difference" | "exclusion" | "hue" | "saturation" | "color" | "luminosity" | string;
 
 /// One adjustment in a layer's effect stack.
-/// 
+///
 /// Tagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps
 /// an effect written by a newer build verbatim and refuses to render it —
 /// the same bargain as [`BlendMode::Other`]: never lose it, never guess at it.
-/// 
+///
 /// The amounts are multipliers where 1 means "unchanged", which is what
 /// `filter: brightness(1.2)` means everywhere else, so a number copied from a
 /// CSS example does what it looks like it does.
@@ -147,7 +160,7 @@ export type Effect = {
 } | unknown;
 
 /// Change properties of an existing layer.
-/// 
+///
 /// Every field is optional and means "leave alone" when absent. `name` is
 /// doubly optional: `Some(None)` clears the name, `None` leaves it.
 export type UpdateLayer = {
@@ -221,11 +234,11 @@ export type Preset = {
 };
 
 /// What a preset sets.
-/// 
+///
 /// Every field optional, and absent means "leave alone" — so a preset that
 /// only names a colour is a colour preset, and applying it does not quietly
 /// reset a layer's font.
-/// 
+///
 /// Deliberately no transform: a style is not a position. A preset that moved
 /// layers would be a template, and templates already exist.
 export type PresetProperties = {
@@ -267,7 +280,10 @@ export type Slot = {
 export type SlotKind = "text" | "image" | "color";
 
 /// One mutation of a document.
-export type Operation = CreateLayer & {
+export type Operation = UpdateCanvas & {
+  op: "updateCanvas";
+  [key: string]: unknown;
+} | CreateLayer & {
   op: "create";
   [key: string]: unknown;
 } | UpdateLayer & {

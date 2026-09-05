@@ -13,14 +13,15 @@
 
 use assemblash_core::document::{BlendMode, Effect, ImageFit, TextAlign, Transform};
 use assemblash_core::ops::{
-    AlignEdge, Axis, CreateLayer, LayerPosition, NewLayerKind, SnapTarget, UpdateLayer,
+    AlignEdge, Axis, CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, SnapTarget,
+    UpdateCanvas, UpdateLayer,
 };
 use assemblash_core::{AssetId, Color, LayerId, Operation};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::ErrorData;
 use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::backend::ProjectSummary;
 use crate::server::{to_error, AssemblashMcp};
@@ -309,6 +310,27 @@ pub struct AxisArgs {
     pub axis: Axis,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCanvasArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
+    #[serde(default, deserialize_with = "nullable_color")]
+    #[schemars(with = "Option<Option<String>>")]
+    pub background: Option<Option<Color>>,
+    #[serde(default)]
+    pub anchor: Option<CanvasAnchor>,
+}
+fn nullable_color<'de, D>(deserializer: D) -> Result<Option<Option<Color>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::<Color>::deserialize(deserializer)?))
+}
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapArgs {
@@ -686,6 +708,24 @@ impl AssemblashMcp {
         )
     }
 
+    /// Changes canvas dimensions or background without scaling layers.
+    #[tool(
+        description = "Update the canvas. Existing root layers translate only according to anchor; they never scale. Omit background to preserve it; pass null to clear it."
+    )]
+    async fn update_canvas(
+        &self,
+        Parameters(args): Parameters<UpdateCanvasArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(
+            &args.write,
+            Operation::UpdateCanvas(UpdateCanvas {
+                width: args.width,
+                height: args.height,
+                background: args.background,
+                anchor: args.anchor,
+            }),
+        )
+    }
     /// Snaps a layer to an edge.
     #[tool(
         description = "Move a layer so it sits against an edge of another layer, or of the canvas."

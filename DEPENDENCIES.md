@@ -49,11 +49,11 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 | Crate | Version | Licence |
 | ----- | ------- | ------- |
-| assemblash-cli | 1.3.1 | Apache-2.0 |
-| assemblash-core | 1.3.1 | Apache-2.0 |
-| assemblash-mcp | 1.3.1 | Apache-2.0 |
-| assemblash-renderer | 1.3.1 | Apache-2.0 |
-| assemblash-server | 1.3.1 | Apache-2.0 |
+| assemblash-cli | 1.4.0 | Apache-2.0 |
+| assemblash-core | 1.4.0 | Apache-2.0 |
+| assemblash-mcp | 1.4.0 | Apache-2.0 |
+| assemblash-renderer | 1.4.0 | Apache-2.0 |
+| assemblash-server | 1.4.0 | Apache-2.0 |
 
 ## Dependencies
 

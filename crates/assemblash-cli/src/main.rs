@@ -13,7 +13,8 @@ use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::UlidIdSource;
 use assemblash_core::layout;
 use assemblash_core::ops::{
-    AlignEdge, Axis, CreateLayer, LayerPosition, NewLayerKind, OpOutcome, Operation, SnapTarget,
+    AlignEdge, Axis, CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, OpOutcome, Operation,
+    SnapTarget, UpdateCanvas,
 };
 use assemblash_core::session::{self, Session, SessionError};
 use assemblash_core::storage::{self, StorageError};
@@ -36,6 +37,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Changes the canvas without scaling layers.
+    #[command(subcommand)]
+    Canvas(CanvasCommand),
     /// Creates an empty project directory.
     New {
         /// Directory to create the project in.
@@ -589,6 +593,51 @@ enum SlotCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum CanvasCommand {
+    Set {
+        project: PathBuf,
+        #[arg(long)]
+        width: Option<f64>,
+        #[arg(long)]
+        height: Option<f64>,
+        #[arg(long, conflicts_with = "no_background")]
+        background: Option<String>,
+        #[arg(long)]
+        no_background: bool,
+        #[arg(long, value_enum)]
+        anchor: Option<CanvasAnchorArg>,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+}
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CanvasAnchorArg {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+impl From<CanvasAnchorArg> for CanvasAnchor {
+    fn from(v: CanvasAnchorArg) -> Self {
+        match v {
+            CanvasAnchorArg::TopLeft => Self::TopLeft,
+            CanvasAnchorArg::Top => Self::Top,
+            CanvasAnchorArg::TopRight => Self::TopRight,
+            CanvasAnchorArg::Left => Self::Left,
+            CanvasAnchorArg::Center => Self::Center,
+            CanvasAnchorArg::Right => Self::Right,
+            CanvasAnchorArg::BottomLeft => Self::BottomLeft,
+            CanvasAnchorArg::Bottom => Self::Bottom,
+            CanvasAnchorArg::BottomRight => Self::BottomRight,
+        }
+    }
+}
 /// What a slot lets a caller supply.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SlotKindArg {
@@ -1723,6 +1772,36 @@ fn run(command: Command) -> Result<(), CliError> {
 
         Command::Slot(command) => run_slot(command),
 
+        Command::Canvas(CanvasCommand::Set {
+            project,
+            width,
+            height,
+            background,
+            no_background,
+            anchor,
+            who,
+        }) => {
+            let mut session = Session::open(&project, now_millis())?;
+            let background = if no_background {
+                Some(None)
+            } else {
+                background.map(Color::new).map(Some)
+            };
+            session.apply(
+                &Operation::UpdateCanvas(UpdateCanvas {
+                    width,
+                    height,
+                    background,
+                    anchor: anchor.map(Into::into),
+                }),
+                &who.actor(),
+                now_millis(),
+                who.expect_version,
+                &mut UlidIdSource,
+            )?;
+            Ok(())
+        }
+
         Command::Preset(command) => run_preset(command),
 
         Command::Styles => {
@@ -2073,6 +2152,7 @@ fn operation_name(operation: &Operation) -> &'static str {
     match operation {
         Operation::Create(_) => "create",
         Operation::Update(_) => "update",
+        Operation::UpdateCanvas(_) => "updateCanvas",
         Operation::Delete { .. } => "delete",
         Operation::Duplicate { .. } => "duplicate",
         Operation::Move { .. } => "move",

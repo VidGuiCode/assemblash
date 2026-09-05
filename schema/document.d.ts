@@ -17,7 +17,7 @@ export type Canvas = {
 };
 
 /// An sRGB colour, `#rrggbb` or `#rrggbbaa`.
-/// 
+///
 /// Stored as written so a document round-trips exactly; validation checks the
 /// shape and [`Color::to_rgba`] parses it.
 export type Color = string;
@@ -100,11 +100,11 @@ export type Transform = {
 };
 
 /// How a layer composites onto what is beneath it.
-/// 
+///
 /// The whole CSS separable-and-non-separable set, every one of which was
 /// checked to rasterize before it was named here — a mode that only
 /// round-trips would be a promise the pixels do not keep.
-/// 
+///
 /// [`BlendMode::Other`] is what a mode written by some newer build becomes:
 /// preserved verbatim, because losing it would mean a document came back
 /// damaged, but **refused at render time** rather than quietly composited as
@@ -113,11 +113,11 @@ export type Transform = {
 export type BlendMode = "normal" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "color-dodge" | "color-burn" | "hard-light" | "soft-light" | "difference" | "exclusion" | "hue" | "saturation" | "color" | "luminosity" | string;
 
 /// One adjustment in a layer's effect stack.
-/// 
+///
 /// Tagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps
 /// an effect written by a newer build verbatim and refuses to render it —
 /// the same bargain as [`BlendMode::Other`]: never lose it, never guess at it.
-/// 
+///
 /// The amounts are multipliers where 1 means "unchanged", which is what
 /// `filter: brightness(1.2)` means everywhere else, so a number copied from a
 /// CSS example does what it looks like it does.
@@ -194,7 +194,7 @@ export type GroupLayer = {
 };
 
 /// A reference to an imported SVG asset, drawn into the layer box.
-/// 
+///
 /// Separate from [`ImageLayer`] because an SVG is vector: it scales without
 /// loss, and it went through the import sanitiser (`crate::svg_import`) before
 /// it was stored. Nothing in a project's `assets/` directory carries scripts
@@ -219,11 +219,11 @@ export type Preset = {
 };
 
 /// What a preset sets.
-/// 
+///
 /// Every field optional, and absent means "leave alone" — so a preset that
 /// only names a colour is a colour preset, and applying it does not quietly
 /// reset a layer's font.
-/// 
+///
 /// Deliberately no transform: a style is not a position. A preset that moved
 /// layers would be a template, and templates already exist.
 export type PresetProperties = {

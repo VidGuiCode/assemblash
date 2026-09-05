@@ -943,3 +943,55 @@ fn overflowing_text_warns_on_stderr_and_still_exits_zero() {
     assert_eq!(printed.lines().nth(1), Some("[]"), "{printed:?}");
     assert!(complaints.is_empty(), "{complaints:?}");
 }
+
+#[test]
+fn canvas_set_resizes_clears_background_and_undoes() {
+    let scratch = tempfile::tempdir().unwrap();
+    let project = scratch.path().join("canvas");
+    let project_arg = project.to_str().unwrap();
+    run(&[
+        "new",
+        project_arg,
+        "--width",
+        "100",
+        "--height",
+        "80",
+        "--background",
+        "#ffffff",
+    ]);
+    let before = std::fs::read(project.join("document.json")).unwrap();
+    run(&[
+        "canvas",
+        "set",
+        project_arg,
+        "--width",
+        "200",
+        "--height",
+        "120",
+        "--no-background",
+        "--anchor",
+        "center",
+    ]);
+    let shown: serde_json::Value = serde_json::from_str(&run(&["show", project_arg])).unwrap();
+    assert_eq!(shown["canvas"]["width"], 200.0);
+    assert_eq!(shown["canvas"]["height"], 120.0);
+    assert!(shown["canvas"]["background"].is_null());
+    assert!(run(&["history", project_arg]).contains("updateCanvas"));
+    run(&["undo", project_arg]);
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before
+    );
+    let output = std::process::Command::new(binary())
+        .args([
+            "canvas",
+            "set",
+            project_arg,
+            "--background",
+            "#ffffff",
+            "--no-background",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}

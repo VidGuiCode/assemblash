@@ -13,7 +13,9 @@ use std::path::Path;
 use assemblash_core::document::{TextAlign, Transform};
 use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::{LayerId, SequentialIdSource};
-use assemblash_core::ops::{CreateLayer, LayerPosition, NewLayerKind, OpError, Operation};
+use assemblash_core::ops::{
+    CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, OpError, Operation, UpdateCanvas,
+};
 use assemblash_core::storage::DOCUMENT_FILE;
 use assemblash_core::{Color, Document, Session, SessionError};
 use proptest::prelude::*;
@@ -123,6 +125,32 @@ fn apply_then_undo_gives_a_byte_identical_document() {
     assert!(project.session.document().layers.is_empty());
 }
 
+#[test]
+fn canvas_update_undoes_and_redoes_byte_identically() {
+    let mut project = Project::new();
+    project.apply(new_text("anchored"));
+    let before = project.document_bytes();
+
+    project.apply(Operation::UpdateCanvas(UpdateCanvas {
+        width: Some(600.0),
+        height: Some(500.0),
+        background: Some(Some(Color::new("#12345678"))),
+        anchor: Some(CanvasAnchor::Center),
+    }));
+    let after = project.document_bytes();
+    assert_ne!(after, before);
+
+    project
+        .session
+        .undo(&human(), Some(2), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), before);
+    project
+        .session
+        .redo(&human(), Some(3), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), after);
+}
 #[test]
 fn a_batch_replays_and_undoes_as_one_transaction() {
     let mut project = Project::new();

@@ -36,7 +36,7 @@ pub use error::{ValidationError, ValidationErrors};
 pub use history::{Actor, ActorKind, History, HistoryError};
 pub use ids::{AssetId, DocumentId, IdSource, LayerId, SequentialIdSource, UlidIdSource};
 pub use layout::{bounding_box, find_overlaps, LayoutError, Rect};
-pub use ops::{apply, dry_run, OpError, Operation};
+pub use ops::{apply, dry_run, CanvasAnchor, OpError, Operation, UpdateCanvas};
 pub use presets::{Preset, PresetProperties};
 pub use session::{Session, SessionError};
 pub use storage::{load, save, StorageError};

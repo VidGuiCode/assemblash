@@ -15,6 +15,7 @@ def main():
     parser.add_argument("--tag", required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--repo", required=True)
+    parser.add_argument("--canvas", action="store_true", help="Also verify canvas editing (1.4.0 and newer)")
     args = parser.parse_args()
     extension = "zip" if args.target.startswith("windows-") else "tar.gz"
     name = f"assemblash-{args.tag}-{args.target}"
@@ -54,6 +55,14 @@ def main():
              "--expected-version", args.tag.removeprefix("v")],
             check=True, timeout=240,
         )
+        if args.canvas:
+            subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("canvas_smoke.py")),
+                 "--binary", str(binary), "--workspace", str(root / "canvas-workspace"),
+                 "--font", str(Path(__file__).resolve().parents[1] / "crates" /
+                               "assemblash-renderer" / "tests" / "fonts" / "NotoSans-Subset.ttf")],
+                check=True, timeout=240,
+            )
 
 
 if __name__ == "__main__":

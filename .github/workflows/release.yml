@@ -207,3 +207,4 @@ jobs:
           --tag "${{ inputs.tag || github.ref_name }}"
           --target "${{ matrix.target-name }}"
           --repo "${{ github.repository }}"
+          --canvas

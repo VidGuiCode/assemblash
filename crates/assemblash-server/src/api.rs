@@ -185,7 +185,7 @@ async fn version(axum::Extension(policy): axum::Extension<crate::Shutdown>) -> J
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RecoverLockRequest {
     expected_pid: u32,
 }
@@ -425,7 +425,7 @@ fn png_response(bytes: Vec<u8>) -> axum::response::Response {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NewProject {
     id: ProjectId,
     width: f64,
@@ -523,11 +523,11 @@ async fn validate_project(
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ActorRequest {
     #[serde(default)]
     kind: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "detail")]
     name: Option<String>,
 }
 
@@ -557,7 +557,7 @@ impl ActorRequest {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OperationRequest {
     /// The operation, still as JSON.
     ///
@@ -646,7 +646,12 @@ enum OperationBatchCommand {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "op",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum OperationBatchMacro {
     InsertLayerTree {
         source_project: String,
@@ -661,7 +666,7 @@ enum OperationBatchMacro {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OperationBatchRequest {
     expected_version: u64,
     label: String,
@@ -951,7 +956,7 @@ fn insert_layer(
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HistoryStepRequest {
     #[serde(default)]
     actor: ActorRequest,
@@ -1376,7 +1381,7 @@ async fn overlaps(
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExportRequest {
     /// File name stem, without an extension. The directory is not the
     /// caller's to choose.
@@ -1492,7 +1497,7 @@ async fn get_slots(
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VariantsRequest {
     /// One entry per variant to render.
     variants: Vec<render::Variant>,

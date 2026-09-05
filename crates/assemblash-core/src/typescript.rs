@@ -55,7 +55,11 @@ pub fn declarations(schema_json: &str, root: &str, banner: &str) -> String {
 fn emit_named(out: &mut String, name: &str, schema: &Value) {
     if let Some(description) = schema.get("description").and_then(Value::as_str) {
         for line in description.lines() {
-            let _ = writeln!(out, "/// {line}");
+            if line.is_empty() {
+                let _ = writeln!(out, "///");
+            } else {
+                let _ = writeln!(out, "/// {line}");
+            }
         }
     }
     let _ = writeln!(out, "export type {name} = {};\n", type_of(schema, 0));

@@ -767,6 +767,104 @@ function drawOverlay(): void {
   dom.overlay.append(box);
 }
 
+/** Canvas edits stay in one operation, so dimensions and placement undo together. */
+function drawCanvasInspector(): void {
+  if (!state.document) return;
+  const canvas = state.document.canvas;
+  const form = document.createElement("form");
+  form.id = "canvas-settings";
+  form.className = "canvas-settings";
+  form.setAttribute("aria-label", "Canvas settings");
+  form.innerHTML = `
+    <h2>Canvas</h2>
+    <div class="property-grid">
+      <label class="field">Width (px)<input id="canvas-width" type="number" min="0" step="any" required></label>
+      <label class="field">Height (px)<input id="canvas-height" type="number" min="0" step="any" required></label>
+    </div>
+    <label class="field canvas-background-field" for="canvas-background">Background</label>
+    <div class="canvas-background-row">
+      <input id="canvas-background-picker" type="color" aria-label="Choose canvas background colour">
+      <input id="canvas-background" type="text" spellcheck="false" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" required title="Use #RRGGBB or #RRGGBBAA">
+    </div>
+    <label class="canvas-transparent"><input id="canvas-transparent" type="checkbox">Transparent background</label>
+    <fieldset class="canvas-anchor-fieldset" aria-describedby="canvas-anchor-hint">
+      <legend>Anchor</legend>
+      <div class="canvas-size-anchor-grid"></div>
+      <p id="canvas-anchor-hint" class="hint">Keep this point fixed when resizing. Layers keep their size.</p>
+    </fieldset>
+    <button id="canvas-apply" type="submit" class="primary" disabled>Apply canvas changes</button>
+  `;
+  const width = form.querySelector<HTMLInputElement>("#canvas-width")!;
+  const height = form.querySelector<HTMLInputElement>("#canvas-height")!;
+  const background = form.querySelector<HTMLInputElement>("#canvas-background")!;
+  const picker = form.querySelector<HTMLInputElement>("#canvas-background-picker")!;
+  const transparent = form.querySelector<HTMLInputElement>("#canvas-transparent")!;
+  const anchorFieldset = form.querySelector<HTMLFieldSetElement>(".canvas-anchor-fieldset")!;
+  const anchorGrid = form.querySelector<HTMLDivElement>(".canvas-size-anchor-grid")!;
+  const apply = form.querySelector<HTMLButtonElement>("#canvas-apply")!;
+  width.value = String(canvas.width);
+  height.value = String(canvas.height);
+  background.value = canvas.background ?? "#ffffff";
+  picker.value = background.value.slice(0, 7);
+  transparent.checked = canvas.background == null;
+  const anchors = [
+    ["top-left", "Top left", "↖"], ["top", "Top", "↑"], ["top-right", "Top right", "↗"],
+    ["left", "Left", "←"], ["center", "Center", "•"], ["right", "Right", "→"],
+    ["bottom-left", "Bottom left", "↙"], ["bottom", "Bottom", "↓"], ["bottom-right", "Bottom right", "↘"],
+  ] as const;
+  for (const [value, name, glyph] of anchors) {
+    const label = document.createElement("label");
+    label.className = "canvas-anchor";
+    label.title = name;
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "canvas-anchor";
+    radio.value = value;
+    radio.checked = value === "top-left";
+    radio.setAttribute("aria-label", name);
+    const mark = document.createElement("span");
+    mark.textContent = glyph;
+    mark.setAttribute("aria-hidden", "true");
+    label.append(radio, mark);
+    anchorGrid.append(label);
+  }
+  const nextBackground = (): string | null => transparent.checked ? null : background.value;
+  const resizing = (): boolean => Number(width.value) !== canvas.width || Number(height.value) !== canvas.height;
+  const update = (): void => {
+    for (const input of [width, height]) {
+      input.setCustomValidity(Number.isFinite(input.valueAsNumber) && input.valueAsNumber > 0
+        ? "" : "Enter a positive canvas dimension.");
+    }
+    background.disabled = transparent.checked;
+    picker.disabled = transparent.checked;
+    anchorFieldset.disabled = !resizing();
+    apply.disabled = !resizing() && nextBackground() === (canvas.background ?? null);
+    if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(background.value)) {
+      picker.value = background.value.slice(0, 7);
+    }
+  };
+  picker.addEventListener("input", () => { background.value = picker.value; update(); });
+  form.addEventListener("input", update);
+  form.addEventListener("change", update);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (state.busy) return;
+    update();
+    if (apply.disabled || !form.reportValidity()) return;
+    const chosen = form.querySelector<HTMLInputElement>('input[name="canvas-anchor"]:checked')?.value;
+    const anchor = anchors.find(([value]) => value === chosen)?.[0] ?? "top-left";
+    const operation: Operation = {
+      op: "updateCanvas",
+      ...(resizing() ? { width: Number(width.value), height: Number(height.value), anchor } : {}),
+      ...(nextBackground() !== (canvas.background ?? null) ? { background: nextBackground() } : {}),
+    };
+    apply.disabled = true;
+    void send("update canvas", operation).finally(() => { if (form.isConnected) update(); });
+  });
+  update();
+  dom.advancedInspector.append(form);
+}
+
 function drawInspector(): void {
   dom.inspector.replaceChildren();
   dom.advancedInspector.replaceChildren();
@@ -775,16 +873,34 @@ function drawInspector(): void {
   dom.deleteLayer.disabled = layers.length === 0 || layers.some((one) => !api.isEditable(one));
   dom.groupLayers.disabled = layers.length < 2 || layers.some((one) => !api.isEditable(one));
   renderPositionFields(layers);
+  if (state.document) {
+    const canvasButton = document.createElement("button");
+    canvasButton.type = "button";
+    canvasButton.id = "edit-canvas";
+    canvasButton.className = "toolbar-action";
+    canvasButton.setAttribute("aria-label", "Canvas size and background");
+    canvasButton.innerHTML = '<i class="ph ph-frame-corners" aria-hidden="true"></i><span>Canvas</span>';
+    canvasButton.title = "Canvas size and background";
+    canvasButton.addEventListener("click", () => {
+      dom.contextMenu.hidden = true;
+      state.selection = [];
+      drawLayers();
+      drawOverlay();
+      drawInspector();
+      showDock("properties");
+      dom.structure.classList.add("mobile-open");
+      dom.dockToggle.setAttribute("aria-expanded", "true");
+      dom.advancedInspector.querySelector<HTMLInputElement>("#canvas-width")?.focus();
+    });
+    dom.inspector.append(canvasButton);
+  }
 
   if (layers.length === 0) {
     const hint = document.createElement("div");
     hint.className = "inspector-empty";
     hint.innerHTML = '<i class="ph ph-cursor-click" aria-hidden="true"></i><span>Select a layer to edit it</span>';
     dom.inspector.append(hint);
-    const copy = document.createElement("p");
-    copy.className = "empty-panel-copy";
-    copy.textContent = "Select a layer to edit its properties. Text content is edited directly on the canvas; layer names live only in Layers.";
-    dom.advancedInspector.append(copy);
+    drawCanvasInspector();
     return;
   }
 

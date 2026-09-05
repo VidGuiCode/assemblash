@@ -30,7 +30,9 @@ use serde::{Deserialize, Serialize};
 
 pub use error::OpError;
 pub use layout_ops::{AlignEdge, Axis, SnapTarget};
-pub use requests::{CreateLayer, LayerPosition, NewLayerKind, UpdateLayer};
+pub use requests::{
+    CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, UpdateCanvas, UpdateLayer,
+};
 
 use crate::document::{Document, LayerKind};
 use crate::ids::{IdSource, LayerId};
@@ -41,6 +43,8 @@ use crate::validate::validate;
 #[serde(tag = "op", rename_all = "camelCase")]
 #[non_exhaustive]
 pub enum Operation {
+    /// Changes the canvas without scaling layers.
+    UpdateCanvas(UpdateCanvas),
     /// Adds a layer.
     Create(CreateLayer),
     /// Changes properties of an existing layer.
@@ -282,6 +286,7 @@ pub fn apply(
 ) -> Result<OpOutcome, OpError> {
     let mut candidate = document.clone();
     let outcome = match operation {
+        Operation::UpdateCanvas(request) => update_canvas(&mut candidate, request),
         Operation::Create(request) => create(&mut candidate, request, ids),
         Operation::Update(request) => update(&mut candidate, request),
         Operation::Delete { id } => delete(&mut candidate, id),
@@ -394,27 +399,30 @@ pub fn dry_run(
 /// refusal in this module is, and what a transport maps onto its own
 /// "refused" status rather than its "malformed" one.
 ///
-/// Only `create` and `update` are checked. They are the two whose properties
-/// live at the top level of the payload, and the two the false success was
-/// observed on; every other variant is a plain struct whose shape the parser
-/// settles by itself.
+/// Every variant is checked. Serde's internally tagged enum parser otherwise
+/// ignores unknown top-level fields on its struct variants, producing a false
+/// success. Nested metadata remains governed by its own typed `extra` maps.
 ///
 /// The known keys are read out of the generated schema rather than listed
-/// here, so a field added to [`UpdateLayer`] in a later release is accepted
-/// without anybody remembering a second list.
+/// here, so a field added to an operation request in a later release is
+/// accepted without anybody remembering a second list.
 /// `check_properties_accepts_every_operation_the_schema_describes` is what
 /// keeps that promise honest.
 pub fn check_properties(value: &serde_json::Value) -> Result<(), OpError> {
     let Some(object) = value.as_object() else {
         return Ok(());
     };
-    let (op, known) = match object.get("op").and_then(serde_json::Value::as_str) {
-        Some("create") => (
-            "create",
-            create_keys(object.get("type").and_then(serde_json::Value::as_str)),
-        ),
-        Some("update") => ("update", update_keys().clone()),
-        _ => return Ok(()),
+    let Some(raw_op) = object.get("op").and_then(serde_json::Value::as_str) else {
+        return Ok(());
+    };
+    let Some(op) = known_operation_name(raw_op) else {
+        return Ok(());
+    };
+    let known = match op {
+        "create" => create_keys(object.get("type").and_then(serde_json::Value::as_str)),
+        "update" => update_keys().clone(),
+        "updateCanvas" => request_keys::<UpdateCanvas>(),
+        _ => operation_keys(op),
     };
     for key in object.keys() {
         if !known.contains(key.as_str()) {
@@ -427,6 +435,64 @@ pub fn check_properties(value: &serde_json::Value) -> Result<(), OpError> {
     Ok(())
 }
 
+const OPERATION_NAMES: &[&str] = &[
+    "updateCanvas",
+    "create",
+    "update",
+    "delete",
+    "duplicate",
+    "move",
+    "resize",
+    "rotate",
+    "reorder",
+    "group",
+    "ungroup",
+    "setVisible",
+    "setLocked",
+    "rename",
+    "align",
+    "centerOnCanvas",
+    "distribute",
+    "snapTo",
+    "definePreset",
+    "deletePreset",
+    "defineSlot",
+    "updateSlot",
+    "removeSlot",
+    "applyPreset",
+];
+
+fn known_operation_name(name: &str) -> Option<&'static str> {
+    OPERATION_NAMES.iter().copied().find(|known| *known == name)
+}
+
+fn request_keys<T: JsonSchema>() -> std::collections::BTreeSet<String> {
+    let mut keys = property_names(&schema_value(schemars::schema_for!(T)));
+    keys.insert("op".to_owned());
+    keys
+}
+
+fn operation_keys(op: &str) -> std::collections::BTreeSet<String> {
+    let schema = schema_value(schemars::schema_for!(Operation));
+    let mut keys = schema
+        .get("oneOf")
+        .or_else(|| schema.get("anyOf"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|branches| {
+            branches.iter().find(|branch| {
+                branch
+                    .get("properties")
+                    .and_then(|properties| properties.get("op"))
+                    .and_then(|tag| tag.get("const"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some(op)
+            })
+        })
+        .map(property_names)
+        .unwrap_or_default();
+    keys.insert("op".to_owned());
+    keys
+}
 /// Spellings `NewLayerKind::Text` accepts as aliases, which the schema
 /// therefore does not name (`requests.rs:63-75`).
 ///
@@ -545,6 +611,65 @@ pub(super) fn ensure_subtree_mutable(document: &Document, id: &LayerId) -> Resul
     Ok(())
 }
 
+fn update_canvas(document: &mut Document, request: &UpdateCanvas) -> Result<OpOutcome, OpError> {
+    let old_width = document.canvas.width;
+    let old_height = document.canvas.height;
+    let new_width = request.width.unwrap_or(old_width);
+    let new_height = request.height.unwrap_or(old_height);
+    let (x_factor, y_factor) = match request.anchor.unwrap_or_default() {
+        CanvasAnchor::TopLeft => (0.0, 0.0),
+        CanvasAnchor::Top => (0.5, 0.0),
+        CanvasAnchor::TopRight => (1.0, 0.0),
+        CanvasAnchor::Left => (0.0, 0.5),
+        CanvasAnchor::Center => (0.5, 0.5),
+        CanvasAnchor::Right => (1.0, 0.5),
+        CanvasAnchor::BottomLeft => (0.0, 1.0),
+        CanvasAnchor::Bottom => (0.5, 1.0),
+        CanvasAnchor::BottomRight => (1.0, 1.0),
+    };
+    let dx = if x_factor == 0.0 {
+        0.0
+    } else {
+        (new_width - old_width) * x_factor
+    };
+    let dy = if y_factor == 0.0 {
+        0.0
+    } else {
+        (new_height - old_height) * y_factor
+    };
+    let moves_layers = dx != 0.0 || dy != 0.0;
+    if moves_layers {
+        for layer in &document.layers {
+            ensure_mutable(document, &layer.id, false)?;
+            if let LayerKind::Group(group) = &layer.kind {
+                let mut descendants = Vec::new();
+                tree::collect_ids(&group.children, &mut descendants);
+                for descendant in descendants {
+                    ensure_mutable(document, &descendant, false)?;
+                }
+            }
+        }
+    }
+
+    document.canvas.width = new_width;
+    document.canvas.height = new_height;
+    if let Some(background) = &request.background {
+        document.canvas.background = background.clone();
+    }
+    let mut changed = Vec::new();
+    if moves_layers {
+        for layer in &mut document.layers {
+            layer.transform.x += dx;
+            layer.transform.y += dy;
+            changed.push(layer.id.clone());
+        }
+    }
+    Ok(OpOutcome {
+        created: Vec::new(),
+        removed: Vec::new(),
+        changed,
+    })
+}
 fn create(
     document: &mut Document,
     request: &CreateLayer,
@@ -1043,6 +1168,183 @@ mod tests {
         assert_eq!(predicted.created.len(), 1);
     }
 
+    #[test]
+    fn canvas_anchors_translate_only_root_layers() {
+        let anchors = [
+            (CanvasAnchor::TopLeft, 0.0, 0.0),
+            (CanvasAnchor::Top, 50.0, 0.0),
+            (CanvasAnchor::TopRight, 100.0, 0.0),
+            (CanvasAnchor::Left, 0.0, 100.0),
+            (CanvasAnchor::Center, 50.0, 100.0),
+            (CanvasAnchor::Right, 100.0, 100.0),
+            (CanvasAnchor::BottomLeft, 0.0, 200.0),
+            (CanvasAnchor::Bottom, 50.0, 200.0),
+            (CanvasAnchor::BottomRight, 100.0, 200.0),
+        ];
+        for (anchor, dx, dy) in anchors {
+            let mut doc = document();
+            let child = Layer::new(
+                LayerId::new("layer_child"),
+                Transform::new(7.0, 9.0, 10.0, 10.0),
+                LayerKind::Group(GroupLayer {
+                    children: Vec::new(),
+                    extra: Extras::new(),
+                }),
+            );
+            doc.layers.push(Layer::new(
+                LayerId::new("layer_root"),
+                Transform::new(10.0, 20.0, 30.0, 40.0),
+                LayerKind::Group(GroupLayer {
+                    children: vec![child],
+                    extra: Extras::new(),
+                }),
+            ));
+            apply(
+                &mut doc,
+                &Operation::UpdateCanvas(UpdateCanvas {
+                    width: Some(300.0),
+                    height: Some(400.0),
+                    anchor: Some(anchor),
+                    ..UpdateCanvas::default()
+                }),
+                &mut SequentialIdSource::new(),
+            )
+            .unwrap();
+            assert_eq!(
+                (doc.layers[0].transform.x, doc.layers[0].transform.y),
+                (10.0 + dx, 20.0 + dy)
+            );
+            let LayerKind::Group(group) = &doc.layers[0].kind else {
+                panic!()
+            };
+            assert_eq!(
+                (group.children[0].transform.x, group.children[0].transform.y),
+                (7.0, 9.0)
+            );
+        }
+    }
+
+    #[test]
+    fn canvas_dry_run_reports_moves_without_mutating() {
+        let mut doc = document();
+        doc.layers.push(Layer::new(
+            LayerId::new("layer_root"),
+            Transform::new(1.0, 2.0, 3.0, 4.0),
+            LayerKind::Group(GroupLayer {
+                children: Vec::new(),
+                extra: Extras::new(),
+            }),
+        ));
+        let before = doc.clone();
+        let outcome = dry_run(
+            &doc,
+            &Operation::UpdateCanvas(UpdateCanvas {
+                width: Some(300.0),
+                anchor: Some(CanvasAnchor::Right),
+                ..UpdateCanvas::default()
+            }),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        assert_eq!(outcome.changed, vec![LayerId::new("layer_root")]);
+        assert_eq!(doc, before);
+    }
+    #[test]
+    fn canvas_update_preserves_omitted_background_and_clears_null() {
+        let omitted: UpdateCanvas = serde_json::from_value(serde_json::json!({})).unwrap();
+        let cleared: UpdateCanvas =
+            serde_json::from_value(serde_json::json!({ "background": null })).unwrap();
+        assert_eq!(omitted.background, None);
+        assert_eq!(cleared.background, Some(None));
+        assert_eq!(
+            serde_json::to_value(&cleared).unwrap()["background"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn invalid_or_guarded_canvas_updates_are_atomic() {
+        let mut doc = document();
+        doc.canvas.background = Some(Color::new("#ffffff"));
+        let mut locked_child = Layer::new(
+            LayerId::new("layer_locked_child"),
+            Transform::new(5.0, 6.0, 7.0, 8.0),
+            LayerKind::Group(GroupLayer {
+                children: Vec::new(),
+                extra: Extras::new(),
+            }),
+        );
+        locked_child.locked = true;
+        doc.layers.push(Layer::new(
+            LayerId::new("layer_guarded"),
+            Transform::new(1.0, 2.0, 3.0, 4.0),
+            LayerKind::Group(GroupLayer {
+                children: vec![locked_child],
+                extra: Extras::new(),
+            }),
+        ));
+        doc.layers[0].protected = true;
+        let before = doc.clone();
+        let guarded = Operation::UpdateCanvas(UpdateCanvas {
+            width: Some(300.0),
+            anchor: Some(CanvasAnchor::Right),
+            ..UpdateCanvas::default()
+        });
+        assert!(matches!(
+            apply(&mut doc, &guarded, &mut SequentialIdSource::new()),
+            Err(OpError::LayerProtected { .. })
+        ));
+        assert_eq!(doc, before);
+
+        doc.layers[0].protected = false;
+        let locked_before = doc.clone();
+        assert!(matches!(
+            apply(&mut doc, &guarded, &mut SequentialIdSource::new()),
+            Err(OpError::LayerLocked { .. })
+        ));
+        assert_eq!(doc, locked_before);
+
+        for request in [
+            UpdateCanvas {
+                width: Some(0.0),
+                ..UpdateCanvas::default()
+            },
+            UpdateCanvas {
+                height: Some(f64::NAN),
+                ..UpdateCanvas::default()
+            },
+            UpdateCanvas {
+                background: Some(Some(Color::new("bad"))),
+                ..UpdateCanvas::default()
+            },
+        ] {
+            let mut candidate = locked_before.clone();
+            assert!(matches!(
+                apply(
+                    &mut candidate,
+                    &Operation::UpdateCanvas(request),
+                    &mut SequentialIdSource::new()
+                ),
+                Err(OpError::Invalid(_))
+            ));
+            assert_eq!(candidate, locked_before);
+        }
+    }
+
+    #[test]
+    fn every_operation_variant_refuses_unknown_top_level_properties() {
+        for operation in one_of_every_operation() {
+            let mut value = serde_json::to_value(operation).unwrap();
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("definitelyUnknown".to_owned(), serde_json::json!(true));
+            assert!(
+                matches!(check_properties(&value), Err(OpError::UnknownProperty { property, .. }) if property == "definitelyUnknown"),
+                "{value}"
+            );
+        }
+    }
     /// Every variant of the union, one instance each.
     ///
     /// Listed rather than derived, because the point is to notice when the
@@ -1061,6 +1363,7 @@ mod tests {
             extra: Extras::new(),
         };
         vec![
+            Operation::UpdateCanvas(UpdateCanvas::default()),
             create_text(LayerPosition::Root { index: None }),
             Operation::Create(CreateLayer {
                 position: LayerPosition::Root { index: None },

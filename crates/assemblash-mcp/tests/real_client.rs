@@ -449,6 +449,7 @@ async fn every_new_tool_is_advertised_and_callable() {
     let tools = client.list_all_tools().await.unwrap();
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
     for expected in [
+        "update_canvas",
         "add_svg_layer",
         "render_document",
         "find_overlaps",
@@ -458,7 +459,7 @@ async fn every_new_tool_is_advertised_and_callable() {
     }
     assert_eq!(
         tools.len(),
-        43,
+        44,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 
@@ -656,4 +657,83 @@ async fn wait_for_unlock(lock: &Path) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+}
+
+#[tokio::test]
+async fn canvas_tool_preserves_omitted_background_and_clears_null_with_undo() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let path = root.join("projects/poster/document.json");
+    let before = std::fs::read(&path).unwrap();
+    let document: Value = serde_json::from_slice(&before).unwrap();
+    let version = document["version"].as_u64().unwrap();
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    let dry = structured(
+        &client
+            .call_tool(call(
+                "update_canvas",
+                arguments(json!({
+                    "project": "poster", "width": 600, "dryRun": true, "expectedVersion": version
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(dry["dryRun"], true);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let applied = structured(
+        &client
+            .call_tool(call(
+                "update_canvas",
+                arguments(json!({
+                    "project": "poster", "width": 600, "expectedVersion": version
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(applied["version"], version + 1);
+    let after_resize = std::fs::read(&path).unwrap();
+    let resized: Value = serde_json::from_slice(&after_resize).unwrap();
+    assert_eq!(resized["canvas"]["width"], 600.0);
+    assert_eq!(
+        resized["canvas"]["background"],
+        document["canvas"]["background"]
+    );
+    let stale = client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({
+                "project": "poster", "height": 300, "expectedVersion": version
+            })),
+        ))
+        .await;
+    assert!(stale.is_err() || stale.as_ref().unwrap().is_error == Some(true));
+    assert_eq!(std::fs::read(&path).unwrap(), after_resize);
+    let cleared = client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({
+                "project": "poster", "background": null, "expectedVersion": version + 1
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(cleared.is_error, Some(true));
+    let current: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(current["canvas"]["background"].is_null());
+    client
+        .call_tool(call("undo", arguments(json!({"project":"poster"}))))
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), after_resize);
+    client
+        .call_tool(call("undo", arguments(json!({"project":"poster"}))))
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    client.cancel().await.unwrap();
 }

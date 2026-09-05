@@ -10,6 +10,34 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-05
+
+### Added
+
+- Canvas editing through the reference editor, `assemblash canvas set`, MCP
+  `update_canvas`, and HTTP `updateCanvas`. Width, height and background change
+  in one undoable operation. Omitting background preserves it; explicit JSON
+  `null` or CLI `--no-background` clears it.
+- Nine resize anchors position existing content without scaling layers. The
+  default `top-left` leaves positions unchanged. An anchor that would move
+  locked, protected or read-only content refuses the entire operation.
+
+### Fixed
+
+- Unknown top-level properties are refused across all operation variants.
+  Typed HTTP JSON request envelopes also reject unknown fields, so misspelled
+  version, actor or export options cannot silently take their defaults.
+
+### Compatibility
+
+- `schemaVersion` remains 1; the document fields and existing operation shapes
+  are unchanged. The operation union gains `updateCanvas`.
+- **Upgrade before reopening a project whose history contains `updateCanvas`.**
+  The released 1.3.1 binary refuses both `show` and `history` with a corrupt
+  journal error naming the line and unknown operation. Undoing the change does
+  not remove that journal entry. Keep the newer binary; do not edit or delete
+  the journal to work around the refusal.
+
 ## [1.3.1] — 2026-09-05
 
 A bugfix release on 1.3.0. Every defect is in the test and CI harness rather
