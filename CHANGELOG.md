@@ -10,6 +10,79 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-09-05
+
+A bugfix release on 1.3.0. Every defect is in the test and CI harness rather
+than in anything the program does, so this release changes no behaviour at
+all — and that is worth saying plainly rather than dressing up. One test could
+pass for the wrong reason, another could fail for the wrong reason, and a run
+could hang instead of reporting anything at all; a suite that does any of those
+is not evidence about a release, which is the only thing a suite is for.
+Nothing new was added, and this is the 1.3 release to install.
+
+### Fixed
+
+- **The Model Context Protocol tests could pass against a binary built from
+  older code.** They drive the real `assemblash` executable as a child process,
+  which is the point of them, but the executable belongs to a different crate
+  from the tests, so `cargo test -p assemblash-mcp` never rebuilt it: the tests
+  ran against whatever an earlier `cargo build --workspace` had left on disk.
+  Removing a tool from the source and running them still passed. They now build
+  the binary themselves, once per test process and into the profile they were
+  built for, and the same removal now fails as it should.
+- **A test's minimal HTTP client waited for the connection to close instead of
+  for the response to finish**, and intermittently failed with `Connection
+  reset by peer` on macOS after the server had answered it perfectly well. A
+  host that closes a connection with anything still unread in its receive queue
+  must send `RST` rather than `FIN`, so a client still reading at that moment
+  sees a reset instead of an end. It was `POST /api/shutdown` that exposed
+  this — its handler takes no body extractor, so the body the test sends is
+  never read — and the failure was a matter of kernel timing, which is why the
+  same commit passed and failed on the same runner twenty minutes apart. The
+  client now reads until the message is complete, by `Content-Length` or by the
+  chunked terminator, and stops there. All four copies of it are fixed, and a
+  new assertion checks that completeness is decided by framing rather than by
+  the close.
+- **A test run could hang for the best part of an hour instead of reporting.**
+  The browser journeys for the reference interface passed all twelve of their
+  assertions and then failed while removing the temporary Chrome profile:
+  Chrome's helper processes outlive the one the test signals and were still
+  writing into the directory being deleted. That failure came from the first of
+  two cleanup steps and so skipped the second, which left the fixture web server
+  listening — an open handle that keeps Node alive with nothing left to do. The
+  run sat silent until somebody cancelled it by hand, and a hang reports
+  nothing, which is worse than a failure. Removing the profile now retries and,
+  if it still loses the race, says so rather than failing a run that has already
+  made every assertion it came to make; the fixture server is closed whatever
+  happens before it; and every wait in the journeys — a condition in the page, a
+  DevTools command, the browser's launch handshake, the sockets at either end —
+  now has an upper bound that fails the test naming what it was waiting for.
+  Every job in both workflows also carries a time limit, so nothing else of this
+  kind can sit unreported either.
+
+- **Release validation now exercises the executable through CLI, HTTP and
+  MCP on all six supported targets.** The same smoke test runs before release
+  and against checksum-verified archives downloaded after publication. It
+  checks matching PNG bytes and warnings, refusal without mutation, actor
+  attribution, undo and overlap queries.
+
+### Compatibility and safety
+
+- `schemaVersion` stays **1**.
+- The existing `Operation` union is unchanged, and no operation changed shape.
+- No CLI flag or subcommand, HTTP route, MCP tool or interface control was
+  added, changed or removed.
+- **A document written by 1.3.0 is unchanged by this release**: it loads and
+  saves identically, and renders the same pixels. Export bytes include the
+  renderer version, so their metadata changes to 1.3.1. No generated
+  artefact moved — not the generated schema, not the TypeScript declarations,
+  not the interface bundle. Every change in this release is a test or a CI
+  workflow, apart from the version number and a comment in a manifest.
+- No server, engine or interface code was touched. In particular the socket
+  behaviour behind the second fix is the server's correct response to
+  `Connection: close`, and it was left alone.
+- Every renderer gate golden is unmoved. No dependency was bumped.
+
 ## [1.3.0] — 2026-09-04
 
 Nothing new that the engine can draw; everything it could already draw becomes

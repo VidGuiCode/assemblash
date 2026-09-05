@@ -27,6 +27,10 @@ jobs:
     # binary: shipping one would be a claim this project does not make.
     name: Build (${{ matrix.target-name }})
     runs-on: ${{ matrix.os }}
+    # Generous: the release profile is fat LTO at `codegen-units = 1`, which
+    # relinks everything and takes well over ten minutes even locally. The
+    # bound is here so a hung build cannot sit unnoticed, not to cap the build.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -148,6 +152,7 @@ jobs:
     name: Attach binaries to the release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -165,3 +170,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  verify:
+    name: Verify downloaded release (${{ matrix.target-name }})
+    needs: attach
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target-name: linux-aarch64
+          - os: windows-latest
+            target-name: windows-x86_64
+          - os: windows-11-arm
+            target-name: windows-aarch64
+          - os: macos-15-intel
+            target-name: macos-x86_64
+          - os: macos-14
+            target-name: macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify checksums and exercise the downloaded executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/check_release_archive.py
+          --tag "${{ inputs.tag || github.ref_name }}"
+          --target "${{ matrix.target-name }}"
+          --repo "${{ github.repository }}"

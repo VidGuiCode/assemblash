@@ -24,14 +24,9 @@ use rmcp::transport::TokioChildProcess;
 use rmcp::ServiceExt;
 use serde_json::{json, Map, Value};
 
-fn binary() -> PathBuf {
-    let mut path = std::env::current_exe().expect("the test binary has a path");
-    path.pop();
-    path.pop();
-    path.push(format!("assemblash{}", std::env::consts::EXE_SUFFIX));
-    assert!(path.is_file(), "{} is missing", path.display());
-    path
-}
+mod support;
+
+use support::binary;
 
 fn font_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

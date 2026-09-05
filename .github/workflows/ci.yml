@@ -13,10 +13,17 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+# Every job carries a `timeout-minutes`. A job that hangs reports nothing —
+# no failure, no log, and no result at all until somebody notices and cancels
+# it by hand — which is worse than a job that fails. The numbers are several
+# times the observed durations on a warm cache, so a cold cache or a slow
+# runner still finishes well inside them; they exist to bound a hang, not to
+# police a slow build.
 jobs:
   hygiene:
     name: Repository hygiene
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +69,7 @@ jobs:
   lint:
     name: Format and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -75,6 +83,7 @@ jobs:
   ui:
     name: Reference interface
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,6 +119,7 @@ jobs:
   deny:
     name: Dependency licenses and advisories
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       # Automates PRD R8: license allowlist, advisories, source allowlist.
@@ -122,6 +132,7 @@ jobs:
     # supported target from the first commit (NFR-1, NFR-2).
     name: Test (${{ matrix.target-name }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -149,3 +160,11 @@ jobs:
           key: ${{ matrix.target-name }}
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Exercise the executable across CLI, HTTP and MCP
+        run: >-
+          python scripts/release_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-ci-smoke"

@@ -29,7 +29,7 @@ const PROJECTS: usize = 200;
 mod http {
     #![allow(unreachable_pub)]
 
-    use std::io::{Read as _, Write as _};
+    use std::io::{ErrorKind, Read as _, Write as _};
     use std::net::TcpStream;
 
     pub struct Response {
@@ -70,8 +70,7 @@ mod http {
         stream.write_all(head.as_bytes()).expect("write");
         stream.flush().expect("flush");
 
-        let mut raw = Vec::new();
-        stream.read_to_end(&mut raw).expect("read");
+        let raw = read_response(&mut stream);
         let split = raw
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -91,6 +90,87 @@ mod http {
             body = dechunk(&body);
         }
         Response { status, body }
+    }
+
+    /// Reads exactly one HTTP response, and stops there.
+    ///
+    /// Not `read_to_end`: that waits for the server's `FIN` after the answer
+    /// is already in hand, and a host closing a connection with anything still
+    /// unread in its receive queue must send `RST` instead — which fails the
+    /// pending read with `ConnectionReset` for a response that arrived
+    /// perfectly well. `round_trip.rs` carries the long version of the note;
+    /// this is the same client and had the same latent flake.
+    fn read_response(stream: &mut TcpStream) -> Vec<u8> {
+        let mut raw = Vec::new();
+        let mut buffer = [0_u8; 8192];
+        while !is_complete(&raw) {
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => raw.extend_from_slice(&buffer[..read]),
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+                    ) =>
+                {
+                    panic!(
+                        "the connection was reset after {} incomplete bytes ({error}): {}",
+                        raw.len(),
+                        String::from_utf8_lossy(&raw)
+                    )
+                }
+                Err(error) => panic!("read failed after {} bytes: {error}", raw.len()),
+            }
+        }
+        raw
+    }
+
+    /// Whether `raw` already holds a whole response. A response with neither
+    /// `Content-Length` nor `chunked` is delimited by the close itself.
+    fn is_complete(raw: &[u8]) -> bool {
+        let Some(split) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+            return false;
+        };
+        let headers = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
+        let body = &raw[split + 4..];
+        if headers.contains("transfer-encoding: chunked") {
+            return chunks_are_terminated(body);
+        }
+        match headers
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+        {
+            Some(length) => body.len() >= length,
+            None => false,
+        }
+    }
+
+    /// Whether a chunked body has reached its zero-length terminator.
+    fn chunks_are_terminated(mut input: &[u8]) -> bool {
+        loop {
+            let Some(end) = input.windows(2).position(|w| w == b"\r\n") else {
+                return false;
+            };
+            let Ok(size) = usize::from_str_radix(String::from_utf8_lossy(&input[..end]).trim(), 16)
+            else {
+                return false;
+            };
+            let start = end + 2;
+            if size == 0 {
+                // The zero-sized chunk is followed by a trailer section. With
+                // no trailers that section is one final CRLF; with trailers it
+                // ends at the first empty line.
+                let trailers = &input[start..];
+                return trailers.starts_with(b"\r\n")
+                    || trailers.windows(4).any(|window| window == b"\r\n\r\n");
+            }
+            if input.len() < start + size + 2 {
+                return false;
+            }
+            input = &input[start + size + 2..];
+        }
     }
 
     fn dechunk(mut input: &[u8]) -> Vec<u8> {

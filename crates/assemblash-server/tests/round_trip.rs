@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 mod http {
     #![allow(unreachable_pub)]
 
-    use std::io::{Read as _, Write as _};
+    use std::io::{ErrorKind, Read as _, Write as _};
     use std::net::TcpStream;
 
     pub struct Response {
@@ -76,8 +76,7 @@ mod http {
         stream.write_all(body).expect("write body");
         stream.flush().expect("flush");
 
-        let mut raw = Vec::new();
-        stream.read_to_end(&mut raw).expect("read");
+        let raw = read_response(&mut stream);
         let split = raw
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -107,6 +106,144 @@ mod http {
             body,
             content_type,
         }
+    }
+
+    /// Reads exactly one HTTP response, and stops there.
+    ///
+    /// Not `read_to_end`. That stops at EOF, so it leaves this client sitting
+    /// in a read *after* the answer is already in hand, waiting for the
+    /// server's `FIN`. A host that closes a connection with anything still
+    /// unread in its receive queue must send `RST` rather than `FIN`, and the
+    /// pending read then fails with `ConnectionReset` — having already been
+    /// handed a perfectly good response.
+    ///
+    /// That is what made `a_managed_server_refuses_to_be_shut_down` flake on
+    /// macOS: it posts a body to `/api/shutdown`, whose handler takes no body
+    /// extractor and so never reads it, and the close that follows the 403
+    /// therefore has unread bytes to discard. Every other test here posts to a
+    /// handler that consumes its body, which is why only that one failed.
+    ///
+    /// So: read until the message is complete — headers, then `Content-Length`
+    /// bytes of body, or the terminating zero-length chunk — and return
+    /// without waiting for the close. A reset is tolerated only once a
+    /// complete message has been read; an incomplete one still panics, because
+    /// that is a real failure and swallowing it would hide the next one.
+    fn read_response(stream: &mut TcpStream) -> Vec<u8> {
+        let mut raw = Vec::new();
+        let mut buffer = [0_u8; 8192];
+        while !is_complete(&raw) {
+            match stream.read(&mut buffer) {
+                // EOF. Whatever arrived is all there is; the caller's own
+                // parsing says whether that was enough.
+                Ok(0) => break,
+                Ok(read) => raw.extend_from_slice(&buffer[..read]),
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+                    ) =>
+                {
+                    panic!(
+                        "the connection was reset after {} incomplete bytes ({error}): {}",
+                        raw.len(),
+                        String::from_utf8_lossy(&raw)
+                    )
+                }
+                Err(error) => panic!("read failed after {} bytes: {error}", raw.len()),
+            }
+        }
+        raw
+    }
+
+    /// Whether `raw` already holds a whole response.
+    ///
+    /// A response with no framing at all — neither `Content-Length` nor
+    /// `chunked` — is delimited by the close itself, so the answer is "not
+    /// yet" and the loop above reads on to EOF.
+    fn is_complete(raw: &[u8]) -> bool {
+        let Some(split) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+            return false;
+        };
+        let headers = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
+        let body = &raw[split + 4..];
+        if headers.contains("transfer-encoding: chunked") {
+            return chunks_are_terminated(body);
+        }
+        match headers
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+        {
+            Some(length) => body.len() >= length,
+            None => false,
+        }
+    }
+
+    /// Whether a chunked body has reached its zero-length terminator.
+    fn chunks_are_terminated(mut input: &[u8]) -> bool {
+        loop {
+            let Some(end) = input.windows(2).position(|w| w == b"\r\n") else {
+                return false;
+            };
+            let Ok(size) = usize::from_str_radix(String::from_utf8_lossy(&input[..end]).trim(), 16)
+            else {
+                return false;
+            };
+            let start = end + 2;
+            if size == 0 {
+                // The zero-sized chunk is followed by a trailer section. With
+                // no trailers that section is one final CRLF; with trailers it
+                // ends at the first empty line.
+                let trailers = &input[start..];
+                return trailers.starts_with(b"\r\n")
+                    || trailers.windows(4).any(|window| window == b"\r\n\r\n");
+            }
+            if input.len() < start + size + 2 {
+                return false;
+            }
+            input = &input[start + size + 2..];
+        }
+    }
+
+    /// DEF-17's regression assertion, at the level the flake actually lives.
+    ///
+    /// What removes the race is that `read_response` stops when the *message*
+    /// is complete rather than when the *socket* closes, so that is what is
+    /// asserted here: a `Content-Length` response is complete with no EOF in
+    /// sight, and one byte short of its length is not.
+    #[test]
+    fn a_response_is_complete_at_its_content_length_not_at_eof() {
+        let head = b"HTTP/1.1 403 Forbidden\r\n\
+                     Content-Type: application/json\r\n\
+                     Content-Length: 5\r\n\r\n";
+
+        let mut short = head.to_vec();
+        short.extend_from_slice(b"abcd");
+        assert!(!is_complete(&short), "four of five bytes is not a response");
+
+        let mut whole = head.to_vec();
+        whole.extend_from_slice(b"abcde");
+        assert!(
+            is_complete(&whole),
+            "the body is all there, so nothing may go on waiting for the close"
+        );
+
+        // A chunked body is framed by its terminator instead.
+        let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n";
+        assert!(!is_complete(chunked), "no zero-length chunk yet");
+        let mut unterminated = chunked.to_vec();
+        unterminated.extend_from_slice(b"0\r\n");
+        assert!(
+            !is_complete(&unterminated),
+            "the zero-sized chunk still needs its trailer terminator"
+        );
+        let mut terminated = unterminated;
+        terminated.extend_from_slice(b"\r\n");
+        assert!(is_complete(&terminated), "the terminator ends the message");
+
+        // With neither header, the close is the only framing there is.
+        assert!(!is_complete(b"HTTP/1.1 200 OK\r\n\r\n"));
     }
 
     fn dechunk(mut input: &[u8]) -> Vec<u8> {

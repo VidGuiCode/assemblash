@@ -27,22 +27,9 @@ use rmcp::transport::TokioChildProcess;
 use rmcp::ServiceExt;
 use serde_json::{json, Map, Value};
 
-/// The binary under test: the one cargo just built for this crate's workspace.
-fn binary() -> PathBuf {
-    // `CARGO_BIN_EXE_` is only set for the crate that declares the binary, so
-    // the path is derived from this test's own location instead: tests live
-    // next to the binaries in `target/<profile>/`.
-    let mut path = std::env::current_exe().expect("the test binary has a path");
-    path.pop(); // deps/
-    path.pop(); // <profile>/
-    path.push(format!("assemblash{}", std::env::consts::EXE_SUFFIX));
-    assert!(
-        path.is_file(),
-        "{} is missing; build the workspace before running this test",
-        path.display()
-    );
-    path
-}
+mod support;
+
+use support::binary;
 
 fn font_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

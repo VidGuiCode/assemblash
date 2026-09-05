@@ -21,6 +21,43 @@ const svg = Buffer.from(
   "utf8",
 );
 
+// Every wait in this file is bounded, and every bound names what it was
+// waiting for. A journey that hangs reports nothing at all — no failure, no
+// output, and on CI no result until somebody cancels the job by hand — so a
+// wait that can never be satisfied is turned into an ordinary test failure
+// that says which one it was. The two helpers below are the only way this
+// file waits for anything; there is no bare `await` on an event or a poll.
+const WAIT_MS = 5000; // a condition the page is expected to reach
+const COMMAND_MS = 15000; // one DevTools command, including its own awaits
+const STARTUP_MS = 10000; // the browser's launch handshake
+const JOURNEY_MS = 120000; // the whole browser journey, as a last resort
+
+function withTimeout(promise, what, timeoutMs = WAIT_MS) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`timed out after ${timeoutMs} ms waiting for ${what}`)),
+        timeoutMs,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+// The condition itself is bounded by whatever is left of the budget, so a
+// probe that never answers fails the same way a probe that keeps answering
+// `false` does.
+async function waitFor(condition, what, timeoutMs = WAIT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  for (let remaining = timeoutMs; remaining > 0; remaining = deadline - Date.now()) {
+    const value = await withTimeout(condition(), what, remaining);
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+}
+
 const editableText = {
   id: "layer_text",
   name: "Editable text",
@@ -207,7 +244,10 @@ async function startFixtureServer() {
     response.writeHead(200, { "content-type": types[extname(requested)] ?? "application/octet-stream" });
     response.end(readFileSync(join(dist, requested)));
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await withTimeout(
+    new Promise((resolve) => server.listen(0, "127.0.0.1", resolve)),
+    "the fixture server to start listening",
+  );
   const address = server.address();
   assert.ok(address && typeof address === "object");
   return {
@@ -220,7 +260,19 @@ async function startFixtureServer() {
       writes.length = 0;
       reads.length = 0;
     },
-    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+    // A listening server is an open handle, and an open handle keeps node
+    // alive after the last test has reported — which is how a finished run
+    // becomes a job that never ends. Sockets the browser left open are closed
+    // first so `close` has something to complete, and the server is unrefed so
+    // that even a `close` that never calls back cannot hold the process.
+    close: async () => {
+      server.closeAllConnections?.();
+      server.unref();
+      await withTimeout(
+        new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+        "the fixture server to close",
+      );
+    },
   };
 }
 
@@ -264,12 +316,20 @@ class CdpPage {
     });
   }
 
+  // A command whose answer never arrives — a browser that died, a socket that
+  // closed under us, an `awaitPromise` on a promise the page never settles —
+  // used to leave an entry in `pending` that nothing would ever resolve.
   send(method, params = {}) {
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
+    const answer = new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.socket.send(JSON.stringify({ id, method, params }));
     });
+    return withTimeout(answer, `the browser to answer ${method}`, COMMAND_MS)
+      .catch((error) => {
+        this.pending.delete(id);
+        throw error;
+      });
   }
 
   async evaluate(expression) {
@@ -285,19 +345,18 @@ class CdpPage {
     return result.result.value;
   }
 
-  async waitFor(expression, description, timeout = 5000) {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      if (await this.evaluate(`Boolean(${expression})`)) return;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+  async waitFor(expression, description, timeoutMs = WAIT_MS) {
+    try {
+      await waitFor(() => this.evaluate(`Boolean(${expression})`), description, timeoutMs);
+    } catch (error) {
+      const page = await this.evaluate(`({
+        url: location.href,
+        ready: document.readyState,
+        status: document.querySelector("#status")?.textContent,
+        save: document.querySelector("#save-state")?.textContent
+      })`).catch((reason) => ({ unreachable: reason.message }));
+      throw new Error(`${error.message}: ${JSON.stringify(page)} ${this.events.join(" | ")}`);
     }
-    const page = await this.evaluate(`({
-      url: location.href,
-      ready: document.readyState,
-      status: document.querySelector("#status")?.textContent,
-      save: document.querySelector("#save-state")?.textContent
-    })`);
-    throw new Error(`timed out waiting for ${description}: ${JSON.stringify(page)} ${this.events.join(" | ")}`);
   }
 
   click(selector) {
@@ -322,39 +381,84 @@ async function startBrowser(url, width = 1400, height = 900) {
     `--user-data-dir=${profile}`,
     "about:blank",
   ], { stdio: "ignore" });
-  const portFile = join(profile, "DevToolsActivePort");
-  const deadline = Date.now() + 10000;
-  while (!existsSync(portFile) && Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`browser exited with ${child.exitCode}`);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  if (!existsSync(portFile)) throw new Error("browser did not expose a DevTools port");
-  const [port] = readFileSync(portFile, "utf8").trim().split(/\r?\n/);
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-  const target = targets.find((one) => one.type === "page");
-  assert.ok(target?.webSocketDebuggerUrl, "headless browser did not create a page target");
+  let childError;
+  child.on("error", (error) => { childError = error; });
   let socket;
+  let stopped = false;
   const stop = async () => {
-    socket?.close();
-    if (child.exitCode === null) {
+    if (stopped) return;
+    stopped = true;
+    try {
+      socket?.close();
+    } catch (error) {
+      console.warn(`could not close the DevTools socket: ${error.message}`);
+    }
+    if (child.exitCode === null && child.signalCode === null && !childError) {
       const exited = new Promise((resolve) => child.once("exit", resolve));
       child.kill();
-      await exited;
+      try {
+        await withTimeout(exited, "the browser to exit", STARTUP_MS);
+      } catch {
+        child.kill("SIGKILL");
+        try {
+          await withTimeout(exited, "the browser to exit after forced termination", WAIT_MS);
+        } catch (error) {
+          // A referenced ChildProcess can keep Node alive even after the test
+          // has finished. The job timeout remains the final bound if the OS
+          // refuses both termination requests.
+          child.unref();
+          console.warn(error.message);
+        }
+      }
     }
-    rmSync(profile, { recursive: true, force: true });
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+    } catch (error) {
+      console.warn(`could not remove the browser profile ${profile}: ${error.message}`);
+    }
   };
+
   try {
+    const portFile = join(profile, "DevToolsActivePort");
+    await waitFor(async () => {
+      if (childError) throw new Error(`browser failed to start: ${childError.message}`);
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(`browser exited with ${child.exitCode ?? child.signalCode}`);
+      }
+      return existsSync(portFile);
+    }, "the browser to write its DevTools port file", STARTUP_MS);
+    const [port] = readFileSync(portFile, "utf8").trim().split(/\r?\n/);
+    const targetController = new AbortController();
+    let targets;
+    try {
+      targets = await withTimeout(
+        fetch(`http://127.0.0.1:${port}/json/list`, {
+          signal: targetController.signal,
+        }).then((response) => response.json()),
+        "the browser target list to be fetched and read",
+        STARTUP_MS,
+      );
+    } catch (error) {
+      targetController.abort();
+      throw error;
+    }
+    const target = targets.find((one) => one.type === "page");
+    assert.ok(target?.webSocketDebuggerUrl, "headless browser did not create a page target");
     socket = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => {
-      socket.addEventListener("open", resolve, { once: true });
-      socket.addEventListener("error", reject, { once: true });
-    });
+    await withTimeout(
+      new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, { once: true });
+        socket.addEventListener("error", reject, { once: true });
+      }),
+      "the DevTools socket to open",
+      STARTUP_MS,
+    );
     const page = new CdpPage(socket);
     await page.send("Runtime.enable");
     await page.send("Page.enable");
     await page.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
     await page.send("Page.navigate", { url });
-    await page.waitFor(`document.readyState === "complete" && document.querySelector("#status")?.textContent?.includes("ready")`, "editor startup", 10000);
+    await page.waitFor(`document.readyState === "complete" && document.querySelector("#status")?.textContent?.includes("ready")`, "editor startup", STARTUP_MS);
     return { page, child, profile, close: stop };
   } catch (error) {
     await stop();
@@ -373,19 +477,22 @@ async function selectLayer(page, id) {
   await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.classList.contains("selected")`, `${id} selection`);
 }
 
-async function waitForWrites(fixture, count = 1, timeout = 5000) {
-  const deadline = Date.now() + timeout;
-  while (fixture.writes.length < count && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  assert.ok(fixture.writes.length >= count, `expected ${count} API write${count === 1 ? "" : "s"}`);
+async function waitForWrites(fixture, count = 1, timeoutMs = WAIT_MS) {
+  await waitFor(
+    () => fixture.writes.length >= count,
+    `${count} API write${count === 1 ? "" : "s"}`,
+    timeoutMs,
+  );
 }
 
 async function waitForSaved(page) {
   await page.waitFor(`document.querySelector("#save-state")?.textContent?.includes("All changes saved")`, "saved state");
 }
 
-test("editor interaction journeys use the real compiled interface", async (t) => {
+// The bounds inside the journey are the ones that name what went wrong; this
+// one is the backstop for anything they do not cover, so it is deliberately
+// much larger than an individual wait.
+test("editor interaction journeys use the real compiled interface", { timeout: JOURNEY_MS }, async (t) => {
   const fixture = await startFixtureServer();
   let browser;
   try {
@@ -402,9 +509,16 @@ test("editor interaction journeys use the real compiled interface", async (t) =>
     t.skip("set ASSEMBLASH_TEST_BROWSER to a Chrome or Chromium executable to run browser journeys");
     return;
   }
+  // The fixture is closed even when closing the browser throws. It used to be
+  // the second of two awaits, so a failure in the first left the fixture
+  // server listening — an open handle that kept node alive after the last
+  // assertion had already passed.
   t.after(async () => {
-    await browser.close();
-    await fixture.close();
+    try {
+      await browser.close();
+    } finally {
+      await fixture.close();
+    }
   });
   const { page } = browser;
 
@@ -648,8 +762,11 @@ test("editor interaction journeys use the real compiled interface", async (t) =>
     // undo whatever the next click did. Waiting for the new width and then for
     // two frames is what makes this journey deterministic rather than lucky.
     await page.waitFor(`window.innerWidth === 800`, "the compact viewport");
-    await page.evaluate(
-      `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+    await withTimeout(
+      page.evaluate(
+        `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+      ),
+      "two animation frames after the viewport change",
     );
     await page.evaluate(`window.dispatchEvent(new Event("resize"))`);
     assert.deepEqual(await page.evaluate(`({

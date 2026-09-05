@@ -31,9 +31,11 @@ tokio = { version = "1.49.0", default-features = false, features = [
 workspace = true
 
 # The exit test spawns the real `assemblash` binary, which lives in the CLI
-# crate. It cannot be a dev-dependency — that crate has no library — so the
-# test finds it next to itself in target/<profile>/. `cargo test --workspace`
-# builds it first, which is what CI runs.
+# crate. It cannot be a dev-dependency — that crate has no library, and a
+# dependency pulls a package's lib rather than its bins — so `tests/support`
+# builds it with cargo once per test process and uses the executable path from
+# Cargo's artifact message. Relying on `cargo test --workspace` having built it
+# first let a `-p assemblash-mcp` run pass against a stale binary.
 [dev-dependencies]
 png = "0.18.1"
 rmcp = { version = "3.1.0", default-features = false, features = [
