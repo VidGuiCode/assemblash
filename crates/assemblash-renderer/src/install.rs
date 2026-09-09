@@ -210,12 +210,55 @@ pub fn install_pack(
     Ok(installed)
 }
 
-fn install_entry(
+/// Installs every family in a named pack, storing none of them unless all of
+/// them arrived intact.
+///
+/// [`install_pack`] stores each family as it arrives, so a pack whose third
+/// download fails leaves the first two installed. That is fine for a command
+/// a person watches finish, and wrong for an API: a caller that gets an error
+/// has to be able to say the store is as it was. Everything is fetched and
+/// hash-checked first, and only then imported.
+pub fn install_pack_atomically(
     store: &mut FontStore,
+    manifest: &Manifest,
+    pack: &str,
+    fetcher: &dyn FontFetcher,
+) -> Result<Vec<FontRecord>, InstallError> {
+    let entries = manifest.pack(pack);
+    if entries.is_empty() {
+        return Err(InstallError::UnknownPack {
+            pack: pack.to_owned(),
+        });
+    }
+
+    let mut fetched = Vec::with_capacity(entries.len());
+    for entry in entries {
+        fetched.push((entry, fetch_verified(manifest, entry, fetcher)?));
+    }
+
+    let mut installed = Vec::new();
+    for (entry, bytes) in fetched {
+        let origin = std::path::PathBuf::from(&entry.path);
+        let url = manifest.url(entry);
+        installed.extend(store.import_bytes(
+            &bytes,
+            &origin,
+            Some(url),
+            Some(entry.license.clone()),
+        )?);
+    }
+    Ok(installed)
+}
+
+/// Downloads one entry and refuses anything but the bytes the manifest pins.
+///
+/// Nothing is written anywhere: the check happens before a store ever sees
+/// the bytes, which is what makes a hash mismatch leave the store untouched.
+fn fetch_verified(
     manifest: &Manifest,
     entry: &ManifestEntry,
     fetcher: &dyn FontFetcher,
-) -> Result<Vec<FontRecord>, InstallError> {
+) -> Result<Vec<u8>, InstallError> {
     let url = manifest.url(entry);
     let bytes = fetcher.fetch(&url).map_err(|reason| InstallError::Fetch {
         url: url.clone(),
@@ -230,8 +273,18 @@ fn install_entry(
             actual,
         });
     }
+    Ok(bytes)
+}
 
+fn install_entry(
+    store: &mut FontStore,
+    manifest: &Manifest,
+    entry: &ManifestEntry,
+    fetcher: &dyn FontFetcher,
+) -> Result<Vec<FontRecord>, InstallError> {
+    let bytes = fetch_verified(manifest, entry, fetcher)?;
     let origin = std::path::PathBuf::from(&entry.path);
+    let url = manifest.url(entry);
     Ok(store.import_bytes(&bytes, &origin, Some(url), Some(entry.license.clone()))?)
 }
 

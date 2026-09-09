@@ -881,13 +881,17 @@ async fn create_project_makes_an_openable_project() {
 /// `export_document` reports what the export noticed (FR-11).
 ///
 /// Advisory: the file is written either way, and the warnings never change a
-/// pixel. The same three producers the CLI and the HTTP API report.
+/// pixel. The subject is the warnings channel over MCP — that the field is
+/// always present, that a real warning arrives with its code and its layer,
+/// and that the export still succeeds — not any particular producer. It used
+/// an SVG asset with no font for that until 1.5.0, when that condition became
+/// a refusal (see `tests/svg_asset_text.rs`); an over-tall text layer is a
+/// warning that still fires, so the channel is still tested here.
 #[tokio::test]
 async fn export_document_reports_export_warnings() {
     let scratch = tempfile::tempdir().unwrap();
     let root = scratch.path().join("workspace");
     workspace_with_project(&root);
-    let asset = import_svg_asset(&root);
 
     let client = connect(&root).await;
     client
@@ -908,15 +912,18 @@ async fn export_document_reports_export_warnings() {
         "warnings is always present, empty when there is nothing to say"
     );
 
-    // An SVG asset drawing text in a family nothing loaded: the DEF-2 symptom,
-    // made loud rather than fixed.
+    // A caption in a box shorter than one line of it: the text spills past the
+    // bottom, which is surprising but not wrong — the file says exactly what
+    // the document says, so it is a warning and not a refusal.
     let added = structured(
         &client
             .call_tool(call(
-                "add_svg_layer",
+                "add_text_layer",
                 args(json!({
-                    "x": 10.0, "y": 10.0, "width": 100.0, "height": 50.0,
-                    "asset": asset
+                    "text": "spills",
+                    "x": 10.0, "y": 10.0, "width": 200.0, "height": 10.0,
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 24.0
                 })),
             ))
             .await
@@ -932,12 +939,12 @@ async fn export_document_reports_export_warnings() {
     );
     let warnings = noisy["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 1, "{warnings:#?}");
-    assert_eq!(warnings[0]["code"], "svgAssetTextWithoutFont");
+    assert_eq!(warnings[0]["code"], "textOverflowsBox");
     assert_eq!(warnings[0]["layerId"], created.as_str());
     assert!(warnings[0]["message"]
         .as_str()
         .unwrap()
-        .contains("Nowhere Sans"));
+        .contains("spills past the bottom"));
 
     // Advisory: the file was written regardless.
     assert_eq!(noisy["path"], "exports/noisy.png");

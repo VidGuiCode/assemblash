@@ -13,10 +13,12 @@ use assemblash_core::ops::{CreateLayer, LayerPosition, NewLayerKind, OpOutcome, 
 use assemblash_core::storage;
 use assemblash_core::workspace::ProjectId;
 use assemblash_core::{Color, Document, Layer, LayerKind, Operation, SessionError};
-use axum::extract::{Path, Query, State};
+use assemblash_renderer::install;
+use assemblash_renderer::store::{FontRecord, FontStore};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +54,19 @@ pub fn router(
         .route("/api/version", get(version))
         .route("/api/schema/document", get(document_schema))
         .route("/api/schema/operation", get(operation_schema))
-        .route("/api/fonts", get(fonts))
+        // A font file is megabytes, well past axum's default 2 MB ceiling, so
+        // this one route says how much it will take. The limit is the
+        // installer's own (`HttpFetcher`), so what a browser may upload and
+        // what the server will download are the same number.
+        .route(
+            "/api/fonts",
+            get(fonts)
+                .post(import_font)
+                .layer(DefaultBodyLimit::max(FONT_BODY_LIMIT)),
+        )
+        .route("/api/fonts/catalogue", get(font_catalogue))
+        .route("/api/fonts/install", post(install_fonts))
+        .route("/api/fonts/{family}", delete(remove_font_family))
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/recent", get(recent_projects))
         .route("/api/projects/{id}", get(project_summary))
@@ -227,16 +241,320 @@ async fn operation_schema() -> impl IntoResponse {
     )
 }
 
+/// How large an uploaded font file may be.
+///
+/// Noto Sans CJK is about 30 MB; this leaves room above that and matches the
+/// ceiling the installer reads a download with, so neither way of getting a
+/// font into the store is the narrower one.
+const FONT_BODY_LIMIT: usize = 64 * 1024 * 1024;
+
+/// The file extensions the import route accepts.
+///
+/// Every one of these is a container [`FontStore::import_bytes`] can actually
+/// read: WOFF and WOFF2 are decompressed to plain OpenType at import, so what
+/// is stored and hashed never needs decompressing again.
+const FONT_FORMATS: [&str; 6] = ["ttf", "otf", "ttc", "otc", "woff", "woff2"];
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FontsResponse {
     families: Vec<String>,
+    faces: Vec<FontRecord>,
 }
 
+/// Every face the store holds, and the families they add up to.
+///
+/// `families` is what this route has always returned and is unchanged;
+/// `faces` is additive, so a client written against 1.4.0 keeps working.
 async fn fonts(State(state): State<AppState>) -> Result<Json<FontsResponse>, ApiError> {
+    let store = state.font_store()?;
     Ok(Json(FontsResponse {
-        families: state.font_store()?.families(),
+        families: store.families(),
+        faces: faces_of(&store),
     }))
+}
+
+/// The store's faces, ordered family, then weight, then style.
+///
+/// The index sorts by style before weight, which puts a family's italics
+/// between two of its weights. A list a person reads goes light to black.
+fn faces_of(store: &FontStore) -> Vec<FontRecord> {
+    let mut faces = store.records().to_vec();
+    faces.sort_by(|a, b| {
+        (&a.family, a.weight, &a.style, &a.file, a.face_index).cmp(&(
+            &b.family,
+            b.weight,
+            &b.style,
+            &b.file,
+            b.face_index,
+        ))
+    });
+    faces
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FontUpload {
+    /// Name the file arrived under. Only its extension is used.
+    filename: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FontImportResponse {
+    imported: Vec<FontRecord>,
+    families: Vec<String>,
+}
+
+/// Imports an uploaded font file into the workspace's font store.
+///
+/// Like an asset upload, the client's filename contributes **only its
+/// extension**: the stored file is named by the hash of its own bytes, so
+/// nothing a caller sends can influence a path. The extension is checked
+/// against a closed list before the bytes are looked at, because "this is a
+/// font" and "this is named like a font" are different claims and only the
+/// second one is cheap.
+///
+/// Re-importing bytes the store already has is not an error — it answers
+/// `200` with the records that were already there, rather than `201`.
+async fn import_font(
+    State(state): State<AppState>,
+    Query(upload): Query<FontUpload>,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<FontImportResponse>), ApiError> {
+    let _format = font_format_of(&upload.filename)?;
+
+    // Taken before the store is opened and held until after its index is
+    // written, so a second import cannot read the index between this one's
+    // read and its write.
+    let _writing = state.lock_font_writes()?;
+    let mut store = state.font_store()?;
+    let before = store.records().len();
+
+    let origin = std::path::Path::new(&upload.filename);
+    let imported = store.import_bytes(&body, origin, Some(upload.filename.clone()), None)?;
+    let added = store.records().len() > before;
+
+    state.clear_font_cache();
+    Ok((
+        if added {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(FontImportResponse {
+            imported,
+            families: store.families(),
+        }),
+    ))
+}
+
+/// The font container a filename claims, or a refusal naming what is accepted.
+///
+/// The path checks are belt and braces — this name never becomes a path — but
+/// a name that is really a path is worth refusing wherever it appears rather
+/// than only where it would currently do harm.
+fn font_format_of(filename: &str) -> Result<&'static str, ApiError> {
+    if filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains("..")
+        || filename.contains('\0')
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalidFilename",
+            format!("{filename:?} is not a plain file name"),
+        ));
+    }
+
+    let extension = filename
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .unwrap_or_default();
+    FONT_FORMATS
+        .iter()
+        .copied()
+        .find(|format| *format == extension)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "unsupportedFontFormat",
+                format!("{filename:?} is not a font format this build can import"),
+            )
+            .with_details(serde_json::json!({
+                "filename": filename,
+                "accepted": FONT_FORMATS,
+            }))
+        })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FontRemovalResponse {
+    removed: usize,
+    families: Vec<String>,
+}
+
+/// Removes every face a family provides, and the files left unreferenced.
+///
+/// A family the store does not have is a `404`, not a silent success: a
+/// client that has just shown a delete button needs to know whether the thing
+/// it was pointing at was still there.
+async fn remove_font_family(
+    State(state): State<AppState>,
+    Path(family): Path<String>,
+) -> Result<Json<FontRemovalResponse>, ApiError> {
+    let _writing = state.lock_font_writes()?;
+    let mut store = state.font_store()?;
+
+    let removed = store.remove_family(&family)?;
+    if removed == 0 {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "unknownFontFamily",
+            format!("no font family named {family:?} is in the font store"),
+        )
+        .with_details(serde_json::json!({ "family": family })));
+    }
+
+    state.clear_font_cache();
+    Ok(Json(FontRemovalResponse {
+        removed,
+        families: store.families(),
+    }))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FontCatalogue {
+    packs: std::collections::BTreeMap<String, Vec<String>>,
+    families: Vec<CatalogueFamily>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogueFamily {
+    family: String,
+    license: String,
+    bytes: u64,
+    packs: Vec<String>,
+}
+
+/// What the install route is able to fetch, from the compiled-in manifest.
+///
+/// Reads no network and touches no store: it is the list a client needs to
+/// say what an install button would download, and how much of it.
+async fn font_catalogue(State(state): State<AppState>) -> Result<Json<FontCatalogue>, ApiError> {
+    let manifest = state.font_manifest()?;
+
+    let mut packs: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut families = Vec::with_capacity(manifest.families.len());
+    for entry in &manifest.families {
+        for pack in &entry.packs {
+            packs
+                .entry(pack.clone())
+                .or_default()
+                .push(entry.name.clone());
+        }
+        families.push(CatalogueFamily {
+            family: entry.name.clone(),
+            license: entry.license.clone(),
+            bytes: entry.bytes,
+            packs: entry.packs.clone(),
+        });
+    }
+
+    Ok(Json(FontCatalogue { packs, families }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FontInstallRequest {
+    /// A pack from the manifest, e.g. `default`.
+    #[serde(default)]
+    pack: Option<String>,
+    /// One family from the manifest, e.g. `Noto Sans`.
+    #[serde(default)]
+    family: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FontInstallResponse {
+    installed: Vec<FontRecord>,
+    families: Vec<String>,
+}
+
+/// Downloads fonts from the pinned manifest and installs them.
+///
+/// **This is the only place the server reaches the network, and it does so
+/// only when this request is made.** Rendering never downloads anything, and
+/// a workspace whose fonts are already installed works with no network at all
+/// (NFR-5). What may be fetched is the committed manifest, pinned to one
+/// upstream commit with the sha256 of every file, and a download whose hash
+/// does not match is refused before the store sees it — so a failed install
+/// leaves the store exactly as it was.
+async fn install_fonts(
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<FontInstallRequest>,
+) -> Result<(StatusCode, Json<FontInstallResponse>), ApiError> {
+    let manifest = state.font_manifest()?;
+
+    let _writing = state.lock_font_writes()?;
+    let mut store = state.font_store()?;
+
+    let installed = match (&request.pack, &request.family) {
+        (Some(pack), None) => {
+            install::install_pack_atomically(&mut store, &manifest, pack, state.font_fetcher())?
+        }
+        (None, Some(family)) => {
+            install::install_family(&mut store, &manifest, family, state.font_fetcher())?
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "an install names exactly one of \"pack\" or \"family\"",
+            ))
+        }
+    };
+
+    state.clear_font_cache();
+    Ok((
+        StatusCode::CREATED,
+        Json(FontInstallResponse {
+            installed,
+            families: store.families(),
+        }),
+    ))
+}
+
+/// A lock this server cleared on the way to opening the project, reported
+/// once.
+///
+/// Additive and absent unless it happened, so a client written before this
+/// existed reads the same summary it always did. Present on the *first*
+/// summary after a reclaim and on none after that: it is a notice, and a
+/// notice that never stops being delivered is noise the interface would have
+/// to learn to dismiss.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReclaimedLock {
+    /// The process that had left the lock behind.
+    pid: u32,
+    /// The machine it was taken on — this one.
+    host: String,
+    /// Milliseconds since the Unix epoch, when this server noticed.
+    at: u64,
+}
+
+impl From<crate::state::ReclaimEvent> for ReclaimedLock {
+    fn from(event: crate::state::ReclaimEvent) -> Self {
+        Self {
+            pid: event.pid,
+            host: event.host,
+            at: event.at,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -248,6 +566,10 @@ struct ProjectSummary {
     document_id: String,
     version: u64,
     layers: usize,
+    /// See [`ReclaimedLock`]. Never set by a listing: a lock is reclaimed by
+    /// opening a project, and listings deliberately do not open one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reclaimed_lock: Option<ReclaimedLock>,
 }
 
 fn summarise(id: &ProjectId, document: &Document) -> ProjectSummary {
@@ -259,6 +581,7 @@ fn summarise(id: &ProjectId, document: &Document) -> ProjectSummary {
         document_id: document.id.to_string(),
         version: document.version,
         layers,
+        reclaimed_lock: None,
     }
 }
 
@@ -290,6 +613,7 @@ fn summarise_indexed(project: &assemblash_core::index::IndexedProject) -> Projec
         document_id: project.document_id.clone(),
         version: project.version,
         layers: project.layers,
+        reclaimed_lock: None,
     }
 }
 
@@ -459,7 +783,12 @@ async fn project_summary(
     let id = ProjectId::new(id)?;
     let project = state.project(&id, now_millis())?;
     let session = lock_project(&project)?;
-    Ok(Json(summarise(&id, session.document())))
+    let mut summary = summarise(&id, session.document());
+    // Taken, not read: this is the one delivery of the notice. Opening the
+    // project above is what may have produced it, so the very first summary
+    // after a crash is the one that carries it.
+    summary.reclaimed_lock = state.take_reclaim_event(id.as_str()).map(Into::into);
+    Ok(Json(summary))
 }
 
 async fn get_document(
@@ -1398,15 +1727,23 @@ async fn export_document(
     Path(id): Path<String>,
     ApiJson(request): ApiJson<ExportRequest>,
 ) -> Result<Json<render::Exported>, ApiError> {
+    let project = id.clone();
     let (document, directory) = read_for_render(&state, id)?;
     let fonts = state.fonts_for(&document)?;
-    Ok(Json(render::export_into_project_loaded(
+    let mut exported = render::export_into_project_loaded(
         &document,
         &directory,
         &fonts,
         request.scale,
         request.name.as_deref(),
-    )?))
+    )?;
+    // Peeked, not taken. The project summary is where the notice is consumed,
+    // so exporting first does not rob the interface of it — and a second
+    // export after the summary has read it says nothing, which is right.
+    if let Some(event) = state.reclaim_event(&project) {
+        render::note_lock_reclaimed(&mut exported, event.pid, &event.host);
+    }
+    Ok(Json(exported))
 }
 
 /// Reads back a PNG the engine wrote into a project's `exports/`.

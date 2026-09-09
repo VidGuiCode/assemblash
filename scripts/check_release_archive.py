@@ -16,6 +16,11 @@ def main():
     parser.add_argument("--target", required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--canvas", action="store_true", help="Also verify canvas editing (1.4.0 and newer)")
+    parser.add_argument(
+        "--no-terminal",
+        action="store_true",
+        help="Also verify font import, SVG-text refusal and stale-lock reclaim (1.5.0 and newer)",
+    )
     args = parser.parse_args()
     extension = "zip" if args.target.startswith("windows-") else "tar.gz"
     name = f"assemblash-{args.tag}-{args.target}"
@@ -61,6 +66,12 @@ def main():
                  "--binary", str(binary), "--workspace", str(root / "canvas-workspace"),
                  "--font", str(Path(__file__).resolve().parents[1] / "crates" /
                                "assemblash-renderer" / "tests" / "fonts" / "NotoSans-Subset.ttf")],
+                check=True, timeout=240,
+            )
+        if args.no_terminal:
+            subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("no_terminal_smoke.py")),
+                 "--binary", str(binary), "--workspace", str(root / "no-terminal-workspace")],
                 check=True, timeout=240,
             )
 

@@ -80,6 +80,10 @@ export async function recentProjects(limit = 8) {
     const body = await request(`/api/projects/recent?limit=${limit}`);
     return body.projects;
 }
+/** One project's summary, fetched fresh by id. */
+export async function projectSummary(project) {
+    return request(`/api/projects/${encodeURIComponent(project)}`);
+}
 /** Where a project's small preview lives. Cached by the engine, not the page. */
 export function thumbnailUrl(project) {
     return `/api/projects/${encodeURIComponent(project)}/thumbnail.png`;
@@ -335,9 +339,66 @@ export async function renderVariants(project, variants, scale = 1) {
 export function exportUrl(project, name) {
     return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.png`;
 }
+/**
+ * The family names in the font store.
+ *
+ * Kept beside `fontFaces` because most of the interface only ever wants the
+ * names — the suggestion list, the text presets — and asking for faces to
+ * throw them away would put the same map in three places.
+ */
 export async function fonts() {
     const body = await request("/api/fonts");
     return body.families;
+}
+/** The store as the font manager shows it: families, and the faces of each. */
+export async function fontFaces() {
+    const body = await request("/api/fonts");
+    return { families: body.families ?? [], faces: body.faces ?? [] };
+}
+/**
+ * Imports one font file into the workspace's font store.
+ *
+ * Raw bytes with the client's name in the query, exactly like an asset
+ * upload: only the extension of that name is used, and the stored file is
+ * named by the hash of its own bytes, so nothing a person types becomes a
+ * path. Re-importing bytes the store already has answers `200` rather than
+ * refusing, and this returns the same shape either way.
+ */
+export async function importFont(file) {
+    return request(`/api/fonts?filename=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: { "content-type": file.type || "application/octet-stream" },
+        body: file,
+    });
+}
+/**
+ * Removes every face of a family, and the files left unreferenced.
+ *
+ * A family the store does not have is a refusal, not a silent success: a
+ * page that has just shown a Remove button needs to know whether the thing it
+ * was pointing at was still there.
+ */
+export async function removeFontFamily(family) {
+    return request(`/api/fonts/${encodeURIComponent(family)}`, { method: "DELETE" });
+}
+/** What the install route could fetch, from the server's pinned manifest. */
+export async function fontCatalogue() {
+    return request("/api/fonts/catalogue");
+}
+/**
+ * Installs a pack from the pinned manifest.
+ *
+ * The only call in this interface that makes the server reach the network,
+ * and it does so only when it is made. A download whose hash does not match
+ * the manifest is refused before the store sees it, so a failed install
+ * leaves the store exactly as it was.
+ */
+export async function installFontPack(pack) {
+    return request("/api/fonts/install", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pack }),
+    });
 }
 /**
  * The engine's vector render, for downloading.

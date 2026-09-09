@@ -1,7 +1,7 @@
 # Assemblash Product Requirements Document
 
 **Product:** Assemblash  
-**Status:** **1.2.0 released 2026-08-30** — the document schema remains `schemaVersion` 1 and the operation API remains compatible with 1.0; breaking either requires a MAJOR release. The reference editor provides the unified canvas-first workflow described by FR-10, now with the finished Assemblash identity and a more legible interaction surface, while preserving the same deterministic renderer and operation layer. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) remain demonstrated. Use case D remains out of scope by design.
+**Status:** **1.5.0 released 2026-09-09** — the document schema remains `schemaVersion` 1 and the operation API remains compatible with 1.0; breaking either requires a MAJOR release. Fonts are now managed from the reference interface rather than from a terminal — the Add panel lists the installed families and their faces, imports font files from disk, removes a family, and offers a one-click install of the bundled `default` pack when the store is empty — and the same font store is reachable over HTTP under the usual access-token rule. A server started by the double-click launch reclaims a project lock by itself only when the lock names this machine and the process it names is provably gone, reporting every reclaim. An imported SVG asset whose text no loaded font can draw is refused with a typed error rather than exported blank. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) remain demonstrated. Use case D remains out of scope by design.
 **Document type:** Product and technical requirements  
 **Audience:** Maintainers, contributors, downstream integrators, and coding agents  
 **Primary deployment model:** Local machine or self-hosted server  
@@ -783,7 +783,7 @@ The project MUST avoid selecting a dependency solely because it offers a visuall
 
 ## 16. Open decisions
 
-These decisions should be resolved before implementation reaches the first public release:
+Decisions 4 and 12 remain open after 1.0; the rest are resolved and recorded in §16.1.
 
 1. ~~TypeScript-only core or a language-neutral API with multiple implementations?~~ **Resolved:** Rust core with a language-neutral JSON Schema document format (see §16.1).
 2. ~~SVG-first, HTML/canvas, or hybrid renderer?~~ **Resolved:** SVG-first, rasterized with resvg (see §16.1).
@@ -791,10 +791,10 @@ These decisions should be resolved before implementation reaches the first publi
 4. Directory-based JSON documents only, or a packaged `.assemblash` file?
 5. ~~Which local API transport: embedded library, HTTP, or both?~~ **Resolved:** embedded (core crate) first, HTTP via axum in Phase 2 (see §16.1).
 6. ~~Which MCP transport should the reference server support first?~~ **Resolved:** stdio first (see §16.1).
-7. How should fonts be resolved and reported?
-8. What image formats are supported in the first release?
-9. Which operations are atomic transactions?
-10. What is the minimum audit/history format?
+7. ~~How should fonts be resolved and reported?~~ **Resolved:** a hash-pinned local font store; only explicitly provided font files, never system fonts (see §16.1).
+8. ~~What image formats are supported in the first release?~~ **Resolved:** PNG, JPEG, WebP, GIF, and sanitised SVG in; PNG and SVG out (see §16.1).
+9. ~~Which operations are atomic transactions?~~ **Resolved:** every one, singly or as a batch (see §16.1).
+10. ~~What is the minimum audit/history format?~~ **Resolved:** an append-only JSONL journal with snapshots (see §16.1).
 11. ~~Which open-source license fits the dependency graph and contribution goals?~~ **Resolved:** Apache-2.0 (see §16.1 below).
 12. Should optional provider adapters live in this repository or separate repositories?
 13. ~~What versioning policy applies to the document schema and API?~~ **Resolved:** see §16.1 below.
@@ -888,6 +888,59 @@ mode and one filter. The named fallback if resvg fails the gate is
   schema version (FR-11).
 - The public API is versioned with the application release; breaking API
   changes after 1.0 require a MAJOR increment.
+
+**Font resolution (decision 7, resolved 2026-08-05):** a hash-pinned local
+font store, and no system fonts anywhere. The workspace holds a `fonts/`
+directory in which every file is named by the sha256 of its own bytes, beside
+an `index.json` recording the family, style, weight, hash, provenance, and
+licence of each face; `assemblash font verify` re-hashes everything and names
+the file that changed, because a font replaced behind the engine's back would
+otherwise move the pixels without moving anything the document records. A
+render uses only the font files it is given — there is no system-font
+discovery and no network access anywhere on the render path — and a family
+the store does not have is a typed error at store, renderer, and command-line
+level rather than a substitution. The one network action is an explicit
+installer, `assemblash font install`, which fetches only what a manifest
+committed in this repository names: twelve OFL families, pinned to one commit
+of the upstream font project and to the sha256 of each file, a download whose
+hash does not match being refused rather than stored. Reporting is by family.
+The store's index records style and weight per face, but a text layer names a
+font family and nothing else, so per-face selection is not yet expressible in
+a document.
+
+**Image formats (decision 8, resolved 2026-08-04):** PNG, JPEG, WebP, and GIF
+are imported as raster assets and SVG as a vector asset, each copied into the
+project's `assets/` directory under the sha256 of its own bytes, with the
+media type recorded from the file extension. An SVG is sanitised on the way
+in rather than on the way out, so everything under `assets/` is safe by
+construction (§10.1). An import with no file extension is refused, and one
+carrying an extension outside that set is stored as `application/octet-stream`
+rather than as an image. Export writes two formats and only two: SVG, which is
+the renderer's own intermediate form, and PNG rasterized from it (FR-11).
+
+**Atomic operations (decision 9, resolved 2026-08-04):** all of them. Every
+operation runs against a copy of the document and is written back only once
+the result validates, so a refused operation leaves the document
+byte-identical rather than half-applied. Each carries an optional
+expected-version check (§10.3), can be asked what it would do without doing
+it (§10.4), and is journalled as one transaction that a single undo reverses.
+`POST /api/projects/{id}/operation-batches`, added in 1.1.0, gives the same
+scope to a group of operations: every member is applied to one cloned
+document, nothing is persisted if any of them fails, and the batch is
+journalled, undone, and redone as one step.
+
+**Audit and history format (decision 10, resolved 2026-08-04):** an
+append-only `history/journal.jsonl` per project — one JSON object per line,
+recording the operation or batch, its transaction id, the actor kind and
+name, a timestamp, and the layers touched (§10.5) — beside periodic
+snapshots of the document under `history/snapshots/`. The file is never
+rewritten, so it stays greppable by a person and no later edit can quietly
+revise it, and undo rebuilds a state by replaying operations forward onto the
+nearest snapshot rather than by inverting them, which is what makes an undone
+document byte-identical rather than merely equivalent. No SQL database is
+ever the source of truth: the workspace `index.db` added in 0.16.0 is a cache
+of what is in `projects/`, rebuilt by scanning it, and deleting the file
+costs time and never information.
 
 ---
 

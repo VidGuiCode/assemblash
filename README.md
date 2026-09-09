@@ -25,8 +25,8 @@ interface, a local HTTP API, an embedded Rust API, and an MCP server. Every
 interface goes through the same validated operation layer, so a change made by
 an agent behaves like a change made by a person.
 
-**Current release: 1.4.0.** The document schema and operation API have been
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.4.0)
+**Current release: 1.5.0.** The document schema and operation API have been
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.5.0)
 or [changelog](CHANGELOG.md) for the full history.
 
 <p align="center">
@@ -103,7 +103,7 @@ the tap is **not published yet**, so there is no `brew install` to run today.
 Building requires [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.4.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.5.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -121,6 +121,16 @@ assemblash export ./poster --out poster.png --font-store ./assemblash-fonts
 Already have a font file? Use `--font /path/to/SomeFont.ttf` or
 `--font-dir /path/to/fonts` instead. Run `assemblash --help` or
 `assemblash <command> --help` for the complete command reference.
+
+The editor manages the same store without a terminal. Its Add panel has a
+**Fonts** section (1.5.0 and newer) that lists the installed families and their
+faces, imports TTF, OTF, TTC, OTC, WOFF and WOFF2 files from disk, and removes
+a family after confirming that projects using it will report a missing font
+until it is imported again. When the store is empty it offers a single button
+that installs the bundled `default` pack — Noto Sans, Noto Serif and Noto Sans
+Mono — naming what it will download before anything is fetched. The font picker
+and the canvas update immediately, and removing a family never touches your
+operating system's fonts or the file you imported from.
 
 To change a layer afterwards, `assemblash set` reaches every updatable
 property — name, position, size, rotation, opacity, visibility, lock, blend
@@ -198,15 +208,26 @@ Fonts are loaded only from files you explicitly provide or install into the
 font store. Their bytes are hashed and pinned, which keeps typography and
 export pixels consistent across operating systems.
 
-An export also reports what it could not do well. Three warnings are produced:
+An export also reports what it could not do well. It produces
 `wordBrokenMidWord` when a single word is too wide for its box and has to be
 split, `textOverflowsBox` when laid-out text is taller than the box holding it,
-and `svgAssetTextWithoutFont` when an imported SVG asset draws text in a family
-no loaded font provides. Each carries a `code`, a `message`, and the `layerId`
+and — from 1.5.0, on the HTTP and MCP paths only — `lockReclaimed` when the
+server reclaimed a stale project lock before producing it. Each carries a
+`code`, a `message`, and the `layerId`
 where one applies. A warning is advisory: it changes no pixel and no exit
 status. The HTTP export response and the MCP `export_document` result carry a
 `warnings` array; the CLI prints one line per warning on stderr, or the whole
 array as JSON on stdout with `--warnings-json`.
+
+Text inside an imported SVG asset is not advisory. From 1.5.0 a render refuses,
+with a typed error naming the asset, unless every `<text>` in that asset names
+at least one non-generic font family the render loaded; text that names only a
+generic family such as `sans-serif` is refused too, because the pinned store
+never holds the renderer's fallback. Earlier releases exported such a document
+successfully with the text simply absent, which looked finished and was not.
+Name a loaded family in the asset, or outline the text before importing it. The
+1.3.0 warning code `svgAssetTextWithoutFont` is kept but is no longer produced
+for this case, because the refusal comes first.
 
 ### History and safety
 
@@ -298,6 +319,18 @@ The token authenticates requests; it does not encrypt traffic. Put Assemblash
 behind a TLS reverse proxy when it is reachable beyond a trusted network. See
 [DEPLOYMENT.md](DEPLOYMENT.md) for Docker, Caddy, Traefik, nginx, and identity
 provider guidance.
+
+If a project's lock file is left behind by a process that died, opening the
+project is refused until someone clears the claim — from the editor's confirm
+dialog, or with `assemblash unlock`. `serve --reclaim-stale-locks` (also
+accepted by `assemblash mcp`, and on from 1.5.0 by the double-click or
+`--friendly` launch, where there is nobody at a terminal) lets the server clear
+such a claim on its own, but only when the lock names this machine and its
+process is provably gone. A lock from another machine, or one written by an
+older build that recorded no machine name, still needs a person: on a synced
+project folder a process id from a different computer proves nothing. Every
+reclaim is reported in the server log, in the editor, and as a `lockReclaimed`
+export warning.
 
 ## Edit the canvas
 

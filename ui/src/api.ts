@@ -35,6 +35,13 @@ export interface ProjectSummary {
   documentId: string;
   version: number;
   layers: number;
+  /**
+   * Present only on the first summary fetched after the server automatically
+   * cleared a stale lock on this project — the process that held it was
+   * gone, so nobody had to recover it by hand. The server drains this on
+   * read, so a second fetch never sees it again for the same reclaim.
+   */
+  reclaimedLock?: { pid: number; host: string; at: number };
 }
 
 /** What an operation did. */
@@ -141,6 +148,11 @@ export async function recentProjects(limit = 8): Promise<ProjectSummary[]> {
     `/api/projects/recent?limit=${limit}`,
   );
   return body.projects;
+}
+
+/** One project's summary, fetched fresh by id. */
+export async function projectSummary(project: string): Promise<ProjectSummary> {
+  return request<ProjectSummary>(`/api/projects/${encodeURIComponent(project)}`);
 }
 
 /** Where a project's small preview lives. Cached by the engine, not the page. */
@@ -532,9 +544,113 @@ export function exportUrl(project: string, name: string): string {
   return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.png`;
 }
 
+/** One face the font store holds, as the engine records it. */
+export interface FontRecord {
+  family: string;
+  style: string;
+  weight: number;
+  file: string;
+  hash: string;
+  faceIndex: number;
+  source?: string;
+  license?: string;
+}
+
+/** Everything `GET /api/fonts` reports: the families, and the faces behind them. */
+export interface FontStoreListing {
+  families: string[];
+  faces: FontRecord[];
+}
+
+/** One family the compiled-in manifest is able to fetch. */
+export interface CatalogueFamily {
+  family: string;
+  license: string;
+  bytes: number;
+  packs: string[];
+}
+
+/** What an install could fetch, and how much of it. Reads no network. */
+export interface FontCatalogue {
+  packs: Record<string, string[]>;
+  families: CatalogueFamily[];
+}
+
+/**
+ * The family names in the font store.
+ *
+ * Kept beside `fontFaces` because most of the interface only ever wants the
+ * names — the suggestion list, the text presets — and asking for faces to
+ * throw them away would put the same map in three places.
+ */
 export async function fonts(): Promise<string[]> {
   const body = await request<{ families: string[] }>("/api/fonts");
   return body.families;
+}
+
+/** The store as the font manager shows it: families, and the faces of each. */
+export async function fontFaces(): Promise<FontStoreListing> {
+  const body = await request<{ families?: string[]; faces?: FontRecord[] }>("/api/fonts");
+  return { families: body.families ?? [], faces: body.faces ?? [] };
+}
+
+/**
+ * Imports one font file into the workspace's font store.
+ *
+ * Raw bytes with the client's name in the query, exactly like an asset
+ * upload: only the extension of that name is used, and the stored file is
+ * named by the hash of its own bytes, so nothing a person types becomes a
+ * path. Re-importing bytes the store already has answers `200` rather than
+ * refusing, and this returns the same shape either way.
+ */
+export async function importFont(file: File): Promise<{ imported: FontRecord[]; families: string[] }> {
+  return request<{ imported: FontRecord[]; families: string[] }>(
+    `/api/fonts?filename=${encodeURIComponent(file.name)}`,
+    {
+      method: "POST",
+      headers: { "content-type": file.type || "application/octet-stream" },
+      body: file,
+    },
+  );
+}
+
+/**
+ * Removes every face of a family, and the files left unreferenced.
+ *
+ * A family the store does not have is a refusal, not a silent success: a
+ * page that has just shown a Remove button needs to know whether the thing it
+ * was pointing at was still there.
+ */
+export async function removeFontFamily(
+  family: string,
+): Promise<{ removed: number; families: string[] }> {
+  return request<{ removed: number; families: string[] }>(
+    `/api/fonts/${encodeURIComponent(family)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** What the install route could fetch, from the server's pinned manifest. */
+export async function fontCatalogue(): Promise<FontCatalogue> {
+  return request<FontCatalogue>("/api/fonts/catalogue");
+}
+
+/**
+ * Installs a pack from the pinned manifest.
+ *
+ * The only call in this interface that makes the server reach the network,
+ * and it does so only when it is made. A download whose hash does not match
+ * the manifest is refused before the store sees it, so a failed install
+ * leaves the store exactly as it was.
+ */
+export async function installFontPack(
+  pack: string,
+): Promise<{ installed: FontRecord[]; families: string[] }> {
+  return request<{ installed: FontRecord[]; families: string[] }>("/api/fonts/install", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pack }),
+  });
 }
 
 /**

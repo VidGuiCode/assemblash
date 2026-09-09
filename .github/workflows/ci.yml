@@ -175,3 +175,9 @@ jobs:
           --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
           --workspace "${{ runner.temp }}/assemblash-canvas-smoke"
           --font crates/assemblash-renderer/tests/fonts/NotoSans-Subset.ttf
+
+      - name: Verify font import, SVG-text refusal and stale-lock reclaim without a terminal
+        run: >-
+          python scripts/no_terminal_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-no-terminal-smoke"

@@ -54,6 +54,16 @@ pub struct Backend {
             std::collections::BTreeMap<PathBuf, assemblash_server::state::OpenProject>,
         >,
     >,
+    /// Whether opening a project may clear a lock left by a dead process on
+    /// this machine. Off unless the client asked for it.
+    reclaim_stale_locks: bool,
+    /// A lock cleared in single-project mode, not yet reported.
+    ///
+    /// Workspace mode keeps this in the [`AppState`], which already has
+    /// somewhere to put it; single-project mode has no such state, and there
+    /// is only ever one project, so one slot is the whole story.
+    single_reclaimed:
+        std::sync::Arc<std::sync::Mutex<Option<assemblash_server::state::ReclaimEvent>>>,
 }
 
 /// Milliseconds since the Unix epoch, for the audit trail.
@@ -289,14 +299,34 @@ impl Loaded {
 impl Backend {
     /// Serves a workspace.
     pub fn workspace(workspace: Workspace) -> Self {
+        Self::workspace_with(workspace, false)
+    }
+
+    /// Serves a workspace, saying whether a stale lock may be reclaimed.
+    ///
+    /// `true` clears a lock only when it names this machine and the process it
+    /// names is provably gone; anything else is still the conflict it has
+    /// always been. `false` is [`Backend::workspace`] exactly.
+    pub fn workspace_with(workspace: Workspace, reclaim_stale_locks: bool) -> Self {
         Self {
-            root: Root::Workspace(Box::new(AppState::new(workspace))),
+            root: Root::Workspace(Box::new(AppState::with_reclaim(
+                workspace,
+                reclaim_stale_locks,
+            ))),
             single: Default::default(),
+            reclaim_stale_locks,
+            single_reclaimed: Default::default(),
         }
     }
 
     /// Serves a single project directory.
     pub fn single_project(directory: PathBuf) -> Self {
+        Self::single_project_with(directory, false)
+    }
+
+    /// Serves a single project directory, saying whether a stale lock may be
+    /// reclaimed.
+    pub fn single_project_with(directory: PathBuf, reclaim_stale_locks: bool) -> Self {
         let name = directory
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -304,7 +334,26 @@ impl Backend {
         Self {
             root: Root::SingleProject { directory, name },
             single: Default::default(),
+            reclaim_stale_locks,
+            single_reclaimed: Default::default(),
         }
+    }
+
+    /// Takes the pending reclaim notice for a project, if there is one.
+    ///
+    /// Taken rather than read: `open_project` reports it once, the way the
+    /// HTTP project summary does, so a client is told what happened without
+    /// being told again on every later call.
+    pub fn take_reclaim_note(&self, project: Option<&str>) -> Option<String> {
+        let event = match &self.root {
+            Root::Workspace(state) => state.take_reclaim_event(project.unwrap_or_default())?,
+            Root::SingleProject { .. } => self.single_reclaimed.lock().ok()?.take()?,
+        };
+        Some(format!(
+            "the lock on this project was left behind by process {} on {}, \
+             which is no longer running; it was cleared and the project reopened",
+            event.pid, event.host
+        ))
     }
 
     /// Releases every project this server holds.
@@ -600,10 +649,30 @@ impl Backend {
         if let Some(existing) = cache.get(directory) {
             return Ok(std::sync::Arc::clone(existing));
         }
-        let session = std::sync::Arc::new(std::sync::Mutex::new(assemblash_core::Session::open(
-            directory,
-            now_millis(),
-        )?));
+        let now = now_millis();
+        let opened = if self.reclaim_stale_locks {
+            let (session, reclaim) = assemblash_core::Session::open_reclaiming(directory, now)?;
+            if let assemblash_core::session::Reclaim::Reclaimed { pid, host } = reclaim {
+                // Standard output belongs to the protocol; standard error is
+                // the only place this server may say anything.
+                eprintln!(
+                    "reclaimed the lock on {}: process {pid} on {host} is gone",
+                    directory.display()
+                );
+                if let Ok(mut slot) = self.single_reclaimed.lock() {
+                    *slot = Some(assemblash_server::state::ReclaimEvent {
+                        project: self.project_name(None),
+                        pid,
+                        host,
+                        at: now.unwrap_or_default(),
+                    });
+                }
+            }
+            session
+        } else {
+            assemblash_core::Session::open(directory, now)?
+        };
+        let session = std::sync::Arc::new(std::sync::Mutex::new(opened));
         cache.insert(directory.to_path_buf(), std::sync::Arc::clone(&session));
         Ok(session)
     }

@@ -18,6 +18,7 @@
 use assemblash_core::session::SessionError;
 use assemblash_core::storage::StorageError;
 use assemblash_core::workspace::WorkspaceError;
+use assemblash_renderer::install::InstallError;
 use assemblash_renderer::store::FontStoreError;
 use assemblash_renderer::RenderError;
 use axum::http::StatusCode;
@@ -224,7 +225,52 @@ impl From<FontStoreError> for ApiError {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "missingFont", message)
                     .with_details(json!({ "family": family }))
             }
+            // Bytes that are not a font, offered under a name that said they
+            // were: a well-formed request the store declined — 422, the same
+            // reading `operationRefused` gets.
+            FontStoreError::NotAFont { path } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalidFont", message)
+                    .with_details(json!({ "file": path.to_string_lossy() }))
+            }
+            FontStoreError::Undecompressable { path, format } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalidFont", message)
+                    .with_details(json!({ "file": path.to_string_lossy(), "format": format }))
+            }
             _ => Self::new(StatusCode::INTERNAL_SERVER_ERROR, "fontStore", message),
+        }
+    }
+}
+
+impl From<InstallError> for ApiError {
+    fn from(error: InstallError) -> Self {
+        let message = error.to_string();
+        match error {
+            InstallError::UnknownFamily { family } => {
+                Self::new(StatusCode::NOT_FOUND, "unknownFontFamily", message)
+                    .with_details(json!({ "family": family }))
+            }
+            InstallError::UnknownPack { pack } => {
+                Self::new(StatusCode::NOT_FOUND, "unknownFontPack", message)
+                    .with_details(json!({ "pack": pack }))
+            }
+            // 502, not 500: the request was fine and this server is fine —
+            // what failed is the upstream the download came from, and a file
+            // that is not the one the manifest pins is exactly that failure
+            // seen from the other end.
+            InstallError::Fetch { url, .. } => {
+                Self::new(StatusCode::BAD_GATEWAY, "fontInstallFailed", message)
+                    .with_details(json!({ "url": url }))
+            }
+            InstallError::HashMismatch {
+                family,
+                expected,
+                actual,
+            } => Self::new(StatusCode::BAD_GATEWAY, "fontInstallFailed", message)
+                .with_details(json!({ "family": family, "expected": expected, "actual": actual })),
+            InstallError::Store(store) => Self::from(store),
+            // The manifest is compiled in, so this is a broken build rather
+            // than anything the caller did.
+            _ => Self::new(StatusCode::INTERNAL_SERVER_ERROR, "fontManifest", message),
         }
     }
 }

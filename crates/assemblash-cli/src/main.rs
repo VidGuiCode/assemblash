@@ -346,6 +346,26 @@ enum Command {
         /// must not be able to take it away.
         #[arg(long)]
         friendly: bool,
+        /// Clear a project lock left behind by a process that has died.
+        ///
+        /// Reclaims a lock only when it names this machine and that process is
+        /// provably gone. A lock from another machine, or one written by a
+        /// build before 1.5.0 that recorded no machine, still needs a person:
+        /// `assemblash unlock`, or the confirmation the interface offers. Two
+        /// programs writing one project corrupts it, so anything short of
+        /// proof leaves the lock alone.
+        ///
+        /// Implied by --friendly. The environment variable is read the way
+        /// a shell toggle is expected to read: empty, `0`, `false`, `no`, and
+        /// `off` are off, anything else is on. Without a value parser saying
+        /// so, clap would accept only the literals `true` and `false` from the
+        /// environment and refuse to start on `=1`.
+        #[arg(
+            long,
+            env = "ASSEMBLASH_RECLAIM_STALE_LOCKS",
+            value_parser = clap::builder::FalseyValueParser::new(),
+        )]
+        reclaim_stale_locks: bool,
     },
 
     /// Serves the Model Context Protocol over standard input and output.
@@ -362,6 +382,24 @@ enum Command {
         /// argument on each tool then becomes optional.
         #[arg(long)]
         project: Option<PathBuf>,
+        /// Clear a project lock left behind by a process that has died.
+        ///
+        /// Reclaims a lock only when it names this machine and that process is
+        /// provably gone. A lock from another machine, or one written by a
+        /// build before 1.5.0 that recorded no machine, still needs a person:
+        /// `assemblash unlock`, or the confirmation the interface offers. Two
+        /// programs writing one project corrupts it, so anything short of
+        /// proof leaves the lock alone.
+        ///
+        /// The environment variable reads the way a shell toggle is expected
+        /// to: empty, `0`, `false`, `no`, and `off` are off, anything else is
+        /// on.
+        #[arg(
+            long,
+            env = "ASSEMBLASH_RECLAIM_STALE_LOCKS",
+            value_parser = clap::builder::FalseyValueParser::new(),
+        )]
+        reclaim_stale_locks: bool,
     },
 
     /// Manages the access token a non-loopback bind requires.
@@ -1227,6 +1265,9 @@ fn main() -> ExitCode {
         // Double-clicked: there is no console to press Ctrl-C in, so the
         // interface is allowed to stop it, and a browser is opened.
         friendly: true,
+        // Implied by friendly, and set here too so the field is not a lie
+        // about what was asked for.
+        reclaim_stale_locks: true,
     });
     match run(command) {
         Ok(()) => ExitCode::SUCCESS,
@@ -1671,6 +1712,7 @@ fn run(command: Command) -> Result<(), CliError> {
             bind,
             ui_dir,
             friendly,
+            reclaim_stale_locks,
         } => {
             let workspace = open_workspace(workspace)?;
             let root = workspace.root().to_path_buf();
@@ -1708,6 +1750,10 @@ fn run(command: Command) -> Result<(), CliError> {
             };
             let needs_token = !assemblash_server::auth::is_loopback(address);
             let open_browser = friendly && workspace.config().open_browser;
+            // A friendly launch is the crash-recovery case by definition: the
+            // person is starting their editor again, most often because the
+            // last one went away without releasing what it had open.
+            let reclaim_stale_locks = reclaim_stale_locks || friendly;
             // One runtime, built here rather than by an attribute on `main`,
             // so every other command stays a plain synchronous program with no
             // async runtime started for it.
@@ -1716,9 +1762,15 @@ fn run(command: Command) -> Result<(), CliError> {
                 .build()
                 .map_err(|source| CliError::Runtime { source })?;
             runtime.block_on(async move {
-                let server =
-                    assemblash_server::Server::bind_to(workspace, address, port, ui, shutdown)
-                        .await?;
+                let server = assemblash_server::Server::bind_to_reclaiming(
+                    workspace,
+                    address,
+                    port,
+                    ui,
+                    shutdown,
+                    reclaim_stale_locks,
+                )
+                .await?;
                 let url = server.url();
                 // The URL goes to stdout whatever else happens, so a person on
                 // a machine with no browser — or a script — still has it.
@@ -1750,11 +1802,20 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
-        Command::Mcp { workspace, project } => {
+        Command::Mcp {
+            workspace,
+            project,
+            reclaim_stale_locks,
+        } => {
             // Nothing in this arm may print to stdout: the protocol owns it.
             let backend = match project {
-                Some(directory) => assemblash_mcp::Backend::single_project(directory),
-                None => assemblash_mcp::Backend::workspace(open_workspace(workspace)?),
+                Some(directory) => {
+                    assemblash_mcp::Backend::single_project_with(directory, reclaim_stale_locks)
+                }
+                None => assemblash_mcp::Backend::workspace_with(
+                    open_workspace(workspace)?,
+                    reclaim_stale_locks,
+                ),
             };
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

@@ -2001,6 +2001,98 @@ body.stopped .topbar-actions {
   font-weight: 700;
 }
 
+/* The font manager. The panel is the whole feature, so it looks like the
+   Uploads section beside it rather than like a settings screen. */
+.font-list {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.font-list[hidden] {
+  display: none;
+}
+
+.font-family {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.625rem;
+  background: var(--color-surface);
+}
+
+.font-family-text {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.font-family-text strong {
+  font-size: 0.85rem;
+}
+
+.font-faces {
+  color: var(--color-ink-faint);
+  font-size: 0.7rem;
+}
+
+.font-family .danger-action {
+  color: var(--color-danger);
+}
+
+.font-empty {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.font-empty p {
+  margin: 0;
+  color: var(--color-ink-soft);
+  font-size: 0.8rem;
+}
+
+/* The install button says what it would download before it downloads it, so
+   it is two lines rather than one and reads left to right like a sentence. */
+.install-pack {
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.install-pack i {
+  margin-top: 0.1rem;
+  color: var(--color-accent);
+  font-size: 1.1rem;
+}
+
+.install-pack-text {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.install-pack-detail {
+  color: var(--color-ink-faint);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.font-feedback {
+  display: grid;
+  gap: 0.125rem;
+  color: var(--color-ink-faint);
+  font-size: 0.7rem;
+}
+
+.font-feedback p {
+  margin: 0;
+}
+
 .editor {
   grid-template-rows: var(--inspector-height) minmax(0, 1fr);
   background: var(--color-canvas);

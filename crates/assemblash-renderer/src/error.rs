@@ -74,6 +74,33 @@ pub enum RenderError {
         source: std::io::Error,
     },
 
+    /// An imported SVG asset draws text that no loaded font can draw.
+    ///
+    /// Fonts are loaded for the families **text layers** name, never for the
+    /// ones an imported asset names, so a `<text>` inside an SVG asset used to
+    /// draw as nothing while the export exited successfully — silent data loss
+    /// that depended on which surface had been used to render (DEF-2). Loading
+    /// the families an asset names is a separate change; until it lands, the
+    /// honest answer is to stop rather than write a picture with a hole in it.
+    ///
+    /// Two sentences, because there are two different things to do about it.
+    /// A named family that nothing loaded can be installed or named on a text
+    /// layer. A `<text>` that names no family at all — or only a generic role
+    /// like `sans-serif` — has nothing to install: the store is keyed by the
+    /// family name a face declares and never holds the renderer's fallback, so
+    /// that text draws nothing no matter what is loaded, and the caller has to
+    /// name a family or outline the text.
+    #[error("{}", svg_asset_text_message(.asset, .family.as_deref()))]
+    SvgAssetTextWithoutFont {
+        /// The asset at fault: its path inside the project, or its id when the
+        /// document does not record the asset.
+        asset: String,
+        /// The first family it asked for that nothing loaded, when it named
+        /// one at all. `None` when that `<text>` names no family, or only
+        /// generic ones — there is nothing to install for it.
+        family: Option<String>,
+    },
+
     /// The SVG handed to the rasterizer could not be parsed.
     #[error("the SVG could not be parsed: {0}")]
     MalformedSvg(String),
@@ -94,4 +121,23 @@ pub enum RenderError {
     /// The PNG encoder or decoder refused the data.
     #[error("PNG encoding failed: {0}")]
     PngEncoding(String),
+}
+
+/// The two sentences [`RenderError::SvgAssetTextWithoutFont`] says.
+///
+/// A named family is something the caller can go and load; a `<text>` that
+/// names none is something the caller has to change in the asset. Telling a
+/// person to "add the family" when there is no family in the file would send
+/// them looking for a name that is not there.
+fn svg_asset_text_message(asset: &str, family: Option<&str>) -> String {
+    match family {
+        Some(family) => format!(
+            "SVG asset {asset:?} draws text but no font is loaded for {family:?}; \
+             add the family to the document's fonts or outline the text before importing"
+        ),
+        None => format!(
+            "SVG asset {asset:?} draws text that names no font family; \
+             name one the document loads or outline the text before importing"
+        ),
+    }
 }

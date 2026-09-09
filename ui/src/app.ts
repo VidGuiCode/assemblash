@@ -26,6 +26,7 @@ import {
   rotatedRectBounds,
   selectionBounds,
 } from "./geometry.js";
+import { mountFonts } from "./fonts.js";
 import { mountTemplates } from "./templates.js";
 
 interface State {
@@ -168,6 +169,7 @@ const dom = {
   zoom100: el<HTMLButtonElement>("zoom-100"),
   templatesPanel: el<HTMLElement>("templates"),
   templatesToggle: el<HTMLButtonElement>("templates-toggle"),
+  fontsToggle: el<HTMLButtonElement>("fonts-toggle"),
   templatesClose: el<HTMLButtonElement>("templates-close"),
 };
 
@@ -213,13 +215,13 @@ function say(message: string, kind: "info" | "error" = "info"): void {
 /**
  * Fills the font suggestion list from the engine's font store.
  *
- * Read once, at startup: the store is a directory the server scanned when it
- * began, so the answer cannot change while this page is open. A suggestion
+ * Called whenever the store changes rather than only at startup: the Fonts
+ * panel can now import, remove, and install families, and a suggestion list
+ * that still named yesterday's store would be worse than none. A suggestion
  * list rather than a closed menu — a document may name a family this machine
  * does not have, and typing that name back in has to stay possible.
  */
-async function loadFontFamilies(): Promise<void> {
-  const families = await api.fonts();
+function setFontFamilies(families: readonly string[]): void {
   dom.fontFamilies.replaceChildren();
   for (const family of families) {
     const option = document.createElement("option");
@@ -271,6 +273,22 @@ const templates = mountTemplates({
 // Vector. Moving the existing renderer-backed controls here avoids a second
 // floating workspace covering the canvas.
 el<HTMLElement>("add-template-section").append(dom.templatesPanel);
+
+/**
+ * The font manager, which owns the store the renderer draws from.
+ *
+ * Given the same handful of things the template panel gets, plus the one
+ * thing only it can report: which families exist, so the shared suggestion
+ * list follows an import or a removal without a page reload.
+ */
+const fontsPanel = mountFonts({
+  project: () => state.project,
+  document: () => state.document,
+  say,
+  guard,
+  refresh: () => refresh(),
+  familiesChanged: setFontFamilies,
+});
 
 const exporter = mountExport({
   project: () => state.project,
@@ -2402,6 +2420,24 @@ async function openProject(): Promise<void> {
   // assets the document lists.
   await templates.projectChanged();
   say(`Opened ${state.document?.name ?? state.project}.`);
+
+  // The server drains a reclaimed lock the first time it is read after
+  // clearing it, so one fetch here either finds nothing (the ordinary case)
+  // or explains, once, why a lock nobody here took out is already gone. A
+  // failure here is not a failure to open the project.
+  if (state.project) {
+    try {
+      const summary = await api.projectSummary(state.project);
+      if (summary.reclaimedLock) {
+        const { pid, host } = summary.reclaimedLock;
+        say(
+          `Recovered this project automatically: the previous Assemblash process (pid ${pid} on ${host}) had stopped without releasing it.`,
+        );
+      }
+    } catch (error) {
+      console.error("could not check for an automatically reclaimed lock", error);
+    }
+  }
 }
 
 dom.reload.addEventListener("click", () => void guard("reload", async () => {
@@ -2465,10 +2501,11 @@ const addSections = [
   ["add-upload-section", "Uploads", dom.addImage],
   ["add-vector-section", "Vector", dom.addVector],
   ["add-template-section", "Templates", dom.templatesToggle],
+  ["add-fonts-section", "Fonts", dom.fontsToggle],
 ] as const;
 
 function activateEditorTool(active: HTMLButtonElement): void {
-  for (const tool of [dom.addToggle, dom.selectTool, dom.addText, dom.addImage, dom.addVector, dom.templatesToggle]) {
+  for (const tool of [dom.addToggle, dom.selectTool, dom.addText, dom.addImage, dom.addVector, dom.templatesToggle, dom.fontsToggle]) {
     const selected = tool === active;
     tool.classList.toggle("active", selected);
     tool.setAttribute("aria-pressed", String(selected));
@@ -2510,12 +2547,30 @@ dom.addText.addEventListener("click", () => showAddSection("add-text-section", d
 dom.addImage.addEventListener("click", () => showAddSection("add-upload-section", dom.addImage));
 dom.addVector.addEventListener("click", () => showAddSection("add-vector-section", dom.addVector));
 dom.templatesToggle.addEventListener("click", () => showAddSection("add-template-section", dom.templatesToggle));
+dom.fontsToggle.addEventListener("click", () => void guard("fonts", () => openFontManager()));
+
+/**
+ * Shows the font manager, with the store as it is right now.
+ *
+ * `focusInstall` is for the one caller that arrives here because something
+ * else could not be done: the button it needs is then the thing under the
+ * keyboard, rather than a panel it has to go looking through.
+ */
+async function openFontManager(focusInstall = false): Promise<void> {
+  showAddSection("add-fonts-section", dom.fontsToggle);
+  await fontsPanel.reload();
+  if (focusInstall) fontsPanel.focusInstall();
+}
 
 async function createTextPreset(preset: "heading" | "subheading" | "body"): Promise<void> {
   const families = await api.fonts();
   const family = families[0];
   if (!family) {
-    say("no fonts installed — run: assemblash font install \"Noto Sans\"", "error");
+    // Text needs a font, and this is a browser: sending somebody to a command
+    // line for the one thing the page just refused to do is the defect, not
+    // the fix. The panel that installs fonts opens instead, on the button.
+    say("no fonts are installed yet — install a font pack to add text", "error");
+    await openFontManager(true);
     return;
   }
   if (!state.project || !state.document) return;
@@ -3153,7 +3208,7 @@ void guard("start", async () => {
   const info = await api.serverInfo();
   dom.shutdown.hidden = !info.canShutdown;
   try {
-    await loadFontFamilies();
+    await fontsPanel.reload();
   } catch {
     // A server with no readable font store still edits documents; only the
     // suggestion list is poorer for it, and the field still takes any name.

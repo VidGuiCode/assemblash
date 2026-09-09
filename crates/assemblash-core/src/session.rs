@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::document::Document;
 use crate::history::{Actor, History, HistoryError};
 use crate::ids::{IdSource, TransactionId};
+use crate::liveness::{process_is_alive, this_host, Liveness};
 use crate::ops::{self, OpError, OpOutcome, Operation};
 use crate::storage::{self, StorageError};
 
@@ -72,12 +73,26 @@ pub enum SessionError {
 }
 
 /// What was recorded in the lock file.
+///
+/// Every field after `pid` is optional in both directions. A lock written by
+/// a build before 1.5.0 carries no `host`, and a build before 1.5.0 reading a
+/// lock that has one ignores it — serde skips unknown fields unless asked not
+/// to, and this struct never asks. Both halves are pinned by tests below, so
+/// the file stays readable in both directions rather than by assertion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LockContents {
     pid: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     since: Option<u64>,
+    /// The machine that took the lock.
+    ///
+    /// A pid means nothing without it: pid 4812 on a colleague's laptop is not
+    /// pid 4812 here, and probing it locally would answer about an unrelated
+    /// process. Absent when [`crate::liveness::this_host`] could not name this
+    /// machine, and absent from every lock written before 1.5.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
 }
 
 /// Exclusive claim on a project directory, released when dropped.
@@ -95,6 +110,7 @@ impl ProjectLock {
         let contents = serde_json::to_string(&LockContents {
             pid: std::process::id(),
             since: now,
+            host: this_host(),
         })
         .unwrap_or_default();
 
@@ -189,6 +205,145 @@ pub fn force_unlock_if_pid(project_dir: &Path, expected_pid: u32) -> Result<bool
     force_unlock(project_dir)
 }
 
+/// Why a lock was left where it was.
+///
+/// Every variant except [`HeldReason::Alive`] is a refusal to *decide*, not a
+/// finding that the owner is running. Reclaim needs positive evidence — this
+/// machine, this pid, definitely gone — and anything short of that keeps the
+/// lock. A human can still clear it with [`force_unlock_if_pid`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum HeldReason {
+    /// The lock records no host: written before 1.5.0, or written on a machine
+    /// that could not name itself. The pid cannot be attributed to any
+    /// machine, so it is not probed.
+    NoHost,
+    /// The lock was taken on a different machine. Its pid is meaningless here.
+    ForeignHost,
+    /// The owning process is running.
+    Alive,
+    /// A process with that id exists but could not be inspected — another
+    /// user, or a platform with no probe. Treated as alive.
+    Unknown,
+}
+
+/// What [`reclaim_if_stale`] found, and what it did about it.
+///
+/// Internally tagged, so every outcome is one flat object with the same
+/// `status` key — `{"status":"notLocked"}`, `{"status":"reclaimed","pid":…,
+/// "host":…}`, `{"status":"held","pid":…,"host":…,"reason":…}`. A client
+/// reads one field to know which it has rather than switching on the shape of
+/// the value, which is what an externally tagged enum would make it do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum Reclaim {
+    /// There was no lock file.
+    NotLocked,
+    /// A lock left by a dead process on this machine was removed.
+    Reclaimed {
+        /// The process that had left it behind.
+        pid: u32,
+        /// The machine it was taken on — this one.
+        host: String,
+    },
+    /// The lock was left alone.
+    Held {
+        /// Who the lock names. 0 when the file could not be parsed.
+        pid: u32,
+        /// The machine the lock names, when it names one.
+        host: Option<String>,
+        /// Why it was not reclaimed.
+        reason: HeldReason,
+    },
+}
+
+/// Removes a lock whose owner is provably gone, and nothing else.
+///
+/// This is the automatic half of lock recovery, and it is deliberately timid.
+/// It removes the file only when **both** of these hold:
+///
+/// 1. the lock names this machine — a pid from another host says nothing here;
+/// 2. [`process_is_alive`] answers [`Liveness::Dead`] for that pid — not
+///    "probably", not "could not tell".
+///
+/// Anything else returns [`Reclaim::Held`] with the reason and touches
+/// nothing. The failure this protects against is two processes writing one
+/// project, which corrupts it; the failure it accepts is a stale lock
+/// surviving until a human clears it with [`force_unlock_if_pid`], which
+/// merely annoys.
+///
+/// # The residual risk
+///
+/// A pid can be reused. If the process that took the lock died and the
+/// operating system handed its id to something else on this machine, the probe
+/// answers `Alive` and the lock is kept — safe. The dangerous direction, a
+/// reused pid being mistaken for the *owner*, cannot cause a wrongful reclaim
+/// here: reclaim needs `Dead`, and a reused pid is never `Dead`.
+pub fn reclaim_if_stale(project_dir: &Path) -> Result<Reclaim, SessionError> {
+    let path = project_dir.join(LOCK_FILE);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Reclaim::NotLocked)
+        }
+        Err(source) => {
+            return Err(SessionError::Storage(StorageError::Io {
+                operation: "reading",
+                path,
+                source,
+            }))
+        }
+    };
+
+    // A lock this build cannot parse is a lock this build must not remove: it
+    // degrades to pid 0 and no host, which lands on `NoHost` below.
+    let contents = serde_json::from_str::<LockContents>(&text).ok();
+    let pid = contents.as_ref().map_or(0, |lock| lock.pid);
+    let host = contents.and_then(|lock| lock.host);
+
+    let Some(host) = host else {
+        return Ok(Reclaim::Held {
+            pid,
+            host: None,
+            reason: HeldReason::NoHost,
+        });
+    };
+
+    // `this_host()` returning `None` lands here too, and that is intended: a
+    // machine that cannot name itself cannot claim a lock as its own.
+    if this_host().as_deref() != Some(host.as_str()) {
+        return Ok(Reclaim::Held {
+            pid,
+            host: Some(host),
+            reason: HeldReason::ForeignHost,
+        });
+    }
+
+    match process_is_alive(pid) {
+        Liveness::Dead => {
+            // Deliberately the same removal path a human takes, so there is
+            // one way a lock file leaves the disk.
+            force_unlock(project_dir)?;
+            Ok(Reclaim::Reclaimed { pid, host })
+        }
+        Liveness::Alive => Ok(Reclaim::Held {
+            pid,
+            host: Some(host),
+            reason: HeldReason::Alive,
+        }),
+        // `Liveness::Unknown`, and anything a later version of the probe
+        // learns to answer. Everything that is not a definite `Dead` keeps the
+        // lock, so a new variant can only ever be more cautious here.
+        _ => Ok(Reclaim::Held {
+            pid,
+            host: Some(host),
+            reason: HeldReason::Unknown,
+        }),
+    }
+}
+
 /// An open project.
 #[derive(Debug)]
 pub struct Session {
@@ -235,6 +390,26 @@ impl Session {
     pub fn open(project_dir: &Path, now: Option<u64>) -> Result<Self, SessionError> {
         let lock = ProjectLock::acquire(project_dir, now)?;
         Self::open_with_lock(project_dir, lock)
+    }
+
+    /// Opens a project, first clearing a lock whose owner is provably gone.
+    ///
+    /// [`Session::open`] is unchanged and still refuses a locked project
+    /// outright; this is the variant a transport uses when it wants a crashed
+    /// predecessor cleaned up without a human in the loop. The [`Reclaim`] is
+    /// returned rather than logged so the caller can report it as a typed
+    /// event — a lock disappearing is worth telling someone about.
+    ///
+    /// When the lock is [`Reclaim::Held`], the open that follows fails with
+    /// [`SessionError::Locked`] exactly as it does today; the reason for
+    /// holding is available from [`reclaim_if_stale`] on its own.
+    pub fn open_reclaiming(
+        project_dir: &Path,
+        now: Option<u64>,
+    ) -> Result<(Self, Reclaim), SessionError> {
+        let reclaim = reclaim_if_stale(project_dir)?;
+        let session = Self::open(project_dir, now)?;
+        Ok((session, reclaim))
     }
 
     /// Opens a project without taking the lock.
@@ -481,6 +656,109 @@ fn extend_unique<T: PartialEq>(target: &mut Vec<T>, values: Vec<T>) {
     for value in values {
         if !target.contains(&value) {
             target.push(value);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    /// `LockContents` exactly as 1.4.0 declared it.
+    ///
+    /// Kept as a frozen copy rather than a version check: the compatibility
+    /// claim is about the *bytes*, and the only honest way to test it is to
+    /// hand an old reader a new file. If someone later adds
+    /// `deny_unknown_fields` to the live struct, this still passes — which is
+    /// why the matching forward test below exists too.
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LockContentsV140 {
+        pid: u32,
+        #[serde(default)]
+        since: Option<u64>,
+    }
+
+    #[test]
+    fn a_1_4_0_reader_ignores_the_host_field() {
+        let written = r#"{"pid":1,"since":2,"host":"x"}"#;
+        let old: LockContentsV140 = serde_json::from_str(written).unwrap();
+        assert_eq!(old.pid, 1);
+        assert_eq!(old.since, Some(2));
+    }
+
+    #[test]
+    fn this_build_reads_a_1_4_0_lock() {
+        let written = r#"{"pid":1,"since":2}"#;
+        let lock: LockContents = serde_json::from_str(written).unwrap();
+        assert_eq!(lock.pid, 1);
+        assert_eq!(lock.since, Some(2));
+        assert_eq!(lock.host, None, "an old lock claims no machine");
+    }
+
+    #[test]
+    fn host_round_trips() {
+        let lock = LockContents {
+            pid: 7,
+            since: Some(11),
+            host: Some("some-machine".to_owned()),
+        };
+        let text = serde_json::to_string(&lock).unwrap();
+        assert_eq!(text, r#"{"pid":7,"since":11,"host":"some-machine"}"#);
+
+        let back: LockContents = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.pid, 7);
+        assert_eq!(back.since, Some(11));
+        assert_eq!(back.host.as_deref(), Some("some-machine"));
+    }
+
+    #[test]
+    fn an_absent_host_is_not_written() {
+        let text = serde_json::to_string(&LockContents {
+            pid: 7,
+            since: None,
+            host: None,
+        })
+        .unwrap();
+        assert_eq!(text, r#"{"pid":7}"#);
+    }
+
+    #[test]
+    fn every_reclaim_outcome_is_one_flat_object_tagged_by_status() {
+        assert_eq!(
+            serde_json::to_string(&Reclaim::NotLocked).unwrap(),
+            r#"{"status":"notLocked"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Reclaim::Reclaimed {
+                pid: 3,
+                host: "some-machine".to_owned(),
+            })
+            .unwrap(),
+            r#"{"status":"reclaimed","pid":3,"host":"some-machine"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Reclaim::Held {
+                pid: 3,
+                host: None,
+                reason: HeldReason::NoHost,
+            })
+            .unwrap(),
+            r#"{"status":"held","pid":3,"host":null,"reason":"noHost"}"#
+        );
+    }
+
+    #[test]
+    fn every_held_reason_is_camel_case() {
+        for (reason, expected) in [
+            (HeldReason::NoHost, "\"noHost\""),
+            (HeldReason::ForeignHost, "\"foreignHost\""),
+            (HeldReason::Alive, "\"alive\""),
+            (HeldReason::Unknown, "\"unknown\""),
+        ] {
+            assert_eq!(serde_json::to_string(&reason).unwrap(), expected);
         }
     }
 }

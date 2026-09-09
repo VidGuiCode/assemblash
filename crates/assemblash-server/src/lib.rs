@@ -122,11 +122,32 @@ impl Server {
         ui: UiSource,
         shutdown: Shutdown,
     ) -> Result<Self, ServeError> {
+        Self::bind_to_reclaiming(workspace, address, port, ui, shutdown, false).await
+    }
+
+    /// [`Server::bind_to`], plus whether a lock left by a dead process on this
+    /// machine may be cleared when a project is opened.
+    ///
+    /// A separate constructor rather than another argument on every `bind*`
+    /// because the answer is almost always "no": a server a service manager
+    /// started shares its machine, and a lock it did not write is not
+    /// obviously its business. The friendly launch — one person's editor, on
+    /// their own desktop, most likely restarted because the last one crashed —
+    /// is the case that wants "yes".
+    pub async fn bind_to_reclaiming(
+        workspace: Workspace,
+        address: IpAddr,
+        port: u16,
+        ui: UiSource,
+        shutdown: Shutdown,
+        reclaim_stale_locks: bool,
+    ) -> Result<Self, ServeError> {
         let access = auth::policy_for(address, workspace.config().token.as_deref())
             .map_err(|source| ServeError::Access { source })?;
 
         let (send, receive) = tokio::sync::watch::channel(false);
-        let router = api::router(AppState::new(workspace), ui, shutdown, send, access);
+        let state = AppState::with_reclaim(workspace, reclaim_stale_locks);
+        let router = api::router(state, ui, shutdown, send, access);
 
         // Port 0 as a fallback only for loopback: a server meant to be
         // reachable at a known address that quietly moved to another port

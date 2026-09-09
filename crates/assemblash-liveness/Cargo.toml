@@ -1,0 +1,55 @@
+[package]
+name = "assemblash-liveness"
+description = "Is a process id still running, and what is this machine called"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+
+# Both crates are already in Cargo.lock as transitive dependencies of the
+# shipped binaries — windows-sys 0.61.2 via clap/anstyle-wincon and
+# rustix/errno, libc via tokio — so naming them directly adds no new code to
+# the binary. Both are declaration-only FFI shims: no build script, no runtime.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+
+# NOT `workspace = true`, and this is the only crate that deviates. It is why
+# this crate exists at all.
+#
+# `[workspace.lints.rust]` sets `unsafe_code = "forbid"`, and `forbid` cannot
+# be lifted by an `#[allow]` in source — that is the point of it. Answering
+# "is this pid alive" and "what is this machine called" needs six kernel calls
+# that have no safe wrapper in std (`OpenProcess`/`GetExitCodeProcess`/
+# `CloseHandle`/`GetComputerNameW` on Windows, `kill(2)`/`gethostname` on
+# Unix). Rather than step `assemblash-core` — the whole document model and
+# operation layer — down to `deny` for the sake of six calls, those calls live
+# here on their own, in a crate small enough to read in one sitting, and every
+# other crate in the workspace keeps `forbid`.
+#
+# The rest of this table mirrors `[workspace.lints]` verbatim. Changing the
+# workspace table means changing this one too.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+
+[dev-dependencies]
+serde_json = "1.0.151"

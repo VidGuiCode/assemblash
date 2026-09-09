@@ -14,7 +14,7 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 ## Summary
 
-5 workspace crates, 266 third-party crates in the full dependency graph
+6 workspace crates, 266 third-party crates in the full dependency graph
 (all features, all targets).
 
 | Licence | Crates |
@@ -49,11 +49,12 @@ enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 | Crate | Version | Licence |
 | ----- | ------- | ------- |
-| assemblash-cli | 1.4.0 | Apache-2.0 |
-| assemblash-core | 1.4.0 | Apache-2.0 |
-| assemblash-mcp | 1.4.0 | Apache-2.0 |
-| assemblash-renderer | 1.4.0 | Apache-2.0 |
-| assemblash-server | 1.4.0 | Apache-2.0 |
+| assemblash-cli | 1.5.0 | Apache-2.0 |
+| assemblash-core | 1.5.0 | Apache-2.0 |
+| assemblash-liveness | 1.5.0 | Apache-2.0 |
+| assemblash-mcp | 1.5.0 | Apache-2.0 |
+| assemblash-renderer | 1.5.0 | Apache-2.0 |
+| assemblash-server | 1.5.0 | Apache-2.0 |
 
 ## Dependencies
 

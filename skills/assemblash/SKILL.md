@@ -83,7 +83,10 @@ kits, customer assets, or downstream workflow data.
   `sha256:<hex>` digest on stdout. Compare that digest instead of re-hashing
   the file.
 - `assemblash serve` for the local HTTP API and reference editor. It binds to
-  loopback by default; a non-loopback bind requires an access token.
+  loopback by default; a non-loopback bind requires an access token. From 1.5.0
+  `--reclaim-stale-locks` (also on `mcp`) lets it clear a stale project lock on
+  its own, but only one this machine wrote whose process is gone; anything else
+  still needs `assemblash unlock` or a person in the editor.
 - `assemblash mcp` for agent access over stdio. Inspect, preview, and validate
   before using mutating tools.
 - `assemblash variants` for deterministic template variants. Its `--values` is
@@ -105,6 +108,51 @@ After `updateCanvas` enters a project's journal, 1.3.1 refuses both `show` and
 `history`, including after undo. Keep using the newer binary and preserve the
 journal. The document schema version remains 1.
 
+## Fonts (1.5.0 and newer)
+
+Check `GET /api/fonts` before assuming a family exists. It returns
+`{ families, faces }`; `faces` is new in 1.5.0 and `families` is unchanged, so
+the family list is safe to read against any release. A font that renders on
+your machine is not evidence that this store holds it.
+
+The rest of the font store is reachable over HTTP from 1.5.0. Check the running
+binary before using these; 1.4.0 serves only `GET /api/fonts`. All of them sit
+behind the same access token as every other route.
+
+- `POST /api/fonts?filename=<name>` with the raw bytes, up to 64 MB, imports a
+  TTF, OTF, TTC, OTC, WOFF or WOFF2 file. `201 {imported, families}`, or `200`
+  when those exact bytes were already stored. Refusals are
+  `400 unsupportedFontFormat`, `400 invalidFilename` and `422 invalidFont`.
+- `DELETE /api/fonts/{family}` — `200 {removed, families}`, or
+  `404 unknownFontFamily`. Every project using that family then reports a
+  missing font, so remove one only when that is what was asked for.
+- `GET /api/fonts/catalogue` — what the bundled manifest offers: `packs`, and
+  `families` with a license and a byte size.
+- `POST /api/fonts/install` with `{"pack":"default"}` or `{"family":"…"}` —
+  `201 {installed, families}`; `404 unknownFontFamily` or `404 unknownFontPack`;
+  `502 fontInstallFailed`. **This is the one route in the product that reaches
+  the network.** It downloads font files, so confirm before calling it, and do
+  not expect anything else here to make a network request. A pack install is
+  atomic: a download that fails leaves the store exactly as it was. An unknown
+  key in the body is refused, like every other typed request envelope.
+
+## SVG asset text (1.5.0 and newer)
+
+Check the running binary before relying on either behaviour. From 1.5.0 a
+render **refuses** when an imported SVG asset draws text no loaded font can
+provide; 1.4.0 and earlier export that document successfully with the text
+simply absent, reporting only the `svgAssetTextWithoutFont` warning.
+
+The rule 1.5.0 applies: an asset draws text only if every `<text>` in it names
+at least one non-generic font family the render loaded. Text that names no
+family, or only a generic one (`serif`, `sans-serif`, …), is refused too — the
+pinned store never holds the renderer's fallback family, so such text is
+guaranteed to draw nothing. The error names the asset id and, where there is
+one, the family. The CLI exits non-zero and writes no file, HTTP answers
+`422 renderFailed`, and MCP returns a tool error. Fix the document rather than
+retrying: name a loaded family in the asset, or outline the text before
+importing it.
+
 ## Pass JSON in a file, not on the command line
 
 PowerShell rewrites an inline JSON argument, so a payload typed after a flag
@@ -120,8 +168,11 @@ Every export reports what it could not do well, with these codes:
 
 - `wordBrokenMidWord` — a single word was too wide for its box and was split.
 - `textOverflowsBox` — the laid-out text is taller than the box holding it.
-- `svgAssetTextWithoutFont` — an imported SVG asset draws text in a family no
-  loaded font provides, so that text will not appear.
+- `lockReclaimed` — the server reclaimed a stale project lock while producing
+  this export (1.5.0 and newer).
+- `svgAssetTextWithoutFont` — still a defined code, but from 1.5.0 no longer
+  produced for the case it was added for. That render refuses instead; see
+  "SVG asset text" above.
 
 Each warning is `{ code, message, layerId? }`. **A warning is not a failure.**
 It changes no pixel and no exit status; the file is written either way. Report

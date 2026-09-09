@@ -1085,17 +1085,24 @@ fn overlaps_over_http_match_the_cli() {
     assert_eq!(error_code(&missing), "operationRefused");
 }
 
+/// An SVG asset whose text has no font stops the export (D12(a)).
+///
+/// This test used to prove the 1.3.0 warning: the export returned `200` with
+/// `svgAssetTextWithoutFont` attached, and the PNG was written with the words
+/// missing. That was the wrong trade — a caller that does not read the
+/// warnings array gets a picture with a hole in it and a success code — so the
+/// same document is a typed refusal now, and this proves the refusal that
+/// replaced the warning. The second half is the way out the message points at,
+/// which has to work or the refusal is just a wall.
 #[test]
-fn svg_asset_text_with_no_loaded_font_is_reported() {
+fn svg_asset_text_with_no_loaded_font_is_refused() {
     let harness = Harness::start();
     install_test_font(&harness);
     create_project(&harness, "poster");
 
     // An asset whose `<text>` names a family nothing loaded. Fonts are
     // resolved from the families *text layers* name, so this draws as
-    // nothing and always has — the export now says so rather than exiting
-    // successfully with a hole in the picture (DEF-2 is still open; this is
-    // the symptom made loud, not the fix).
+    // nothing and always has.
     let svg = concat!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">"#,
         r##"<rect width="100" height="50" fill="#eeeeee"/>"##,
@@ -1126,22 +1133,78 @@ fn svg_asset_text_with_no_loaded_font_is_reported() {
     assert_eq!(created.status, 200, "{}", created.json());
     let layer = created.json()["created"][0].as_str().unwrap().to_owned();
 
+    let refused = http::post_json(
+        &harness.url("/api/projects/poster/export"),
+        &json!({ "name": "with-svg" }),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.json());
+    assert_eq!(error_code(&refused), "renderFailed");
+    let message = refused.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(message.contains(&asset), "must name the asset: {message}");
+    assert!(
+        message.contains("Nowhere Sans"),
+        "and the family nothing loaded: {message}"
+    );
+    assert!(
+        !harness
+            .root()
+            .join("projects/poster/exports/with-svg.png")
+            .exists(),
+        "a refused export writes no file"
+    );
+
+    // And the way out: a text layer in a family that is installed makes that
+    // family load, and an asset that names *it* draws. Both halves are needed
+    // — the loader only ever sees what text layers ask for — which is why the
+    // offending layer is replaced rather than just accompanied.
+    add_text(&harness, "poster", "Noto Sans");
+    let deleted = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": { "op": "delete", "id": layer } }),
+    );
+    assert_eq!(deleted.status, 200, "{}", deleted.json());
+
+    let loadable = concat!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">"#,
+        r##"<rect width="100" height="50" fill="#eeeeee"/>"##,
+        r#"<text x="4" y="30" font-family="Noto Sans" font-size="20">label</text>"#,
+        "</svg>"
+    );
+    let uploaded = http::post_bytes(
+        &harness.url("/api/projects/poster/assets?filename=loadable.svg"),
+        "image/svg+xml",
+        loadable.as_bytes(),
+    );
+    assert_eq!(uploaded.status, 201, "{}", uploaded.json());
+    let asset = uploaded.json()["asset"]["id"].as_str().unwrap().to_owned();
+    let created = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({
+            "operation": {
+                "op": "create",
+                "position": { "at": "root" },
+                "transform": { "x": 10.0, "y": 10.0, "width": 100.0, "height": 50.0 },
+                "type": "svg",
+                "asset": asset,
+                "fit": "contain"
+            }
+        }),
+    );
+    assert_eq!(created.status, 200, "{}", created.json());
+
     let exported = http::post_json(
         &harness.url("/api/projects/poster/export"),
         &json!({ "name": "with-svg" }),
     );
-    // Still a success: a warning is not a failure.
     assert_eq!(exported.status, 200, "{}", exported.json());
-    let body = exported.json();
-    assert_eq!(body["path"], "exports/with-svg.png");
-    let warnings = body["warnings"].as_array().unwrap();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert_eq!(warnings[0]["code"], "svgAssetTextWithoutFont");
-    assert_eq!(warnings[0]["layerId"], layer);
-    assert!(warnings[0]["message"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("Nowhere Sans"));
+    assert_eq!(exported.json()["path"], "exports/with-svg.png");
+    assert!(harness
+        .root()
+        .join("projects/poster/exports/with-svg.png")
+        .is_file());
 }
 
 #[test]

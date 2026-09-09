@@ -10,6 +10,118 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-09-09
+
+No 1.4.1 was released: no defect was outstanding after 1.4.0.
+
+Fonts become something you manage in the interface rather than in a terminal,
+and an imported SVG asset drawing text no loaded font can provide stops
+exporting a blank space and calling it a success.
+
+### Added
+
+- **A Fonts section in the reference interface's Add panel.** It lists the
+  installed families and their faces, imports font files from disk, and removes
+  a family. Until now the interface's answer to a missing font was a line of
+  text telling you to go and run `assemblash font install …` in a terminal,
+  which is not an answer for the person the double-click launch exists for.
+  That instruction no longer appears anywhere in the interface.
+- **Import takes TTF, OTF, TTC, OTC, WOFF and WOFF2.** A WOFF or WOFF2 file is
+  decompressed on import and stored as the sfnt bytes it carries, so the hash
+  in the index describes the file that is actually on disk rather than the
+  container it arrived in.
+- **Removing a family asks first**, and the confirmation says what will happen:
+  a project using that family reports a missing-font error until the family is
+  imported again. Removal touches the font store and nothing else — not the
+  operating system's fonts, and not the file you imported from.
+- **One button installs the bundled `default` pack** — Noto Sans, Noto Serif
+  and Noto Sans Mono — offered only when the store is empty. The button says
+  what it will download, and nothing is fetched until it is pressed.
+- After an import, an install or a removal, the font picker and the canvas
+  refresh immediately. There is no restart.
+- **The font store now has an HTTP surface**, under the same access-token rule
+  as every other route:
+  - `GET /api/fonts` returns `{ families, faces }`. `faces` is new and
+    additive; `families` is unchanged.
+  - `POST /api/fonts?filename=<name>` takes the raw bytes, up to 64 MB, and
+    answers `201 {imported, families}` — or `200` when those exact bytes were
+    already stored, because importing the same file twice is not an error. The
+    refusals are `400 unsupportedFontFormat`, `400 invalidFilename` and
+    `422 invalidFont`. Concurrent imports are serialised in the server, so two
+    uploads that arrive together cannot cost one of them its index entry.
+  - `DELETE /api/fonts/{family}` answers `200 {removed, families}`, or
+    `404 unknownFontFamily`.
+  - `GET /api/fonts/catalogue` reports what the bundled manifest offers:
+    `packs`, and `families` with a license and a byte size, so a caller can
+    show the cost before anyone agrees to it.
+  - `POST /api/fonts/install` with `{"pack":"default"}` or `{"family":"…"}`
+    answers `201 {installed, families}`, `404 unknownFontFamily`,
+    `404 unknownFontPack`, or `502 fontInstallFailed`. **This is the one route
+    that reaches the network, and it does so only on this explicit request.** A
+    pack install is atomic: every file is downloaded and hash-checked before
+    any of them is stored, so a download that fails partway leaves the store
+    exactly as it was rather than holding half a pack. An unknown key in the
+    install body is refused, following the 1.4.0 rule.
+- **`serve --reclaim-stale-locks`, and the same flag on `mcp`.** A lock file
+  now records the machine that wrote it (`host`) beside the pid. With the flag
+  on, the server reclaims a project lock by itself only when the lock names
+  this machine and the process it names is provably gone; every reclaim is
+  reported — a line in the server log, a notice in the interface, and a
+  `lockReclaimed` export warning wherever there is an export result to carry
+  one. The flag is off by default and switched on by the double-click /
+  `--friendly` launch, which is the case with nobody at a terminal to run
+  `assemblash unlock`. A lock written on another machine, or written by an
+  older build and so carrying no `host` at all, still needs a person: the
+  interface's confirm dialog and `assemblash unlock` are unchanged. The reason
+  is the synced folder — a project directory that syncs between machines can
+  hold a lock whose pid belongs to a different computer, where that number
+  proves nothing.
+
+### Changed
+
+- **An imported SVG asset whose text no loaded font can draw is now refused
+  rather than exported blank.** Since 0.x, rendering an SVG asset containing
+  `<text>` with no matching font produced a file with that text simply missing:
+  exit 0, zero ink, and a document that looked finished. That was the behaviour
+  on the HTTP, MCP and interface paths and on CLI `--font-store`, while CLI
+  `--font-dir` drew the text — so the same document produced two different
+  pictures depending on how its fonts were supplied. This is the same argument
+  1.3.0 made about an operation carrying a property it does not define: a
+  success that did nothing is a false success, and the fix is to stop reporting
+  it as one.
+
+  1.5.0 refuses the render with a typed error naming the asset id and, where
+  there is one, the family. The rule it applies: an asset draws text only if
+  every `<text>` in it names at least one non-generic font family the render
+  loaded. Text that names no family, or only a generic one (`serif`,
+  `sans-serif`, …), is refused too, because the pinned store never holds the
+  renderer's fallback family — such text is guaranteed to draw nothing.
+
+  **A document that used to export blank but successfully now refuses.** Name a
+  loaded family in the asset, or outline the text before importing it. On the
+  CLI the exit status is non-zero and no file is written; over HTTP it is
+  `422 renderFailed`; over MCP it is a tool error.
+- The `svgAssetTextWithoutFont` export warning added in 1.3.0 is kept as a
+  code, but it is no longer produced for this case. The refusal happens first,
+  so there is no export result for a warning to sit in.
+
+### Compatibility
+
+- `schemaVersion` stays **1**, and the existing `Operation` union is unchanged.
+  This release adds no operation and no document field.
+- **1.4.0 opens every project 1.5.0 writes**, and so does every earlier 1.x
+  build, because nothing about the on-disk document changed. The only new data
+  written anywhere is the optional `host` in a lock file, which 1.4.0 reads and
+  ignores.
+- `faces` on `GET /api/fonts` is additive, and the other four font routes are
+  new. No existing HTTP route, CLI flag, subcommand or MCP tool changed shape.
+- **The one thing you may notice on an existing document is the SVG-text
+  refusal.** A project that exported successfully while an SVG asset drew text
+  in a family no loaded font provides will now refuse to export. Nothing in the
+  document changed and there is nothing to migrate: load the family the asset
+  names, name a loaded family in the asset, or outline its text and import it
+  again. 1.4.0 still exports the same project blank.
+
 ## [1.4.0] — 2026-09-05
 
 ### Added

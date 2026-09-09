@@ -86,6 +86,26 @@ const protectedText = {
   transform: { x: 100, y: 300, width: 400, height: 100, rotation: 0 },
 };
 
+// The six containers the engine imports; anything else is refused before
+// the bytes are looked at, which is what the "not a font" journey exercises.
+const FONT_FORMATS = ["ttf", "otf", "ttc", "otc", "woff", "woff2"];
+
+const FONT_CATALOGUE = {
+  packs: { default: ["Noto Sans", "Noto Serif", "Noto Sans Mono"] },
+  families: [
+    { family: "Noto Sans", license: "OFL-1.1", bytes: 5 * 1024 * 1024, packs: ["default"] },
+    { family: "Noto Serif", license: "OFL-1.1", bytes: 4 * 1024 * 1024, packs: ["default"] },
+    { family: "Noto Sans Mono", license: "OFL-1.1", bytes: 3 * 1024 * 1024, packs: ["default"] },
+    { family: "Inter", license: "OFL-1.1", bytes: 2 * 1024 * 1024, packs: ["ui"] },
+  ],
+};
+
+function defaultFontFaces() {
+  return [
+    { family: "Noto Sans", style: "normal", weight: 400, file: "a1.ttf", hash: "sha256:a1", faceIndex: 0 },
+  ];
+}
+
 function freshDocument() {
   return {
     schemaVersion: 1,
@@ -154,8 +174,13 @@ function json(response, status, body) {
 
 async function startFixtureServer() {
   let document = freshDocument();
+  let fontFaces = defaultFontFaces();
+  let failInstall = null;
+  let pendingReclaimedLock = null;
+  const fontFamilies = () => [...new Set(fontFaces.map((face) => face.family))].sort();
   const writes = [];
   const reads = [];
+  const fontCalls = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     const send = (status, body) => json(response, status, body);
@@ -170,6 +195,17 @@ async function startFixtureServer() {
     if (request.method === "GET" && url.pathname === "/api/projects/recent") {
       return send(200, { projects: [{ id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length }] });
     }
+    // A stale lock the server reclaimed on its own is reported exactly once,
+    // to the first summary fetched afterward, then drained — the same shape
+    // as the real engine's read-and-clear behaviour.
+    if (request.method === "GET" && url.pathname === "/api/projects/demo") {
+      const summary = { id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length };
+      if (pendingReclaimedLock) {
+        summary.reclaimedLock = pendingReclaimedLock;
+        pendingReclaimedLock = null;
+      }
+      return send(200, summary);
+    }
     if (request.method === "GET" && url.pathname === "/api/projects/demo/document") {
       return send(200, structuredClone(document));
     }
@@ -182,8 +218,94 @@ async function startFixtureServer() {
     if (request.method === "GET" && url.pathname === "/api/projects/demo/slots") {
       return send(200, { isTemplate: false, slots: [] });
     }
+    // Every call the font manager can make is recorded, because two of the
+    // journeys are about what is *not* sent: nothing is downloaded before the
+    // install button is clicked, and nothing is deleted when the confirmation
+    // is dismissed.
+    if (url.pathname.startsWith("/api/fonts")) {
+      fontCalls.push({ method: request.method, path: url.pathname, query: url.search });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/fonts/catalogue") {
+      return send(200, structuredClone(FONT_CATALOGUE));
+    }
+    if (request.method === "POST" && url.pathname === "/api/fonts/install") {
+      let raw = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { raw += chunk; });
+      request.on("end", () => {
+        const body = raw ? JSON.parse(raw) : {};
+        if (failInstall) {
+          const message = failInstall;
+          failInstall = null;
+          // The server installs atomically, so a refusal leaves the store as
+          // it was — which is what the journey then checks the page says.
+          return send(502, { error: { code: "fontInstallFailed", message } });
+        }
+        if (body.pack !== "default") {
+          return send(404, { error: { code: "unknownFontPack", message: `no pack named "${body.pack}"` } });
+        }
+        const installed = FONT_CATALOGUE.packs.default.map((family, index) => ({
+          family,
+          style: "normal",
+          weight: 400,
+          file: `pack${index}.ttf`,
+          hash: `sha256:pack${index}`,
+          faceIndex: 0,
+          license: "OFL-1.1",
+        }));
+        for (const face of installed) {
+          if (!fontFaces.some((one) => one.file === face.file)) fontFaces.push(face);
+        }
+        send(201, { installed, families: fontFamilies() });
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/fonts") {
+      const filename = url.searchParams.get("filename") ?? "";
+      const extension = filename.includes(".") ? filename.split(".").pop().toLowerCase() : "";
+      request.resume();
+      request.on("end", () => {
+        if (!FONT_FORMATS.includes(extension)) {
+          return send(400, {
+            error: {
+              code: "unsupportedFontFormat",
+              message: `"${filename}" is not a font format this build can import`,
+              details: { filename, accepted: FONT_FORMATS },
+            },
+          });
+        }
+        const family = filename.replace(/\.[^.]+$/, "");
+        const record = {
+          family,
+          style: "normal",
+          weight: 400,
+          file: `${family}.${extension}`,
+          hash: `sha256:${family}`,
+          faceIndex: 0,
+          source: filename,
+        };
+        const already = fontFaces.some((one) => one.file === record.file);
+        if (!already) fontFaces.push(record);
+        // Bytes the store already has answer 200 rather than refusing.
+        send(already ? 200 : 201, { imported: [record], families: fontFamilies() });
+      });
+      return;
+    }
+    if (request.method === "DELETE" && url.pathname.startsWith("/api/fonts/")) {
+      const family = decodeURIComponent(url.pathname.slice("/api/fonts/".length));
+      const before = fontFaces.length;
+      fontFaces = fontFaces.filter((face) => face.family !== family);
+      const removed = before - fontFaces.length;
+      if (!removed) {
+        return send(404, {
+          error: { code: "unknownFontFamily", message: `no font family named "${family}" is in the font store` },
+        });
+      }
+      return send(200, { removed, families: fontFamilies() });
+    }
     if (request.method === "GET" && url.pathname === "/api/fonts") {
-      return send(200, { families: ["Noto Sans"] });
+      return send(200, { families: fontFamilies(), faces: structuredClone(fontFaces) });
     }
     if (request.method === "GET" && url.pathname.endsWith("/preview.png")) {
       response.writeHead(200, { "content-type": "image/png" });
@@ -237,7 +359,7 @@ async function startFixtureServer() {
 
     const requested = url.pathname === "/" ? "index.html" : basename(url.pathname);
     const allowed = new Set([
-      "index.html", "app.js", "api.js", "export.js", "geometry.js", "templates.js", "token.js",
+      "index.html", "app.js", "api.js", "export.js", "fonts.js", "geometry.js", "templates.js", "token.js",
       "studio.css", "style.css", "phosphor.css", "Phosphor.woff2",
     ]);
     if (!allowed.has(requested)) return send(404, { error: { code: "notFound", message: url.pathname } });
@@ -260,11 +382,25 @@ async function startFixtureServer() {
     url: `http://127.0.0.1:${address.port}`,
     writes,
     reads,
+    fontCalls,
     layers: () => structuredClone(document.layers),
+    setFonts(faces) {
+      fontFaces = structuredClone(faces);
+    },
+    failNextInstall(message) {
+      failInstall = message;
+    },
+    armReclaimedLock(lock) {
+      pendingReclaimedLock = lock;
+    },
     reset() {
       document = freshDocument();
+      fontFaces = defaultFontFaces();
+      failInstall = null;
+      pendingReclaimedLock = null;
       writes.length = 0;
       reads.length = 0;
+      fontCalls.length = 0;
     },
     // A listening server is an open handle, and an open handle keeps node
     // alive after the last test has reported — which is how a finished run
@@ -820,6 +956,188 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.deepEqual(fixture.writes[0].body.operation, { op: "updateCanvas", background: null });
     assert.equal(await page.evaluate(`document.querySelector("#canvas-background").disabled`), true);
     assert.equal(await page.evaluate(`document.querySelector("#canvas-transparent").checked`), true);
+  });
+
+  await t.test("an empty font store offers the pack it would download, and text needs no terminal", async () => {
+    fixture.reset();
+    fixture.setFonts([]);
+    await openProject(page);
+    await page.click("#fonts-toggle");
+    await page.waitFor(`!document.querySelector("#font-empty").hidden`, "the empty font state");
+    await waitForSaved(page);
+
+    const empty = await page.evaluate(`({
+      detail: document.querySelector("#install-default-detail").textContent,
+      suggestions: [...document.querySelector("#font-families").options].length,
+      listed: document.querySelectorAll("#font-list li").length
+    })`);
+    assert.equal(empty.suggestions, 0);
+    assert.equal(empty.listed, 0);
+    for (const family of FONT_CATALOGUE.packs.default) {
+      assert.ok(empty.detail.includes(family), `${family} missing from "${empty.detail}"`);
+    }
+    assert.match(empty.detail, /12 MB/);
+    assert.match(empty.detail, /when you click/);
+    // Describing the pack reads the catalogue; nothing is fetched until the
+    // button is pressed, so no install has been posted yet.
+    assert.equal(fixture.fontCalls.filter((call) => call.method === "POST").length, 0);
+
+    // The defect this rung fixes: the text preset used to answer with a
+    // command line. It now opens this panel with the install button focused.
+    fixture.writes.length = 0;
+    await page.click("#add-text");
+    await page.click('[data-text-preset="heading"]');
+    await page.waitFor(
+      `document.activeElement?.id === "install-default"`,
+      "the install button focused from a text preset",
+    );
+    const refusal = await page.evaluate(`document.querySelector("#status").textContent`);
+    assert.match(refusal, /no fonts are installed/);
+    assert.ok(!refusal.includes("assemblash font install"), refusal);
+    assert.equal(fixture.writes.length, 0);
+
+    // A refused install leaves the store untouched and the button pressable:
+    // the server guarantees the first, and the panel must not take away the
+    // second — trying again is the whole of the recovery.
+    fixture.failNextInstall("the font mirror could not be reached");
+    await page.click("#install-default");
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("fontInstallFailed")`,
+      "the refused install",
+    );
+    assert.deepEqual(await page.evaluate(`({
+      disabled: document.querySelector("#install-default").disabled,
+      label: document.querySelector("#install-default-label").textContent,
+      listed: document.querySelectorAll("#font-list li").length,
+      status: document.querySelector("#status").textContent
+    })`), {
+      disabled: false,
+      label: "Install the default font pack",
+      listed: 0,
+      status: "install fonts: the font mirror could not be reached (fontInstallFailed)",
+    });
+
+    await page.click("#install-default");
+    // The install is finished when it says so — the list is redrawn earlier,
+    // in the middle of the same run, and acting on that would race it.
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("installed Noto Sans")`,
+      "the default pack to be installed",
+    );
+    assert.deepEqual(await page.evaluate(`({
+      empty: document.querySelector("#font-empty").hidden,
+      listed: document.querySelectorAll("#font-list li").length,
+      faces: document.querySelector("#font-list li .font-faces").textContent,
+      families: [...document.querySelector("#font-families").options].map((one) => one.value)
+    })`), {
+      empty: true,
+      listed: 3,
+      faces: "1 face · normal 400",
+      families: ["Noto Sans", "Noto Sans Mono", "Noto Serif"],
+    });
+
+    // And the thing that could not be done a moment ago now works.
+    await page.click("#add-text");
+    await page.click('[data-text-preset="heading"]');
+    await waitForWrites(fixture);
+    await page.waitFor(`document.querySelector('.inline-text-editor')`, "the new heading's inline editor");
+    await page.evaluate(`document.querySelector('.inline-text-editor').dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    assert.equal(fixture.writes[0].body.operation.op, "create");
+    assert.equal(fixture.writes[0].body.operation.type, "text");
+    assert.equal(fixture.writes[0].body.operation.fontFamily, "Noto Sans");
+  });
+
+  await t.test("a font file is imported, and a file that is not one says why", async () => {
+    await page.click("#fonts-toggle");
+    await waitForSaved(page);
+    assert.equal(await page.evaluate(`document.querySelectorAll("#font-list li").length`), 3);
+
+    await page.evaluate(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array([0, 1, 0, 0])], "Brand Sans.ttf", { type: "font/ttf" }));
+      const input = document.querySelector("#font-file");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("imported 1 font file")`,
+      "the imported family",
+    );
+    assert.equal(await page.evaluate(`document.querySelectorAll("#font-list li").length`), 4);
+    assert.deepEqual(await page.evaluate(`({
+      feedback: document.querySelector("#font-feedback").textContent,
+      suggested: [...document.querySelector("#font-families").options].some((one) => one.value === "Brand Sans")
+    })`), { feedback: "Brand Sans.ttf → Brand Sans", suggested: true });
+
+    await page.evaluate(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array([1, 2, 3])], "notes.txt", { type: "text/plain" }));
+      const input = document.querySelector("#font-file");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("no fonts imported")`,
+      "the refusal for a file that is not a font",
+    );
+    const refused = await page.evaluate(`({
+      feedback: document.querySelector("#font-feedback").textContent,
+      listed: document.querySelectorAll("#font-list li").length,
+      status: document.querySelector("#status").textContent
+    })`);
+    assert.match(refused.feedback, /notes\.txt/);
+    assert.match(refused.feedback, /is not a font format this build can import/);
+    assert.equal(refused.listed, 4);
+    assert.match(refused.status, /no fonts imported/);
+  });
+
+  await t.test("removing a family asks first, and sends nothing when dismissed", async () => {
+    const deletes = () => fixture.fontCalls.filter((call) => call.method === "DELETE").length;
+    await page.evaluate(`(() => { window.confirm = () => false; return true; })()`);
+    const before = deletes();
+    await page.click('#font-list [data-remove-family="Brand Sans"]');
+    assert.equal(deletes(), before);
+    assert.equal(await page.evaluate(`document.querySelectorAll("#font-list li").length`), 4);
+
+    await page.evaluate(`(() => { window.confirm = () => true; return true; })()`);
+    await page.click('#font-list [data-remove-family="Brand Sans"]');
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("Brand Sans removed")`,
+      "the removed family",
+    );
+    assert.equal(await page.evaluate(`document.querySelectorAll("#font-list li").length`), 3);
+    assert.equal(deletes(), before + 1);
+    assert.ok(fixture.fontCalls.some((call) => call.method === "DELETE" && call.path.endsWith("/Brand%20Sans")));
+    assert.equal(
+      await page.evaluate(`[...document.querySelector("#font-families").options].some((one) => one.value === "Brand Sans")`),
+      false,
+    );
+    assert.match(await page.evaluate(`document.querySelector("#status").textContent`), /Brand Sans removed/);
+  });
+
+  await t.test("a lock the server reclaimed on its own is reported once, on the next open", async () => {
+    fixture.reset();
+    fixture.armReclaimedLock({ pid: 4242, host: "workstation-7", at: Date.now() });
+    await page.evaluate(`(() => { const select = document.querySelector("#projects"); select.value = "demo"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await page.waitFor(
+      `document.querySelector("#status")?.textContent?.includes("Recovered this project automatically")`,
+      "the automatic lock-recovery notice",
+    );
+    assert.match(
+      await page.evaluate(`document.querySelector("#status").textContent`),
+      /pid 4242 on workstation-7/,
+    );
+
+    // The server drains the reclaim on read, so reopening the same project
+    // fetches a summary with no `reclaimedLock` and shows the ordinary
+    // "Opened" status instead.
+    await openProject(page);
+    assert.doesNotMatch(
+      await page.evaluate(`document.querySelector("#status").textContent`),
+      /Recovered this project automatically/,
+    );
   });
 
 });

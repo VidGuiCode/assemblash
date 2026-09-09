@@ -9,6 +9,10 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+# Kernel probes for stale-lock reclaim (session::reclaim_if_stale) live in
+# their own crate: they need `unsafe`, and this one keeps the workspace's
+# `unsafe_code = "forbid"`.
+assemblash-liveness.workspace = true
 roxmltree = "0.21.1"
 rusqlite = { version = "0.38", features = ["bundled"] }
 schemars = "1.2.2"

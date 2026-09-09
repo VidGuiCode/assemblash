@@ -28,6 +28,13 @@ pub mod typescript;
 pub mod validate;
 pub mod workspace;
 
+/// Process-liveness and hostname probing, re-exported so it stays part of
+/// this crate's surface.
+///
+/// It lives in its own crate because the kernel calls behind it need
+/// `unsafe`, and this crate keeps the workspace's `unsafe_code = "forbid"`.
+/// Nothing about `assemblash_core::liveness::*` changed when it moved.
+pub use assemblash_liveness as liveness;
 pub use document::{
     Asset, BlendMode, Canvas, Color, Document, Extras, GroupLayer, ImageFit, ImageLayer, Layer,
     LayerKind, SvgLayer, TextAlign, TextLayer, Transform,
@@ -36,6 +43,7 @@ pub use error::{ValidationError, ValidationErrors};
 pub use history::{Actor, ActorKind, History, HistoryError};
 pub use ids::{AssetId, DocumentId, IdSource, LayerId, SequentialIdSource, UlidIdSource};
 pub use layout::{bounding_box, find_overlaps, LayoutError, Rect};
+pub use liveness::{process_is_alive, this_host, Liveness};
 pub use ops::{apply, dry_run, CanvasAnchor, OpError, Operation, UpdateCanvas};
 pub use presets::{Preset, PresetProperties};
 pub use session::{Session, SessionError};

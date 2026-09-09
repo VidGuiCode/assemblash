@@ -2,10 +2,16 @@
 //!
 //! A warning is not a failure. Each one names something the picture does that
 //! its author probably did not ask for — a word split down the middle, text
-//! running past the bottom of its box, an imported vector asset whose `<text>`
-//! will draw as nothing — and the export still writes its file and still
-//! succeeds. Refusing here would be worse: the file is correct, deterministic,
-//! and exactly what the document says; it is the document that is surprising.
+//! running past the bottom of its box — and the export still writes its file
+//! and still succeeds. Refusing here would be worse: the file is correct,
+//! deterministic, and exactly what the document says; it is the document that
+//! is surprising.
+//!
+//! The line between a warning and a refusal is whether the file still says
+//! what the document says. An imported asset whose `<text>` has no font warned
+//! here in 1.3.0 and refuses in the renderer now, because that file did *not*:
+//! the words were simply gone, and an export that loses content and returns
+//! success is the one thing this module must not be used to excuse.
 //!
 //! This lives in the renderer rather than beside any one response type
 //! because there are three export paths — the CLI's own, the HTTP API's, and
@@ -21,7 +27,7 @@ use assemblash_core::ids::LayerId;
 use assemblash_core::{storage, svg_import, Document};
 
 use crate::fonts::FontSet;
-use crate::svg::{layout_text, number};
+use crate::svg::{families_in, layout_text, number};
 
 /// A word was wider than its box and was split at a character boundary.
 pub const WORD_BROKEN_MID_WORD: &str = "wordBrokenMidWord";
@@ -30,6 +36,16 @@ pub const WORD_BROKEN_MID_WORD: &str = "wordBrokenMidWord";
 pub const TEXT_OVERFLOWS_BOX: &str = "textOverflowsBox";
 
 /// An imported SVG asset draws text in a family this render did not load.
+///
+/// **Superseded in 1.5.0, and no longer reachable from any export.** This was
+/// the 1.3.0 answer to DEF-2: report the hole and write the file anyway. It
+/// was the wrong answer — the export still "succeeded" while a chart lost its
+/// labels — so the render refuses that document now
+/// ([`RenderError::SvgAssetTextWithoutFont`](crate::RenderError::SvgAssetTextWithoutFont))
+/// and an export that gets far enough to collect warnings cannot be one this
+/// would fire on. The code stays defined because a warning code is public API
+/// and deleting one is a breaking change; a caller switching on it keeps
+/// compiling and simply never sees it.
 pub const SVG_ASSET_TEXT_WITHOUT_FONT: &str = "svgAssetTextWithoutFont";
 
 /// One thing an export noticed.
@@ -110,12 +126,17 @@ pub fn export_warnings(
     warnings
 }
 
-/// The DEF-2 symptom, made loud.
+/// The DEF-2 symptom, made loud — and, since 1.5.0, never actually said.
 ///
-/// Fonts are loaded for the families **text layers** name, never for the ones
-/// an imported asset names, so a `<text>` inside an SVG asset draws as nothing
-/// and the export still exits successfully. This does not fix that — loading
-/// those families is gated on D7 — it says it is happening.
+/// The render refuses an SVG asset whose `<text>` no loaded font can draw, so
+/// by the time anything asks for warnings this condition has already stopped
+/// the export. It is kept, and kept using the renderer's own
+/// [`families_in`](crate::svg::families_in) so the two cannot disagree, for the
+/// one caller shape the refusal cannot see: [`crate::doc_to_svg`] reads the
+/// asset out of a `data:` URI, so a caller that resolved its assets to file
+/// paths instead gets no check there and this warning here. No shipped surface
+/// does that — all three embed assets — which is why this is unreachable in
+/// practice rather than merely unused.
 fn svg_asset_warning(
     document: &Document,
     layer: &assemblash_core::Layer,
@@ -126,12 +147,15 @@ fn svg_asset_warning(
     let asset = document.assets.iter().find(|stored| &stored.id == asset)?;
     let source = std::fs::read_to_string(storage::asset_path(project_dir, asset)).ok()?;
     let families = svg_import::text_families(&source).ok()?;
-    if families.is_empty() || families.iter().any(|family| fonts.contains(family)) {
-        return None;
-    }
-
-    let wanted = families
+    // Exactly the families the render refuses on: a CSS list is satisfied by
+    // any one of its members, and a list of nothing but generic roles names
+    // nothing the store could hold.
+    let unsatisfied = families
         .iter()
+        .filter(|value| {
+            let named = families_in(value);
+            !named.iter().any(|family| fonts.contains(family))
+        })
         .map(|family| {
             if family.is_empty() {
                 // A `<text>` naming no family at all. Nothing can satisfy it,
@@ -141,8 +165,11 @@ fn svg_asset_warning(
                 format!("{family:?}")
             }
         })
-        .collect::<Vec<_>>()
-        .join(", ");
+        .collect::<Vec<_>>();
+    if unsatisfied.is_empty() {
+        return None;
+    }
+    let wanted = unsatisfied.join(", ");
     Some(ExportWarning {
         code: SVG_ASSET_TEXT_WITHOUT_FONT,
         message: format!(

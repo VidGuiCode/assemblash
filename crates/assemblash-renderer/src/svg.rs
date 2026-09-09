@@ -11,7 +11,7 @@ use assemblash_core::document::{
     Effect, GroupLayer, ImageFit, Layer, LayerKind, TextAlign, Transform,
 };
 use assemblash_core::ids::AssetId;
-use assemblash_core::{validate, Color, Document};
+use assemblash_core::{svg_import, validate, Color, Document};
 
 use crate::error::RenderError;
 use crate::fonts::FontSet;
@@ -184,6 +184,12 @@ fn write_layer(
                     asset: asset_id.clone(),
                 })?;
 
+            // A vector asset carries its own `<text>`, and nothing has loaded
+            // a font for it. Refused here rather than drawn as a hole.
+            if matches!(&layer.kind, LayerKind::Svg(_)) {
+                check_asset_text(asset_id, href, fonts)?;
+            }
+
             let preserve = match fit {
                 ImageFit::Fill => "none",
                 ImageFit::Contain => "xMidYMid meet",
@@ -247,6 +253,184 @@ fn write_layer(
     }
 
     Ok(())
+}
+
+/// CSS families that name a role rather than a file.
+///
+/// A role is not a family this document could load: the font store is keyed by
+/// the family name a face declares, and no face declares itself `sans-serif`.
+/// So a `<text>` asking only for one of these names nothing that can be
+/// resolved, and is treated exactly like a `<text>` that names no family at
+/// all — refused, with no family to put in the message.
+const GENERIC_FAMILIES: &[&str] = &[
+    "serif",
+    "sans-serif",
+    "monospace",
+    "cursive",
+    "fantasy",
+    "system-ui",
+];
+
+/// Refuses an SVG asset whose `<text>` no loaded font can draw (DEF-2).
+///
+/// Fonts are resolved from the families **text layers** name, so a `<text>`
+/// inside an imported asset had nothing loaded for it and drew as nothing —
+/// while the export exited successfully and wrote a file with a hole in it.
+/// Whether it happened at all depended on the surface: the command line's
+/// `--font-dir` loads every file in the directory and so happened to work,
+/// every other path did not. Silent, and different depending on how you asked:
+/// the two properties a rendering promise cannot have.
+///
+/// This does not fix it — loading the families an asset names is a separate
+/// change — it stops the render instead of producing the hole.
+///
+/// The families come from [`svg_import::text_families`], which parses the
+/// markup, so a `<text>` inside a comment is not one and an empty `<text>` with
+/// nothing to draw is not one either. Each value is a CSS list, and a list is
+/// satisfied by any one of its members, so a `<text>` passes when **any** of
+/// the families it names was loaded.
+///
+/// A `<text>` that names **no** family, or only generic ones, is refused too,
+/// with no family to name. That is not pedantry: fonts are resolved by family
+/// name out of a pinned store, so the store never holds the default family
+/// usvg falls back to, and such a `<text>` is guaranteed to draw nothing. It
+/// measured zero dark pixels with a face loaded, which is the silent loss this
+/// check exists to remove — a chart exporting "successfully" without its
+/// labels. Refusing is the only honest answer, and the caller has two real
+/// fixes: name a family the document loads, or outline the text at import.
+/// (The 1.3.0 `svgAssetTextWithoutFont` warning covered this case by reporting
+/// it and carrying on; it is superseded here.)
+///
+/// The fault reported is the first one in the sorted order
+/// [`svg_import::text_families`] returns, so the message is the same on every
+/// machine.
+fn check_asset_text(asset_id: &AssetId, href: &str, fonts: &FontSet) -> Result<(), RenderError> {
+    // Only a `data:` URI carries the bytes with it. A caller that resolved its
+    // assets to paths instead has an href this function cannot read, and a
+    // guess about a file it has not seen would be worse than no check: this
+    // crate does no I/O.
+    let Some(source) = svg_data_uri(href) else {
+        return Ok(());
+    };
+    // Markup that will not parse is not this check's business; the rasterizer
+    // reports it as a malformed SVG a moment later.
+    let Ok(referenced) = svg_import::text_families(&source) else {
+        return Ok(());
+    };
+
+    for value in &referenced {
+        let wanted = families_in(value);
+        // One loaded family out of the list is enough: that is what a CSS
+        // font-family list means, and this `<text>` has a face to draw with.
+        if wanted.iter().any(|family| fonts.contains(family)) {
+            continue;
+        }
+        return Err(RenderError::SvgAssetTextWithoutFont {
+            asset: asset_id.to_string(),
+            // `None` when the `<text>` named nothing resolvable, which is a
+            // different sentence to the caller: there is no family to install.
+            family: wanted.into_iter().next(),
+        });
+    }
+
+    Ok(())
+}
+
+/// The named, non-generic families in one `font-family` value, in order.
+pub(crate) fn families_in(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|family| {
+            let family = family.trim();
+            // A family with a space in it is usually quoted in CSS.
+            family
+                .strip_prefix(['"', '\''])
+                .and_then(|rest| rest.strip_suffix(['"', '\'']))
+                .unwrap_or(family)
+                .trim()
+        })
+        .filter(|family| {
+            !family.is_empty()
+                && !GENERIC_FAMILIES
+                    .iter()
+                    .any(|generic| family.eq_ignore_ascii_case(generic))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The markup inside a `data:` URI that carries an SVG, if this href is one.
+fn svg_data_uri(href: &str) -> Option<String> {
+    let (meta, payload) = href.split_once(',')?;
+    let meta = meta.to_ascii_lowercase();
+    let media = meta.strip_prefix("data:")?;
+    if !media.contains("svg") {
+        return None;
+    }
+    let bytes = if media.ends_with(";base64") {
+        decode_base64(payload)?
+    } else {
+        percent_decode(payload)
+    };
+    String::from_utf8(bytes).ok()
+}
+
+/// Standard base64, ignoring padding and whitespace.
+///
+/// Hand-rolled for the same reason [`crate::assets`] hand-rolls the encoder:
+/// every crate in a single-binary product has to be licence-audited and
+/// shipped (R8), and this is a dozen lines of arithmetic.
+fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let mut accumulator: u32 = 0;
+    let mut bits: u32 = 0;
+    for byte in text.bytes() {
+        if byte == b'=' || byte.is_ascii_whitespace() {
+            continue;
+        }
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        accumulator = (accumulator << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((accumulator >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// Percent-decoding, for a `data:` URI that spells its payload out.
+fn percent_decode(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let pair = (index + 2 < bytes.len() && bytes[index] == b'%')
+            .then(|| {
+                let high = char::from(bytes[index + 1]).to_digit(16)?;
+                let low = char::from(bytes[index + 2]).to_digit(16)?;
+                u8::try_from(high * 16 + low).ok()
+            })
+            .flatten();
+        match pair {
+            Some(byte) => {
+                out.push(byte);
+                index += 3;
+            }
+            None => {
+                out.push(bytes[index]);
+                index += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Wraps text at the layer width, preserving explicit line breaks.
@@ -690,6 +874,58 @@ mod tests {
     fn markup_characters_are_escaped() {
         assert_eq!(escape_text("a & b < c"), "a &amp; b &lt; c");
         assert_eq!(attribute("say \"hi\""), "say &quot;hi&quot;");
+    }
+
+    #[test]
+    fn a_font_family_list_is_split_trimmed_unquoted_and_stripped_of_generics() {
+        assert_eq!(families_in("Noto Sans"), ["Noto Sans"]);
+        assert_eq!(
+            families_in("  'Noto Sans' , \"Inter\" ,sans-serif "),
+            ["Noto Sans", "Inter"]
+        );
+        // A list of nothing but roles names no file, so there is nothing a
+        // document could add and nothing to refuse.
+        assert!(families_in("serif, SANS-SERIF, system-ui").is_empty());
+        assert!(families_in("").is_empty());
+    }
+
+    #[test]
+    fn only_an_svg_data_uri_is_read_back() {
+        let base64 = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+        assert_eq!(svg_data_uri(base64).as_deref(), Some("<svg></svg>"));
+
+        let plain = "data:image/svg+xml,%3Csvg%3E%3C/svg%3E";
+        assert_eq!(svg_data_uri(plain).as_deref(), Some("<svg></svg>"));
+
+        // A path, and an asset that is not vector: nothing this can read, and
+        // guessing would be worse than not checking.
+        assert_eq!(svg_data_uri("assets/logo.svg"), None);
+        assert_eq!(svg_data_uri("data:image/png;base64,iVBOR"), None);
+    }
+
+    #[test]
+    fn the_refusal_names_the_asset_and_the_family_when_there_is_one() {
+        let named = RenderError::SvgAssetTextWithoutFont {
+            asset: "logo.svg".to_owned(),
+            family: Some("Arial".to_owned()),
+        };
+        assert_eq!(
+            named.to_string(),
+            "SVG asset \"logo.svg\" draws text but no font is loaded for \"Arial\"; \
+             add the family to the document's fonts or outline the text before importing"
+        );
+
+        // No family to name is a different instruction, not a shorter one:
+        // there is nothing to install, so the asset itself has to change.
+        let unnamed = RenderError::SvgAssetTextWithoutFont {
+            asset: "logo.svg".to_owned(),
+            family: None,
+        };
+        assert_eq!(
+            unnamed.to_string(),
+            "SVG asset \"logo.svg\" draws text that names no font family; \
+             name one the document loads or outline the text before importing"
+        );
     }
 
     #[test]

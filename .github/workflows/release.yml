@@ -208,3 +208,4 @@ jobs:
           --target "${{ matrix.target-name }}"
           --repo "${{ github.repository }}"
           --canvas
+          --no-terminal

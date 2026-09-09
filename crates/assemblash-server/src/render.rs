@@ -373,3 +373,31 @@ fn template_error(error: assemblash_core::TemplateError) -> ApiError {
         error.to_string(),
     )
 }
+
+/// This project's lock had been left behind by a process that died, and this
+/// server cleared it (FR-11).
+///
+/// Not a fault in the document, unlike every other code in
+/// [`assemblash_renderer::warnings`] — it says something happened to the
+/// *project* that the person exporting would want to know: an earlier run of
+/// this program did not shut down, and the work it had open was reopened
+/// without anyone confirming it. The export itself is unaffected.
+pub const LOCK_RECLAIMED: &str = "lockReclaimed";
+
+/// Adds the reclaimed-lock notice to an export's warnings.
+///
+/// Separate from [`export_warnings`](assemblash_renderer::export_warnings)
+/// because that function is given a document and a font set and nothing else —
+/// it cannot know what the server did to open the project. This is the one
+/// place the two channels meet, so both reach a client through the same
+/// `warnings` array rather than one of them needing a field of its own.
+pub fn note_lock_reclaimed(exported: &mut Exported, pid: u32, host: &str) {
+    exported.warnings.push(ExportWarning {
+        code: LOCK_RECLAIMED,
+        message: format!(
+            "the lock on this project was left behind by process {pid} on {host}, \
+             which is no longer running; it was cleared and the project reopened"
+        ),
+        layer_id: None,
+    });
+}

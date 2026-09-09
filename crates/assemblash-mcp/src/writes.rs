@@ -96,7 +96,9 @@ pub struct ExportResult {
 #[schemars(rename_all = "camelCase")]
 pub struct ExportWarningShape {
     /// Machine-readable code: `wordBrokenMidWord`, `textOverflowsBox`, or
-    /// `svgAssetTextWithoutFont`. Switch on this; the message is for a person.
+    /// `lockReclaimed`. Switch on this; the message is for a person. (Since
+    /// 1.5.0 an SVG asset whose text has no loaded font is refused outright,
+    /// so `svgAssetTextWithoutFont` is no longer produced.)
     pub code: String,
     /// What happened, in the voice the operation layer refuses in.
     pub message: String,
@@ -114,6 +116,15 @@ pub struct OpenedProject {
     pub version: u64,
     /// How many layers it has.
     pub layers: usize,
+    /// One line about something that happened while opening it.
+    ///
+    /// Present only when this server cleared a lock left behind by a process
+    /// that had died — worth saying once, because it means an earlier run of
+    /// the program did not shut down cleanly. Absent otherwise, and absent
+    /// entirely from a server that was not started with
+    /// `--reclaim-stale-locks`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl Backend {
@@ -259,10 +270,13 @@ impl Backend {
         let state = self.document_state(Some(project))?;
         let mut layers = 0;
         state.document.walk_layers(&mut |_| layers += 1);
+        // After the open above, which is what may have produced it.
+        let note = self.take_reclaim_note(Some(project));
         Ok(OpenedProject {
             project: state.project,
             version: state.version,
             layers,
+            note,
         })
     }
 }
