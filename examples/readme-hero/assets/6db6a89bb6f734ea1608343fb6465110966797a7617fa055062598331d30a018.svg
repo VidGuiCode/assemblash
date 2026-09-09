@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">Assemblash logo</title>
+  <desc id="description">Three warm red layers assembled into a compact geometric mark.</desc>
+  <path d="M32 6 57 19 32 32 7 19 32 6Z" fill="#EF3325" opacity=".28"/>
+  <path d="M32 19 57 32 32 45 7 32l25-13Z" fill="#EF3325" opacity=".58"/>
+  <path d="M32 32 57 45 32 58 7 45l25-13Z" fill="#EF3325"/>
+  <path d="m32 17 10 5.2-10 5.2-10-5.2L32 17Z" fill="#fff" opacity=".94"/>
+</svg>

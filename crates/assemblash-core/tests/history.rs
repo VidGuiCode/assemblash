@@ -151,6 +151,67 @@ fn canvas_update_undoes_and_redoes_byte_identically() {
         .unwrap();
     assert_eq!(project.document_bytes(), after);
 }
+/// The 1.6.0 form of exit test 1: a new layer kind, and the two properties
+/// that can be *cleared* rather than only set, have to undo as exactly as
+/// everything else does.
+#[test]
+fn shape_edits_undo_to_a_byte_identical_document() {
+    use assemblash_core::document::{ShapeKind, Stroke};
+    use assemblash_core::ops::UpdateLayer;
+
+    let mut project = Project::new();
+    let empty = project.document_bytes();
+
+    let created = project.apply(Operation::Create(CreateLayer {
+        position: LayerPosition::Root { index: None },
+        transform: Transform::new(10.0, 10.0, 60.0, 40.0),
+        name: Some("badge".to_owned()),
+        kind: NewLayerKind::Shape {
+            shape: ShapeKind::Rect { corner_radius: 6.0 },
+            fill: Some(Color::new("#3366cc")),
+            stroke: Some(Stroke {
+                color: Color::new("#112233"),
+                width: 2.0,
+            }),
+        },
+    }));
+    let id = created.first().expect("a layer was created").clone();
+    let after_create = project.document_bytes();
+    assert_ne!(after_create, empty);
+
+    // Clearing a paint is the interesting undo: `Some(None)` has to restore
+    // the value it replaced, not merely stop being sent.
+    project.apply(Operation::Update(UpdateLayer {
+        fill: Some(None),
+        corner_radius: Some(12.0),
+        ..UpdateLayer::new(id)
+    }));
+    let after_update = project.document_bytes();
+    assert_ne!(after_update, after_create);
+
+    project
+        .session
+        .undo(&human(), Some(3), &mut project.ids)
+        .unwrap();
+    assert_eq!(
+        project.document_bytes(),
+        after_create,
+        "undo must put the cleared fill back byte for byte"
+    );
+
+    project
+        .session
+        .undo(&human(), Some(4), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), empty);
+
+    project
+        .session
+        .redo(&human(), Some(5), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), after_create);
+}
+
 #[test]
 fn a_batch_replays_and_undoes_as_one_transaction() {
     let mut project = Project::new();

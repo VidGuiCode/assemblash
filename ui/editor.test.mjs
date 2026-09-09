@@ -155,7 +155,14 @@ function applyMockOperation(document, operation, created) {
     return;
   }
   const layer = operation.id ? findLayer(document, operation.id) : null;
-  if (operation.op === "update" && layer) Object.assign(layer, operation);
+  if (operation.op === "update" && layer) {
+    const { op, id, cornerRadius, ...rest } = operation;
+    Object.assign(layer, rest);
+    // A corner radius belongs to the rect geometry, not to the layer: the
+    // engine writes it inside `shape`, and the inspector reads it back from
+    // there, so the mock has to put it in the same place.
+    if (cornerRadius !== undefined && layer.shape) layer.shape.cornerRadius = cornerRadius;
+  }
   if (operation.op === "move" && layer) {
     layer.transform.x += operation.dx;
     layer.transform.y += operation.dy;
@@ -1138,6 +1145,187 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       await page.evaluate(`document.querySelector("#status").textContent`),
       /Recovered this project automatically/,
     );
+  });
+
+  await t.test("each shape is added by one create carrying its geometry and paint", async () => {
+    fixture.reset();
+    await openProject(page);
+    // Opening says so before its last read has returned, and a create sent
+    // while the page is still busy is dropped rather than queued.
+    await waitForSaved(page);
+    await page.click("#add-shape");
+    assert.deepEqual(await page.evaluate(`({
+      title: document.querySelector("#add-panel-title").textContent,
+      visible: !document.querySelector("#add-shape-section").hidden,
+      shownSections: [...document.querySelectorAll(".add-section")].filter((one) => !one.hidden).length,
+      offered: [...document.querySelectorAll("#add-shape-section [data-shape]")].map((one) => one.dataset.shape)
+    })`), {
+      title: "Shapes",
+      visible: true,
+      shownSections: 1,
+      offered: ["rect", "ellipse", "line"],
+    });
+
+    // Each button is one create: the geometry and the paint arrive together,
+    // so there is never a moment when the document holds an unpainted shape.
+    const expected = [
+      ["rect", {
+        op: "create",
+        position: { at: "root" },
+        transform: { x: 340, y: 230, width: 320, height: 240 },
+        type: "shape",
+        shape: { kind: "rect", cornerRadius: 0 },
+        fill: "#3366cc",
+      }],
+      ["ellipse", {
+        op: "create",
+        position: { at: "root" },
+        transform: { x: 340, y: 230, width: 320, height: 240 },
+        type: "shape",
+        shape: { kind: "ellipse" },
+        fill: "#3366cc",
+      }],
+      ["line", {
+        op: "create",
+        position: { at: "root" },
+        // A line's box is 24 tall although the segment it draws is 2: the
+        // height is layout only, and a flat box would put the selection
+        // handles on top of one another.
+        transform: { x: 300, y: 338, width: 400, height: 24 },
+        type: "shape",
+        shape: { kind: "line" },
+        stroke: { color: "#111111", width: 2 },
+      }],
+    ];
+    for (const [kind, operation] of expected) {
+      fixture.writes.length = 0;
+      await page.click(`[data-shape="${kind}"]`);
+      await waitForWrites(fixture);
+      await waitForSaved(page);
+      assert.equal(fixture.writes.length, 1, `${kind} sent ${fixture.writes.length} operations`);
+      assert.deepEqual(fixture.writes[0].body.operation, operation);
+    }
+
+    // The tree says which primitive each layer is, rather than showing three
+    // identical rows.
+    assert.deepEqual(await page.evaluate(`({
+      rect: document.querySelector('.layer[data-id="layer_made_3"] .layer-icon').className,
+      ellipse: document.querySelector('.layer[data-id="layer_made_4"] .layer-icon').className,
+      line: document.querySelector('.layer[data-id="layer_made_5"] .layer-icon').className
+    })`), {
+      rect: "ph ph-square layer-icon",
+      ellipse: "ph ph-circle layer-icon",
+      line: "ph ph-line-segment layer-icon",
+    });
+  });
+
+  await t.test("a shape's paint and corners each send exactly one update", async () => {
+    await selectLayer(page, "layer_made_3");
+    assert.deepEqual(await page.evaluate(`({
+      heading: [...document.querySelectorAll("#advanced-inspector h2")].some((one) => one.textContent === "Shape"),
+      fill: document.querySelector(".shape-fill").value,
+      clearFill: document.querySelector(".shape-fill-none").disabled,
+      stroke: document.querySelector(".shape-stroke").value,
+      clearStroke: document.querySelector(".shape-stroke-none").disabled,
+      width: document.querySelector(".shape-stroke-width").value,
+      corner: document.querySelector(".shape-corner-radius").value
+    })`), {
+      heading: true,
+      fill: "#3366cc",
+      clearFill: false,
+      // A rect created with a fill has no stroke: the colour offered is the
+      // one a stroke would be added with, and there is nothing to clear.
+      stroke: "#111111",
+      clearStroke: true,
+      width: "2",
+      corner: "0",
+    });
+
+    fixture.writes.length = 0;
+    await page.click(".shape-fill-none");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, { op: "update", id: "layer_made_3", fill: null });
+    assert.equal(await page.evaluate(`document.querySelector(".shape-fill-none").disabled`), true);
+
+    // A stroke is one value: the width carries the colour it is drawn with,
+    // so the engine never has to merge two updates to know what to paint.
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const input = document.querySelector(".shape-stroke-width");
+      input.value = "6";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update",
+      id: "layer_made_3",
+      stroke: { color: "#111111", width: 6 },
+    });
+
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const input = document.querySelector(".shape-corner-radius");
+      input.value = "12";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, { op: "update", id: "layer_made_3", cornerRadius: 12 });
+    assert.deepEqual(await page.evaluate(`({
+      corner: document.querySelector(".shape-corner-radius").value,
+      clearStroke: document.querySelector(".shape-stroke-none").disabled
+    })`), { corner: "12", clearStroke: false });
+
+    // Only a rect has corners; offering the row on an ellipse would be a form
+    // that invites the engine's refusal.
+    await selectLayer(page, "layer_made_4");
+    assert.deepEqual(await page.evaluate(`({
+      corner: Boolean(document.querySelector(".shape-corner-radius")),
+      fill: document.querySelector(".shape-fill").value,
+      clearFill: document.querySelector(".shape-fill-none").disabled
+    })`), { corner: false, fill: "#3366cc", clearFill: false });
+  });
+
+  await t.test("a drop shadow joins the effect stack with its four fields", async () => {
+    await selectLayer(page, "layer_made_5");
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => { document.querySelector(".effect-chooser").value = "dropShadow"; })()`);
+    await page.click(".effect-add");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation.effects, [
+      { type: "dropShadow", dx: 4, dy: 4, blur: 6, color: "#00000080" },
+    ]);
+    assert.deepEqual(await page.evaluate(`({
+      offered: [...document.querySelectorAll(".effect-chooser option")].map((one) => one.value),
+      fields: [...document.querySelectorAll('.effect-row[data-effect="dropShadow"] input')]
+        .map((one) => [one.dataset.field, one.type, one.value])
+    })`), {
+      offered: ["brightness", "contrast", "saturation", "blur", "grain", "dropShadow"],
+      // The colour is typed rather than picked: a colour input cannot hold the
+      // alpha this default carries, and dropping it silently would change the
+      // picture on the first edit.
+      fields: [["dx", "number", "4"], ["dy", "number", "4"], ["blur", "number", "6"], ["color", "text", "#00000080"]],
+    });
+
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const input = document.querySelector('.effect-row[data-effect="dropShadow"] [data-field="dy"]');
+      input.value = "10";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation.effects, [
+      { type: "dropShadow", dx: 4, dy: 10, blur: 6, color: "#00000080" },
+    ]);
   });
 
 });

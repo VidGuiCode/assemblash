@@ -85,6 +85,19 @@ pub struct PresetProperties {
     /// Any layer: the whole effect stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Vec<Effect>>,
+    /// Shape layers: interior paint.
+    ///
+    /// A plain `Option`, unlike the update's doubly-optional `fill`: a preset
+    /// that omits it leaves the fill alone, and there is no spelling that
+    /// clears one. A style says what a thing looks like; "looks like nothing"
+    /// is not a house style, and a preset that could silently empty a shape
+    /// would be a sharp edge on a feature whose whole point is repeatability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Color>,
+    /// Shape layers: edge paint. See [`PresetProperties::fill`] for why it
+    /// cannot be cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<crate::document::Stroke>,
     /// Keys this build does not know about, preserved verbatim.
     #[serde(flatten)]
     pub extra: crate::document::Extras,
@@ -106,6 +119,11 @@ impl PresetProperties {
             opacity: self.opacity,
             blend_mode: self.blend_mode.clone(),
             effects: self.effects.clone(),
+            // `Some(fill)` sets it; `None` leaves it. The update's third
+            // state — `Some(None)`, meaning clear — is deliberately
+            // unreachable from a preset.
+            fill: self.fill.clone().map(Some),
+            stroke: self.stroke.clone().map(Some),
             allow_locked,
             ..UpdateLayer::new(id)
         }
@@ -121,6 +139,8 @@ impl PresetProperties {
             && self.opacity.is_none()
             && self.blend_mode.is_none()
             && self.effects.is_none()
+            && self.fill.is_none()
+            && self.stroke.is_none()
     }
 }
 
@@ -204,6 +224,89 @@ mod tests {
     fn an_empty_preset_is_recognisable_as_one() {
         assert!(PresetProperties::default().is_empty());
         assert!(!heading().properties.is_empty());
+    }
+
+    #[test]
+    fn a_fill_preset_on_a_shape_is_the_hand_update_byte_for_byte() {
+        // The 1.6.0 form of the claim above, for the two properties D8 added:
+        // if a preset carrying a fill did anything but compile to the same
+        // `UpdateLayer` a person would write, "a preset renders identically"
+        // would stop being true the moment shapes shipped.
+        use crate::document::{Extras, Layer, LayerKind, ShapeKind, ShapeLayer, Stroke, Transform};
+        use crate::ids::SequentialIdSource;
+        use crate::ops::{apply, Operation, UpdateLayer};
+
+        let brand = Preset {
+            name: "brand".to_owned(),
+            description: None,
+            properties: PresetProperties {
+                fill: Some(Color::new("#3366cc")),
+                stroke: Some(Stroke {
+                    color: Color::new("#112233"),
+                    width: 2.0,
+                }),
+                ..PresetProperties::default()
+            },
+            extra: crate::document::Extras::new(),
+        };
+
+        let document = || {
+            let mut document = Document::new(&mut SequentialIdSource::new(), 100.0, 100.0);
+            document.layers.push(Layer::new(
+                LayerId::new("layer_1"),
+                Transform::new(0.0, 0.0, 40.0, 20.0),
+                LayerKind::Shape(ShapeLayer {
+                    shape: ShapeKind::Rect { corner_radius: 4.0 },
+                    fill: Some(Color::new("#ffffff")),
+                    stroke: None,
+                    extra: Extras::new(),
+                }),
+            ));
+            document.presets.push(brand.clone());
+            document
+        };
+
+        let mut by_preset = document();
+        apply(
+            &mut by_preset,
+            &Operation::ApplyPreset {
+                id: LayerId::new("layer_1"),
+                preset: "brand".to_owned(),
+                allow_locked: false,
+            },
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+
+        let mut by_hand = document();
+        apply(
+            &mut by_hand,
+            &Operation::Update(UpdateLayer {
+                fill: Some(Some(Color::new("#3366cc"))),
+                stroke: Some(Some(Stroke {
+                    color: Color::new("#112233"),
+                    width: 2.0,
+                })),
+                ..UpdateLayer::new(LayerId::new("layer_1"))
+            }),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&by_preset).unwrap(),
+            serde_json::to_string(&by_hand).unwrap(),
+            "a fill preset must be the update it describes, byte for byte"
+        );
+    }
+
+    #[test]
+    fn a_preset_cannot_clear_a_fill() {
+        // `None` on the preset means "leave alone", and there is no spelling
+        // for "clear": the update's `Some(None)` is unreachable from here.
+        let update = PresetProperties::default().update_for(LayerId::new("layer_1"), false);
+        assert_eq!(update.fill, None);
+        assert_eq!(update.stroke, None);
     }
 
     #[test]

@@ -37,7 +37,7 @@ pub mod workspace;
 pub use assemblash_liveness as liveness;
 pub use document::{
     Asset, BlendMode, Canvas, Color, Document, Extras, GroupLayer, ImageFit, ImageLayer, Layer,
-    LayerKind, SvgLayer, TextAlign, TextLayer, Transform,
+    LayerKind, ShapeKind, ShapeLayer, Stroke, SvgLayer, TextAlign, TextLayer, Transform,
 };
 pub use error::{ValidationError, ValidationErrors};
 pub use history::{Actor, ActorKind, History, HistoryError};

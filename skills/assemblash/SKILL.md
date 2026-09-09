@@ -122,10 +122,14 @@ behind the same access token as every other route.
 - `POST /api/fonts?filename=<name>` with the raw bytes, up to 64 MB, imports a
   TTF, OTF, TTC, OTC, WOFF or WOFF2 file. `201 {imported, families}`, or `200`
   when those exact bytes were already stored. Refusals are
-  `400 unsupportedFontFormat`, `400 invalidFilename` and `422 invalidFont`.
+  `400 unsupportedFontFormat`, `400 invalidFilename` and `422 invalidFont`;
+  from 1.6.0 a body over the limit is `413 payloadTooLarge` (the same code
+  the asset upload route answers with).
 - `DELETE /api/fonts/{family}` — `200 {removed, families}`, or
   `404 unknownFontFamily`. Every project using that family then reports a
-  missing font, so remove one only when that is what was asked for.
+  missing font, so remove one only when that is what was asked for. From
+  1.6.0 a family literally named `catalogue` or `install` is removed with
+  `DELETE` on its own fixed path; 1.5.0 answered 405 for those two names.
 - `GET /api/fonts/catalogue` — what the bundled manifest offers: `packs`, and
   `families` with a license and a byte size.
 - `POST /api/fonts/install` with `{"pack":"default"}` or `{"family":"…"}` —
@@ -152,6 +156,46 @@ one, the family. The CLI exits non-zero and writes no file, HTTP answers
 `422 renderFailed`, and MCP returns a tool error. Fix the document rather than
 retrying: name a loaded family in the asset, or outline the text before
 importing it.
+
+## Shapes and shadows (1.6.0 and newer)
+
+Check the running binary first. A `shape` layer draws a rectangle, an ellipse
+or a line, and its transform box *is* the geometry: a rect fills the box, an
+ellipse is inscribed in it, a line runs across its middle — `width` is the
+line's length, `rotation` its angle, and `height` layout only.
+
+Paint is `fill` (a colour, or absent for none) and `stroke`
+(`{ color, width }`, or absent); a shape with neither is valid. On a rect and
+an ellipse the stroke is painted inward, so the box stays the visual box —
+except below width 1, where it is drawn as a hairline that may spill up to
+half a pixel outside.
+
+- `update` takes `fill`, `stroke` and `cornerRadius`. An explicit JSON `null`
+  on `fill` or `stroke` clears that paint; omitting the key leaves it alone.
+  `cornerRadius` is not nullable (0 is the square corner) and is refused by
+  name on an ellipse or a line.
+- MCP `update_layer` cannot use `null` here, because a null argument is
+  indistinguishable from an omitted one: pass `clearFill: true` or
+  `clearStroke: true` instead, never beside `fill` or `stroke`.
+- MCP `add_shape_layer` takes `shape` (`rect`, `ellipse`, `line`),
+  `cornerRadius`, `fill`, `stroke` as `{ color, width }` and `name`, beside the
+  usual placement, box, `expectedVersion` and `dryRun` arguments.
+- CLI `add-rect`, `add-ellipse` and `add-line` take `--x`, `--y`, `--width`,
+  `--height`, `--rotation`, `--opacity`, `--layer-name`, plus `--fill`,
+  `--stroke`, `--stroke-width` and, for a rect, `--corner-radius`. `set` takes
+  the same four paint flags; `--fill none` and `--stroke none` clear a paint,
+  and `--stroke-width` alone is refused when the layer has no stroke to take a
+  colour from.
+- A `dropShadow` effect takes `dx`, `dy`, `blur` and `color`; an `#rrggbbaa`
+  alpha is its opacity, `dx` and `dy` at 0 is a glow, whole pixels are
+  crispest.
+- A colour slot may target a shape's `fill` as well as a text layer's `color`.
+  Stroke colour is not slot-able anywhere in 1.x — do not offer it.
+
+1.0 through 1.5 refuse a document containing a shape layer outright: every
+command exits 1 naming `shape` as an unknown layer kind, and nothing in the
+file is repairable — open it with 1.6.0 or newer. A `dropShadow` is milder:
+1.3.0 and newer keep it and refuse only the render.
 
 ## Pass JSON in a file, not on the command line
 

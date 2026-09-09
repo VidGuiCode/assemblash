@@ -55,6 +55,9 @@ export type Layer = (TextLayer & {
 } | SvgLayer & {
   type: "svg";
   [key: string]: unknown;
+} | ShapeLayer & {
+  type: "shape";
+  [key: string]: unknown;
 }) & {
   /** Stable id, `layer_<ULID>`. */
   id: LayerId;
@@ -150,6 +153,17 @@ export type Effect = {
   scale?: number;
   type: "grain";
   [key: string]: unknown;
+} | {
+  /** Horizontal offset in document units. */
+  dx: number;
+  /** Vertical offset in document units. See `dx`. */
+  dy: number;
+  /** Standard deviation of the blur, 0 or more. 0 is a hard-edged */
+  blur: number;
+  /** Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so */
+  color: Color;
+  type: "dropShadow";
+  [key: string]: unknown;
 } | unknown;
 
 /// Horizontal text alignment inside the layer box.
@@ -207,6 +221,46 @@ export type SvgLayer = {
   [key: string]: unknown;
 };
 
+/// The geometry of a [`ShapeLayer`], tagged by `"kind"` in JSON.
+export type ShapeKind = {
+  /** Corner radius in document units; 0 is a square corner. */
+  cornerRadius?: number;
+  kind: "rect";
+  [key: string]: unknown;
+} | {
+  kind: "ellipse";
+  [key: string]: unknown;
+} | {
+  kind: "line";
+  [key: string]: unknown;
+} | unknown;
+
+/// A shape's edge paint.
+export type Stroke = {
+  /** Edge colour. */
+  color: Color;
+  /** Width in document units; must be finite and 0 or more. */
+  width: number;
+  [key: string]: unknown;
+};
+
+/// A primitive drawn from the document rather than from an imported file.
+///
+/// The transform box *is* the geometry: a rect fills it, an ellipse is
+/// inscribed in it, a line runs across its middle. Nothing here carries
+/// coordinates of its own, so `move`, `resize` and `rotate` mean for a shape
+/// exactly what they already mean for every other layer, and layout bounds
+/// stay the box (D5).
+export type ShapeLayer = {
+  /** The geometry, a nested object tagged by `kind`. */
+  shape: ShapeKind;
+  /** Interior paint. `None` means no fill at all — SVG's `fill="none"`, */
+  fill?: Color | null;
+  /** Edge paint. `None` means no stroke. */
+  stroke?: Stroke | null;
+  [key: string]: unknown;
+};
+
 /// A named bundle of style properties.
 export type Preset = {
   /** What it is called. Unique within a document. */
@@ -243,6 +297,10 @@ export type PresetProperties = {
   blendMode?: BlendMode | null;
   /** Any layer: the whole effect stack. */
   effects?: Effect[] | null;
+  /** Shape layers: interior paint. */
+  fill?: Color | null;
+  /** Shape layers: edge paint. See [`PresetProperties::fill`] for why it */
+  stroke?: Stroke | null;
   [key: string]: unknown;
 };
 

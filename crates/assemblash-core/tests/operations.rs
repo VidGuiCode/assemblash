@@ -6,7 +6,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use assemblash_core::document::{Extras, GroupLayer, TextAlign, Transform};
+use assemblash_core::document::{
+    Extras, GroupLayer, ShapeKind, ShapeLayer, Stroke, TextAlign, Transform,
+};
 use assemblash_core::ids::{LayerId, SequentialIdSource};
 use assemblash_core::ops::{
     apply, CreateLayer, LayerPosition, NewLayerKind, OpError, OpOutcome, Operation, UpdateLayer,
@@ -704,4 +706,284 @@ fn create_operations_are_camel_case_and_still_read_the_old_spelling() {
     let written = serde_json::to_value(&from_camel).unwrap();
     assert_eq!(written["fontFamily"], "Inter");
     assert!(written.get("font_family").is_none());
+}
+
+// ---------------------------------------------------------------------------
+// 1.6.0 — shapes
+// ---------------------------------------------------------------------------
+
+fn create_shape(shape: ShapeKind) -> Operation {
+    Operation::Create(CreateLayer {
+        position: LayerPosition::Root { index: None },
+        transform: Transform::new(10.0, 10.0, 60.0, 40.0),
+        name: None,
+        kind: NewLayerKind::Shape {
+            shape,
+            fill: Some(Color::new("#3366cc")),
+            stroke: Some(Stroke {
+                color: Color::new("#112233"),
+                width: 2.0,
+            }),
+        },
+    })
+}
+
+fn shape_of(document: &Document, index: usize) -> &ShapeLayer {
+    match &document.layers[index].kind {
+        LayerKind::Shape(shape) => shape,
+        other => panic!("expected a shape layer, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_makes_a_rect_an_ellipse_and_a_line() {
+    let mut editor = Editor::new();
+    for shape in [
+        ShapeKind::Rect { corner_radius: 8.0 },
+        ShapeKind::Ellipse,
+        ShapeKind::Line,
+    ] {
+        let expected = shape.clone();
+        let outcome = editor.apply(create_shape(shape));
+        assert_eq!(outcome.created.len(), 1);
+        let made = shape_of(&editor.document, editor.document.layers.len() - 1);
+        assert_eq!(made.shape, expected);
+        assert_eq!(made.fill, Some(Color::new("#3366cc")));
+    }
+    validate(&editor.document).unwrap();
+    assert_eq!(editor.document.layers.len(), 3);
+}
+
+#[test]
+fn a_shape_may_be_created_with_no_paint_at_all() {
+    // The operation layer applies no default fill: "invisible" is something a
+    // caller is allowed to ask for, and guessing black would make "no fill"
+    // impossible to say. The surfaces people type at supply their own.
+    let mut editor = Editor::new();
+    editor.apply(Operation::Create(CreateLayer {
+        position: LayerPosition::Root { index: None },
+        transform: Transform::new(0.0, 0.0, 10.0, 10.0),
+        name: None,
+        kind: NewLayerKind::Shape {
+            shape: ShapeKind::Ellipse,
+            fill: None,
+            stroke: None,
+        },
+    }));
+    let made = shape_of(&editor.document, 0);
+    assert_eq!(made.fill, None);
+    assert_eq!(made.stroke, None);
+    validate(&editor.document).unwrap();
+}
+
+#[test]
+fn creating_a_shape_this_build_cannot_draw_is_refused() {
+    let mut editor = Editor::new();
+    let error = editor
+        .try_apply(create_shape(ShapeKind::Other(
+            serde_json::json!({ "kind": "star", "points": 5 }),
+        )))
+        .unwrap_err();
+    assert_eq!(
+        error,
+        OpError::UnsupportedShape {
+            id: None,
+            kind: "star".to_owned(),
+        }
+    );
+    assert!(editor.document.layers.is_empty(), "nothing was created");
+    assert_eq!(
+        error.to_string(),
+        "shape kind \"star\" is not one this build draws"
+    );
+}
+
+#[test]
+fn update_sets_fill_stroke_and_corner_radius() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Rect { corner_radius: 0.0 }));
+    let id = editor.document.layers[0].id.clone();
+
+    editor.apply(Operation::Update(UpdateLayer {
+        fill: Some(Some(Color::new("#ff0000"))),
+        corner_radius: Some(12.0),
+        ..UpdateLayer::new(id)
+    }));
+
+    let shape = shape_of(&editor.document, 0);
+    assert_eq!(shape.fill, Some(Color::new("#ff0000")));
+    assert_eq!(
+        shape.shape,
+        ShapeKind::Rect {
+            corner_radius: 12.0
+        }
+    );
+    assert_eq!(
+        shape.stroke,
+        Some(Stroke {
+            color: Color::new("#112233"),
+            width: 2.0,
+        }),
+        "an update that does not mention the stroke leaves it alone"
+    );
+}
+
+#[test]
+fn null_clears_a_fill_and_a_stroke() {
+    // The doubly-optional wire shape: absent leaves it, `null` clears it.
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Ellipse));
+    let id = editor.document.layers[0].id.clone();
+
+    let clear: UpdateLayer = serde_json::from_value(serde_json::json!({
+        "id": id.to_string(),
+        "fill": null,
+        "stroke": null
+    }))
+    .unwrap();
+    assert_eq!(clear.fill, Some(None));
+    assert_eq!(clear.stroke, Some(None));
+
+    editor.apply(Operation::Update(clear));
+    let shape = shape_of(&editor.document, 0);
+    assert_eq!(shape.fill, None);
+    assert_eq!(shape.stroke, None);
+    validate(&editor.document).unwrap();
+}
+
+#[test]
+fn corner_radius_is_refused_on_a_shape_that_has_no_corners() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Ellipse));
+    editor.apply(create_shape(ShapeKind::Line));
+
+    for (index, expected) in [(0usize, "ellipse"), (1, "line")] {
+        let id = editor.document.layers[index].id.clone();
+        let error = editor
+            .try_apply(Operation::Update(UpdateLayer {
+                corner_radius: Some(4.0),
+                ..UpdateLayer::new(id.clone())
+            }))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            OpError::WrongLayerKind {
+                id,
+                actual: expected,
+                property: "cornerRadius",
+            }
+        );
+    }
+}
+
+#[test]
+fn shape_properties_are_refused_on_every_other_layer_kind() {
+    let mut editor = Editor::new();
+    editor.apply(create_at(0.0, 0.0, 10.0, 10.0));
+    let id = editor.document.layers[0].id.clone();
+    let error = editor
+        .try_apply(Operation::Update(UpdateLayer {
+            fill: Some(Some(Color::new("#ff0000"))),
+            ..UpdateLayer::new(id.clone())
+        }))
+        .unwrap_err();
+    assert_eq!(
+        error,
+        OpError::WrongLayerKind {
+            id,
+            actual: "text",
+            property: "fill",
+        }
+    );
+}
+
+#[test]
+fn text_properties_are_refused_on_a_shape() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Rect { corner_radius: 0.0 }));
+    let id = editor.document.layers[0].id.clone();
+    let error = editor
+        .try_apply(Operation::Update(UpdateLayer {
+            text: Some("nope".to_owned()),
+            ..UpdateLayer::new(id.clone())
+        }))
+        .unwrap_err();
+    assert_eq!(
+        error,
+        OpError::WrongLayerKind {
+            id,
+            actual: "shape",
+            property: "text",
+        }
+    );
+}
+
+#[test]
+fn repainting_a_shape_this_build_cannot_draw_is_refused_by_kind() {
+    // The geometry came from a newer build and is preserved. Changing its
+    // paint would produce a layer that looks edited and is not, so the
+    // refusal names the kind rather than the property.
+    let mut editor = Editor::new();
+    editor.document.layers.push(Layer::new(
+        LayerId::new("layer_future"),
+        Transform::new(0.0, 0.0, 10.0, 10.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Other(serde_json::json!({ "kind": "star", "points": 5 })),
+            fill: Some(Color::new("#000000")),
+            stroke: None,
+            extra: Extras::new(),
+        }),
+    ));
+
+    let id = LayerId::new("layer_future");
+    let error = editor
+        .try_apply(Operation::Update(UpdateLayer {
+            fill: Some(Some(Color::new("#ff0000"))),
+            ..UpdateLayer::new(id.clone())
+        }))
+        .unwrap_err();
+    assert_eq!(
+        error,
+        OpError::UnsupportedShape {
+            id: Some(id.clone()),
+            kind: "star".to_owned(),
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "layer layer_future: shape kind \"star\" is not one this build draws"
+    );
+
+    // An update that touches nothing shape-specific still works: the layer is
+    // preserved, not quarantined.
+    editor.apply(Operation::Update(UpdateLayer {
+        opacity: Some(0.5),
+        ..UpdateLayer::new(id)
+    }));
+    assert_eq!(editor.document.layers[0].opacity, 0.5);
+}
+
+#[test]
+fn a_shape_create_round_trips_as_camel_case_json() {
+    let json = serde_json::json!({
+        "op": "create",
+        "position": { "at": "root" },
+        "transform": { "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rotation": 0.0 },
+        "type": "shape",
+        "shape": { "kind": "rect", "cornerRadius": 8.0 },
+        "fill": "#3366cc",
+        "stroke": { "color": "#112233", "width": 3.0 }
+    });
+    let operation: Operation = serde_json::from_value(json.clone()).unwrap();
+    let Operation::Create(create) = &operation else {
+        panic!("expected a create, got {operation:?}");
+    };
+    assert!(matches!(
+        &create.kind,
+        NewLayerKind::Shape {
+            shape: ShapeKind::Rect { corner_radius },
+            ..
+        } if *corner_radius == 8.0
+    ));
+    assert_eq!(serde_json::to_value(&operation).unwrap(), json);
 }

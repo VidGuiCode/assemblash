@@ -309,6 +309,8 @@ pub enum LayerKind {
     Group(GroupLayer),
     /// An imported vector graphic, drawn into the layer box.
     Svg(SvgLayer),
+    /// A rectangle, an ellipse or a line, drawn from the document itself.
+    Shape(ShapeLayer),
 }
 
 /// Text content and its single style. Per-run styling arrives in v2.0.
@@ -394,6 +396,122 @@ pub struct GroupLayer {
     pub extra: Extras,
 }
 
+/// A primitive drawn from the document rather than from an imported file.
+///
+/// The transform box *is* the geometry: a rect fills it, an ellipse is
+/// inscribed in it, a line runs across its middle. Nothing here carries
+/// coordinates of its own, so `move`, `resize` and `rotate` mean for a shape
+/// exactly what they already mean for every other layer, and layout bounds
+/// stay the box (D5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapeLayer {
+    /// The geometry, a nested object tagged by `kind`.
+    ///
+    /// Nested rather than flattened on purpose. [`ShapeKind::Other`] is an
+    /// untagged catch-all, and an untagged variant flattened into this struct
+    /// would swallow `fill`, `stroke` and every unknown sibling key on its way
+    /// past — the layer would round-trip, but the paint would have moved
+    /// inside the geometry. One level of nesting keeps the catch-all's reach
+    /// to the thing it is a catch-all for.
+    pub shape: ShapeKind,
+    /// Interior paint. `None` means no fill at all — SVG's `fill="none"`,
+    /// not black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Color>,
+    /// Edge paint. `None` means no stroke.
+    ///
+    /// A shape with neither fill nor stroke is a valid document. Invisible is
+    /// allowed here for the same reason `opacity: 0` is, and refusing it would
+    /// mean an editor could not clear one paint before choosing the other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<Stroke>,
+    /// Keys this build does not know about, preserved verbatim. See
+    /// [`TextLayer::extra`].
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// The geometry of a [`ShapeLayer`], tagged by `"kind"` in JSON.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ShapeKind {
+    /// A rectangle filling the transform box.
+    Rect {
+        /// Corner radius in document units; 0 is a square corner.
+        ///
+        /// Clamped to half the shorter side when it is drawn, so a radius
+        /// larger than the box makes a stadium rather than a refusal.
+        #[serde(default)]
+        corner_radius: f64,
+    },
+    /// An ellipse inscribed in the transform box.
+    Ellipse,
+    /// A straight segment across the middle of the transform box, from the
+    /// left edge to the right.
+    ///
+    /// The box *is* the line: `width` is its length, `rotation` is its angle,
+    /// and `height` is layout only — nothing is drawn above or below the
+    /// middle. A second endpoint in the payload would be a second way of
+    /// saying where a layer is, and `move`, `resize` and `rotate` would then
+    /// have to mean something different for this layer kind than for the
+    /// other four (maintainer's decision, 2026-09-09).
+    Line,
+    /// A geometry this build does not know, preserved as written and refused
+    /// when something tries to change or draw it — the same bargain as
+    /// [`Effect::Other`] and [`BlendMode::Other`] (D21).
+    #[serde(untagged)]
+    Other(serde_json::Value),
+}
+
+impl ShapeKind {
+    /// What this geometry is called in the document.
+    pub fn kind_name(&self) -> &str {
+        match self {
+            Self::Rect { .. } => "rect",
+            Self::Ellipse => "ellipse",
+            Self::Line => "line",
+            Self::Other(raw) => raw
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("(untyped)"),
+        }
+    }
+
+    /// Whether this build draws this geometry rather than refusing it.
+    pub fn is_rendered(&self) -> bool {
+        !matches!(self, Self::Other(_))
+    }
+}
+
+/// A shape's edge paint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Stroke {
+    /// Edge colour.
+    pub color: Color,
+    /// Width in document units; must be finite and 0 or more.
+    ///
+    /// **Painted inset** on a rect and an ellipse (D5): the stroke grows
+    /// inward from the transform box, so the box is the visual box and
+    /// nothing that reasons about layout has to know whether a shape is
+    /// stroked. A line has no interior, so its stroke is centred on the
+    /// segment instead — half of it falls either side of the box's middle.
+    ///
+    /// One caveat, measured rather than assumed: a width below one device
+    /// pixel is drawn as a *hairline* centred on the geometric edge, and a
+    /// hairline occupies a whole pixel row. A 0.5-wide stroke therefore
+    /// spills up to half a pixel outside the box on each side. It is
+    /// deterministic and identical on every target, so it is documented here
+    /// rather than refused — but at that width the box is not quite the
+    /// visual box.
+    pub width: f64,
+}
+
 /// One adjustment in a layer's effect stack.
 ///
 /// Tagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps
@@ -441,6 +559,27 @@ pub enum Effect {
         #[serde(default = "default_grain_scale")]
         scale: f64,
     },
+    /// A soft offset copy of the layer's alpha, drawn beneath it.
+    ///
+    /// A glow is this with `dx` and `dy` at 0, and Lift is this with a small
+    /// offset and a soft blur. There is no second primitive for either: a
+    /// centred shadow *is* a glow, and two names for one filter would be two
+    /// things to keep bit-identical for no gain.
+    DropShadow {
+        /// Horizontal offset in document units.
+        ///
+        /// A fractional offset is resampled by the filter and reads slightly
+        /// softer; whole numbers give the crispest edge.
+        dx: f64,
+        /// Vertical offset in document units. See `dx`.
+        dy: f64,
+        /// Standard deviation of the blur, 0 or more. 0 is a hard-edged
+        /// offset copy.
+        blur: f64,
+        /// Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so
+        /// a shadow's strength is written where every other colour writes it.
+        color: Color,
+    },
     /// An effect this build does not know, preserved as written and refused
     /// when something tries to draw it.
     #[serde(untagged)]
@@ -460,6 +599,7 @@ impl Effect {
             Self::Saturation { .. } => "saturation",
             Self::Blur { .. } => "blur",
             Self::Grain { .. } => "grain",
+            Self::DropShadow { .. } => "dropShadow",
             Self::Other(raw) => raw
                 .get("type")
                 .and_then(serde_json::Value::as_str)
@@ -670,7 +810,7 @@ impl Default for Color {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::panic)]
 
     use super::*;
     use crate::ids::SequentialIdSource;
@@ -756,6 +896,117 @@ mod tests {
         let mut seen = 0;
         doc.walk_layers(&mut |_| seen += 1);
         assert_eq!(seen, 2);
+    }
+
+    #[test]
+    fn a_shape_layer_round_trips_with_every_field_set() {
+        let mut layer = Layer::new(
+            LayerId::new("layer_shape"),
+            Transform::new(1.5, 2.5, 60.0, 40.0),
+            LayerKind::Shape(ShapeLayer {
+                shape: ShapeKind::Rect { corner_radius: 8.0 },
+                fill: Some(Color::new("#3366cc")),
+                stroke: Some(Stroke {
+                    color: Color::new("#112233"),
+                    width: 3.0,
+                }),
+                extra: Extras::new(),
+            }),
+        );
+        layer.effects = vec![Effect::DropShadow {
+            dx: 4.0,
+            dy: 4.0,
+            blur: 1.5,
+            color: Color::new("#00000080"),
+        }];
+
+        let json = serde_json::to_value(&layer).unwrap();
+        assert_eq!(json["type"], "shape");
+        assert_eq!(json["shape"]["kind"], "rect");
+        assert_eq!(json["shape"]["cornerRadius"], 8.0);
+        assert_eq!(json["fill"], "#3366cc");
+        assert_eq!(json["stroke"]["color"], "#112233");
+        assert_eq!(json["stroke"]["width"], 3.0);
+        assert_eq!(json["effects"][0]["type"], "dropShadow");
+
+        let back: Layer = serde_json::from_value(json).unwrap();
+        assert_eq!(back, layer);
+    }
+
+    #[test]
+    fn a_shape_without_paint_omits_both_keys() {
+        let layer = Layer::new(
+            LayerId::new("layer_shape"),
+            Transform::new(0.0, 0.0, 10.0, 10.0),
+            LayerKind::Shape(ShapeLayer {
+                shape: ShapeKind::Ellipse,
+                fill: None,
+                stroke: None,
+                extra: Extras::new(),
+            }),
+        );
+        let json = serde_json::to_value(&layer).unwrap();
+        assert_eq!(json["shape"], serde_json::json!({ "kind": "ellipse" }));
+        assert!(json.get("fill").is_none(), "{json}");
+        assert!(json.get("stroke").is_none(), "{json}");
+    }
+
+    #[test]
+    fn an_unknown_shape_kind_comes_back_byte_identical() {
+        // The reason `shape` is a nested object rather than a flattened one:
+        // an untagged catch-all next to `fill` and `stroke` would swallow
+        // them, and the layer would round-trip with the paint in the wrong
+        // place. A sibling key this build has never heard of has to survive
+        // alongside it.
+        let json = serde_json::json!({
+            "id": "layer_1",
+            "transform": { "x": 0.0, "y": 0.0, "width": 4.0, "height": 4.0, "rotation": 0.0 },
+            "opacity": 1.0,
+            "visible": true,
+            "locked": false,
+            "protected": false,
+            "readOnly": false,
+            "blendMode": "normal",
+            "effects": [],
+            "type": "shape",
+            "shape": { "kind": "star", "points": 5, "innerRadius": 0.5 },
+            "fill": "#ff0000",
+            "stroke": { "color": "#00ff00", "width": 2.0 },
+            "somethingNewer": { "nested": true }
+        });
+
+        let layer: Layer = serde_json::from_value(json.clone()).unwrap();
+        let LayerKind::Shape(shape) = &layer.kind else {
+            panic!("expected a shape layer, got {:?}", layer.kind);
+        };
+        assert!(!shape.shape.is_rendered());
+        assert_eq!(shape.shape.kind_name(), "star");
+        assert_eq!(shape.fill, Some(Color::new("#ff0000")));
+        assert_eq!(shape.extra["somethingNewer"]["nested"], true);
+
+        assert_eq!(serde_json::to_value(&layer).unwrap(), json);
+    }
+
+    #[test]
+    fn shape_kinds_and_the_shadow_name_themselves() {
+        assert_eq!(ShapeKind::Rect { corner_radius: 0.0 }.kind_name(), "rect");
+        assert_eq!(ShapeKind::Ellipse.kind_name(), "ellipse");
+        assert_eq!(ShapeKind::Line.kind_name(), "line");
+        assert!(ShapeKind::Line.is_rendered());
+        assert_eq!(
+            ShapeKind::Other(serde_json::json!({ "notKind": 1 })).kind_name(),
+            "(untyped)"
+        );
+        assert_eq!(
+            Effect::DropShadow {
+                dx: 0.0,
+                dy: 0.0,
+                blur: 4.0,
+                color: Color::default(),
+            }
+            .type_name(),
+            "dropShadow"
+        );
     }
 
     #[test]

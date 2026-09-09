@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{
     BlendMode, Color, Document, Effect, Extras, GroupLayer, ImageFit, ImageLayer, Layer, LayerKind,
-    TextAlign, TextLayer, Transform,
+    ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer, Transform,
 };
 use crate::ids::{AssetId, IdSource, LayerId};
 use crate::ops::error::OpError;
@@ -135,6 +135,25 @@ pub enum NewLayerKind {
         #[serde(default)]
         fit: ImageFit,
     },
+    /// A rectangle, an ellipse or a line, drawn from the document.
+    ///
+    /// No implicit default paint: a caller that sends neither `fill` nor
+    /// `stroke` gets an invisible shape, because guessing black here would
+    /// make "no fill" impossible to ask for. The surfaces people actually
+    /// type at — the CLI, the MCP tools, the interface — apply their own
+    /// defaults on top of this.
+    Shape {
+        /// The geometry. A kind this build does not draw is refused here
+        /// rather than stored: creating a layer nothing can render is not a
+        /// document a newer build wrote, it is a mistake being made now.
+        shape: ShapeKind,
+        /// Interior paint, or none.
+        #[serde(default)]
+        fill: Option<Color>,
+        /// Edge paint, or none.
+        #[serde(default)]
+        stroke: Option<Stroke>,
+    },
 }
 
 fn default_line_height() -> f64 {
@@ -209,6 +228,24 @@ impl CreateLayer {
                 LayerKind::Svg(crate::document::SvgLayer {
                     asset: asset.clone(),
                     fit: *fit,
+                    extra: Extras::new(),
+                })
+            }
+            NewLayerKind::Shape {
+                shape,
+                fill,
+                stroke,
+            } => {
+                if !shape.is_rendered() {
+                    return Err(OpError::UnsupportedShape {
+                        id: None,
+                        kind: shape.kind_name().to_owned(),
+                    });
+                }
+                LayerKind::Shape(ShapeLayer {
+                    shape: shape.clone(),
+                    fill: fill.clone(),
+                    stroke: stroke.clone(),
                     extra: Extras::new(),
                 })
             }
@@ -292,6 +329,35 @@ pub struct UpdateLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<AssetId>,
 
+    /// Shape layers: new interior paint. Absent leaves it, `null` clears it.
+    ///
+    /// Doubly optional like `name` and the canvas background, and for the
+    /// same reason: "no fill" is a real value a shape can have, so there has
+    /// to be a way to say it that is not "leave it alone".
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_nullable"
+    )]
+    pub fill: Option<Option<Color>>,
+    /// Shape layers: the whole stroke. Absent leaves it, `null` clears it.
+    ///
+    /// The whole stroke rather than colour and width separately: a width
+    /// without a colour is not a stroke, and letting one be set alone would
+    /// mean inventing a colour nobody asked for.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_nullable"
+    )]
+    pub stroke: Option<Option<Stroke>>,
+    /// Shape layers whose geometry is a rect: new corner radius.
+    ///
+    /// Not nullable: 0 is the square-cornered value, so there is nothing for
+    /// `null` to mean that 0 does not already say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_radius: Option<f64>,
+
     /// Change the layer even though it is locked.
     ///
     /// Needed to unlock a layer at all, and kept explicit so that no ordinary
@@ -323,6 +389,9 @@ impl UpdateLayer {
             line_height: None,
             fit: None,
             asset: None,
+            fill: None,
+            stroke: None,
+            corner_radius: None,
             allow_locked: false,
         }
     }
@@ -375,6 +444,9 @@ impl UpdateLayer {
                 if self.fit.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "fit"));
                 }
+                if let Some(property) = self.first_shape_property() {
+                    return Err(wrong_kind(&layer.id, kind_name, property));
+                }
                 if let Some(value) = &self.text {
                     text.text = value.clone();
                 }
@@ -398,6 +470,9 @@ impl UpdateLayer {
                 if let Some(property) = self.first_text_property() {
                     return Err(wrong_kind(&layer.id, kind_name, property));
                 }
+                if let Some(property) = self.first_shape_property() {
+                    return Err(wrong_kind(&layer.id, kind_name, property));
+                }
                 if let Some(value) = self.fit {
                     image.fit = value;
                 }
@@ -409,6 +484,9 @@ impl UpdateLayer {
                 if let Some(property) = self.first_text_property() {
                     return Err(wrong_kind(&layer.id, kind_name, property));
                 }
+                if let Some(property) = self.first_shape_property() {
+                    return Err(wrong_kind(&layer.id, kind_name, property));
+                }
                 if let Some(value) = self.fit {
                     svg.fit = value;
                 }
@@ -416,8 +494,50 @@ impl UpdateLayer {
                     svg.asset = asset.clone();
                 }
             }
+            LayerKind::Shape(shape) => {
+                if let Some(property) = self.first_text_property() {
+                    return Err(wrong_kind(&layer.id, kind_name, property));
+                }
+                if self.fit.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "fit"));
+                }
+                if self.asset.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "asset"));
+                }
+                // A geometry this build does not know is preserved, never
+                // edited: repainting a shape whose outline nothing here can
+                // draw would produce a layer that looks edited and is not.
+                // Refused by kind rather than by property, because the kind
+                // is the thing that is wrong.
+                if !shape.shape.is_rendered() && self.first_shape_property().is_some() {
+                    return Err(OpError::UnsupportedShape {
+                        id: Some(layer.id.clone()),
+                        kind: shape.shape.kind_name().to_owned(),
+                    });
+                }
+                if let Some(value) = &self.fill {
+                    shape.fill = value.clone();
+                }
+                if let Some(value) = &self.stroke {
+                    shape.stroke = value.clone();
+                }
+                if let Some(value) = self.corner_radius {
+                    if let ShapeKind::Rect { corner_radius } = &mut shape.shape {
+                        *corner_radius = value;
+                    } else {
+                        return Err(wrong_kind(
+                            &layer.id,
+                            shape_kind_name(&shape.shape),
+                            "cornerRadius",
+                        ));
+                    }
+                }
+            }
             LayerKind::Group(_) => {
                 if let Some(property) = self.first_text_property() {
+                    return Err(wrong_kind(&layer.id, kind_name, property));
+                }
+                if let Some(property) = self.first_shape_property() {
                     return Err(wrong_kind(&layer.id, kind_name, property));
                 }
                 if self.fit.is_some() {
@@ -444,6 +564,22 @@ impl UpdateLayer {
         .flatten()
         .next()
     }
+
+    /// The first shape-only property this update carries, if any.
+    ///
+    /// The companion of [`Self::first_text_property`]: on a layer that is not
+    /// a shape, the refusal should name the property the caller actually
+    /// sent, not the first one this code happens to look at.
+    fn first_shape_property(&self) -> Option<&'static str> {
+        [
+            self.fill.is_some().then_some("fill"),
+            self.stroke.is_some().then_some("stroke"),
+            self.corner_radius.is_some().then_some("cornerRadius"),
+        ]
+        .into_iter()
+        .flatten()
+        .next()
+    }
 }
 
 fn kind_name(kind: &LayerKind) -> &'static str {
@@ -452,6 +588,23 @@ fn kind_name(kind: &LayerKind) -> &'static str {
         LayerKind::Image(_) => "image",
         LayerKind::Group(_) => "group",
         LayerKind::Svg(_) => "svg",
+        LayerKind::Shape(_) => "shape",
+    }
+}
+
+/// The geometry to blame when a rect-only property lands on a shape that is
+/// not a rect.
+///
+/// Borrowed for `'static` rather than taken from [`ShapeKind::kind_name`],
+/// which borrows an unknown kind's name out of the raw JSON. `Other` cannot
+/// reach here — an unknown geometry is refused whole, by kind, before any
+/// property is looked at — so it falls back to the layer kind's own name.
+fn shape_kind_name(kind: &ShapeKind) -> &'static str {
+    match kind {
+        ShapeKind::Rect { .. } => "rect",
+        ShapeKind::Ellipse => "ellipse",
+        ShapeKind::Line => "line",
+        ShapeKind::Other(_) => "shape",
     }
 }
 

@@ -123,6 +123,18 @@ impl Harness {
     /// the runtime and the concurrency test would pass without the store lock
     /// existing at all.
     fn start_with(fetcher: Arc<FakeFetcher>, manifest: Option<Manifest>) -> Self {
+        Self::start_limited(fetcher, manifest, Default::default())
+    }
+
+    /// A server whose upload ceilings are whatever the caller says.
+    ///
+    /// The real one is 64 MiB, and proving that an over-limit body comes back
+    /// as JSON does not need 64 MiB to travel down a socket to do it.
+    fn start_limited(
+        fetcher: Arc<FakeFetcher>,
+        manifest: Option<Manifest>,
+        limits: assemblash_server::api::BodyLimits,
+    ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("workspace");
         let workspace = Workspace::open_or_create(&root).unwrap();
@@ -144,12 +156,13 @@ impl Harness {
                     .unwrap();
                 let address = listener.local_addr().unwrap();
                 let (stop, _stopping) = tokio::sync::watch::channel(false);
-                let router = assemblash_server::api::router(
+                let router = assemblash_server::api::router_with_limits(
                     state,
                     Default::default(),
                     Default::default(),
                     stop,
                     Default::default(),
+                    limits,
                 );
                 send.send(format!("http://{address}")).unwrap();
                 let _ = axum::serve(listener, router).await;
@@ -674,26 +687,111 @@ fn removing_a_family_the_store_does_not_have_is_a_404() {
     assert_eq!(error_code(&never), "unknownFontFamily");
 }
 
+/// Renames every face in the store's index to `family`, outside the server.
+///
+/// A font's family comes out of its own `name` table, so a store holding a
+/// family called "install" cannot be built by importing one — and the point
+/// of the test below is what the route does once such a family exists, not
+/// how it got there. The index on disk is the store's whole state, and the
+/// handlers reopen it per request, so rewriting it is enough.
+fn rename_every_family_to(harness: &Harness, family: &str) {
+    let index = harness.root.join(FONTS_DIR).join("index.json");
+    let mut json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&index).unwrap()).unwrap();
+    for face in json["fonts"].as_array_mut().expect("the index lists faces") {
+        face["family"] = json!(family);
+    }
+    std::fs::write(&index, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+}
+
 #[test]
-fn the_two_named_font_routes_shadow_a_family_of_the_same_name() {
+fn a_family_named_after_one_of_the_two_fixed_font_routes_can_be_removed() {
     // `/api/fonts/catalogue` and `/api/fonts/install` are fixed segments, so
-    // they win over `/api/fonts/{family}` — a family literally called
-    // "install" could be imported and listed but not deleted by name. No font
-    // in the manifest is named either, and this is here so the behaviour is
-    // recorded rather than discovered.
+    // they win over `/api/fonts/{family}`: until 1.6.0 a family literally
+    // called "install" could be imported and listed but never deleted, and
+    // the 405 said nothing a client could act on (DEF-21). Each fixed route
+    // now carries the removal for its own name.
+    for name in ["install", "catalogue"] {
+        let harness = Harness::start();
+        assert_eq!(
+            import(&harness, "noto.ttf", &fixture("NotoSans-Subset.ttf")).status,
+            201
+        );
+        rename_every_family_to(&harness, name);
+        assert_eq!(families(&harness), vec![name.to_owned()]);
+
+        let removed = http::delete(&harness.url(&format!("/api/fonts/{name}")));
+        assert_eq!(removed.status, 200, "{}", removed.json());
+        assert_eq!(removed.json()["removed"], 1);
+        assert_eq!(removed.json()["families"], json!([]));
+
+        // Gone from the store as well as from the answer.
+        assert_eq!(families(&harness), Vec::<String>::new());
+        assert!(!harness.store().has_family(name));
+
+        // And the two routes' other methods still do what they did.
+        assert_eq!(http::get(&harness.url("/api/fonts/catalogue")).status, 200);
+    }
+}
+
+#[test]
+fn a_family_named_after_a_fixed_route_but_absent_reports_like_any_other() {
+    // The removal is the same code either way, so a name that is not there
+    // is the same 404 with the same code — not a 405, and not a silent 200.
     let harness = Harness::start();
-    let shadowed = http::delete(&harness.url("/api/fonts/install"));
-    assert_eq!(
-        shadowed.status,
-        405,
-        "expected the fixed route to answer, got {}",
-        String::from_utf8_lossy(&shadowed.body)
+    for name in ["install", "catalogue", "Installer"] {
+        let response = http::delete(&harness.url(&format!("/api/fonts/{name}")));
+        assert_eq!(response.status, 404, "{name}: {}", response.json());
+        assert_eq!(error_code(&response), "unknownFontFamily");
+        assert_eq!(response.json()["error"]["details"]["family"], json!(name));
+    }
+}
+
+#[test]
+fn a_font_over_the_body_limit_is_refused_in_the_usual_envelope() {
+    // Every other failure this API has comes back as
+    // `{"error": {"code", "message", "details"}}`; axum's own answer to an
+    // over-limit body is plain text, which made the one mistake an upload
+    // form makes most often the one a client could not read (DEF-20).
+    //
+    // The ceiling here is 1 MiB rather than the shipped 64 MiB: the handler
+    // names the limit it was built with, so the small one proves the same
+    // path without moving 64 MiB down a loopback socket.
+    let harness = Harness::start_limited(
+        Arc::new(FakeFetcher::default()),
+        None,
+        assemblash_server::api::BodyLimits::testing(1024 * 1024, 1024 * 1024),
     );
 
-    // Every other name reaches the removal route and gets a real answer.
-    let ordinary = http::delete(&harness.url("/api/fonts/Installer"));
-    assert_eq!(ordinary.status, 404, "{}", ordinary.json());
-    assert_eq!(error_code(&ordinary), "unknownFontFamily");
+    let mut oversize = fixture("NotoSans-Subset.ttf");
+    oversize.resize(1024 * 1024 + 1, 0);
+    let response = import(&harness, "big.ttf", &oversize);
+    assert_eq!(
+        response.status,
+        413,
+        "{}",
+        String::from_utf8_lossy(&response.body)
+    );
+    assert_eq!(error_code(&response), "payloadTooLarge");
+    let message = response.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        message.contains("1 MiB"),
+        "the message must name the limit in MiB: {message}"
+    );
+    assert_eq!(
+        response.json()["error"]["details"]["limitBytes"],
+        1024 * 1024
+    );
+
+    // Nothing was imported, and a body under the limit still is.
+    assert_eq!(families(&harness), Vec::<String>::new());
+    assert_eq!(
+        import(&harness, "noto.ttf", &fixture("NotoSans-Subset.ttf")).status,
+        201
+    );
 }
 
 #[test]

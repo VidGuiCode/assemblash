@@ -28,7 +28,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use assemblash_core::document::{
-    Effect, Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
+    Effect, Extras, GroupLayer, ImageFit, ImageLayer, ShapeKind, ShapeLayer, Stroke, TextAlign,
+    TextLayer, Transform,
 };
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::storage::{self, hash_bytes};
@@ -335,6 +336,230 @@ fn effects_document() -> (Document, AssetHrefs) {
     (document, hrefs)
 }
 
+fn shape_layer(
+    index: usize,
+    transform: Transform,
+    kind: ShapeKind,
+    fill: Option<&str>,
+    stroke: Option<(&str, f64)>,
+) -> Layer {
+    Layer::new(
+        LayerId::new(format!("layer_{index:026}")),
+        transform,
+        LayerKind::Shape(ShapeLayer {
+            shape: kind,
+            fill: fill.map(Color::new),
+            stroke: stroke.map(|(color, width)| Stroke {
+                color: Color::new(color),
+                width,
+            }),
+            extra: Extras::new(),
+        }),
+    )
+}
+
+/// Every branch the shape emitter and the shape raster path can take.
+///
+/// The cases are not decoration; each one is a place where two targets could
+/// disagree, taken from the 1.6.0 stroker spike:
+///
+/// * a **square-cornered** rect and a **rounded** one, because usvg takes a
+///   completely different branch when there is no corner arc, so a golden with
+///   only rounded corners covers neither;
+/// * a corner radius **near 367 user units** — the radius at which kurbo's
+///   `powf(1/6).ceil()` flips the number of cubics it generates for a
+///   quadrant, i.e. the one place a platform-libm ULP could change a path's
+///   *structure* rather than nudge it. This renderer no longer emits `rx`, so
+///   kurbo is off our path entirely and nothing should be sensitive here any
+///   more — the case is kept deliberately as a **canary**: if a target ever
+///   disagrees about this document and no other, the arc conversion has crept
+///   back in;
+/// * an **ellipse**, four cubic quadrants of it;
+/// * a **rotated** shape, which resolves its `rotate()` through svgtypes'
+///   `sin`/`cos`;
+/// * a stroke **below 1 px**, which tiny-skia draws as a hairline rather than
+///   running the stroker at all;
+/// * a stroke **wider than its box**, which is the clamp cliff;
+/// * fractional coordinates throughout, and alpha in a fill and in a stroke.
+fn shapes_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 1200.0, 800.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+
+    // The kurbo canary. The radius survives the clamp only because the box is
+    // larger than 734 on its shorter side.
+    document.layers.push(shape_layer(
+        1,
+        Transform::new(20.5, 20.25, 760.75, 750.5),
+        ShapeKind::Rect {
+            corner_radius: 366.9,
+        },
+        Some("#3366cc40"),
+        None,
+    ));
+
+    // Square corners, no arc anywhere.
+    document.layers.push(shape_layer(
+        2,
+        Transform::new(800.25, 20.75, 180.5, 90.25),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#3366cc"),
+        Some(("#112233", 3.0)),
+    ));
+
+    // Rounded, with an alpha fill.
+    document.layers.push(shape_layer(
+        3,
+        Transform::new(800.25, 130.5, 180.5, 90.25),
+        ShapeKind::Rect {
+            corner_radius: 18.75,
+        },
+        Some("#cc6633aa"),
+        Some(("#112233", 3.0)),
+    ));
+
+    // Hairline: below one device pixel the stroker is bypassed entirely.
+    document.layers.push(shape_layer(
+        4,
+        Transform::new(800.25, 240.5, 180.5, 90.25),
+        ShapeKind::Ellipse,
+        None,
+        Some(("#204060", 0.5)),
+    ));
+
+    // A rotated line, and a rotated rect: two different rotate() centres.
+    document.layers.push(shape_layer(
+        5,
+        Transform {
+            rotation: 17.5,
+            ..Transform::new(800.25, 350.5, 180.5, 40.25)
+        },
+        ShapeKind::Line,
+        None,
+        Some(("#8b1a1a", 4.0)),
+    ));
+    document.layers.push(shape_layer(
+        6,
+        Transform {
+            rotation: 30.0,
+            ..Transform::new(820.5, 430.75, 140.25, 100.5)
+        },
+        ShapeKind::Rect { corner_radius: 8.5 },
+        Some("#2e8b57"),
+        // Alpha in a stroke.
+        Some(("#11223380", 5.0)),
+    ));
+
+    // The clamp cliff: 90 is wider than the 60.5 shorter side, so this draws
+    // as the whole box filled in the stroke colour.
+    document.layers.push(shape_layer(
+        7,
+        Transform::new(820.5, 580.5, 120.25, 60.5),
+        ShapeKind::Rect { corner_radius: 4.0 },
+        Some("#000000"),
+        Some(("#d2691e", 90.0)),
+    ));
+
+    (document, AssetHrefs::new())
+}
+
+/// Both blur implementations, both offset shapes, and a shadow over glyphs.
+///
+/// σ 1.5 and σ 8 straddle resvg's `BLUR_SIGMA_THRESHOLD` of 2.0: below it the
+/// IIR blur runs, above it a five-pass box blur. They are different code, so
+/// one of them alone would not cover the other.
+fn shadow_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 600.0, 420.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+
+    // IIR branch, and a non-integer dx the filter has to resample.
+    let mut small_sigma = shape_layer(
+        1,
+        Transform::new(40.5, 30.5, 120.25, 80.5),
+        ShapeKind::Rect { corner_radius: 6.0 },
+        Some("#3366cc"),
+        None,
+    );
+    small_sigma.effects = vec![Effect::DropShadow {
+        dx: 6.5,
+        dy: 4.0,
+        blur: 1.5,
+        color: Color::new("#000000"),
+    }];
+    document.layers.push(small_sigma);
+
+    // Box-blur branch, with an alpha shadow colour.
+    let mut large_sigma = shape_layer(
+        2,
+        Transform::new(240.5, 30.5, 120.25, 80.5),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#cc3366"),
+        None,
+    );
+    large_sigma.effects = vec![Effect::DropShadow {
+        dx: 12.0,
+        dy: 10.0,
+        blur: 8.0,
+        color: Color::new("#20406080"),
+    }];
+    document.layers.push(large_sigma);
+
+    // A glow is the same primitive with no offset; there is no second one.
+    let mut glow = shape_layer(
+        3,
+        Transform::new(440.5, 30.5, 120.25, 80.5),
+        ShapeKind::Ellipse,
+        Some("#2e8b57"),
+        None,
+    );
+    glow.effects = vec![Effect::DropShadow {
+        dx: 0.0,
+        dy: 0.0,
+        blur: 6.0,
+        color: Color::new("#ff8000"),
+    }];
+    document.layers.push(glow);
+
+    // Stacked after a blur: the shadow is cast from the blurred result, and
+    // the region has to be sized from the larger of the two sigmas.
+    let mut stacked = shape_layer(
+        4,
+        Transform::new(40.5, 180.5, 200.5, 90.25),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#204060"),
+        None,
+    );
+    stacked.effects = vec![
+        Effect::Blur { radius: 2.0 },
+        Effect::DropShadow {
+            dx: 8.0,
+            dy: 8.0,
+            blur: 4.0,
+            color: Color::new("#000000"),
+        },
+    ];
+    document.layers.push(stacked);
+
+    // A filter over glyphs takes a different path through the rasterizer than
+    // one over a shape.
+    let mut text = text_layer(
+        "layer_00000000000000000000000005",
+        Transform::new(40.5, 310.5, 520.25, 80.0),
+        "Shadowed",
+        "Noto Sans",
+        40.0,
+        TextAlign::Left,
+    );
+    text.effects = vec![Effect::DropShadow {
+        dx: 3.5,
+        dy: 3.5,
+        blur: 2.5,
+        color: Color::new("#00000099"),
+    }];
+    document.layers.push(text);
+
+    (document, AssetHrefs::new())
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -343,6 +568,8 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("arabic", arabic_document()),
         ("japanese", japanese_document()),
         ("effects", effects_document()),
+        ("shapes", shapes_document()),
+        ("shadow", shadow_document()),
     ] {
         out.push((name, document, hrefs));
     }
@@ -716,7 +943,9 @@ fn goldens_cover_every_reference_document() {
         return;
     }
     let goldens = read_goldens();
-    for name in ["mixed", "latin", "arabic", "japanese", "blend", "blur"] {
+    for name in [
+        "mixed", "latin", "arabic", "japanese", "blend", "blur", "shapes", "shadow",
+    ] {
         assert!(
             goldens.contains_key(&format!("{name}.pixels")),
             "no golden for {name}"

@@ -731,6 +731,78 @@
         }
       ]
     },
+    "ShapeKind": {
+      "description": "The geometry of a [`ShapeLayer`], tagged by `\"kind\"` in JSON.",
+      "anyOf": [
+        {
+          "description": "A rectangle filling the transform box.",
+          "type": "object",
+          "properties": {
+            "cornerRadius": {
+              "description": "Corner radius in document units; 0 is a square corner.\n\nClamped to half the shorter side when it is drawn, so a radius\nlarger than the box makes a stadium rather than a refusal.",
+              "type": "number",
+              "format": "double",
+              "default": 0.0
+            },
+            "kind": {
+              "type": "string",
+              "const": "rect"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "An ellipse inscribed in the transform box.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ellipse"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A straight segment across the middle of the transform box, from the\nleft edge to the right.\n\nThe box *is* the line: `width` is its length, `rotation` is its angle,\nand `height` is layout only — nothing is drawn above or below the\nmiddle. A second endpoint in the payload would be a second way of\nsaying where a layer is, and `move`, `resize` and `rotate` would then\nhave to mean something different for this layer kind than for the\nother four (maintainer's decision, 2026-09-09).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "line"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A geometry this build does not know, preserved as written and refused\nwhen something tries to change or draw it — the same bargain as\n[`Effect::Other`] and [`BlendMode::Other`] (D21)."
+        }
+      ]
+    },
+    "Stroke": {
+      "description": "A shape's edge paint.",
+      "type": "object",
+      "properties": {
+        "color": {
+          "description": "Edge colour.",
+          "$ref": "#/$defs/Color"
+        },
+        "width": {
+          "description": "Width in document units; must be finite and 0 or more.\n\n**Painted inset** on a rect and an ellipse (D5): the stroke grows\ninward from the transform box, so the box is the visual box and\nnothing that reasons about layout has to know whether a shape is\nstroked. A line has no interior, so its stroke is centred on the\nsegment instead — half of it falls either side of the box's middle.\n\nOne caveat, measured rather than assumed: a width below one device\npixel is drawn as a *hairline* centred on the geometric edge, and a\nhairline occupies a whole pixel row. A 0.5-wide stroke therefore\nspills up to half a pixel outside the box on each side. It is\ndeterministic and identical on every target, so it is documented here\nrather than refused — but at that width the box is not quite the\nvisual box.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "color",
+        "width"
+      ]
+    },
     "CreateLayer": {
       "description": "Add a layer to the document.",
       "type": "object",
@@ -860,6 +932,48 @@
           "required": [
             "type",
             "asset"
+          ]
+        },
+        {
+          "description": "A rectangle, an ellipse or a line, drawn from the document.\n\nNo implicit default paint: a caller that sends neither `fill` nor\n`stroke` gets an invisible shape, because guessing black here would\nmake \"no fill\" impossible to ask for. The surfaces people actually\ntype at — the CLI, the MCP tools, the interface — apply their own\ndefaults on top of this.",
+          "type": "object",
+          "properties": {
+            "shape": {
+              "description": "The geometry. A kind this build does not draw is refused here\nrather than stored: creating a layer nothing can render is not a\ndocument a newer build wrote, it is a mistake being made now.",
+              "$ref": "#/$defs/ShapeKind"
+            },
+            "fill": {
+              "description": "Interior paint, or none.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Color"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stroke": {
+              "description": "Edge paint, or none.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Stroke"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "type": {
+              "type": "string",
+              "const": "shape"
+            }
+          },
+          "required": [
+            "type",
+            "shape"
           ]
         }
       ]
@@ -1065,6 +1179,42 @@
           ]
         },
         {
+          "description": "A soft offset copy of the layer's alpha, drawn beneath it.\n\nA glow is this with `dx` and `dy` at 0, and Lift is this with a small\noffset and a soft blur. There is no second primitive for either: a\ncentred shadow *is* a glow, and two names for one filter would be two\nthings to keep bit-identical for no gain.",
+          "type": "object",
+          "properties": {
+            "dx": {
+              "description": "Horizontal offset in document units.\n\nA fractional offset is resampled by the filter and reads slightly\nsofter; whole numbers give the crispest edge.",
+              "type": "number",
+              "format": "double"
+            },
+            "dy": {
+              "description": "Vertical offset in document units. See `dx`.",
+              "type": "number",
+              "format": "double"
+            },
+            "blur": {
+              "description": "Standard deviation of the blur, 0 or more. 0 is a hard-edged\noffset copy.",
+              "type": "number",
+              "format": "double"
+            },
+            "color": {
+              "description": "Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so\na shadow's strength is written where every other colour writes it.",
+              "$ref": "#/$defs/Color"
+            },
+            "type": {
+              "type": "string",
+              "const": "dropShadow"
+            }
+          },
+          "required": [
+            "type",
+            "dx",
+            "dy",
+            "blur",
+            "color"
+          ]
+        },
+        {
           "description": "An effect this build does not know, preserved as written and refused\nwhen something tries to draw it."
         }
       ]
@@ -1211,6 +1361,36 @@
               "type": "null"
             }
           ]
+        },
+        "fill": {
+          "description": "Shape layers: new interior paint. Absent leaves it, `null` clears it.\n\nDoubly optional like `name` and the canvas background, and for the\nsame reason: \"no fill\" is a real value a shape can have, so there has\nto be a way to say it that is not \"leave it alone\".",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stroke": {
+          "description": "Shape layers: the whole stroke. Absent leaves it, `null` clears it.\n\nThe whole stroke rather than colour and width separately: a width\nwithout a colour is not a stroke, and letting one be set alone would\nmean inventing a colour nobody asked for.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Stroke"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cornerRadius": {
+          "description": "Shape layers whose geometry is a rect: new corner radius.\n\nNot nullable: 0 is the square-cornered value, so there is nothing for\n`null` to mean that 0 does not already say.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
         },
         "allowLocked": {
           "description": "Change the layer even though it is locked.\n\nNeeded to unlock a layer at all, and kept explicit so that no ordinary\nedit slips past a lock by accident.",
@@ -1425,6 +1605,28 @@
           "items": {
             "$ref": "#/$defs/Effect"
           }
+        },
+        "fill": {
+          "description": "Shape layers: interior paint.\n\nA plain `Option`, unlike the update's doubly-optional `fill`: a preset\nthat omits it leaves the fill alone, and there is no spelling that\nclears one. A style says what a thing looks like; \"looks like nothing\"\nis not a house style, and a preset that could silently empty a shape\nwould be a sharp edge on a feature whose whole point is repeatability.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stroke": {
+          "description": "Shape layers: edge paint. See [`PresetProperties::fill`] for why it\ncannot be cleared.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Stroke"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": true
@@ -1479,7 +1681,7 @@
           "const": "image"
         },
         {
-          "description": "The fill colour of a text layer.",
+          "description": "The fill colour of a text layer, or of a shape layer.\n\nOne slot kind for both, resolved by the layer it points at (D8): a\ntext layer's `color` and a shape layer's `fill` are the same question\nasked of two payloads, and a template that wanted a brand colour in\nboth a headline and the badge behind it should not need two slot\nkinds to say so. A shape's *stroke* colour is not slot-able — a stroke\nis a colour and a width together, and half of one is not a value.",
           "type": "string",
           "const": "color"
         }

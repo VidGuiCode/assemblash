@@ -738,20 +738,13 @@ fn define_slot(
         });
     }
 
-    let found = match &layer.kind {
-        LayerKind::Text(_) => "text",
-        LayerKind::Image(_) => "image",
-        LayerKind::Svg(_) => "svg",
-        LayerKind::Group(_) => "group",
-    };
-    let wants = match slot.kind {
-        crate::templates::SlotKind::Text | crate::templates::SlotKind::Color => "text",
-        crate::templates::SlotKind::Image => "image",
-    };
-    if found != wants {
+    let found = crate::templates::layer_kind_name(&layer.kind);
+    // Defining a slot and filling one have to agree about what a slot may
+    // point at, so both ask `templates` rather than each keeping a list.
+    if !crate::templates::slot_accepts(slot.kind, found) {
         return Err(OpError::SlotKindMismatch {
             name: slot.name.clone(),
-            wants,
+            wants: crate::templates::slot_wants(slot.kind),
             id: slot.layer.clone(),
             found,
         });
@@ -1552,6 +1545,57 @@ mod tests {
             Err(OpError::UnknownProperty {
                 op: "create",
                 property: "fontSize".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_shape_create_knows_its_own_keys_and_refuses_the_rest() {
+        // The key sets come from the schema, so `shape`, `fill` and `stroke`
+        // became known the moment `NewLayerKind::Shape` existed — and the
+        // DEF-1 refusal has to still hold for anything else, or a misspelled
+        // property would be silently ignored on the newest layer kind.
+        let good = serde_json::json!({
+            "op": "create",
+            "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+            "type": "shape",
+            "shape": { "kind": "rect", "cornerRadius": 4 },
+            "fill": "#3366cc",
+            "stroke": { "color": "#112233", "width": 2 }
+        });
+        assert_eq!(check_properties(&good), Ok(()));
+
+        let bad = serde_json::json!({
+            "op": "create",
+            "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+            "type": "shape",
+            "shape": { "kind": "rect" },
+            "strokeWidth": 2
+        });
+        assert_eq!(
+            check_properties(&bad),
+            Err(OpError::UnknownProperty {
+                op: "create",
+                property: "strokeWidth".to_owned(),
+            })
+        );
+
+        // And a shape property on a text create is as wrong as one nothing
+        // has.
+        let text = serde_json::json!({
+            "op": "create",
+            "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+            "type": "text",
+            "text": "hi",
+            "fontFamily": "Inter",
+            "fontSize": 12,
+            "shape": { "kind": "rect" }
+        });
+        assert_eq!(
+            check_properties(&text),
+            Err(OpError::UnknownProperty {
+                op: "create",
+                property: "shape".to_owned(),
             })
         );
     }

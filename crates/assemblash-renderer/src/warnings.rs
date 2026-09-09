@@ -121,7 +121,9 @@ pub fn export_warnings(
                 warnings.push(warning);
             }
         }
-        LayerKind::Image(_) | LayerKind::Group(_) => {}
+        // Every warning here is about text fitting or an imported asset; a
+        // shape draws itself into its own box and has neither.
+        LayerKind::Image(_) | LayerKind::Group(_) | LayerKind::Shape(_) => {}
     });
     warnings
 }

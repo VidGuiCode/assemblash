@@ -71,6 +71,9 @@
           <button class="tool" id="add-text" type="button" aria-label="Open text presets" aria-pressed="false" aria-controls="add-panel">
             <i class="ph ph-text-t" aria-hidden="true"></i><span>Text</span>
           </button>
+          <button class="tool" id="add-shape" type="button" aria-label="Open shapes" aria-pressed="false" aria-controls="add-panel">
+            <i class="ph ph-shapes" aria-hidden="true"></i><span>Shapes</span>
+          </button>
           <button class="tool" id="add-image" type="button" aria-label="Open uploads" aria-pressed="false" aria-controls="add-panel">
             <i class="ph ph-image" aria-hidden="true"></i><span>Uploads</span>
           </button>
@@ -101,6 +104,15 @@
             <button class="text-preset heading" type="button" data-text-preset="heading">Heading</button>
             <button class="text-preset subheading" type="button" data-text-preset="subheading">Subheading</button>
             <button class="text-preset body" type="button" data-text-preset="body">Body text</button>
+          </section>
+          <section class="add-section" id="add-shape-section">
+            <div class="section-title"><h3>Shapes</h3></div>
+            <p class="hint">Drawn from the document itself, so they scale and recolour without an imported file.</p>
+            <div class="shape-row">
+              <button class="shape-preset" type="button" data-shape="rect"><i class="ph ph-square" aria-hidden="true"></i> Rectangle</button>
+              <button class="shape-preset" type="button" data-shape="ellipse"><i class="ph ph-circle" aria-hidden="true"></i> Ellipse</button>
+              <button class="shape-preset" type="button" data-shape="line"><i class="ph ph-line-segment" aria-hidden="true"></i> Line</button>
+            </div>
           </section>
           <section class="add-section" id="add-upload-section">
             <div class="section-title"><h3>Uploads</h3></div>

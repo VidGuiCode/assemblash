@@ -76,6 +76,23 @@ pub enum OpError {
         effect: String,
     },
 
+    /// A shape geometry was asked for that this build does not draw.
+    ///
+    /// Refused on the way in for the same reason [`OpError::UnsupportedEffect`]
+    /// is: a document that saves cleanly and then cannot be drawn is the worst
+    /// place to find out. A geometry already in a document is preserved — this
+    /// refuses *creating* one and refuses *changing* the paint on one.
+    ///
+    /// The layer id is absent when the refusal is a `create`: there is no
+    /// layer yet, and naming one that will never exist would be a lie.
+    #[error("{}shape kind {kind:?} is not one this build draws", layer_prefix(id))]
+    UnsupportedShape {
+        /// The layer in question, when there is one.
+        id: Option<LayerId>,
+        /// The shape kind that was asked for.
+        kind: String,
+    },
+
     /// No slot of that name is in the document.
     #[error("no slot named {name:?}; this document has: {available}")]
     NoSuchSlot {
@@ -220,6 +237,18 @@ pub enum OpError {
 /// Two operations reach [`OpError::UnknownProperty`] and they need different
 /// articles — "an update", "a create" — so the message picks rather than
 /// settling for a wooden "on operation update".
+/// `"layer <id>: "`, or nothing when the refusal names no layer.
+///
+/// [`OpError::UnsupportedShape`] is reached from both `create`, where no layer
+/// exists yet, and `update`, where one does. One message that reads correctly
+/// either way beats two variants that say the same thing.
+fn layer_prefix(id: &Option<LayerId>) -> String {
+    match id {
+        Some(id) => format!("layer {id}: "),
+        None => String::new(),
+    }
+}
+
 fn article(word: &str) -> &'static str {
     if word.starts_with(['a', 'e', 'i', 'o', 'u']) {
         "an"

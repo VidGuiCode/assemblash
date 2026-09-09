@@ -38,8 +38,48 @@ pub enum SlotKind {
     Text,
     /// The asset an image layer draws.
     Image,
-    /// The fill colour of a text layer.
+    /// The fill colour of a text layer, or of a shape layer.
+    ///
+    /// One slot kind for both, resolved by the layer it points at (D8): a
+    /// text layer's `color` and a shape layer's `fill` are the same question
+    /// asked of two payloads, and a template that wanted a brand colour in
+    /// both a headline and the badge behind it should not need two slot
+    /// kinds to say so. A shape's *stroke* colour is not slot-able — a stroke
+    /// is a colour and a width together, and half of one is not a value.
     Color,
+}
+
+/// What a layer of this kind is called, for slot errors and slot checks.
+pub(crate) fn layer_kind_name(kind: &LayerKind) -> &'static str {
+    match kind {
+        LayerKind::Text(_) => "text",
+        LayerKind::Image(_) => "image",
+        LayerKind::Svg(_) => "svg",
+        LayerKind::Group(_) => "group",
+        LayerKind::Shape(_) => "shape",
+    }
+}
+
+/// Whether a slot of this kind may point at a layer of that kind.
+///
+/// Shared by `validate_slots` here and by `defineSlot` in [`crate::ops`], so
+/// that what a slot may be defined against and what it may be filled against
+/// cannot drift apart.
+pub(crate) fn slot_accepts(kind: SlotKind, layer_kind: &str) -> bool {
+    match kind {
+        SlotKind::Text => layer_kind == "text",
+        SlotKind::Color => layer_kind == "text" || layer_kind == "shape",
+        SlotKind::Image => layer_kind == "image",
+    }
+}
+
+/// What a slot of this kind needs its layer to be, for the error message.
+pub(crate) fn slot_wants(kind: SlotKind) -> &'static str {
+    match kind {
+        SlotKind::Text => "text",
+        SlotKind::Color => "text or shape",
+        SlotKind::Image => "image",
+    }
 }
 
 /// A named opening in a template.
@@ -145,20 +185,11 @@ pub fn validate_slots(document: &Document) -> Result<(), TemplateError> {
                     name: slot.name.clone(),
                     layer: slot.layer.clone(),
                 })?;
-        let found = match &layer.kind {
-            LayerKind::Text(_) => "text",
-            LayerKind::Image(_) => "image",
-            LayerKind::Svg(_) => "svg",
-            LayerKind::Group(_) => "group",
-        };
-        let wants = match slot.kind {
-            SlotKind::Text | SlotKind::Color => "text",
-            SlotKind::Image => "image",
-        };
-        if found != wants {
+        let found = layer_kind_name(&layer.kind);
+        if !slot_accepts(slot.kind, found) {
             return Err(TemplateError::WrongLayerKind {
                 name: slot.name.clone(),
-                kind: wants,
+                kind: slot_wants(slot.kind),
                 layer: slot.layer.clone(),
                 found,
             });
@@ -211,10 +242,28 @@ pub fn fill_operations(
                 text: Some(value.clone()),
                 ..UpdateLayer::new(slot.layer.clone())
             },
-            SlotKind::Color => UpdateLayer {
-                color: Some(Color::new(value.clone())),
-                ..UpdateLayer::new(slot.layer.clone())
-            },
+            // D8: one colour slot, two properties. Which one it is depends on
+            // the layer it points at, not on the slot — a text layer takes
+            // `color`, a shape layer takes `fill`. `validate_slots` has
+            // already established that the layer exists and is one of the
+            // two, so anything else here is a text layer's `color`.
+            SlotKind::Color => {
+                let is_shape = matches!(
+                    document.find_layer(&slot.layer).map(|layer| &layer.kind),
+                    Some(LayerKind::Shape(_))
+                );
+                if is_shape {
+                    UpdateLayer {
+                        fill: Some(Some(Color::new(value.clone()))),
+                        ..UpdateLayer::new(slot.layer.clone())
+                    }
+                } else {
+                    UpdateLayer {
+                        color: Some(Color::new(value.clone())),
+                        ..UpdateLayer::new(slot.layer.clone())
+                    }
+                }
+            }
             SlotKind::Image => UpdateLayer {
                 asset: Some(AssetId::new(value.clone())),
                 ..UpdateLayer::new(slot.layer.clone())
@@ -391,6 +440,80 @@ mod tests {
                 name: "headline".to_owned()
             }
         );
+    }
+
+    /// A template whose colour slot points at a shape layer instead of text.
+    fn shape_template() -> Document {
+        use crate::document::{ShapeKind, ShapeLayer, Stroke};
+
+        let mut document = Document::new(&mut SequentialIdSource::new(), 100.0, 100.0);
+        document.layers.push(Layer::new(
+            LayerId::new("layer_badge"),
+            Transform::new(0.0, 0.0, 60.0, 24.0),
+            LayerKind::Shape(ShapeLayer {
+                shape: ShapeKind::Rect { corner_radius: 6.0 },
+                fill: Some(Color::new("#3366cc")),
+                stroke: Some(Stroke {
+                    color: Color::new("#112233"),
+                    width: 1.0,
+                }),
+                extra: Extras::new(),
+            }),
+        ));
+        document.slots = vec![Slot {
+            name: "brand".to_owned(),
+            layer: LayerId::new("layer_badge"),
+            kind: SlotKind::Color,
+            description: None,
+            required: false,
+            extra: Extras::new(),
+        }];
+        document
+    }
+
+    #[test]
+    fn a_colour_slot_fills_a_text_layers_colour() {
+        let mut document = template();
+        document.slots[0].kind = SlotKind::Color;
+        let operations = fill_operations(&document, &values(&[("headline", "#ff0000")])).unwrap();
+        let Operation::Update(update) = &operations[0] else {
+            panic!("expected an update, got {:?}", operations[0]);
+        };
+        assert_eq!(update.color, Some(Color::new("#ff0000")));
+        assert_eq!(update.fill, None, "a text layer has no fill");
+    }
+
+    #[test]
+    fn a_colour_slot_fills_a_shape_layers_fill() {
+        // D8: the same slot kind, resolved by the layer it points at.
+        let document = shape_template();
+        assert!(validate_slots(&document).is_ok());
+
+        let operations = fill_operations(&document, &values(&[("brand", "#ff0000")])).unwrap();
+        let Operation::Update(update) = &operations[0] else {
+            panic!("expected an update, got {:?}", operations[0]);
+        };
+        assert_eq!(update.fill, Some(Some(Color::new("#ff0000"))));
+        assert_eq!(update.color, None, "a shape layer has no text colour");
+    }
+
+    #[test]
+    fn a_colour_slot_still_refuses_a_layer_that_is_neither() {
+        let mut document = shape_template();
+        document.layers[0] = Layer::new(
+            LayerId::new("layer_badge"),
+            Transform::default(),
+            LayerKind::Group(crate::document::GroupLayer {
+                children: Vec::new(),
+                extra: Extras::new(),
+            }),
+        );
+        let error = validate_slots(&document).unwrap_err();
+        let TemplateError::WrongLayerKind { kind, found, .. } = &error else {
+            panic!("{error:?}");
+        };
+        assert_eq!(*kind, "text or shape");
+        assert_eq!(*found, "group");
     }
 
     #[test]

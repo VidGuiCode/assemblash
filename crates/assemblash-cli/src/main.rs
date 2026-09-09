@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use assemblash_core::document::{ImageFit, TextAlign, Transform};
+use assemblash_core::document::{ImageFit, LayerKind, ShapeKind, Stroke, TextAlign, Transform};
 use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::UlidIdSource;
 use assemblash_core::layout;
@@ -36,6 +36,9 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+// `set` carries one optional flag per layer property and is parsed once, so
+// boxing it to shrink the enum would cost a line per field for nothing.
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Changes the canvas without scaling layers.
     #[command(subcommand)]
@@ -87,6 +90,75 @@ enum Command {
         /// several commands later and looks like a rendering problem.
         #[arg(long = "font-store", env = "ASSEMBLASH_FONT_STORE")]
         font_store: Option<PathBuf>,
+        #[command(flatten)]
+        box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Appends a rectangle shape layer.
+    ///
+    /// The rectangle fills its transform box. `--fill none` makes it
+    /// transparent; the default fill is black. A stroke is omitted unless
+    /// `--stroke` is given.
+    AddRect {
+        /// Project directory.
+        project: PathBuf,
+        /// Fill colour, or `none` for no fill.
+        #[arg(long, default_value = "#000000")]
+        fill: String,
+        /// Stroke colour, or `none` for no stroke.
+        #[arg(long)]
+        stroke: Option<String>,
+        /// Stroke width in document units. Used only when `--stroke` is given.
+        #[arg(long, default_value_t = 1.0)]
+        stroke_width: f64,
+        /// Corner radius in document units.
+        #[arg(long, default_value_t = 0.0)]
+        corner_radius: f64,
+        #[command(flatten)]
+        box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Appends an ellipse shape layer.
+    ///
+    /// The ellipse is inscribed in its transform box. `--fill none` makes it
+    /// transparent; the default fill is black. A stroke is omitted unless
+    /// `--stroke` is given.
+    AddEllipse {
+        /// Project directory.
+        project: PathBuf,
+        /// Fill colour, or `none` for no fill.
+        #[arg(long, default_value = "#000000")]
+        fill: String,
+        /// Stroke colour, or `none` for no stroke.
+        #[arg(long)]
+        stroke: Option<String>,
+        /// Stroke width in document units. Used only when `--stroke` is given.
+        #[arg(long, default_value_t = 1.0)]
+        stroke_width: f64,
+        #[command(flatten)]
+        box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Appends a line shape layer.
+    ///
+    /// The line runs from the box's left-middle to right-middle. The box
+    /// width is its length, its height is layout-only, and `--rotation` gives
+    /// the angle. `--stroke none` removes the line.
+    AddLine {
+        /// Project directory.
+        project: PathBuf,
+        /// Stroke colour, or `none` for no stroke.
+        #[arg(long, default_value = "#000000")]
+        stroke: String,
+        /// Stroke width in document units.
+        #[arg(long, default_value_t = 1.0)]
+        stroke_width: f64,
         #[command(flatten)]
         box_: BoxArgs,
         #[command(flatten)]
@@ -493,6 +565,22 @@ enum Command {
         /// Text layers: fill colour.
         #[arg(long)]
         color: Option<String>,
+        /// Shape layers: fill colour, or `none` for no fill.
+        #[arg(long)]
+        fill: Option<String>,
+        /// Shape layers: stroke colour, or `none` for no stroke.
+        ///
+        /// When a colour is given, an existing stroke width is preserved
+        /// unless `--stroke-width` is also supplied.
+        #[arg(long)]
+        stroke: Option<String>,
+        /// Shape layers: stroke width. With no `--stroke`, the layer must
+        /// already have a stroke to supply its colour.
+        #[arg(long)]
+        stroke_width: Option<f64>,
+        /// Rect shape layers: corner radius in document units.
+        #[arg(long)]
+        corner_radius: Option<f64>,
         /// Text layers: horizontal alignment inside the box.
         #[arg(long, value_enum)]
         align: Option<Align>,
@@ -1085,6 +1173,10 @@ struct LayerChange {
     font: Option<String>,
     size: Option<f64>,
     color: Option<String>,
+    fill: Option<String>,
+    stroke: Option<String>,
+    stroke_width: Option<f64>,
+    corner_radius: Option<f64>,
     align: Option<Align>,
     line_height: Option<f64>,
     fit: Option<Fit>,
@@ -1110,6 +1202,8 @@ impl LayerChange {
             .map(serde_json::from_str::<Vec<assemblash_core::document::Effect>>)
             .transpose()?;
         let transform = self.transform_for(document, &id);
+        let stroke = self.stroke_update(document, &id)?;
+        let fill = self.fill.map(optional_color);
         Ok(assemblash_core::ops::UpdateLayer {
             id,
             // An empty string is how a name is removed: `Some(None)` on the
@@ -1127,12 +1221,68 @@ impl LayerChange {
             font_family: self.font,
             font_size: self.size,
             color: self.color.map(Color::new),
+            fill,
+            stroke,
+            corner_radius: self.corner_radius,
             align: self.align.map(Into::into),
             line_height: self.line_height,
             fit: self.fit.map(Into::into),
             asset: self.asset.map(assemblash_core::AssetId::new),
             allow_locked: self.allow_locked,
         })
+    }
+
+    /// Builds the whole nullable stroke update from the flags and the layer's
+    /// current stroke. A width has no useful meaning without a colour, so a
+    /// shape with no existing stroke must be given `--stroke` as well.
+    fn stroke_update(
+        &self,
+        document: &Document,
+        id: &assemblash_core::LayerId,
+    ) -> Result<Option<Option<Stroke>>, CliError> {
+        match (self.stroke.as_deref(), self.stroke_width) {
+            (None, None) => Ok(None),
+            (Some("none"), _) => Ok(Some(None)),
+            (None, Some(width)) => {
+                let Some(layer) = document.find_layer(id) else {
+                    return Ok(Some(Some(Stroke {
+                        color: Color::new("#000000"),
+                        width,
+                    })));
+                };
+                match &layer.kind {
+                    LayerKind::Shape(shape) => {
+                        let Some(current) = &shape.stroke else {
+                            return Err(CliError::StrokeColorNeeded);
+                        };
+                        Ok(Some(Some(Stroke {
+                            color: current.color.clone(),
+                            width,
+                        })))
+                    }
+                    // Let the operation layer give the typed wrong-kind
+                    // refusal for a non-shape rather than making the CLI
+                    // invent one.
+                    _ => Ok(Some(Some(Stroke {
+                        color: Color::new("#000000"),
+                        width,
+                    }))),
+                }
+            }
+            (Some(color), width) => {
+                let current = document.find_layer(id).and_then(|layer| match &layer.kind {
+                    LayerKind::Shape(shape) => shape.stroke.as_ref(),
+                    _ => None,
+                });
+                let width = width
+                    .or_else(|| current.map(|stroke| stroke.width))
+                    .unwrap_or(1.0);
+                Ok(Some(Some(Stroke {
+                    color: Color::new(color),
+                    width,
+                })))
+            }
+        }
     }
 
     /// The whole transform, when any part of it was named.
@@ -1174,6 +1324,16 @@ impl LayerChange {
 fn blend_mode(raw: String) -> assemblash_core::BlendMode {
     serde_json::from_value(serde_json::Value::String(raw.clone()))
         .unwrap_or(assemblash_core::BlendMode::Other(raw))
+}
+
+/// Parses the CLI's nullable paint spelling. The operation layer receives a
+/// real `None` for the literal `none`, never a colour string it cannot draw.
+fn optional_color(raw: String) -> Option<Color> {
+    if raw == "none" {
+        None
+    } else {
+        Some(Color::new(raw))
+    }
 }
 
 /// Whichever of an inline flag and its `--…-file` twin was given.
@@ -1320,6 +1480,10 @@ enum CliError {
     NoProperties,
     #[error("say where the font store is: --font-store")]
     NoStore,
+    #[error(
+        "a stroke colour is needed: pass --stroke COLOR when the layer has no existing stroke"
+    )]
+    StrokeColorNeeded,
     #[error("{message} ({code})")]
     Rendering { code: &'static str, message: String },
     #[error("font family {family:?} is not in the font store at {store}; available: {available}")]
@@ -1383,6 +1547,84 @@ fn run(command: Command) -> Result<(), CliError> {
                     color: Color::new(color),
                     align: align.into(),
                     line_height,
+                },
+                &box_,
+                &who,
+            )?;
+            print_created(&outcome);
+            Ok(())
+        }
+
+        Command::AddRect {
+            project,
+            fill,
+            stroke,
+            stroke_width,
+            corner_radius,
+            box_,
+            who,
+        } => {
+            let mut session = open_session(&project)?;
+            let outcome = add_layer(
+                &mut session,
+                NewLayerKind::Shape {
+                    shape: ShapeKind::Rect { corner_radius },
+                    fill: optional_color(fill),
+                    stroke: stroke.and_then(optional_color).map(|color| Stroke {
+                        color,
+                        width: stroke_width,
+                    }),
+                },
+                &box_,
+                &who,
+            )?;
+            print_created(&outcome);
+            Ok(())
+        }
+
+        Command::AddEllipse {
+            project,
+            fill,
+            stroke,
+            stroke_width,
+            box_,
+            who,
+        } => {
+            let mut session = open_session(&project)?;
+            let outcome = add_layer(
+                &mut session,
+                NewLayerKind::Shape {
+                    shape: ShapeKind::Ellipse,
+                    fill: optional_color(fill),
+                    stroke: stroke.and_then(optional_color).map(|color| Stroke {
+                        color,
+                        width: stroke_width,
+                    }),
+                },
+                &box_,
+                &who,
+            )?;
+            print_created(&outcome);
+            Ok(())
+        }
+
+        Command::AddLine {
+            project,
+            stroke,
+            stroke_width,
+            box_,
+            who,
+        } => {
+            let mut session = open_session(&project)?;
+            let outcome = add_layer(
+                &mut session,
+                NewLayerKind::Shape {
+                    shape: ShapeKind::Line,
+                    fill: None,
+                    stroke: optional_color(stroke).map(|color| Stroke {
+                        color,
+                        width: stroke_width,
+                    }),
                 },
                 &box_,
                 &who,
@@ -1904,6 +2146,10 @@ fn run(command: Command) -> Result<(), CliError> {
             font,
             size,
             color,
+            fill,
+            stroke,
+            stroke_width,
+            corner_radius,
             align,
             line_height,
             fit,
@@ -1927,6 +2173,10 @@ fn run(command: Command) -> Result<(), CliError> {
                 font,
                 size,
                 color,
+                fill,
+                stroke,
+                stroke_width,
+                corner_radius,
                 align,
                 line_height,
                 fit,

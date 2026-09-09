@@ -274,3 +274,36 @@ impl From<InstallError> for ApiError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use assemblash_core::ids::LayerId;
+
+    /// A geometry this build cannot draw reports like an effect it cannot
+    /// draw: the document is fine, the request was fine, and the render is
+    /// the thing that could not be done.
+    #[test]
+    fn a_shape_this_build_cannot_draw_reports_like_an_effect_it_cannot_draw() {
+        let effect = ApiError::from(RenderError::UnsupportedEffect {
+            layer: LayerId::new("layer_01J"),
+            effect: "kaleidoscope".to_owned(),
+        });
+        let shape = ApiError::from(RenderError::UnsupportedShape {
+            layer: LayerId::new("layer_01J"),
+            kind: "star".to_owned(),
+        });
+
+        assert_eq!(shape.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(shape.status(), effect.status());
+        assert_eq!(shape.code(), "renderFailed");
+        assert_eq!(shape.code(), effect.code());
+        assert!(
+            shape.message().contains("star"),
+            "the message must name the kind: {}",
+            shape.message()
+        );
+    }
+}

@@ -80,6 +80,19 @@ const state: State = {
   editingText: null,
 };
 
+/**
+ * What a new shape is painted with, and what the inspector offers a shape
+ * that has no paint at all.
+ *
+ * The operation layer applies no default of its own — a create that names
+ * neither produces an invisible shape — so the defaults a person gets are
+ * decided here, once, and the same numbers stand behind the Add panel and
+ * the inspector.
+ */
+const SHAPE_FILL_COLOUR = "#3366cc";
+const SHAPE_STROKE_COLOUR = "#111111";
+const SHAPE_STROKE_WIDTH = 2;
+
 interface DragPreviewCache {
   key: string;
   baseUrl?: string;
@@ -129,6 +142,7 @@ const dom = {
   addPanelClose: el<HTMLButtonElement>("add-panel-close"),
   dockToggle: el<HTMLButtonElement>("dock-toggle"),
   addText: el<HTMLButtonElement>("add-text"),
+  addShape: el<HTMLButtonElement>("add-shape"),
   addImage: el<HTMLButtonElement>("add-image"),
   addVector: el<HTMLButtonElement>("add-vector"),
   imageFile: el<HTMLInputElement>("image-file"),
@@ -474,7 +488,18 @@ function drawLayers(): void {
       svg: "ph-pen-nib",
       group: "ph-stack",
     };
-    icon.className = `ph ${layerIcons[layer.type] ?? "ph-square"} layer-icon`;
+    // A shape says which shape it is: four rects in a list would otherwise
+    // read the same as four ellipses. A kind this build cannot draw gets the
+    // generic mark rather than a wrong one.
+    const shapeIcons: Record<string, string> = {
+      rect: "ph-square",
+      ellipse: "ph-circle",
+      line: "ph-line-segment",
+    };
+    const kindIcon = layer.type === "shape"
+      ? shapeIcons[api.shapeKindOf(layer) ?? ""] ?? "ph-shapes"
+      : layerIcons[layer.type];
+    icon.className = `ph ${kindIcon ?? "ph-square"} layer-icon`;
     icon.setAttribute("aria-hidden", "true");
 
     const label = document.createElement("span");
@@ -1055,6 +1080,7 @@ function drawInspector(): void {
     apply: (next: string) => Operation | null,
     type = "number",
     list?: string,
+    className?: string,
   ): void => {
     const wrapper = document.createElement("label");
     wrapper.className = "field";
@@ -1064,6 +1090,7 @@ function drawInspector(): void {
     input.value = value;
     input.disabled = why !== null;
     if (list) input.setAttribute("list", list);
+    if (className) input.className = className;
     input.addEventListener("change", () => {
       if (input.value === value) return;
       const operation = apply(input.value);
@@ -1142,6 +1169,107 @@ function drawInspector(): void {
     );
     fit.append(fitSelect);
     dom.advancedInspector.append(fit);
+  }
+
+  if (layer.type === "shape") {
+    // Fill and stroke are two independent paints, and either may be absent —
+    // a shape with neither is valid, and "no fill" is not the same as white.
+    // So each paint gets a colour and a control that removes it: `null`
+    // clears it, an absent property leaves it alone, and every control here
+    // sends exactly one update.
+    const heading = document.createElement("h2");
+    heading.textContent = "Shape";
+    dom.advancedInspector.append(heading);
+
+    const kind = api.shapeKindOf(layer);
+    const strokeColour = layer.stroke?.color ?? SHAPE_STROKE_COLOUR;
+    const strokeWidth = layer.stroke?.width ?? SHAPE_STROKE_WIDTH;
+    // A colour input holds `#rrggbb` and nothing else, and a document written
+    // elsewhere may carry `#rrggbbaa`. Showing the opaque part of it is much
+    // closer to the truth than the black an invalid value falls back to. Only
+    // the swatch is trimmed: the width row still sends the colour as stored.
+    const swatch = (colour: string): string =>
+      /^#[0-9a-fA-F]{8}$/.test(colour) ? colour.slice(0, 7) : colour;
+
+    const paint = (
+      label: string,
+      name: string,
+      colour: string,
+      present: boolean,
+      set: (next: string) => Operation,
+      clear: () => Operation,
+    ): void => {
+      const row = document.createElement("div");
+      row.className = "field shape-field";
+      const caption = document.createElement("span");
+      caption.textContent = label;
+      const controls = document.createElement("span");
+      controls.className = "shape-paint";
+      const input = document.createElement("input");
+      input.type = "color";
+      input.className = name;
+      input.value = colour;
+      input.disabled = why !== null;
+      input.setAttribute("aria-label", label);
+      // Absent is shown as the colour this build would give it, so picking
+      // one adds the paint that was described rather than a surprise.
+      if (!present) input.title = `no ${label.toLowerCase()} — choose a colour to add one`;
+      input.addEventListener("change", () => void send(`change ${label}`, set(input.value)));
+      const none = document.createElement("button");
+      none.type = "button";
+      none.className = `small ${name}-none`;
+      none.textContent = "None";
+      none.title = `Remove the ${label.toLowerCase()}`;
+      none.disabled = why !== null || !present;
+      none.addEventListener("click", () => void send(`clear ${label}`, clear()));
+      controls.append(input, none);
+      row.append(caption, controls);
+      dom.advancedInspector.append(row);
+    };
+
+    paint(
+      "Fill",
+      "shape-fill",
+      swatch(layer.fill ?? SHAPE_FILL_COLOUR),
+      Boolean(layer.fill),
+      (next) => ({ op: "update", id: layer.id, fill: next }) as Operation,
+      () => ({ op: "update", id: layer.id, fill: null }) as Operation,
+    );
+    paint(
+      "Stroke",
+      "shape-stroke",
+      swatch(strokeColour),
+      Boolean(layer.stroke),
+      // A stroke is one value, not two: the colour carries the width it is
+      // already drawn with, and a shape that had no stroke gets this build's
+      // default width rather than a zero-width one that would draw nothing.
+      (next) => ({ op: "update", id: layer.id, stroke: { color: next, width: strokeWidth } }) as Operation,
+      () => ({ op: "update", id: layer.id, stroke: null }) as Operation,
+    );
+    field(
+      "Stroke width",
+      String(strokeWidth),
+      (next) => ({
+        op: "update",
+        id: layer.id,
+        stroke: { color: strokeColour, width: Number(next) },
+      }) as Operation,
+      "number",
+      undefined,
+      "shape-stroke-width",
+    );
+    if (kind === "rect") {
+      // Only a rect has corners. Sending this to an ellipse or a line is a
+      // typed refusal from the engine, so the row is simply not offered.
+      field(
+        "Corner radius",
+        String(api.cornerRadiusOf(layer)),
+        (next) => ({ op: "update", id: layer.id, cornerRadius: Number(next) }) as Operation,
+        "number",
+        undefined,
+        "shape-corner-radius",
+      );
+    }
   }
 
   const appearanceHeading = document.createElement("h2");
@@ -1225,25 +1353,42 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
     label.textContent = effect.type;
     row.append(label);
 
-    // Every effect this build renders has exactly one number worth a slider;
-    // grain's seed is deliberately not one of them, because changing it would
-    // change the picture for no reason a person asked for.
-    const parameter = api.effectParameter(effect);
-    if (parameter) {
+    // Most effects have one number worth editing; grain's seed is deliberately
+    // not one of them, because changing it would change the picture for no
+    // reason a person asked for. A drop shadow has four values and no single
+    // one of them is the parameter, so each field is named in the row.
+    const fields = api.effectFields(effect);
+    if (fields.length > 1) row.classList.add("multi");
+    const editField = (field: api.EffectField): HTMLInputElement => {
       const input = document.createElement("input");
-      input.type = "number";
-      input.step = "0.05";
-      input.value = String(parameter.value);
+      input.type = field.kind === "color" ? "text" : "number";
+      if (field.kind === "number") input.step = "0.05";
+      input.value = String(field.value);
       input.disabled = guarded;
+      input.dataset["field"] = field.name;
+      input.setAttribute("aria-label", `${effect.type} ${field.name}`);
       input.addEventListener("change", () => {
-        const value = Number(input.value);
-        if (!Number.isFinite(value) || value === parameter.value) return;
-        const next = effects.map((one, at) =>
-          at === index ? { ...one, [parameter.name]: value } : one,
-        );
-        setStack(next);
+        const value = field.kind === "color" ? input.value.trim() : Number(input.value);
+        if (typeof value === "number" && !Number.isFinite(value)) return;
+        if (value === field.value) return;
+        setStack(effects.map((one, at) => (at === index ? { ...one, [field.name]: value } : one)));
       });
-      row.append(input);
+      return input;
+    };
+    if (fields.length === 1 && fields[0]) {
+      row.append(editField(fields[0]));
+    } else if (fields.length > 1) {
+      const group = document.createElement("span");
+      group.className = "effect-fields";
+      for (const field of fields) {
+        const wrapper = document.createElement("label");
+        wrapper.className = "effect-field";
+        const caption = document.createElement("span");
+        caption.textContent = field.name;
+        wrapper.append(caption, editField(field));
+        group.append(wrapper);
+      }
+      row.append(group);
     }
 
     // Order is part of the meaning — a blur before a grain is not the same
@@ -2498,6 +2643,7 @@ dom.newProjectForm.addEventListener("submit", (event) => {
 
 const addSections = [
   ["add-text-section", "Text", dom.addText],
+  ["add-shape-section", "Shapes", dom.addShape],
   ["add-upload-section", "Uploads", dom.addImage],
   ["add-vector-section", "Vector", dom.addVector],
   ["add-template-section", "Templates", dom.templatesToggle],
@@ -2505,7 +2651,7 @@ const addSections = [
 ] as const;
 
 function activateEditorTool(active: HTMLButtonElement): void {
-  for (const tool of [dom.addToggle, dom.selectTool, dom.addText, dom.addImage, dom.addVector, dom.templatesToggle, dom.fontsToggle]) {
+  for (const tool of [dom.addToggle, dom.selectTool, dom.addText, dom.addShape, dom.addImage, dom.addVector, dom.templatesToggle, dom.fontsToggle]) {
     const selected = tool === active;
     tool.classList.toggle("active", selected);
     tool.setAttribute("aria-pressed", String(selected));
@@ -2544,6 +2690,7 @@ dom.addToggle.addEventListener("click", () => {
 });
 dom.addPanelClose.addEventListener("click", closeAddPanel);
 dom.addText.addEventListener("click", () => showAddSection("add-text-section", dom.addText));
+dom.addShape.addEventListener("click", () => showAddSection("add-shape-section", dom.addShape));
 dom.addImage.addEventListener("click", () => showAddSection("add-upload-section", dom.addImage));
 dom.addVector.addEventListener("click", () => showAddSection("add-vector-section", dom.addVector));
 dom.templatesToggle.addEventListener("click", () => showAddSection("add-template-section", dom.templatesToggle));
@@ -2608,10 +2755,63 @@ async function createTextPreset(preset: "heading" | "subheading" | "body"): Prom
   if (layer?.type === "text") beginInlineTextEdit(layer);
 }
 
+/**
+ * Adds one primitive, in one operation.
+ *
+ * The box is picked exactly as the text presets pick theirs — a fixed size,
+ * centred on the canvas — so a shape arrives where a person is already
+ * looking. The line's box is 24 units tall although the segment it draws is
+ * 2: the geometry runs across the box's middle and its height is layout only
+ * (design §1), so a taller box costs the picture nothing and leaves the
+ * selection handles far enough apart to grab.
+ */
+async function createShape(kind: "rect" | "ellipse" | "line"): Promise<void> {
+  if (!state.project || !state.document) return;
+  const settings = {
+    rect: { width: 320, height: 240 },
+    ellipse: { width: 320, height: 240 },
+    line: { width: 400, height: 24 },
+  }[kind];
+  const transform = {
+    x: Math.round((state.document.canvas.width - settings.width) / 2),
+    y: Math.round((state.document.canvas.height - settings.height) / 2),
+    width: settings.width,
+    height: settings.height,
+  };
+  // A line has no interior, so it is given a stroke and no fill; a rect and
+  // an ellipse are the other way round. Nothing here is a partial shape: the
+  // one create carries the geometry and its paint together.
+  const paint = kind === "line"
+    ? { stroke: { color: SHAPE_STROKE_COLOUR, width: SHAPE_STROKE_WIDTH } }
+    : { fill: SHAPE_FILL_COLOUR };
+  const shape = kind === "rect" ? { kind: "rect", cornerRadius: 0 } : { kind };
+  const result = await api.applyOperation(
+    state.project,
+    {
+      op: "create",
+      position: { at: "root" },
+      transform,
+      type: "shape",
+      shape,
+      ...paint,
+    } as Operation,
+    api.versionOf(state.document),
+  );
+  const created = result.created?.[0];
+  if (created) state.selection = [created];
+  say(`Added a ${kind === "rect" ? "rectangle" : kind}. Its fill and stroke are in Properties.`);
+  await refresh();
+}
+
 dom.addPanel.addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-text-preset]");
+  const target = event.target as HTMLElement;
+  const button = target.closest<HTMLButtonElement>("[data-text-preset]");
   const preset = button?.dataset["textPreset"] as "heading" | "subheading" | "body" | undefined;
   if (preset) void guard(`add ${preset}`, () => createTextPreset(preset));
+  const shape = target.closest<HTMLButtonElement>("[data-shape]")?.dataset["shape"];
+  if (shape === "rect" || shape === "ellipse" || shape === "line") {
+    void guard(`add ${shape}`, () => createShape(shape));
+  }
 });
 
 dom.deleteLayer.addEventListener("click", () => deleteSelection());

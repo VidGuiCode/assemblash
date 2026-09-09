@@ -15,7 +15,8 @@
 use std::path::{Path, PathBuf};
 
 use assemblash_core::document::{
-    BlendMode, Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, Transform,
+    BlendMode, Effect, Extras, GroupLayer, ImageFit, ImageLayer, ShapeKind, ShapeLayer, Stroke,
+    TextAlign, TextLayer, Transform,
 };
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::{Asset, Color, Document, Layer, LayerKind};
@@ -555,4 +556,294 @@ fn warnings_never_change_what_is_drawn() {
     assert_eq!(warnings.len(), 2, "{warnings:?}");
     let after = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
     assert_eq!(before, after);
+}
+
+// ---------------------------------------------------------------------------
+// Shapes and shadows (1.6.0)
+// ---------------------------------------------------------------------------
+
+fn shape(
+    id: &str,
+    transform: Transform,
+    kind: ShapeKind,
+    fill: Option<&str>,
+    stroke: Option<(&str, f64)>,
+) -> Layer {
+    Layer::new(
+        LayerId::new(id),
+        transform,
+        LayerKind::Shape(ShapeLayer {
+            shape: kind,
+            fill: fill.map(Color::new),
+            stroke: stroke.map(|(color, width)| Stroke {
+                color: Color::new(color),
+                width,
+            }),
+            extra: Extras::new(),
+        }),
+    )
+}
+
+#[test]
+fn a_filled_rect_with_square_corners_is_a_plain_rect() {
+    let mut doc = document(200.0, 120.0);
+    doc.layers.push(shape(
+        "layer_1",
+        Transform::new(20.5, 10.25, 160.0, 90.5),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#3366cc"),
+        None,
+    ));
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    // Square corners have no arc to convert, so the short element is also the
+    // one that never reaches kurbo.
+    assert!(svg.contains("<rect x=\"20.5\""), "{svg}");
+    assert!(!svg.contains("stroke"), "{svg}");
+    assert_snapshot("shape_filled_rect", &svg);
+}
+
+#[test]
+fn a_stroked_rounded_rect_is_cubics_and_never_rx() {
+    let mut doc = document(200.0, 120.0);
+    doc.layers.push(shape(
+        "layer_1",
+        Transform::new(20.5, 10.25, 160.0, 90.5),
+        ShapeKind::Rect {
+            corner_radius: 18.0,
+        },
+        Some("#3366cc"),
+        Some(("#112233", 4.0)),
+    ));
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    // `rx` would hand the corner to usvg, which hands it to kurbo, which calls
+    // the platform's `sin_cos`/`tan`/`powf` — the one thing on this path that
+    // can differ between targets.
+    assert!(svg.contains("<path d=\"M "), "{svg}");
+    assert!(svg.contains(" C "), "{svg}");
+    assert!(!svg.contains("rx="), "{svg}");
+    // The stroke is inset by half its width: 20.5 + 2 = 22.5, and the radius
+    // comes in with it, 18 - 2 = 16, so the path starts at 22.5 + 16 = 38.5.
+    assert!(svg.contains("stroke-width=\"4\""), "{svg}");
+    assert!(svg.contains("M 38.5 12.25"), "{svg}");
+    assert_snapshot("shape_stroked_rounded_rect", &svg);
+}
+
+#[test]
+fn an_ellipse_is_four_cubics_not_an_ellipse_element() {
+    let mut doc = document(200.0, 120.0);
+    doc.layers.push(shape(
+        "layer_1",
+        Transform::new(20.5, 10.25, 160.0, 90.5),
+        ShapeKind::Ellipse,
+        None,
+        Some(("#204060", 0.5)),
+    ));
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    assert!(!svg.contains("<ellipse"), "{svg}");
+    assert_eq!(svg.matches(" C ").count(), 4, "{svg}");
+    // No fill is `none`, not black.
+    assert!(svg.contains("fill=\"none\""), "{svg}");
+    assert_snapshot("shape_ellipse", &svg);
+}
+
+#[test]
+fn a_line_runs_across_the_middle_of_its_box() {
+    let mut doc = document(200.0, 120.0);
+    doc.layers.push(shape(
+        "layer_1",
+        Transform {
+            rotation: 17.5,
+            ..Transform::new(20.5, 10.25, 160.0, 40.0)
+        },
+        ShapeKind::Line,
+        // A line has no interior, so a fill on one means nothing and is left
+        // out of the output rather than drawn.
+        Some("#3366cc"),
+        Some(("#8b1a1a", 3.0)),
+    ));
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    assert!(
+        svg.contains("<line x1=\"20.5\" y1=\"30.25\" x2=\"180.5\" y2=\"30.25\""),
+        "{svg}"
+    );
+    assert!(svg.contains("stroke-linecap=\"butt\""), "{svg}");
+    assert!(!svg.contains("fill="), "{svg}");
+    assert_snapshot("shape_line", &svg);
+}
+
+#[test]
+fn a_stroke_wider_than_its_box_fills_in_the_stroke_colour() {
+    // The naive clamp — `w - s` floored at zero — makes the shape vanish at
+    // exactly `s = min(w, h)` while `0.999 * min(w, h)` still fills the box.
+    // Clamping `s` instead is the continuous limit of the inset rule.
+    let mut doc = document(200.0, 120.0);
+    doc.layers.push(shape(
+        "layer_1",
+        Transform::new(20.5, 10.25, 160.0, 40.0),
+        ShapeKind::Rect { corner_radius: 6.0 },
+        Some("#3366cc"),
+        Some(("#8b1a1a", 90.0)),
+    ));
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    assert!(!svg.contains("stroke"), "{svg}");
+    assert!(svg.contains("fill=\"#8b1a1a\""), "{svg}");
+    // The full box, not an inset one, and its radius is untouched.
+    assert!(svg.contains("M 26.5 10.25"), "{svg}");
+    assert_snapshot("shape_oversize_stroke", &svg);
+}
+
+#[test]
+fn a_zero_width_stroke_draws_nothing() {
+    let mut doc = document(200.0, 120.0);
+    doc.layers.push(shape(
+        "layer_1",
+        Transform::new(20.5, 10.25, 160.0, 40.0),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#3366cc"),
+        Some(("#8b1a1a", 0.0)),
+    ));
+    // A line with no width has nothing left at all: no interior to fill, and
+    // an element that draws nothing still costs the rasterizer a pass.
+    doc.layers.push(shape(
+        "layer_2",
+        Transform::new(20.5, 70.0, 160.0, 20.0),
+        ShapeKind::Line,
+        None,
+        Some(("#8b1a1a", 0.0)),
+    ));
+    doc.layers.push(shape(
+        "layer_3",
+        Transform::new(20.5, 95.0, 160.0, 20.0),
+        ShapeKind::Line,
+        None,
+        None,
+    ));
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    assert!(!svg.contains("stroke"), "{svg}");
+    assert!(!svg.contains("<line"), "{svg}");
+    assert_eq!(svg.matches("<rect").count(), 1, "{svg}");
+    assert_snapshot("shape_zero_width_stroke", &svg);
+}
+
+#[test]
+fn a_shape_this_build_cannot_draw_stops_the_render() {
+    let mut doc = document(200.0, 120.0);
+    doc.layers.push(shape(
+        "layer_1",
+        Transform::new(20.5, 10.25, 160.0, 40.0),
+        ShapeKind::Other(serde_json::json!({ "kind": "star", "points": 5 })),
+        Some("#3366cc"),
+        None,
+    ));
+    let error = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            assemblash_renderer::RenderError::UnsupportedShape { kind, .. } if kind == "star"
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_drop_shadow_gets_an_explicit_user_space_region() {
+    let mut doc = document(300.0, 200.0);
+    let mut layer = shape(
+        "layer_1",
+        Transform::new(40.0, 30.0, 100.0, 60.0),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#3366cc"),
+        None,
+    );
+    layer.effects = vec![Effect::DropShadow {
+        dx: 6.0,
+        dy: 4.0,
+        blur: 3.0,
+        color: Color::new("#00000080"),
+    }];
+    doc.layers.push(layer);
+
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    // Box (40, 30, 100, 60) union its (6, 4) copy is x 40..146, y 30..94. The
+    // blur margin is ceil(3 * 3) + 1 = 10, and half the box is 50 and 30, so
+    // the region grows by 50 on each side in x and 30 in y.
+    assert!(
+        svg.contains(
+            "filterUnits=\"userSpaceOnUse\" x=\"-10\" y=\"0\" width=\"206\" height=\"124\""
+        ),
+        "{svg}"
+    );
+    assert!(
+        svg.contains(
+            "<feDropShadow in=\"SourceGraphic\" result=\"e0\" dx=\"6\" dy=\"4\" \
+             stdDeviation=\"3\" flood-color=\"#000000\" flood-opacity=\"0.501961\"/>"
+        ),
+        "{svg}"
+    );
+    assert_snapshot("shape_drop_shadow", &svg);
+}
+
+#[test]
+fn a_stack_without_a_shadow_keeps_the_percentage_region() {
+    // The region rule only changes for a stack that casts a shadow; every
+    // other filter is emitted exactly as it was before 1.6.0, which is what
+    // keeps the existing goldens and snapshots unmoved.
+    let mut doc = document(300.0, 200.0);
+    let mut layer = shape(
+        "layer_1",
+        Transform::new(40.0, 30.0, 100.0, 60.0),
+        ShapeKind::Ellipse,
+        Some("#3366cc"),
+        None,
+    );
+    layer.effects = vec![Effect::Blur { radius: 4.0 }];
+    doc.layers.push(layer);
+
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    assert!(
+        svg.contains("x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\""),
+        "{svg}"
+    );
+    assert!(!svg.contains("filterUnits"), "{svg}");
+    assert_snapshot("shape_blur_only_region", &svg);
+}
+
+#[test]
+fn several_shadows_in_one_stack_union_their_offsets() {
+    let mut doc = document(300.0, 200.0);
+    let mut layer = shape(
+        "layer_1",
+        Transform::new(40.0, 30.0, 100.0, 60.0),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#3366cc"),
+        None,
+    );
+    layer.effects = vec![
+        Effect::DropShadow {
+            dx: -20.0,
+            dy: 0.0,
+            blur: 1.0,
+            color: Color::new("#000000"),
+        },
+        Effect::DropShadow {
+            dx: 30.0,
+            dy: 12.0,
+            blur: 2.0,
+            color: Color::new("#ff0000"),
+        },
+    ];
+    doc.layers.push(layer);
+
+    let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
+    // x 20..170, y 30..102; the margins are max(50, ceil(6) + 1) = 50 and
+    // max(30, 7) = 30.
+    assert!(
+        svg.contains(
+            "filterUnits=\"userSpaceOnUse\" x=\"-30\" y=\"0\" width=\"250\" height=\"132\""
+        ),
+        "{svg}"
+    );
+    // An opaque shadow colour writes no flood-opacity at all.
+    assert!(svg.contains("flood-color=\"#ff0000\"/>"), "{svg}");
+    assert_snapshot("shape_two_shadows", &svg);
 }

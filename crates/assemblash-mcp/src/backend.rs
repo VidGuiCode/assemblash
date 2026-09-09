@@ -106,8 +106,12 @@ pub struct LayerSummary {
     /// Human-facing name, when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// `text`, `image`, `svg`, or `group`.
+    /// `text`, `image`, `svg`, `group`, or `shape`.
     pub kind: &'static str,
+    /// The geometry name for a shape: `rect`, `ellipse`, `line`, or the
+    /// preserved name of a shape kind this build does not know.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
     /// Group this layer sits in, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
@@ -727,21 +731,30 @@ fn summarise(id: &str, document: &Document) -> ProjectSummary {
 
 fn collect(layers: &[Layer], parent: Option<&str>, depth: usize, out: &mut Vec<LayerSummary>) {
     for layer in layers {
-        let (kind, text, font_family, children) = match &layer.kind {
+        let (kind, text, font_family, children, shape) = match &layer.kind {
             LayerKind::Text(text) => (
                 "text",
                 Some(text.text.clone()),
                 Some(text.font_family.clone()),
                 None,
+                None,
             ),
-            LayerKind::Image(_) => ("image", None, None, None),
-            LayerKind::Svg(_) => ("svg", None, None, None),
-            LayerKind::Group(group) => ("group", None, None, Some(group.children.len())),
+            LayerKind::Image(_) => ("image", None, None, None, None),
+            LayerKind::Svg(_) => ("svg", None, None, None, None),
+            LayerKind::Shape(shape) => (
+                "shape",
+                None,
+                None,
+                None,
+                Some(shape.shape.kind_name().to_owned()),
+            ),
+            LayerKind::Group(group) => ("group", None, None, Some(group.children.len()), None),
         };
         out.push(LayerSummary {
             id: layer.id.to_string(),
             name: layer.name.clone(),
             kind,
+            shape,
             parent: parent.map(ToOwned::to_owned),
             depth,
             x: layer.transform.x,

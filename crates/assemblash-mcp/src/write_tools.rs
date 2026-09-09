@@ -11,7 +11,9 @@
 //! run, the expected version, the protected-layer refusal, and the transaction
 //! id live.
 
-use assemblash_core::document::{BlendMode, Effect, ImageFit, TextAlign, Transform};
+use assemblash_core::document::{
+    BlendMode, Effect, ImageFit, ShapeKind, Stroke, TextAlign, Transform,
+};
 use assemblash_core::ops::{
     AlignEdge, Axis, CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, SnapTarget,
     UpdateCanvas, UpdateLayer,
@@ -107,6 +109,66 @@ pub struct AddTextArgs {
     pub name: Option<String>,
 }
 
+/// The primitive geometry a shape layer draws.
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ShapeArg {
+    /// A rectangle filling its box.
+    Rect,
+    /// An ellipse inscribed in its box.
+    Ellipse,
+    /// A horizontal segment across the middle of its box.
+    Line,
+}
+
+/// The edge paint for a shape layer.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StrokeArgs {
+    /// Stroke colour, `#rrggbb` or `#rrggbbaa`.
+    pub color: String,
+    /// Stroke width in document units. Defaults to 1 when omitted.
+    #[serde(default)]
+    pub width: Option<f64>,
+}
+
+impl StrokeArgs {
+    fn to_stroke(&self) -> Stroke {
+        Stroke {
+            color: Color::new(self.color.clone()),
+            width: self.width.unwrap_or(1.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddShapeArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    #[serde(flatten)]
+    pub placement: PlacementArgs,
+    #[serde(flatten)]
+    pub box_: BoxArgs,
+    /// Geometry to create: `rect`, `ellipse`, or `line`.
+    pub shape: ShapeArg,
+    /// Corner radius for a rectangle, in document units. Defaults to 0;
+    /// other geometries do not have corners.
+    #[serde(default)]
+    pub corner_radius: Option<f64>,
+    /// Interior paint. Rectangles and ellipses default to `#000000`; lines
+    /// default to no fill.
+    #[serde(default)]
+    pub fill: Option<String>,
+    /// Edge paint. Rectangles and ellipses default to no stroke; lines default
+    /// to `#000000` at width 1. A supplied width defaults to 1.
+    #[serde(default)]
+    pub stroke: Option<StrokeArgs>,
+    /// Human-facing layer name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AddImageArgs {
@@ -177,6 +239,24 @@ pub struct UpdateArgs {
     /// New line height, as a multiple of the font size, for a text layer.
     #[serde(default)]
     pub line_height: Option<f64>,
+    /// New fill colour for a shape layer, `#rrggbb` or `#rrggbbaa`. Use
+    /// `clearFill: true` to remove the fill; a JSON null is treated as omitted.
+    #[serde(default)]
+    pub fill: Option<String>,
+    /// Replace the whole stroke on a shape layer. Its width defaults to 1.
+    /// Use `clearStroke: true` to remove it; a JSON null is treated as
+    /// omitted.
+    #[serde(default)]
+    pub stroke: Option<StrokeArgs>,
+    /// New corner radius for a rectangular shape, in document units.
+    #[serde(default)]
+    pub corner_radius: Option<f64>,
+    /// Set true to remove the fill; cannot be combined with `fill`.
+    #[serde(default)]
+    pub clear_fill: Option<bool>,
+    /// Set true to remove the stroke; cannot be combined with `stroke`.
+    #[serde(default)]
+    pub clear_stroke: Option<bool>,
     /// New fit, for an image or SVG layer.
     #[serde(default)]
     pub fit: Option<ImageFit>,
@@ -415,6 +495,56 @@ impl AssemblashMcp {
         self.write(&args.write, operation)
     }
 
+    /// Adds a rectangle, ellipse, or line shape layer.
+    #[tool(
+        description = "Add a rectangle, ellipse, or horizontal line shape layer to a project. Rectangles and ellipses default to a #000000 fill and no stroke; lines default to no fill and a #000000 stroke of width 1. A supplied stroke width defaults to 1, and cornerRadius defaults to 0 for rectangles. The operation is journalled, supports dryRun and expectedVersion, and refuses invalid paint, boxes, parents, protected targets, or unsupported values; it never imports files or writes outside the project."
+    )]
+    async fn add_shape_layer(
+        &self,
+        Parameters(args): Parameters<AddShapeArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        if args.corner_radius.is_some() && !matches!(args.shape, ShapeArg::Rect) {
+            let kind = match args.shape {
+                ShapeArg::Rect => "rect",
+                ShapeArg::Ellipse => "ellipse",
+                ShapeArg::Line => "line",
+            };
+            return Err(ErrorData::invalid_request(
+                format!("cornerRadius is only valid for rect shapes; got {kind}"),
+                None,
+            ));
+        }
+        let shape = match args.shape {
+            ShapeArg::Rect => ShapeKind::Rect {
+                corner_radius: args.corner_radius.unwrap_or(0.0),
+            },
+            ShapeArg::Ellipse => ShapeKind::Ellipse,
+            ShapeArg::Line => ShapeKind::Line,
+        };
+        let fill = args
+            .fill
+            .clone()
+            .map(Color::new)
+            .or_else(|| (!matches!(&shape, ShapeKind::Line)).then(|| Color::new("#000000")));
+        let stroke = args.stroke.as_ref().map(StrokeArgs::to_stroke).or_else(|| {
+            matches!(&shape, ShapeKind::Line).then(|| Stroke {
+                color: Color::new("#000000"),
+                width: 1.0,
+            })
+        });
+        let operation = Operation::Create(CreateLayer {
+            position: (&args.placement).into(),
+            transform: (&args.box_).into(),
+            name: args.name.clone(),
+            kind: NewLayerKind::Shape {
+                shape,
+                fill,
+                stroke,
+            },
+        });
+        self.write(&args.write, operation)
+    }
+
     /// Adds an image layer for an asset already in the document.
     #[tool(
         description = "Add an image layer for an asset already imported into the project. \
@@ -468,6 +598,30 @@ impl AssemblashMcp {
         &self,
         Parameters(args): Parameters<UpdateArgs>,
     ) -> Result<Json<WriteOutcome>, ErrorData> {
+        let clear_fill = args.clear_fill.unwrap_or(false);
+        let clear_stroke = args.clear_stroke.unwrap_or(false);
+        if clear_fill && args.fill.is_some() {
+            return Err(ErrorData::invalid_request(
+                "fill and clearFill cannot be combined; set clearFill to true to remove the fill",
+                None,
+            ));
+        }
+        if clear_stroke && args.stroke.is_some() {
+            return Err(ErrorData::invalid_request(
+                "stroke and clearStroke cannot be combined; set clearStroke to true to remove the stroke",
+                None,
+            ));
+        }
+        let fill = if clear_fill {
+            Some(None)
+        } else {
+            args.fill.clone().map(|value| Some(Color::new(value)))
+        };
+        let stroke = if clear_stroke {
+            Some(None)
+        } else {
+            args.stroke.as_ref().map(|value| Some(value.to_stroke()))
+        };
         let operation = Operation::Update(UpdateLayer {
             opacity: args.opacity,
             text: args.text.clone(),
@@ -476,6 +630,9 @@ impl AssemblashMcp {
             color: args.color.clone().map(Color::new),
             align: args.align,
             line_height: args.line_height,
+            fill,
+            stroke,
+            corner_radius: args.corner_radius,
             fit: args.fit,
             blend_mode: args.blend_mode.clone(),
             effects: args.effects.clone(),

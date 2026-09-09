@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use assemblash_core::document::{
-    Effect, GroupLayer, ImageFit, Layer, LayerKind, TextAlign, Transform,
+    Effect, GroupLayer, ImageFit, Layer, LayerKind, ShapeKind, ShapeLayer, TextAlign, Transform,
 };
 use assemblash_core::ids::AssetId;
 use assemblash_core::{svg_import, validate, Color, Document};
@@ -213,6 +213,8 @@ fn write_layer(
             );
         }
 
+        LayerKind::Shape(shape) => write_shape(out, layer, shape, &pad)?,
+
         LayerKind::Group(group) => {
             let _ = writeln!(
                 out,
@@ -253,6 +255,293 @@ fn write_layer(
     }
 
     Ok(())
+}
+
+/// Control-arm length for a quarter arc, as a fraction of the radius.
+///
+/// The usual `4/3 * (sqrt(2) - 1)`, written as a literal rather than computed:
+/// a constant is the same bits on every target, and a `sqrt` at start-up would
+/// be one more thing to argue about when two machines disagree about a golden.
+const KAPPA: f64 = 0.552_284_749_8;
+
+/// Draws one shape layer.
+///
+/// Three decisions here are not obvious and all three are the result of the
+/// 1.6.0 stroker spike, which measured them rather than assuming them:
+///
+/// * **Every curve is written as cubic Béziers, never as `rx` on a `<rect>`
+///   and never as `<ellipse>`.** usvg converts both of those to cubics with
+///   `kurbo::Arc`, which calls `sin_cos`, `tan`, `atan2` and `powf` from the
+///   platform's math library. Those are not required to be correctly rounded,
+///   so glibc, Darwin and the UCRT are each free to differ by an ULP — and
+///   `powf(1/6)` feeds a `ceil()` that picks the *number* of cubic segments,
+///   so an unlucky ULP changes the path's structure rather than a hair of its
+///   position. Emitting the cubics ourselves keeps that whole family of
+///   functions off the path: what is left is multiplication and addition on
+///   `f64`, which is exact everywhere. (`kurbo` flips the segment count for a
+///   quadrant at a radius near 367 user units; the gate carries a shape there
+///   as a canary.)
+/// * **The stroke width is clamped, not the box.** Clamping `w - s` to zero
+///   makes an over-stroked shape vanish entirely at `s = min(w, h)` while
+///   `s = 0.999 * min(w, h)` still fills the box — a cliff in the middle of a
+///   slider. Clamping `s` and falling back to a plain fill in the stroke
+///   colour is the continuous limit, and was measured bit-identical to the
+///   `0.999` case.
+/// * **The stroke is inset by `s/2`** (D5), so the transform box is the visual
+///   box and nothing that reasons about layout has to know whether a shape is
+///   stroked. One measured caveat: below one device pixel tiny-skia draws a
+///   *hairline* centred on the edge rather than running the stroker, and a
+///   hairline always covers a whole pixel row — so a 0.5-wide stroke spills up
+///   to half a pixel outside the box on each side. Deterministic and identical
+///   on every target, so it is documented rather than refused, but below
+///   `s = 1` the box is not quite the visual box.
+fn write_shape(
+    out: &mut String,
+    layer: &Layer,
+    shape: &ShapeLayer,
+    pad: &str,
+) -> Result<(), RenderError> {
+    // A geometry this build does not know is refused rather than skipped: a
+    // shape silently missing from an export is the one failure this engine
+    // refuses to make.
+    if let ShapeKind::Other(_) = &shape.shape {
+        return Err(RenderError::UnsupportedShape {
+            layer: layer.id.clone(),
+            kind: shape.shape.kind_name().to_owned(),
+        });
+    }
+
+    let t = &layer.transform;
+    let (x, y, w, h) = (t.x, t.y, t.width, t.height);
+    // Exactly the image branch's trailing attributes, in the same order.
+    let common = || -> Result<String, RenderError> {
+        Ok(format!(
+            "{opacity}{rotation}{filter}{blend}",
+            opacity = opacity_attribute(layer.opacity),
+            rotation = rotation_attribute(t),
+            filter = filter_attribute(layer),
+            blend = blend_attribute(layer)?,
+        ))
+    };
+
+    match &shape.shape {
+        ShapeKind::Rect { corner_radius } => {
+            let (fill, stroke, inset) = shape_paint(shape, w.min(h))?;
+            // Clamped against the box first, so a radius larger than the shape
+            // is a stadium rather than a refusal, and only then pulled in by
+            // the inset — the inner edge of a stroked corner has the smaller
+            // radius.
+            let radius = corner_radius.clamp(0.0, (w.min(h) / 2.0).max(0.0));
+            let radius = (radius - inset).max(0.0);
+            let (bx, by, bw, bh) = (x + inset, y + inset, w - 2.0 * inset, h - 2.0 * inset);
+            if radius <= 0.0 {
+                // Square corners have no arc to convert, so a plain <rect> is
+                // already free of the kurbo path and is the shorter output.
+                let _ = writeln!(
+                    out,
+                    "{pad}<rect x=\"{bx}\" y=\"{by}\" width=\"{bw}\" height=\"{bh}\" \
+                     fill=\"{fill}\"{stroke}{common}/>",
+                    bx = number(bx),
+                    by = number(by),
+                    bw = number(bw),
+                    bh = number(bh),
+                    common = common()?,
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "{pad}<path d=\"{d}\" fill=\"{fill}\"{stroke}{common}/>",
+                    d = rounded_rect_path(bx, by, bw, bh, radius),
+                    common = common()?,
+                );
+            }
+        }
+
+        ShapeKind::Ellipse => {
+            let (fill, stroke, inset) = shape_paint(shape, w.min(h))?;
+            let _ = writeln!(
+                out,
+                "{pad}<path d=\"{d}\" fill=\"{fill}\"{stroke}{common}/>",
+                d = ellipse_path(x + w / 2.0, y + h / 2.0, w / 2.0 - inset, h / 2.0 - inset),
+                common = common()?,
+            );
+        }
+
+        // A line has no interior: its stroke is centred on the segment rather
+        // than inset, it is not clamped against the box (there is nothing for
+        // it to eat), and `fill` means nothing. With no stroke, or a width of
+        // zero, there is nothing to draw at all — and an empty element that
+        // draws nothing is worse than no element, because it still costs the
+        // rasterizer a pass.
+        ShapeKind::Line => {
+            let Some(stroke) = &shape.stroke else {
+                return Ok(());
+            };
+            if stroke.width <= 0.0 {
+                return Ok(());
+            }
+            let _ = writeln!(
+                out,
+                "{pad}<line x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" \
+                 stroke=\"{color}\" stroke-width=\"{width}\" \
+                 stroke-linecap=\"butt\"{common}/>",
+                x1 = number(x),
+                y1 = number(y + h / 2.0),
+                x2 = number(x + w),
+                y2 = number(y + h / 2.0),
+                color = color(&stroke.color)?,
+                width = number(stroke.width),
+                common = common()?,
+            );
+        }
+
+        ShapeKind::Other(_) => unreachable!("refused above"),
+    }
+
+    Ok(())
+}
+
+/// A rect or ellipse's paint, after the stroke clamp.
+///
+/// Returns the `fill` value, the stroke attributes (empty when there is no
+/// stroke to draw) and the inset to apply to the geometry — `s/2`, or 0 when
+/// nothing is stroked.
+fn shape_paint(shape: &ShapeLayer, minimum: f64) -> Result<(String, String, f64), RenderError> {
+    let fill = match &shape.fill {
+        Some(color_value) => color(color_value)?,
+        None => "none".to_owned(),
+    };
+    let Some(stroke) = &shape.stroke else {
+        return Ok((fill, String::new(), 0.0));
+    };
+
+    // `minimum` is negative only for a box validation would have refused;
+    // `clamp` panics when its bounds cross, so it is floored here rather than
+    // trusted.
+    let width = stroke.width.clamp(0.0, minimum.max(0.0));
+    if width <= 0.0 {
+        return Ok((fill, String::new(), 0.0));
+    }
+    if width >= minimum {
+        // The stroke has eaten the box. Drawn as the whole shape filled in the
+        // stroke colour, which is what the inset rule converges to.
+        return Ok((color(&stroke.color)?, String::new(), 0.0));
+    }
+    Ok((
+        fill,
+        format!(
+            " stroke=\"{}\" stroke-width=\"{}\"",
+            color(&stroke.color)?,
+            number(width)
+        ),
+        width / 2.0,
+    ))
+}
+
+/// A rounded rectangle as four straight edges and four cubic quarter-arcs.
+///
+/// Clockwise from the top-left corner's end. See [`write_shape`] for why the
+/// arcs are cubics rather than an `rx` attribute.
+fn rounded_rect_path(x: f64, y: f64, width: f64, height: f64, radius: f64) -> String {
+    let (x0, y0, x1, y1) = (x, y, x + width, y + height);
+    let r = radius;
+    let k = KAPPA * radius;
+    let mut d = String::new();
+    let _ = write!(d, "M {} {}", number(x0 + r), number(y0));
+    let _ = write!(d, " L {} {}", number(x1 - r), number(y0));
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {}",
+        number(x1 - r + k),
+        number(y0),
+        number(x1),
+        number(y0 + r - k),
+        number(x1),
+        number(y0 + r),
+    );
+    let _ = write!(d, " L {} {}", number(x1), number(y1 - r));
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {}",
+        number(x1),
+        number(y1 - r + k),
+        number(x1 - r + k),
+        number(y1),
+        number(x1 - r),
+        number(y1),
+    );
+    let _ = write!(d, " L {} {}", number(x0 + r), number(y1));
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {}",
+        number(x0 + r - k),
+        number(y1),
+        number(x0),
+        number(y1 - r + k),
+        number(x0),
+        number(y1 - r),
+    );
+    let _ = write!(d, " L {} {}", number(x0), number(y0 + r));
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {} Z",
+        number(x0),
+        number(y0 + r - k),
+        number(x0 + r - k),
+        number(y0),
+        number(x0 + r),
+        number(y0),
+    );
+    d
+}
+
+/// An ellipse as four cubic quadrants, starting at the rightmost point and
+/// running clockwise. See [`write_shape`] for why this is not an `<ellipse>`.
+fn ellipse_path(cx: f64, cy: f64, rx: f64, ry: f64) -> String {
+    let (kx, ky) = (KAPPA * rx, KAPPA * ry);
+    let mut d = String::new();
+    let _ = write!(d, "M {} {}", number(cx + rx), number(cy));
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {}",
+        number(cx + rx),
+        number(cy + ky),
+        number(cx + kx),
+        number(cy + ry),
+        number(cx),
+        number(cy + ry),
+    );
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {}",
+        number(cx - kx),
+        number(cy + ry),
+        number(cx - rx),
+        number(cy + ky),
+        number(cx - rx),
+        number(cy),
+    );
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {}",
+        number(cx - rx),
+        number(cy - ky),
+        number(cx - kx),
+        number(cy - ry),
+        number(cx),
+        number(cy - ry),
+    );
+    let _ = write!(
+        d,
+        " C {} {} {} {} {} {} Z",
+        number(cx + kx),
+        number(cy - ry),
+        number(cx + rx),
+        number(cy - ky),
+        number(cx + rx),
+        number(cy),
+    );
+    d
 }
 
 /// CSS families that name a role rather than a file.
@@ -637,6 +926,37 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
             } => {
                 grain(&mut body, &input, &result, *amount, *seed, *scale);
             }
+            // One primitive, not a decomposition into offset/blur/flood/merge:
+            // resvg implements `feDropShadow` natively, and the two were
+            // measured to produce identical pixels, so the shorter one wins.
+            Effect::DropShadow {
+                dx,
+                dy,
+                blur,
+                color: shadow,
+            } => {
+                let [r, g, b, a] = shadow
+                    .to_rgba()
+                    .ok_or_else(|| RenderError::InvalidColor(shadow.as_str().to_owned()))?;
+                // A shadow's strength is written in its colour's alpha, which
+                // is where every other colour in this document writes it; the
+                // filter wants the two separately. Omitted when opaque so the
+                // common case stays short.
+                let flood_opacity = if a == 255 {
+                    String::new()
+                } else {
+                    format!(" flood-opacity=\"{}\"", number(f64::from(a) / 255.0))
+                };
+                let _ = writeln!(
+                    body,
+                    "      <feDropShadow in=\"{input}\" result=\"{result}\" dx=\"{dx}\" \
+                     dy=\"{dy}\" stdDeviation=\"{blur}\" flood-color=\"#{r:02x}{g:02x}{b:02x}\"\
+                     {flood_opacity}/>",
+                    dx = number(*dx),
+                    dy = number(*dy),
+                    blur = number(*blur),
+                );
+            }
             Effect::Other(_) => {
                 return Err(RenderError::UnsupportedEffect {
                     layer: layer.id.clone(),
@@ -647,10 +967,92 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
         input = result;
     }
 
+    // A percentage region is a percentage of the *bounding box*, which is
+    // exactly the wrong unit for an offset shadow: a thin shape has a small
+    // box, and 50% of a small box is a small margin. A shadow therefore gets
+    // an explicit region in user units; everything else keeps the region it
+    // has always had, so no existing output moves.
+    let region = match shadow_region(layer) {
+        Some((x, y, width, height)) => format!(
+            "filterUnits=\"userSpaceOnUse\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
+            number(x),
+            number(y),
+            number(width),
+            number(height),
+        ),
+        None => "x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"".to_owned(),
+    };
+
     Ok(format!(
-        "    <filter id=\"{id}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\" \
-         color-interpolation-filters=\"sRGB\">\n{body}    </filter>\n",
+        "    <filter id=\"{id}\" {region} color-interpolation-filters=\"sRGB\">\n\
+         {body}    </filter>\n",
         id = filter_id(layer),
+    ))
+}
+
+/// The user-space filter region for a stack that casts a shadow, if it does.
+///
+/// The union of the layer's box and its offset copy, expanded on each side by
+/// the larger of half that axis's box side and `ceil(3σ) + 1`, σ being the
+/// largest blur anywhere in the stack — a Gaussian blur earlier in the chain
+/// widens the thing the shadow is cast from, so it counts too. `ceil(3σ) + 1`
+/// was measured against both of resvg's blur implementations: the box branch
+/// (σ ≥ 2) needs 2.875σ and the IIR branch below it needs 3.33σ, and the `+ 1`
+/// is what keeps the IIR case from having zero slack. A region that is too
+/// large costs memory and changes nothing, so erring wide is safe.
+///
+/// The trade-off, stated plainly: the region is sized from the layer's *box*,
+/// so content that paints more than half a box outside it — an overflowing
+/// text layer, a group whose children spill past its bounds — can have the
+/// far edge of its shadow clipped. Sizing from real content bounds would mean
+/// measuring every glyph and every descendant here, and this function is
+/// deliberately arithmetic on the transform, which is the same on every
+/// machine.
+///
+/// A group's box starts at the origin: its `<g>` carries a `translate`, so its
+/// children and its filter both live in that translated space.
+fn shadow_region(layer: &Layer) -> Option<(f64, f64, f64, f64)> {
+    let mut offsets = Vec::new();
+    let mut sigma: f64 = 0.0;
+    for effect in &layer.effects {
+        match effect {
+            Effect::DropShadow { dx, dy, blur, .. } => {
+                offsets.push((*dx, *dy));
+                sigma = sigma.max(*blur);
+            }
+            Effect::Blur { radius } => sigma = sigma.max(*radius),
+            _ => {}
+        }
+    }
+    if offsets.is_empty() {
+        return None;
+    }
+
+    let t = &layer.transform;
+    let (box_x, box_y) = if matches!(&layer.kind, LayerKind::Group(_)) {
+        (0.0, 0.0)
+    } else {
+        (t.x, t.y)
+    };
+    let (box_w, box_h) = (t.width, t.height);
+
+    let (mut x0, mut y0) = (box_x, box_y);
+    let (mut x1, mut y1) = (box_x + box_w, box_y + box_h);
+    for (dx, dy) in offsets {
+        x0 = x0.min(box_x + dx);
+        y0 = y0.min(box_y + dy);
+        x1 = x1.max(box_x + box_w + dx);
+        y1 = y1.max(box_y + box_h + dy);
+    }
+
+    let blur_margin = (3.0 * sigma).ceil() + 1.0;
+    let margin_x = (0.5 * box_w).max(blur_margin);
+    let margin_y = (0.5 * box_h).max(blur_margin);
+    Some((
+        x0 - margin_x,
+        y0 - margin_y,
+        (x1 - x0) + 2.0 * margin_x,
+        (y1 - y0) + 2.0 * margin_y,
     ))
 }
 

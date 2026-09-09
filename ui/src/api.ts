@@ -346,6 +346,39 @@ export async function uploadAsset(
 /** The fit modes the engine draws an image or SVG asset with. */
 export const IMAGE_FITS = ["fill", "contain", "cover"] as const;
 
+/** The shape kinds this build draws, and what each is called in the panel. */
+export const SHAPE_KINDS = ["rect", "ellipse", "line"] as const;
+
+/**
+ * The `kind` of a shape layer's geometry, or `null` if there is not one.
+ *
+ * The generated `ShapeKind` widens to `unknown` in TypeScript, because its
+ * catch-all arm carries any JSON a newer build might write. So the kind is
+ * read once, defensively, here — rather than asserted at each of the three
+ * places that want it — and a shape whose kind this build does not know is
+ * simply reported as itself.
+ */
+export function shapeKindOf(layer: Layer): string | null {
+  if (layer.type !== "shape") return null;
+  const shape: unknown = layer.shape;
+  if (shape && typeof shape === "object" && !Array.isArray(shape)) {
+    const kind = (shape as Record<string, unknown>)["kind"];
+    if (typeof kind === "string") return kind;
+  }
+  return null;
+}
+
+/** A rect shape's corner radius, with the schema's default applied. */
+export function cornerRadiusOf(layer: Layer): number {
+  if (layer.type !== "shape") return 0;
+  const shape: unknown = layer.shape;
+  if (shape && typeof shape === "object") {
+    const radius = (shape as Record<string, unknown>)["cornerRadius"];
+    if (typeof radius === "number") return radius;
+  }
+  return 0;
+}
+
 /** One effect in a layer's stack, as the document stores it. */
 export type Effect = NonNullable<Layer["effects"]>[number] & {
   type: string;
@@ -385,28 +418,55 @@ export const EFFECT_TYPES = [
   "saturation",
   "blur",
   "grain",
+  "dropShadow",
 ] as const;
 
-/** The one number worth editing for an effect, and what it is called. */
-export function effectParameter(
-  effect: Effect,
-): { name: string; value: number } | null {
-  const named = (name: string): { name: string; value: number } | null => {
+/** One editable field of an effect: what it is called, and what it holds. */
+export interface EffectField {
+  name: string;
+  value: number | string;
+  /** `number` gets a number input; `color` gets `#rrggbb` or `#rrggbbaa`. */
+  kind: "number" | "color";
+}
+
+/**
+ * The fields worth editing for an effect, in the order they are shown.
+ *
+ * Most effects have exactly one number; `dropShadow` has four values and no
+ * single one of them is "the" parameter, so this returns a list rather than
+ * the one number the earlier shape assumed.
+ */
+export function effectFields(effect: Effect): EffectField[] {
+  const number = (name: string): EffectField[] => {
     const value = effect[name];
-    return typeof value === "number" ? { name, value } : null;
+    return typeof value === "number" ? [{ name, value, kind: "number" }] : [];
   };
   switch (effect.type) {
     case "brightness":
     case "contrast":
     case "saturation":
     case "grain":
-      return named("amount");
+      return number("amount");
     case "blur":
-      return named("radius");
+      return number("radius");
+    case "dropShadow": {
+      const colour = effect["color"];
+      return [
+        ...number("dx"),
+        ...number("dy"),
+        ...number("blur"),
+        // A colour input cannot hold the alpha this effect's default carries
+        // (`#00000080`), and silently dropping it would change the picture
+        // on the first edit, so the colour is typed as text.
+        ...(typeof colour === "string"
+          ? [{ name: "color", value: colour, kind: "color" } as EffectField]
+          : []),
+      ];
+    }
     default:
       // An effect this build does not know is shown but not edited: changing
       // a number in something we cannot draw would be guessing.
-      return null;
+      return [];
   }
 }
 
@@ -415,7 +475,8 @@ export function effectParameter(
  *
  * Neutral rather than "a nice default": adding an effect should change
  * nothing until a number is typed, so the picture never moves under someone
- * who was only exploring the menu. Grain's seed is fixed rather than random
+ * who was only exploring the menu. `dropShadow` is the exception, and says
+ * why below. Grain's seed is fixed rather than random
  * for the same reason the engine takes one at all — the same document must
  * produce the same noise.
  */
@@ -425,6 +486,12 @@ export function newEffect(type: string): Effect {
       return { type: "blur", radius: 0 } as Effect;
     case "grain":
       return { type: "grain", amount: 0, seed: 1, scale: 1 } as Effect;
+    case "dropShadow":
+      // The one effect that cannot be neutral: a shadow at dx 0, dy 0, blur 0
+      // and full black is an invisible copy of the layer under itself, which
+      // looks like the control did nothing. These are the numbers the design
+      // contract names, and every one of them is editable in the row.
+      return { type: "dropShadow", dx: 4, dy: 4, blur: 6, color: "#00000080" } as Effect;
     default:
       return { type, amount: 1 } as Effect;
   }
@@ -473,6 +540,14 @@ export function styleOf(layer: Layer): Record<string, unknown> {
     properties["color"] = layer.color ?? "#000000";
     properties["align"] = layer.align ?? "left";
     properties["lineHeight"] = layer.lineHeight ?? 1.2;
+  }
+  if (layer.type === "shape") {
+    // A preset cannot clear a paint, so a shape with no fill contributes no
+    // `fill` rather than a null that would mean something the format cannot
+    // express. The geometry is not style: a preset saved from a rect applies
+    // to an ellipse.
+    if (layer.fill) properties["fill"] = layer.fill;
+    if (layer.stroke) properties["stroke"] = layer.stroke;
   }
   return properties;
 }

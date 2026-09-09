@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::document::{Color, Document, Effect, Layer, LayerKind};
+use crate::document::{Color, Document, Effect, Layer, LayerKind, ShapeKind, ShapeLayer};
 use crate::error::{ValidationError, ValidationErrors};
 use crate::ids::AssetId;
 use crate::SCHEMA_VERSION;
@@ -187,9 +187,61 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
                 });
             }
         }
+        LayerKind::Shape(shape) => check_shape(layer, shape, errors),
         // Children are visited by the caller's walk; nothing group-specific
         // to check beyond what every layer gets.
         LayerKind::Group(_) => {}
+    }
+}
+
+/// Checks a shape layer's geometry and its paint.
+///
+/// A geometry this build does not know is *not* an error, exactly as an
+/// unknown effect is not: preserving it is the point, and a document full of a
+/// newer build's shapes should still validate and list. It is refused where it
+/// matters — on `update`, and at render.
+///
+/// A shape with neither fill nor stroke is valid. Invisible is a thing a
+/// document is allowed to be (so is `opacity: 0`), and refusing it would mean
+/// an editor could not clear one paint before choosing the other.
+fn check_shape(layer: &Layer, shape: &ShapeLayer, errors: &mut Vec<ValidationError>) {
+    let mut bad = |field: &'static str, expected: &'static str, value: f64| {
+        errors.push(ValidationError::InvalidShape {
+            layer: layer.id.clone(),
+            field,
+            expected,
+            value,
+        });
+    };
+
+    match &shape.shape {
+        ShapeKind::Rect { corner_radius } => {
+            // No upper bound: a radius larger than the box is clamped to a
+            // stadium when it is drawn, which is what somebody dragging a
+            // corner-radius slider to the end means.
+            if !corner_radius.is_finite() || *corner_radius < 0.0 {
+                bad(
+                    "cornerRadius",
+                    "a finite number of 0 or more",
+                    *corner_radius,
+                );
+            }
+        }
+        ShapeKind::Ellipse | ShapeKind::Line => {}
+        ShapeKind::Other(_) => {}
+    }
+
+    if let Some(stroke) = &shape.stroke {
+        if !stroke.width.is_finite() || stroke.width < 0.0 {
+            bad("stroke.width", "a finite number of 0 or more", stroke.width);
+        }
+    }
+
+    if let Some(fill) = &shape.fill {
+        check_color(fill, &format!("layer {} fill", layer.id), errors);
+    }
+    if let Some(stroke) = &shape.stroke {
+        check_color(&stroke.color, &format!("layer {} stroke", layer.id), errors);
     }
 }
 
@@ -240,7 +292,35 @@ fn check_effects(layer: &Layer, errors: &mut Vec<ValidationError>) {
                     bad("scale", "a finite number greater than 0", *scale);
                 }
             }
+            Effect::DropShadow {
+                dx,
+                dy,
+                blur,
+                color: _,
+            } => {
+                // No bound on the offset: a shadow thrown well clear of its
+                // layer is a legitimate long-shadow look, and the renderer
+                // sizes the filter region from the offset it is given.
+                for (field, value) in [("dx", *dx), ("dy", *dy)] {
+                    if !value.is_finite() {
+                        bad(field, "a finite number", value);
+                    }
+                }
+                if !blur.is_finite() || *blur < 0.0 {
+                    bad("blur", "a finite number of 0 or more", *blur);
+                }
+            }
             Effect::Other(_) => {}
+        }
+
+        // Outside the match: `bad` holds the only mutable borrow of `errors`
+        // while it is alive, and the colour check needs one of its own.
+        if let Effect::DropShadow { color, .. } = effect {
+            check_color(
+                color,
+                &format!("layer {} effect dropShadow", layer.id),
+                errors,
+            );
         }
     }
 }
@@ -279,10 +359,10 @@ fn is_sha256(hash: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::panic)]
 
     use super::*;
-    use crate::document::{Asset, Extras, ImageFit, ImageLayer, Transform};
+    use crate::document::{Asset, Extras, ImageFit, ImageLayer, Stroke, Transform};
     use crate::ids::{LayerId, SequentialIdSource};
 
     fn document() -> Document {
@@ -428,5 +508,163 @@ mod tests {
 
         let found = errors(&doc);
         assert_eq!(found.len(), 4, "{found:?}");
+    }
+
+    fn shape_layer(shape: ShapeKind) -> Layer {
+        Layer::new(
+            LayerId::new("layer_1"),
+            Transform::new(0.0, 0.0, 40.0, 20.0),
+            LayerKind::Shape(ShapeLayer {
+                shape,
+                fill: Some(Color::new("#3366cc")),
+                stroke: Some(Stroke {
+                    color: Color::new("#112233"),
+                    width: 2.0,
+                }),
+                extra: Extras::new(),
+            }),
+        )
+    }
+
+    fn shape_document(shape: ShapeKind) -> Document {
+        let mut doc = document();
+        doc.layers.push(shape_layer(shape));
+        doc
+    }
+
+    #[test]
+    fn a_well_formed_shape_is_valid() {
+        for shape in [
+            ShapeKind::Rect { corner_radius: 8.0 },
+            ShapeKind::Ellipse,
+            ShapeKind::Line,
+        ] {
+            let doc = shape_document(shape);
+            assert!(validate(&doc).is_ok(), "{:?}", validate(&doc));
+        }
+    }
+
+    #[test]
+    fn a_negative_or_nan_corner_radius_is_rejected() {
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            let doc = shape_document(ShapeKind::Rect { corner_radius: bad });
+            assert!(
+                errors(&doc).iter().any(|e| matches!(
+                    e,
+                    ValidationError::InvalidShape {
+                        field: "cornerRadius",
+                        ..
+                    }
+                )),
+                "cornerRadius {bad} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_negative_or_nan_stroke_width_is_rejected() {
+        for bad in [-0.5, f64::NAN] {
+            let mut doc = shape_document(ShapeKind::Ellipse);
+            let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
+                panic!("expected a shape");
+            };
+            shape.stroke = Some(Stroke {
+                color: Color::new("#112233"),
+                width: bad,
+            });
+            assert!(
+                errors(&doc).iter().any(|e| matches!(
+                    e,
+                    ValidationError::InvalidShape {
+                        field: "stroke.width",
+                        ..
+                    }
+                )),
+                "stroke width {bad} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_fill_or_stroke_colour_names_which_one() {
+        let mut doc = shape_document(ShapeKind::Ellipse);
+        let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
+            panic!("expected a shape");
+        };
+        shape.fill = Some(Color::new("nope"));
+        shape.stroke = Some(Stroke {
+            color: Color::new("also nope"),
+            width: 1.0,
+        });
+
+        let found = errors(&doc);
+        assert_eq!(found.len(), 2, "{found:?}");
+        let contexts: Vec<&str> = found
+            .iter()
+            .filter_map(|e| match e {
+                ValidationError::InvalidColor { context, .. } => Some(context.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(contexts, vec!["layer layer_1 fill", "layer layer_1 stroke"]);
+    }
+
+    #[test]
+    fn a_shape_with_no_fill_and_no_stroke_is_valid() {
+        // Invisible is allowed, for the same reason `opacity: 0` is.
+        let mut doc = shape_document(ShapeKind::Rect { corner_radius: 0.0 });
+        let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
+            panic!("expected a shape");
+        };
+        shape.fill = None;
+        shape.stroke = None;
+        assert!(validate(&doc).is_ok(), "{:?}", validate(&doc));
+    }
+
+    #[test]
+    fn an_unknown_shape_kind_validates() {
+        // Preserved, not refused — the same bargain `Effect::Other` gets.
+        let doc = shape_document(ShapeKind::Other(
+            serde_json::json!({ "kind": "star", "points": 5 }),
+        ));
+        assert!(validate(&doc).is_ok(), "{:?}", validate(&doc));
+    }
+
+    #[test]
+    fn a_drop_shadow_is_checked_number_by_number() {
+        let mut doc = shape_document(ShapeKind::Ellipse);
+        doc.layers[0].effects = vec![Effect::DropShadow {
+            dx: f64::NAN,
+            dy: 2.0,
+            blur: -1.0,
+            color: Color::new("#zzz"),
+        }];
+
+        let found = errors(&doc);
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert!(found.iter().any(|e| matches!(
+            e,
+            ValidationError::InvalidEffect {
+                field: "dx",
+                effect,
+                ..
+            } if effect == "dropShadow"
+        )));
+        assert!(found
+            .iter()
+            .any(|e| matches!(e, ValidationError::InvalidEffect { field: "blur", .. })));
+        assert!(found.iter().any(|e| matches!(
+            e,
+            ValidationError::InvalidColor { context, .. }
+            if context == "layer layer_1 effect dropShadow"
+        )));
+
+        doc.layers[0].effects = vec![Effect::DropShadow {
+            dx: 0.0,
+            dy: 0.0,
+            blur: 0.0,
+            color: Color::new("#00000080"),
+        }];
+        assert!(validate(&doc).is_ok(), "a glow is a shadow with no offset");
     }
 }

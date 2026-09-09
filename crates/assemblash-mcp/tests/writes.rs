@@ -307,6 +307,238 @@ async fn a_real_client_applies_a_reversible_operation() {
     client.cancel().await.unwrap();
 }
 
+/// Shape creation, paint clearing, and undo use the real MCP transport.
+#[tokio::test]
+async fn shape_tools_apply_defaults_clear_paint_and_undo() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+
+    let rect = structured(
+        &client
+            .call_tool(call(
+                "add_shape_layer",
+                args(json!({
+                    "shape": "rect",
+                    "x": 20.0,
+                    "y": 20.0,
+                    "width": 120.0,
+                    "height": 80.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(rect["version"], 1);
+    let rect_id = rect["created"][0].as_str().unwrap().to_owned();
+    let journal =
+        std::fs::read_to_string(root.join("projects/poster/history/journal.jsonl")).unwrap();
+    assert_eq!(journal.lines().count(), 1, "one shape create is journalled");
+
+    let listed = structured(&client.call_tool(call("list_layers", None)).await.unwrap());
+    let rect_summary = listed["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|layer| layer["id"] == rect_id.as_str())
+        .unwrap();
+    assert_eq!(rect_summary["kind"], "shape");
+    assert_eq!(rect_summary["shape"], "rect");
+
+    let state = structured(
+        &client
+            .call_tool(call("get_document_state", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(layer_of(&state, &rect_id)["fill"], "#000000");
+    assert!(layer_of(&state, &rect_id)["stroke"].is_null());
+
+    let line = structured(
+        &client
+            .call_tool(call(
+                "add_shape_layer",
+                args(json!({
+                    "shape": "line",
+                    "x": 20.0,
+                    "y": 120.0,
+                    "width": 120.0,
+                    "height": 10.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let line_id = line["created"][0].as_str().unwrap().to_owned();
+    let state = structured(
+        &client
+            .call_tool(call("get_document_state", None))
+            .await
+            .unwrap(),
+    );
+    let line_layer = layer_of(&state, &line_id);
+    assert!(line_layer["fill"].is_null());
+    assert_eq!(line_layer["stroke"]["color"], "#000000");
+    assert_eq!(line_layer["stroke"]["width"], 1.0);
+
+    let ellipse = structured(
+        &client
+            .call_tool(call(
+                "add_shape_layer",
+                args(json!({
+                    "shape": "ellipse",
+                    "x": 20.0,
+                    "y": 160.0,
+                    "width": 120.0,
+                    "height": 80.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let ellipse_id = ellipse["created"][0].as_str().unwrap().to_owned();
+    let before_invalid_create = document_bytes(&root);
+    let invalid_create = client
+        .call_tool(call(
+            "add_shape_layer",
+            args(json!({
+                "shape": "ellipse",
+                "cornerRadius": 4.0,
+                "x": 20.0,
+                "y": 160.0,
+                "width": 120.0,
+                "height": 80.0
+            })),
+        ))
+        .await
+        .expect_err("an ellipse cannot receive a corner radius at create time");
+    let invalid_create_text = format!("{invalid_create:?}");
+    assert!(
+        invalid_create_text.contains("ellipse"),
+        "{invalid_create_text}"
+    );
+    assert_eq!(document_bytes(&root), before_invalid_create);
+
+    let filled = structured(
+        &client
+            .call_tool(call(
+                "update_layer",
+                args(json!({ "layerId": rect_id, "fill": "#ff0000" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(filled["version"], 4);
+    let before_clear = document_bytes(&root);
+
+    let conflict = client
+        .call_tool(call(
+            "update_layer",
+            args(json!({
+                "layerId": rect_id,
+                "fill": "#00ff00",
+                "clearFill": true
+            })),
+        ))
+        .await
+        .expect_err("fill and clearFill must be rejected before writing");
+    let conflict_text = format!("{conflict:?}");
+    assert!(conflict_text.contains("clearFill"), "{conflict_text}");
+    assert_eq!(document_bytes(&root), before_clear);
+    let unchanged = structured(
+        &client
+            .call_tool(call("get_document_state", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(unchanged["version"], 4);
+    assert_eq!(layer_of(&unchanged, &rect_id)["fill"], "#ff0000");
+
+    let cleared = structured(
+        &client
+            .call_tool(call(
+                "update_layer",
+                args(json!({ "layerId": rect_id, "clearFill": true })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(cleared["version"], 5);
+    let state = structured(
+        &client
+            .call_tool(call("get_document_state", None))
+            .await
+            .unwrap(),
+    );
+    assert!(layer_of(&state, &rect_id)["fill"].is_null());
+
+    let wrong_kind_before = document_bytes(&root);
+    let wrong_kind = client
+        .call_tool(call(
+            "update_layer",
+            args(json!({ "layerId": ellipse_id, "cornerRadius": 4.0 })),
+        ))
+        .await
+        .expect_err("an ellipse has no corner radius");
+    let wrong_kind_text = format!("{wrong_kind:?}");
+    assert!(wrong_kind_text.contains("ellipse"), "{wrong_kind_text}");
+    assert!(
+        wrong_kind_text.contains("operationRefused"),
+        "{wrong_kind_text}"
+    );
+    assert_eq!(document_bytes(&root), wrong_kind_before);
+
+    let undone = structured(&client.call_tool(call("undo", None)).await.unwrap());
+    assert_eq!(undone["version"], 4);
+    assert_eq!(document_bytes(&root), before_clear);
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn render_document_renders_a_shape_layer() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+    client
+        .call_tool(call(
+            "add_shape_layer",
+            args(json!({
+                "shape": "rect",
+                "x": 20.0,
+                "y": 20.0,
+                "width": 120.0,
+                "height": 80.0
+            })),
+        ))
+        .await
+        .unwrap();
+
+    let rendered = structured(
+        &client
+            .call_tool(call("render_document", None))
+            .await
+            .unwrap(),
+    );
+    assert!(rendered["svg"].as_str().unwrap().starts_with("<svg"));
+    assert_eq!(rendered["width"], 400);
+    assert_eq!(rendered["height"], 300);
+
+    client.cancel().await.unwrap();
+}
+
 /// MVP criterion 11 — protected and locked layers refuse every agent tool.
 #[tokio::test]
 async fn protected_and_locked_layers_refuse_every_mutating_tool() {

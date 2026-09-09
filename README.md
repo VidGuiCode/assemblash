@@ -25,15 +25,15 @@ interface, a local HTTP API, an embedded Rust API, and an MCP server. Every
 interface goes through the same validated operation layer, so a change made by
 an agent behaves like a change made by a person.
 
-**Current release: 1.5.0.** The document schema and operation API have been
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.5.0)
+**Current release: 1.6.0.** The document schema and operation API have been
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.6.0)
 or [changelog](CHANGELOG.md) for the full history.
 
 <p align="center">
-  <img src="assets/assemblash-example.png" width="960" alt="A dark Assemblash launch card reading Build visuals that stay editable, with capability labels and a layered red composition">
+  <img src="assets/assemblash-example.png" width="960" alt="A near-white diagram in Assemblash red and black: a white outlined document sheet with a simple layout on it and two earlier sheets behind it; on the left, terminal and node-graph icons labelled CLI and MCP connect to it, on the right a cursor icon labelled Canvas; the Assemblash mark and wordmark centred above, and one centred line below, Visuals that stay editable">
 </p>
 
-<p align="center"><sub>Created as a structured Assemblash document and exported by the deterministic renderer. <a href="examples/launch-card">Inspect the editable project.</a></sub></p>
+<p align="center"><sub>Created as a structured Assemblash document and exported by the deterministic renderer. <a href="examples/readme-hero">Inspect the editable project.</a></sub></p>
 
 ## Why Assemblash?
 
@@ -103,7 +103,7 @@ the tap is **not published yet**, so there is no `brew install` to run today.
 Building requires [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.5.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.6.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -115,12 +115,16 @@ into a local store once, then use that same store when exporting:
 assemblash font install "Noto Sans" --font-store ./assemblash-fonts
 assemblash new ./poster --width 800 --height 400 --background '#f6f4ef'
 assemblash add-text ./poster --text "Hello" --font "Noto Sans" --size 64 --x 40 --y 40 --width 720 --height 120
+assemblash add-rect ./poster --x 40 --y 200 --width 240 --height 96 --fill '#1d1d1f' --corner-radius 12
 assemblash export ./poster --out poster.png --font-store ./assemblash-fonts
 ```
 
 Already have a font file? Use `--font /path/to/SomeFont.ttf` or
 `--font-dir /path/to/fonts` instead. Run `assemblash --help` or
 `assemblash <command> --help` for the complete command reference.
+
+`add-ellipse` and `add-line` take the same box flags; a line's box is the line,
+so `--width` is its length and `--rotation` its angle.
 
 The editor manages the same store without a terminal. Its Add panel has a
 **Fonts** section (1.5.0 and newer) that lists the installed families and their
@@ -134,8 +138,8 @@ operating system's fonts or the file you imported from.
 
 To change a layer afterwards, `assemblash set` reaches every updatable
 property — name, position, size, rotation, opacity, visibility, lock, blend
-mode, effect stack, text, font, size, colour, alignment, line height, fit, and
-asset:
+mode, effect stack, text, font, size, colour, alignment, line height, fill,
+stroke, stroke width, corner radius, fit, and asset:
 
 ```sh
 assemblash set ./poster --layer <LAYER_ID> --color '#1d1d1f' --size 72 --line-height 1.4
@@ -176,7 +180,8 @@ runs in a modern browser and is served by the executable itself.
 ### A structured document engine
 
 - Canvas dimensions and background settings
-- Text, raster image, SVG, and nested group layers
+- Text, raster image, SVG, shape, and nested group layers
+- Rectangle, ellipse, and line shapes with fill, stroke, and corner radius
 - Position, size, rotation, scale, opacity, visibility, and ordering
 - Stable IDs, metadata, locking, duplication, grouping, and ungrouping
 - Alignment, centering, distribution, snapping, bounds, and overlap queries
@@ -201,8 +206,8 @@ The published contracts live in [`schema/`](schema/).
 Assemblash converts a document to SVG as a pure function and rasterizes it with
 `resvg` and `tiny-skia`. It supports PNG export, compatible SVG export,
 configurable output dimensions, fourteen deterministic blend modes, and a
-non-destructive effect stack for brightness, contrast, saturation, blur, and
-seeded grain.
+non-destructive effect stack for brightness, contrast, saturation, blur,
+seeded grain, and drop shadow — a glow being that shadow with no offset.
 
 Fonts are loaded only from files you explicitly provide or install into the
 font store. Their bytes are hashed and pinned, which keeps typography and
@@ -356,6 +361,13 @@ Canvas editing requires 1.4.0 or newer. Once a project records
 that journal operation, even after undo. Continue using the newer binary;
 do not edit the journal. The document schema remains version 1.
 
+The Add panel's **Shapes** row (1.6.0 and newer) adds a rectangle, an ellipse
+or a line, and a shape's inspector then edits Fill, Stroke, Stroke width and,
+for a rectangle, Corner radius — each row one undoable change, with a **None**
+button beside each paint for removing it. A drop shadow is an effect rather
+than a shape property: add `dropShadow` to any layer's effect stack and set its
+`dx`, `dy`, `blur` and colour, leaving both offsets at 0 for a glow.
+
 ## Stability and current limits
 
 Assemblash 1.x makes two compatibility promises:
@@ -372,6 +384,12 @@ The important limits are stated plainly:
 - AI image/provider adapters do not ship and are out of scope for the core.
 - Fourteen blend modes are supported. `color-dodge` and `color-burn` are
   refused because they are not bit-identical across every target.
+- A document containing a shape layer needs 1.6.0 or newer: 1.0 through 1.5
+  refuse to read the whole document, naming `shape` as a layer kind they do
+  not know.
+- A shape's stroke is painted inside its box, so the box is the visual box —
+  except below width 1, where the stroke is drawn as a hairline centred on the
+  edge and may spill up to half a pixel outside the box.
 - Built-in authentication is one shared token. Accounts, roles, OIDC, SSO,
   TLS, and per-user audit identity belong in a reverse proxy.
 - The editor is intentionally a reference client rather than a complete

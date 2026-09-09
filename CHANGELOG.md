@@ -10,6 +10,147 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-09-09
+
+No 1.5.1 was released: no defect was outstanding after 1.5.0.
+
+A rectangle, an ellipse and a line stop being things you draw elsewhere and
+import: they are layers this document draws itself, with fill, stroke and
+corner radius as ordinary properties. A drop shadow joins the effect stack,
+and a glow is that shadow with no offset rather than a second thing to keep
+bit-identical.
+
+### Added
+
+- **Shape layers, a fifth layer kind.** A `shape` layer draws a rectangle, an
+  ellipse or a line from the document itself, so a badge, a rule or a panel
+  no longer needs an imported file that nothing here can edit afterwards. The
+  transform box *is* the geometry — a rect fills it, an ellipse is inscribed
+  in it — which means `move`, `resize` and `rotate` mean for a shape exactly
+  what they already mean for every other layer, and layout bounds stay the
+  box.
+- **A line is its box.** `width` is the segment's length, `rotation` is its
+  angle, and `height` is layout only: the line runs across the middle of the
+  box, left edge to right edge. A second pair of endpoint coordinates would
+  have been a second way of saying where a layer is, and every operation that
+  moves a layer would then have meant something different for this one kind
+  than for the other four.
+- **`fill` and `stroke`.** `fill` is the interior paint, `stroke` is
+  `{ color, width }`, and either may be absent — absent meaning *no paint*,
+  which is SVG's `fill="none"` and not black. A shape with neither is a valid
+  document, for the same reason `opacity: 0` is one: an editor has to be able
+  to clear one paint before choosing the other.
+- **A stroke is painted inward on a rect and an ellipse**, so the transform
+  box is the visual box and nothing that reasons about layout has to know
+  whether a shape is stroked. A line has no interior, so its stroke is
+  centred on the segment instead. A width larger than the shorter side of the
+  box fills the shape in the stroke colour, which is the continuous limit of
+  the same rule — clamping the box instead would make an over-stroked shape
+  vanish entirely one step after it still filled its box.
+- **One measured caveat, on strokes thinner than a pixel.** A width below one
+  device pixel is drawn as a hairline centred on the geometric edge, and a
+  hairline always covers a whole pixel row, so a 0.5-wide stroke spills up to
+  half a pixel outside the box on each side. It is deterministic and
+  identical on every target, so it is written down here rather than refused —
+  but below width 1 the box is not quite the visual box.
+- **A `dropShadow` effect**, with `dx`, `dy`, `blur` and `color`. A glow is
+  this with `dx` and `dy` at 0: there is no second primitive, because two
+  names for one filter would be two things to keep bit-identical for no gain.
+  An `#rrggbbaa` alpha becomes the shadow's flood opacity, so a shadow's
+  strength is written where every other colour in the document writes it. A
+  fractional offset is resampled by the filter and reads slightly softer;
+  whole-pixel offsets give the crispest edge.
+- **Presets carry `fill` and `stroke`.** A preset that omits one leaves it
+  alone, and there is no spelling that clears a paint from a preset: a preset
+  says what it sets, and one that could silently remove paint would be a
+  different kind of thing.
+- **A colour slot may target a shape's fill.** A template's colour slot now
+  accepts a text layer or a shape layer and resolves to the right property
+  when it is filled — a text layer's `color`, a shape layer's `fill` —
+  because those are one question asked of two layer kinds. Stroke colour is
+  not slot-able anywhere in 1.x, so a template cannot repaint an edge.
+- **CLI `add-rect`, `add-ellipse` and `add-line`**, each taking the `--x`,
+  `--y`, `--width`, `--height`, `--rotation`, `--opacity` and `--layer-name`
+  flags `add-text` already has. `add-rect` and `add-ellipse` take `--fill`
+  (default `#000000`, or `none`), `--stroke` and `--stroke-width`, and
+  `add-rect` also takes `--corner-radius`; `add-line` takes `--stroke`
+  (default `#000000`) and `--stroke-width` and no fill, because a line has no
+  interior to paint.
+- **`set` gains `--fill`, `--stroke`, `--stroke-width` and
+  `--corner-radius`**, still one operation however many flags are given.
+  `--fill none` and `--stroke none` clear a paint, and a colour on its own
+  keeps the width the layer is already drawn with. `--stroke-width` on its
+  own is refused on a shape that has no stroke to take a colour from: a width
+  without a colour is not a stroke, and inventing a colour nobody asked for
+  is the kind of quiet guess this engine does not make.
+- **MCP `add_shape_layer`**, taking `shape` (`rect`, `ellipse` or `line`),
+  `cornerRadius`, `fill`, `stroke` as `{ color, width }` and `name` beside
+  the same placement, box and write arguments as `add_text_layer` — taking
+  the server from 44 tools to 45. `update_layer` gains `fill`, `stroke` and
+  `cornerRadius`, with `clearFill` and `clearStroke` for removing a paint,
+  because a JSON null in a tool argument cannot be told apart from an
+  argument nobody sent. A layer summary reports `kind` `shape` and a `shape`
+  field naming the geometry, so an agent listing layers can tell a rect from
+  a line without reading the document.
+- **A Shapes row in the reference interface's Add panel** — Rectangle,
+  Ellipse, Line — and a Shape inspector with Fill, Stroke, Stroke width and,
+  for a rectangle, Corner radius, each row sending exactly one `update`.
+  `dropShadow` is in the add-effect menu with all four of its fields, and the
+  layer tree shows a shape's geometry in its icon.
+- **Two new reference documents in the render gate**, `shapes` and `shadow`,
+  so every shape and shadow path is checked byte-for-byte on all six released
+  targets rather than only on the machine that wrote it.
+
+### Changed
+
+- **An asset upload may be up to 64 MiB**, the ceiling a font import has had
+  since 1.5.0. Until now this route ran under the web framework's 2 MB
+  default, so a photograph from a phone was refused for being an ordinary
+  photograph. Both upload routes now answer a body over their limit with the
+  same JSON error envelope as every other failure — status 413, code
+  `payloadTooLarge`, and a message naming the limit in MiB — rather than the
+  framework's plain-text refusal, because a client that learned to read this
+  API's errors one way should not have to learn a second way for the most
+  ordinary mistake an upload can make.
+
+### Fixed
+
+- **A font family literally named `catalogue` or `install` can now be
+  removed.** `GET /api/fonts/catalogue` and `POST /api/fonts/install` are
+  fixed path segments, and a fixed segment wins over `/api/fonts/{family}`:
+  a family with one of those two names could be imported and listed but never
+  deleted, and the answer to trying was a 405 with nothing a client could do
+  about it. `DELETE` now sits on both paths and removes the family of that
+  name.
+
+### Compatibility
+
+- `schemaVersion` stays **1**, and the `Operation` union is additive: one new
+  `create` payload for a shape layer and three new `update` properties. No
+  existing operation or document field changes shape.
+- **1.0 through 1.5 refuse a document that contains a shape layer — the whole
+  document, not the layer.** `show`, `history` and every other command exit 1
+  with `` unknown variant `shape`, expected one of `text`, `image`, `group`,
+  `svg` `` and the line and column where the read stopped. This is the first
+  1.x feature that makes a released build refuse a project rather than open it
+  with less in it, which is why a new layer kind is a `.0` and is named here
+  rather than left to be discovered. There is nothing to migrate and nothing
+  to repair in the file: open the project with 1.6.0 or newer.
+- **A `dropShadow` effect is the gentler story.** Every 1.3.0-and-newer build
+  keeps it in the document verbatim and refuses only the render, with
+  `effect "dropShadow" is not one this build renders` naming the layer;
+  unrelated edits to the same project still succeed, and the effect is still
+  there afterwards. The way back is the same one: render with 1.6.0 or newer.
+- **Rounded corners and ellipses are emitted as cubic curves rather than as
+  SVG arcs**, so the rasteriser's own arc conversion — which reaches the
+  platform's maths library, where two operating systems are free to disagree
+  in the last bit — is never on the path to a pixel.
+- **A layer that casts a shadow gets an explicit filter region** in user units
+  rather than the percentage-of-bounding-box default, which is the wrong unit
+  for an offset shadow; the trade-off is that content reaching more than half
+  a box beyond the layer's box may have its shadow clipped, while a stack
+  with no shadow keeps exactly the region it has always had.
+
 ## [1.5.0] — 2026-09-09
 
 No 1.4.1 was released: no defect was outstanding after 1.4.0.

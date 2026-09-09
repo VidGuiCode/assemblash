@@ -1,7 +1,8 @@
 # Launch card example
 
-This is the editable Assemblash project behind the launch card shown in the
-main README. It is a real document, not a design mockup or generated image.
+This is the editable Assemblash project behind the 1.2 launch card that the
+main README showed before 1.6.0. It is kept as an example of artwork built from
+imported SVG assets, and of a project whose operation history travels with it.
 
 The composition contains separate layers for:
 

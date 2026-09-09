@@ -93,6 +93,24 @@ pub enum ValidationError {
         value: f64,
     },
 
+    /// A shape's geometry or stroke parameter is out of range or not a
+    /// number.
+    ///
+    /// Modelled on [`ValidationError::InvalidEffect`], and for the same
+    /// reason: the caller needs to know which number on which layer, not that
+    /// "the shape is wrong".
+    #[error("layer {layer}: shape — {field} must be {expected}, got {value}")]
+    InvalidShape {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The parameter at fault, e.g. `cornerRadius` or `stroke.width`.
+        field: &'static str,
+        /// What it has to be.
+        expected: &'static str,
+        /// The offending value.
+        value: f64,
+    },
+
     /// A font size is zero, negative, or not a number.
     #[error("layer {layer}: fontSize must be a positive finite number, got {value}")]
     InvalidFontSize {

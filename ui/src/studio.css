@@ -1934,6 +1934,7 @@ body.stopped .topbar-actions {
 }
 
 .text-preset,
+.shape-preset,
 .wide-action,
 .upload-dropzone {
   width: 100%;
@@ -1947,11 +1948,27 @@ body.stopped .topbar-actions {
 }
 
 .text-preset:hover,
+.shape-preset:hover,
 .wide-action:hover,
 .upload-dropzone:hover,
 .upload-dropzone.drag-over {
   border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
   background: var(--color-accent-soft);
+}
+
+/* Three shapes, stacked like the text presets: one row each, the icon saying
+   which primitive arrives before the word does. */
+.shape-row {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.shape-preset {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .text-preset.heading {
@@ -2529,6 +2546,18 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
   border-radius: 0.45rem;
   background: var(--color-surface);
 }
+
+#advanced-inspector > .field.shape-field { display: grid; gap: 0.25rem; color: var(--color-ink-soft); font-size: 0.7rem; }
+.shape-paint { display: flex; align-items: center; gap: 0.4rem; }
+.shape-paint input { flex: 1; min-width: 0; }
+.shape-paint button.small { flex: none; }
+
+/* A drop shadow has four values and no single "the" number, so its row wraps
+   instead of squeezing four inputs and three buttons onto one line. */
+.effect-row.multi { flex-wrap: wrap; }
+.effect-fields { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.effect-field { display: grid; gap: 0.15rem; color: var(--color-ink-soft); font-size: 0.65rem; }
+.effect-field input[type="text"] { width: 7rem; }
 
 .property-flags { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 1rem; }
 .property-flags .checkbox { display: flex; align-items: center; gap: 0.4rem; }

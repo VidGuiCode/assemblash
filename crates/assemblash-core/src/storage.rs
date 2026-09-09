@@ -318,7 +318,8 @@ pub fn prune_unused_assets(
     document.walk_layers(&mut |layer| match &layer.kind {
         LayerKind::Image(image) => referenced.push(image.asset.clone()),
         LayerKind::Svg(svg) => referenced.push(svg.asset.clone()),
-        LayerKind::Text(_) | LayerKind::Group(_) => {}
+        // A shape draws itself; it has nothing in `assets/` to keep alive.
+        LayerKind::Text(_) | LayerKind::Group(_) | LayerKind::Shape(_) => {}
     });
 
     let mut removed = Vec::new();

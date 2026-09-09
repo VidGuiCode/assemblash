@@ -61,6 +61,18 @@ pub enum RenderError {
         effect: String,
     },
 
+    /// A layer asks for a shape geometry this build does not draw.
+    ///
+    /// Same bargain as an unknown effect: preserved on the way through,
+    /// refused when something tries to draw it.
+    #[error("layer {layer}: shape kind {kind:?} is not one this build draws")]
+    UnsupportedShape {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The shape kind it asked for.
+        kind: String,
+    },
+
     /// A colour that validation would have rejected reached the renderer.
     #[error("invalid color {0}")]
     InvalidColor(String),

@@ -15,7 +15,8 @@ use assemblash_core::workspace::ProjectId;
 use assemblash_core::{Color, Document, Layer, LayerKind, Operation, SessionError};
 use assemblash_renderer::install;
 use assemblash_renderer::store::{FontRecord, FontStore};
-use axum::extract::{DefaultBodyLimit, Path, Query, State};
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, Extension, Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
@@ -45,6 +46,25 @@ pub fn router(
     stop: tokio::sync::watch::Sender<bool>,
     access: crate::Access,
 ) -> Router {
+    router_with_limits(state, ui, shutdown, stop, access, BodyLimits::default())
+}
+
+/// [`router`], with the upload ceilings named rather than assumed.
+///
+/// Only a test wants this: proving that an over-limit body comes back as the
+/// API's own JSON refusal means sending one, and 64 MiB down a loopback
+/// socket to prove a `match` arm is not a trade worth making. Not part of the
+/// supported surface — the limits a shipped server enforces are
+/// [`BodyLimits::default`], and nothing else calls this.
+#[doc(hidden)]
+pub fn router_with_limits(
+    state: AppState,
+    ui: crate::UiSource,
+    shutdown: crate::Shutdown,
+    stop: tokio::sync::watch::Sender<bool>,
+    access: crate::Access,
+    limits: BodyLimits,
+) -> Router {
     Router::new()
         // The interface, at the root. Everything under /api is the engine;
         // everything else is one of a fixed list of files (see `crate::ui`).
@@ -62,10 +82,21 @@ pub fn router(
             "/api/fonts",
             get(fonts)
                 .post(import_font)
-                .layer(DefaultBodyLimit::max(FONT_BODY_LIMIT)),
+                .layer(DefaultBodyLimit::max(limits.font)),
         )
-        .route("/api/fonts/catalogue", get(font_catalogue))
-        .route("/api/fonts/install", post(install_fonts))
+        // These two are fixed segments and therefore win over
+        // `/api/fonts/{family}`, which used to mean a family literally named
+        // "catalogue" or "install" could be imported and listed but never
+        // removed — a 405 with nothing a client could do about it (DEF-21).
+        // Each one now carries the removal too, for that one name.
+        .route(
+            "/api/fonts/catalogue",
+            get(font_catalogue).delete(remove_catalogue_family),
+        )
+        .route(
+            "/api/fonts/install",
+            post(install_fonts).delete(remove_install_family),
+        )
         .route("/api/fonts/{family}", delete(remove_font_family))
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/recent", get(recent_projects))
@@ -84,7 +115,12 @@ pub fn router(
         )
         .route("/api/projects/{id}/undo", post(undo))
         .route("/api/projects/{id}/redo", post(redo))
-        .route("/api/projects/{id}/assets", post(upload_asset))
+        // A photograph is megabytes, and axum's default is 2 MB: without
+        // this the route refused ordinary uploads (DEF-20).
+        .route(
+            "/api/projects/{id}/assets",
+            post(upload_asset).layer(DefaultBodyLimit::max(limits.asset)),
+        )
         .route("/api/projects/{id}/thumbnail.png", get(thumbnail))
         .route("/api/projects/{id}/preview.png", get(preview))
         .route("/api/projects/{id}/preview.svg", get(preview_svg))
@@ -104,6 +140,9 @@ pub fn router(
             access.clone(),
             require_access,
         ))
+        // Carried so a refusal can name the ceiling it hit rather than a
+        // constant that a test-built router is not using.
+        .layer(axum::Extension(limits))
         .layer(axum::Extension(ui))
         .layer(axum::Extension(shutdown))
         .layer(axum::Extension(access))
@@ -248,6 +287,76 @@ async fn operation_schema() -> impl IntoResponse {
 /// font into the store is the narrower one.
 const FONT_BODY_LIMIT: usize = 64 * 1024 * 1024;
 
+/// How large an uploaded asset may be.
+///
+/// The same number as [`FONT_BODY_LIMIT`], and named separately rather than
+/// shared so that raising one later is a deliberate act rather than a
+/// side effect. Until 1.6.0 this route ran under axum's 2 MB default, which
+/// meant a photograph from a phone was refused — with a plain-text 413, not
+/// the envelope every other failure uses (DEF-20).
+const ASSET_BODY_LIMIT: usize = 64 * 1024 * 1024;
+
+/// The ceiling each upload route enforces.
+///
+/// A value rather than two constants read where they are needed, because the
+/// refusal has to name the number it hit: a handler that formatted
+/// [`FONT_BODY_LIMIT`] into its message would lie the moment a test built a
+/// router with a smaller one.
+#[derive(Debug, Clone, Copy)]
+pub struct BodyLimits {
+    /// Ceiling on `POST /api/fonts`.
+    font: usize,
+    /// Ceiling on `POST /api/projects/{id}/assets`.
+    asset: usize,
+}
+
+impl Default for BodyLimits {
+    fn default() -> Self {
+        Self {
+            font: FONT_BODY_LIMIT,
+            asset: ASSET_BODY_LIMIT,
+        }
+    }
+}
+
+impl BodyLimits {
+    /// Ceilings small enough that a test can exceed one without moving
+    /// 64 MiB down a socket. Not part of the supported surface.
+    #[doc(hidden)]
+    pub fn testing(font: usize, asset: usize) -> Self {
+        Self { font, asset }
+    }
+}
+
+/// The uploaded bytes, or this API's own refusal for a body that was too big.
+///
+/// `Bytes` answers an over-limit body with axum's plain-text 413, which would
+/// make "every failure comes back in the same envelope" false for the most
+/// ordinary mistake an upload form can make — picking too large a file. Taking
+/// the rejection rather than the bytes is the whole of the difference between
+/// these two handlers and every other one.
+fn uploaded(
+    body: Result<axum::body::Bytes, BytesRejection>,
+    limit: usize,
+) -> Result<axum::body::Bytes, ApiError> {
+    body.map_err(|rejection| {
+        if rejection.status() != StatusCode::PAYLOAD_TOO_LARGE {
+            return ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "malformedRequest",
+                rejection.body_text(),
+            );
+        }
+        let mib = limit as f64 / (1024.0 * 1024.0);
+        ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payloadTooLarge",
+            format!("the request body is larger than the {mib} MiB this route accepts"),
+        )
+        .with_details(serde_json::json!({ "limitBytes": limit, "limitMib": mib }))
+    })
+}
+
 /// The file extensions the import route accepts.
 ///
 /// Every one of these is a container [`FontStore::import_bytes`] can actually
@@ -319,9 +428,11 @@ struct FontImportResponse {
 /// `200` with the records that were already there, rather than `201`.
 async fn import_font(
     State(state): State<AppState>,
+    Extension(limits): Extension<BodyLimits>,
     Query(upload): Query<FontUpload>,
-    body: axum::body::Bytes,
+    body: Result<axum::body::Bytes, BytesRejection>,
 ) -> Result<(StatusCode, Json<FontImportResponse>), ApiError> {
+    let body = uploaded(body, limits.font)?;
     let _format = font_format_of(&upload.filename)?;
 
     // Taken before the store is opened and held until after its index is
@@ -404,10 +515,38 @@ async fn remove_font_family(
     State(state): State<AppState>,
     Path(family): Path<String>,
 ) -> Result<Json<FontRemovalResponse>, ApiError> {
+    remove_family_named(&state, &family)
+}
+
+/// `DELETE /api/fonts/catalogue`, for the family of that name.
+///
+/// `GET /api/fonts/catalogue` reads the install manifest, and the fixed
+/// segment shadows `/api/fonts/{family}`; without this arm the one family
+/// that cannot be called anything else would be the one family that could
+/// never be removed (DEF-21).
+async fn remove_catalogue_family(
+    State(state): State<AppState>,
+) -> Result<Json<FontRemovalResponse>, ApiError> {
+    remove_family_named(&state, "catalogue")
+}
+
+/// `DELETE /api/fonts/install`, for the family of that name. See
+/// [`remove_catalogue_family`].
+async fn remove_install_family(
+    State(state): State<AppState>,
+) -> Result<Json<FontRemovalResponse>, ApiError> {
+    remove_family_named(&state, "install")
+}
+
+/// The removal itself, so the three routes that reach it cannot drift apart.
+fn remove_family_named(
+    state: &AppState,
+    family: &str,
+) -> Result<Json<FontRemovalResponse>, ApiError> {
     let _writing = state.lock_font_writes()?;
     let mut store = state.font_store()?;
 
-    let removed = store.remove_family(&family)?;
+    let removed = store.remove_family(family)?;
     if removed == 0 {
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,
@@ -1219,6 +1358,11 @@ fn insert_layer(
             asset: svg.asset.clone(),
             fit: svg.fit,
         },
+        LayerKind::Shape(shape) => NewLayerKind::Shape {
+            shape: shape.shape.clone(),
+            fill: shape.fill.clone(),
+            stroke: shape.stroke.clone(),
+        },
         LayerKind::Group(_) => NewLayerKind::Group,
     };
     let created = apply_compiled(
@@ -1365,10 +1509,12 @@ struct AssetResponse {
 /// only reliable way to keep an upload inside the project root (PRD §10.1).
 async fn upload_asset(
     State(state): State<AppState>,
+    Extension(limits): Extension<BodyLimits>,
     Path(id): Path<String>,
     Query(upload): Query<AssetUpload>,
-    body: axum::body::Bytes,
+    body: Result<axum::body::Bytes, BytesRejection>,
 ) -> Result<(StatusCode, Json<AssetResponse>), ApiError> {
+    let body = uploaded(body, limits.asset)?;
     let id = ProjectId::new(id)?;
     let extension = extension_of(&upload.filename)?;
 

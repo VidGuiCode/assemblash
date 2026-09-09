@@ -450,6 +450,7 @@ async fn every_new_tool_is_advertised_and_callable() {
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
     for expected in [
         "update_canvas",
+        "add_shape_layer",
         "add_svg_layer",
         "render_document",
         "find_overlaps",
@@ -459,7 +460,7 @@ async fn every_new_tool_is_advertised_and_callable() {
     }
     assert_eq!(
         tools.len(),
-        44,
+        45,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 

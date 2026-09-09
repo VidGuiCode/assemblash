@@ -69,6 +69,52 @@ impl Harness {
         }
     }
 
+    /// A server whose upload ceilings are whatever the caller says.
+    ///
+    /// The router is built here rather than through [`Server::bind`] because
+    /// the small-limit constructor is deliberately not on the binding path:
+    /// the only server anyone ships uses the real 64 MiB, and proving that an
+    /// over-limit body answers in JSON does not need 64 MiB to travel down a
+    /// socket to do it.
+    fn start_limited(limits: assemblash_server::api::BodyLimits) -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("workspace");
+        let workspace = Workspace::open_or_create(&root).unwrap();
+        let state = assemblash_server::AppState::new(workspace);
+
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                    .await
+                    .unwrap();
+                let address = listener.local_addr().unwrap();
+                let (stop, _stopping) = tokio::sync::watch::channel(false);
+                let router = assemblash_server::api::router_with_limits(
+                    state,
+                    Default::default(),
+                    Default::default(),
+                    stop,
+                    Default::default(),
+                    limits,
+                );
+                send.send(format!("http://{address}")).unwrap();
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+
+        let base = receive.recv().expect("the server started");
+        Self {
+            base,
+            _workspace: directory,
+            root,
+        }
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base)
     }
@@ -1311,12 +1357,17 @@ fn an_unknown_property_on_a_create_is_refused() {
     assert_eq!(journal_and_version(&harness, "poster"), before);
 
     // And the same refusal inside a batch, which parses commands its own way.
+    // The key has to be one the schema still does not know: `cornerRadius`
+    // stood here until 1.6.0 gave shapes rounded corners, at which point this
+    // half of the test would have passed for the wrong reason — the batch
+    // refusing an update to a layer that is not there rather than refusing
+    // the unknown property.
     let batch = http::post_json(
         &harness.url("/api/projects/poster/operation-batches"),
         &json!({
             "expectedVersion": before.1,
             "label": "Add a heading",
-            "commands": [{ "op": "update", "id": "layer_nope", "cornerRadius": 8 }]
+            "commands": [{ "op": "update", "id": "layer_nope", "letterSpacing": 4 }]
         }),
     );
     assert_eq!(batch.status, 422, "{}", batch.json());
@@ -1324,7 +1375,7 @@ fn an_unknown_property_on_a_create_is_refused() {
     assert!(batch.json()["error"]["message"]
         .as_str()
         .unwrap_or_default()
-        .contains("cornerRadius"));
+        .contains("letterSpacing"));
     assert_eq!(journal_and_version(&harness, "poster"), before);
 }
 
@@ -1480,4 +1531,277 @@ fn actor_detail_alias_is_recorded_in_history() {
         history["entries"][0]["actor"]["detail"],
         "canvas integration"
     );
+}
+
+/// Creates one shape layer over `POST …/operations` and returns its id.
+fn add_shape(harness: &Harness, project: &str, mut layer: Value) -> String {
+    let object = layer.as_object_mut().expect("a shape create is an object");
+    object.insert("op".into(), json!("create"));
+    object.insert("position".into(), json!({ "at": "root" }));
+    object.insert("type".into(), json!("shape"));
+    let response = http::post_json(
+        &harness.url(&format!("/api/projects/{project}/operations")),
+        &json!({ "operation": layer }),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    response.json()["created"][0]
+        .as_str()
+        .expect("a create reports the layer it made")
+        .to_owned()
+}
+
+fn layers_of(harness: &Harness, project: &str) -> Vec<Value> {
+    http::get(&harness.url(&format!("/api/projects/{project}/document"))).json()["layers"]
+        .as_array()
+        .expect("layers is an array")
+        .clone()
+}
+
+/// The three geometries 1.6.0 draws, made and then repainted over HTTP.
+///
+/// Nothing here reaches into the library: the point is that the shape half of
+/// the operation vocabulary survives the transport, including the one thing
+/// JSON makes awkward — telling "leave the stroke alone" apart from "there is
+/// no stroke now".
+#[test]
+fn shapes_are_created_and_repainted_over_http() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+
+    let rect = add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 10.0, "y": 10.0, "width": 120.0, "height": 60.0 },
+            "shape": { "kind": "rect", "cornerRadius": 8.0 },
+            "fill": "#3366cc",
+            "stroke": { "color": "#112233", "width": 3.0 }
+        }),
+    );
+    let ellipse = add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 150.0, "y": 10.0, "width": 80.0, "height": 80.0 },
+            "shape": { "kind": "ellipse" },
+            "fill": "#cc6633"
+        }),
+    );
+    let line = add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 10.0, "y": 120.0, "width": 200.0, "height": 0.0 },
+            "shape": { "kind": "line" },
+            "stroke": { "color": "#111111", "width": 2.0 }
+        }),
+    );
+
+    let layers = layers_of(&harness, "poster");
+    assert_eq!(layers.len(), 3);
+    for layer in &layers {
+        assert_eq!(layer["type"], "shape", "{layer}");
+    }
+    assert_eq!(
+        layers[0]["shape"],
+        json!({ "kind": "rect", "cornerRadius": 8.0 })
+    );
+    assert_eq!(layers[1]["shape"], json!({ "kind": "ellipse" }));
+    assert_eq!(layers[2]["shape"], json!({ "kind": "line" }));
+    assert_eq!(layers[0]["fill"], "#3366cc");
+    assert_eq!(
+        layers[2]["stroke"],
+        json!({ "color": "#111111", "width": 2.0 })
+    );
+    // A line has no interior, and nothing invented one for it.
+    assert!(layers[2].get("fill").is_none(), "{}", layers[2]);
+
+    // A new fill.
+    let repainted = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": { "op": "update", "id": rect, "fill": "#ff0000" } }),
+    );
+    assert_eq!(repainted.status, 200, "{}", repainted.json());
+    assert_eq!(layers_of(&harness, "poster")[0]["fill"], "#ff0000");
+
+    // And no stroke at all, which is `null` rather than an absent key —
+    // absent means "leave it", and there would otherwise be no way to say
+    // this at all.
+    let cleared = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": { "op": "update", "id": rect, "stroke": null } }),
+    );
+    assert_eq!(cleared.status, 200, "{}", cleared.json());
+    let repainted = layers_of(&harness, "poster");
+    assert!(
+        repainted[0].get("stroke").is_none(),
+        "a cleared stroke is gone from the document, not null in it: {}",
+        repainted[0]
+    );
+    assert_eq!(repainted[0]["fill"], "#ff0000", "and the fill is untouched");
+
+    // A corner radius is a rect's property. Asking an ellipse for one is the
+    // same refusal as asking an image for a font size.
+    let refused = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": { "op": "update", "id": ellipse, "cornerRadius": 4.0 } }),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.json());
+    assert_eq!(error_code(&refused), "operationRefused");
+    let message = refused.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        message.contains("cornerRadius") && message.contains("ellipse"),
+        "the message must name the property and the kind: {message}"
+    );
+
+    // The refusal changed nothing, and the line is still a line.
+    let after = layers_of(&harness, "poster");
+    assert_eq!(after[1]["shape"], json!({ "kind": "ellipse" }));
+    assert_eq!(after[2]["id"], line);
+}
+
+/// Pasting a shape copies its paint, not just its box.
+///
+/// `insertLayerTree` rebuilds a copied layer out of ordinary create and
+/// update operations, so anything the rebuild forgets to carry is silently
+/// lost — which is exactly how a paste that drops a fill would look.
+#[test]
+fn pasting_a_shape_keeps_its_fill_and_its_stroke() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 10.0, "y": 10.0, "width": 120.0, "height": 60.0 },
+            "shape": { "kind": "rect", "cornerRadius": 8.0 },
+            "fill": "#3366cc80",
+            "stroke": { "color": "#112233", "width": 3.0 }
+        }),
+    );
+    let source = layers_of(&harness, "poster").remove(0);
+
+    let pasted = http::post_json(
+        &harness.url("/api/projects/poster/operation-batches"),
+        &json!({
+            "expectedVersion": 1,
+            "label": "Paste layers",
+            "commands": [{
+                "op": "insertLayerTree",
+                "sourceProject": "poster",
+                "layers": [source],
+                "offsetX": 12.0,
+                "offsetY": 8.0
+            }]
+        }),
+    );
+    assert_eq!(pasted.status, 200, "{}", pasted.json());
+
+    let layers = layers_of(&harness, "poster");
+    assert_eq!(layers.len(), 2);
+    let (original, copy) = (&layers[0], &layers[1]);
+    assert_ne!(copy["id"], original["id"], "the copy is a new layer");
+    assert_eq!(copy["shape"], original["shape"]);
+    assert_eq!(copy["fill"], original["fill"]);
+    assert_eq!(copy["stroke"], original["stroke"]);
+    assert_eq!(copy["transform"]["x"], 22.0);
+    assert_eq!(copy["transform"]["y"], 18.0);
+}
+
+/// A document of nothing but shapes exports, needing no font and no asset.
+#[test]
+fn a_document_of_shapes_exports() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 10.0, "y": 10.0, "width": 120.0, "height": 60.0 },
+            "shape": { "kind": "rect", "cornerRadius": 8.0 },
+            "fill": "#3366cc",
+            "stroke": { "color": "#112233", "width": 3.0 }
+        }),
+    );
+    add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 150.0, "y": 10.0, "width": 80.0, "height": 80.0 },
+            "shape": { "kind": "ellipse" },
+            "stroke": { "color": "#cc6633", "width": 1.0 }
+        }),
+    );
+    add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 10.0, "y": 120.0, "width": 200.0, "height": 0.0 },
+            "shape": { "kind": "line" },
+            "stroke": { "color": "#111111", "width": 2.0 }
+        }),
+    );
+
+    let exported = http::post_json(
+        &harness.url("/api/projects/poster/export"),
+        &json!({ "name": "shapes" }),
+    );
+    assert_eq!(exported.status, 200, "{}", exported.json());
+    assert_eq!(exported.json()["path"], "exports/shapes.png");
+    assert_eq!(exported.json()["warnings"], json!([]));
+    assert!(harness
+        .root()
+        .join("projects/poster/exports/shapes.png")
+        .is_file());
+}
+
+/// An over-limit asset upload answers in the envelope everything else uses.
+///
+/// Until 1.6.0 this route ran under axum's 2 MB default and answered a body
+/// over it with plain text, so an ordinary photograph failed in a way no
+/// client could read (DEF-20). The ceiling here is 1 MiB rather than the
+/// shipped 64 MiB: the handler names the limit it was built with, so a small
+/// one proves the same path without moving 64 MiB down a loopback socket.
+#[test]
+fn an_asset_over_the_body_limit_is_refused_in_the_usual_envelope() {
+    let limit = 1024 * 1024;
+    let harness = Harness::start_limited(assemblash_server::api::BodyLimits::testing(limit, limit));
+    create_project(&harness, "poster");
+
+    let response = http::post_bytes(
+        &harness.url("/api/projects/poster/assets?filename=huge.png"),
+        "image/png",
+        &vec![0_u8; limit + 1],
+    );
+    assert_eq!(
+        response.status,
+        413,
+        "{}",
+        String::from_utf8_lossy(&response.body)
+    );
+    assert_eq!(error_code(&response), "payloadTooLarge");
+    let message = response.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        message.contains("1 MiB"),
+        "the message must name the limit in MiB: {message}"
+    );
+    assert_eq!(response.json()["error"]["details"]["limitBytes"], limit);
+
+    // Nothing was written, and a body under the limit still uploads.
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/document")).json()["assets"],
+        json!([])
+    );
+    let accepted = http::post_bytes(
+        &harness.url("/api/projects/poster/assets?filename=small.png"),
+        "image/png",
+        &solid_png(),
+    );
+    assert_eq!(accepted.status, 201, "{}", accepted.json());
 }

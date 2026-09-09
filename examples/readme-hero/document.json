@@ -1,0 +1,818 @@
+{
+  "schemaVersion": 1,
+  "id": "doc_01M23MFW7YFRJ7XQKD3ZB9E6WC",
+  "version": 69,
+  "name": "Assemblash README hero",
+  "canvas": {
+    "width": 1200.0,
+    "height": 675.0,
+    "background": "#fbfbfa"
+  },
+  "assets": [
+    {
+      "id": "asset_01M23MFYMQ6XR6RJ0VGFEFF0Z8",
+      "path": "455af832c44e7ab68ca40448a846c998bc6164fcef97a7aacc19c2f89ea6fda9.svg",
+      "hash": "sha256:455af832c44e7ab68ca40448a846c998bc6164fcef97a7aacc19c2f89ea6fda9",
+      "mediaType": "image/svg+xml"
+    },
+    {
+      "id": "asset_01M23MFZ7MGWDCDYVHPP08MGQV",
+      "path": "f751a897687725c4e03e2212c9179277ad3058cdea459151ab9c555bd1ddf924.svg",
+      "hash": "sha256:f751a897687725c4e03e2212c9179277ad3058cdea459151ab9c555bd1ddf924",
+      "mediaType": "image/svg+xml"
+    },
+    {
+      "id": "asset_01M23MFZVXV6F9K9MDG8FKWFCC",
+      "path": "e38ecb91c447adfc57808351d500672e31a8b63ef2cb42036c1dccb7cf540040.svg",
+      "hash": "sha256:e38ecb91c447adfc57808351d500672e31a8b63ef2cb42036c1dccb7cf540040",
+      "mediaType": "image/svg+xml"
+    },
+    {
+      "id": "asset_01M23MG044V85KP3N49907K4E3",
+      "path": "6db6a89bb6f734ea1608343fb6465110966797a7617fa055062598331d30a018.svg",
+      "hash": "sha256:6db6a89bb6f734ea1608343fb6465110966797a7617fa055062598331d30a018",
+      "mediaType": "image/svg+xml"
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer_01M23MKE8SP2KQMDGKR51M8HJQ",
+      "name": "Agents",
+      "transform": {
+        "x": 232.0,
+        "y": 232.0,
+        "width": 186.62081050606815,
+        "height": 226.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "group",
+      "children": [
+        {
+          "id": "layer_01M23MKE7X6CWG58HTX6JVG9G0",
+          "name": "CLI",
+          "transform": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 186.62081050606815,
+            "height": 94.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "group",
+          "children": [
+            {
+              "id": "layer_01M23MFWAYC81SXS7VX0CNZKFN",
+              "name": "Connector CLI",
+              "transform": {
+                "x": 77.05000000000001,
+                "y": 48.0,
+                "width": 111.9,
+                "height": 4.0,
+                "rotation": 18.76
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "line"
+              },
+              "stroke": {
+                "color": "#1a1a1a",
+                "width": 1.5
+              }
+            },
+            {
+              "id": "layer_01M23MFYAZ8DWEHG8TPQ7HNY5W",
+              "name": "Ring CLI",
+              "transform": {
+                "x": 16.0,
+                "y": 0.0,
+                "width": 64.0,
+                "height": 64.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [
+                {
+                  "type": "dropShadow",
+                  "dx": 0.0,
+                  "dy": 10.0,
+                  "blur": 14.0,
+                  "color": "#0000003d"
+                }
+              ],
+              "type": "shape",
+              "shape": {
+                "kind": "ellipse"
+              },
+              "fill": "#ffffff",
+              "stroke": {
+                "color": "#1a1a1a",
+                "width": 1.5
+              }
+            },
+            {
+              "id": "layer_01M23MFYMVCSE1QXVQZSNCYW79",
+              "name": "Icon CLI",
+              "transform": {
+                "x": 34.0,
+                "y": 18.0,
+                "width": 28.0,
+                "height": 28.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "svg",
+              "asset": "asset_01M23MFYMQ6XR6RJ0VGFEFF0Z8",
+              "fit": "contain"
+            },
+            {
+              "id": "layer_01M23MFYS36SQ4JFM9354AMV2B",
+              "name": "Label CLI",
+              "transform": {
+                "x": 0.0,
+                "y": 74.0,
+                "width": 96.0,
+                "height": 20.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "text",
+              "text": "CLI",
+              "fontFamily": "Noto Sans",
+              "fontSize": 14.0,
+              "color": "#5c5c5c",
+              "align": "center",
+              "lineHeight": 1.2,
+              "runs": []
+            }
+          ]
+        },
+        {
+          "id": "layer_01M23MKE89MWD8M7CDP2BT7SE1",
+          "name": "MCP",
+          "transform": {
+            "x": 0.0,
+            "y": 126.11246727998838,
+            "width": 186.62081050606815,
+            "height": 99.88753272001162,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "group",
+          "children": [
+            {
+              "id": "layer_01M23MFWFH3A6D6VPJ3XYJ282D",
+              "name": "Connector MCP",
+              "transform": {
+                "x": 77.05000000000001,
+                "y": 17.88753272001162,
+                "width": 111.9,
+                "height": 4.0,
+                "rotation": -18.76
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "line"
+              },
+              "stroke": {
+                "color": "#1a1a1a",
+                "width": 1.5
+              }
+            },
+            {
+              "id": "layer_01M23MFYZ3VSAH7WK1XDK2105Q",
+              "name": "Ring MCP",
+              "transform": {
+                "x": 16.0,
+                "y": 5.88753272001162,
+                "width": 64.0,
+                "height": 64.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [
+                {
+                  "type": "dropShadow",
+                  "dx": 0.0,
+                  "dy": 10.0,
+                  "blur": 14.0,
+                  "color": "#0000003d"
+                }
+              ],
+              "type": "shape",
+              "shape": {
+                "kind": "ellipse"
+              },
+              "fill": "#ffffff",
+              "stroke": {
+                "color": "#1a1a1a",
+                "width": 1.5
+              }
+            },
+            {
+              "id": "layer_01M23MFZ7S5VW863DJ1C4RV732",
+              "name": "Icon MCP",
+              "transform": {
+                "x": 34.0,
+                "y": 23.88753272001162,
+                "width": 28.0,
+                "height": 28.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "svg",
+              "asset": "asset_01M23MFZ7MGWDCDYVHPP08MGQV",
+              "fit": "contain"
+            },
+            {
+              "id": "layer_01M23MFZC6T09CR4PNVG87S9YQ",
+              "name": "Label MCP",
+              "transform": {
+                "x": 0.0,
+                "y": 79.88753272001162,
+                "width": 96.0,
+                "height": 20.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "text",
+              "text": "MCP",
+              "fontFamily": "Noto Sans",
+              "fontSize": 14.0,
+              "color": "#5c5c5c",
+              "align": "center",
+              "lineHeight": 1.2,
+              "runs": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layer_01M23MKE97ETFFT2Z3W4H1567H",
+      "name": "Canvas",
+      "transform": {
+        "x": 818.0,
+        "y": 298.0,
+        "width": 150.0,
+        "height": 94.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "group",
+      "children": [
+        {
+          "id": "layer_01M23MFWMF3KY3P2W5694ZS0CX",
+          "name": "Connector Canvas",
+          "transform": {
+            "x": 0.0,
+            "y": 30.0,
+            "width": 70.0,
+            "height": 4.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "line"
+          },
+          "stroke": {
+            "color": "#1a1a1a",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M23MFZK595F3V3QGNGFRKEC9",
+          "name": "Ring Canvas",
+          "transform": {
+            "x": 70.0,
+            "y": 0.0,
+            "width": 64.0,
+            "height": 64.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [
+            {
+              "type": "dropShadow",
+              "dx": 0.0,
+              "dy": 10.0,
+              "blur": 14.0,
+              "color": "#0000003d"
+            }
+          ],
+          "type": "shape",
+          "shape": {
+            "kind": "ellipse"
+          },
+          "fill": "#ffffff",
+          "stroke": {
+            "color": "#1a1a1a",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M23MFZW200H6CPVNPH29WM0Z",
+          "name": "Icon Canvas",
+          "transform": {
+            "x": 88.0,
+            "y": 18.0,
+            "width": 28.0,
+            "height": 28.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "svg",
+          "asset": "asset_01M23MFZVXV6F9K9MDG8FKWFCC",
+          "fit": "contain"
+        },
+        {
+          "id": "layer_01M23MFZZP5Z3101S3TYM7MR1C",
+          "name": "Label Canvas",
+          "transform": {
+            "x": 54.0,
+            "y": 74.0,
+            "width": 96.0,
+            "height": 20.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "Canvas",
+          "fontFamily": "Noto Sans",
+          "fontSize": 14.0,
+          "color": "#5c5c5c",
+          "align": "center",
+          "lineHeight": 1.2,
+          "runs": []
+        }
+      ]
+    },
+    {
+      "id": "layer_01M23MKE7DRZM66BKCCA52CPBZ",
+      "name": "Document",
+      "transform": {
+        "x": 418.0,
+        "y": 166.0,
+        "width": 424.0,
+        "height": 304.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "group",
+      "children": [
+        {
+          "id": "layer_01M23MFWS947V4XM1D381CGXFN",
+          "name": "Sheet, two edits ago",
+          "transform": {
+            "x": 24.0,
+            "y": 0.0,
+            "width": 400.0,
+            "height": 280.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 18.0
+          },
+          "fill": "#ffffff",
+          "stroke": {
+            "color": "#1a1a1a40",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M23MFWYN0S3N0GW2Q0WBRJSE",
+          "name": "Sheet, one edit ago",
+          "transform": {
+            "x": 12.0,
+            "y": 12.0,
+            "width": 400.0,
+            "height": 280.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 18.0
+          },
+          "fill": "#ffffff",
+          "stroke": {
+            "color": "#1a1a1a80",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M23MFX4Z0PE8ZKP2667RPR95",
+          "name": "Sheet, current",
+          "transform": {
+            "x": 0.0,
+            "y": 24.0,
+            "width": 400.0,
+            "height": 280.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [
+            {
+              "type": "dropShadow",
+              "dx": 0.0,
+              "dy": 22.0,
+              "blur": 26.0,
+              "color": "#0000004a"
+            }
+          ],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 18.0
+          },
+          "fill": "#ffffff",
+          "stroke": {
+            "color": "#1a1a1a",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M23MKE6XX43E3D32MAM6N5FQ",
+          "name": "Design",
+          "transform": {
+            "x": 32.0,
+            "y": 56.0,
+            "width": 336.0,
+            "height": 184.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "group",
+          "children": [
+            {
+              "id": "layer_01M23MFXCYD58DHA60Q63YYMWS",
+              "name": "Block",
+              "transform": {
+                "x": 0.0,
+                "y": 0.0,
+                "width": 150.0,
+                "height": 100.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "rect",
+                "cornerRadius": 12.0
+              },
+              "fill": "#EF3325"
+            },
+            {
+              "id": "layer_01M23MFXJAG22NY09BCH6N83QD",
+              "name": "Dot",
+              "transform": {
+                "x": 178.0,
+                "y": 0.0,
+                "width": 76.0,
+                "height": 76.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "ellipse"
+              },
+              "fill": "#1a1a1a"
+            },
+            {
+              "id": "layer_01M23MFXPMYT51X6W0Q0S7PF7B",
+              "name": "Bar",
+              "transform": {
+                "x": 276.0,
+                "y": 0.0,
+                "width": 60.0,
+                "height": 100.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "rect",
+                "cornerRadius": 12.0
+              },
+              "fill": "#EF332559"
+            },
+            {
+              "id": "layer_01M23MFXVM7HJPKZF6WHNDN8K7",
+              "name": "Line 1",
+              "transform": {
+                "x": 0.0,
+                "y": 130.0,
+                "width": 220.0,
+                "height": 10.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "rect",
+                "cornerRadius": 5.0
+              },
+              "fill": "#dcdcdc"
+            },
+            {
+              "id": "layer_01M23MFXZHJ0TH2971C8KJZDGR",
+              "name": "Line 2",
+              "transform": {
+                "x": 0.0,
+                "y": 152.0,
+                "width": 160.0,
+                "height": 10.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "rect",
+                "cornerRadius": 5.0
+              },
+              "fill": "#dcdcdc"
+            },
+            {
+              "id": "layer_01M23MFY3KNP1RW040N0CRTTRT",
+              "name": "Line 3",
+              "transform": {
+                "x": 0.0,
+                "y": 174.0,
+                "width": 190.0,
+                "height": 10.0,
+                "rotation": 0.0
+              },
+              "opacity": 1.0,
+              "visible": true,
+              "locked": false,
+              "protected": false,
+              "readOnly": false,
+              "blendMode": "normal",
+              "effects": [],
+              "type": "shape",
+              "shape": {
+                "kind": "rect",
+                "cornerRadius": 5.0
+              },
+              "fill": "#dcdcdc"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layer_01M23MKE9P2KK6RP23MRSTH33S",
+      "name": "Brand",
+      "transform": {
+        "x": 498.64,
+        "y": 84.0,
+        "width": 202.72,
+        "height": 42.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "group",
+      "children": [
+        {
+          "id": "layer_01M23MG04993X6NYWYY6KPT9WA",
+          "name": "Assemblash mark",
+          "transform": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 42.0,
+            "height": 42.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "svg",
+          "asset": "asset_01M23MG044V85KP3N49907K4E3",
+          "fit": "contain"
+        },
+        {
+          "id": "layer_01M23MG089T625MNC35E30BP4F",
+          "name": "Wordmark",
+          "transform": {
+            "x": 54.0,
+            "y": 5.0,
+            "width": 150.72,
+            "height": 36.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "Assemblash",
+          "fontFamily": "Noto Sans Bold",
+          "fontSize": 25.0,
+          "color": "#1a1a1a",
+          "align": "left",
+          "lineHeight": 1.2,
+          "runs": []
+        }
+      ]
+    },
+    {
+      "id": "layer_01M23MG0D2C1X692E4238V1RGF",
+      "name": "Headline",
+      "transform": {
+        "x": 0.0,
+        "y": 556.0,
+        "width": 1200.0,
+        "height": 60.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "text",
+      "text": "Visuals that stay editable.",
+      "fontFamily": "Noto Sans Bold",
+      "fontSize": 42.0,
+      "color": "#1a1a1a",
+      "align": "center",
+      "lineHeight": 1.2,
+      "runs": []
+    }
+  ]
+}

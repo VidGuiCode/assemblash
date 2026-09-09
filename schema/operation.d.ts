@@ -63,6 +63,29 @@ export type AssetId = string;
 /// How an image is scaled into its box.
 export type ImageFit = "fill" | "contain" | "cover";
 
+/// The geometry of a [`ShapeLayer`], tagged by `"kind"` in JSON.
+export type ShapeKind = {
+  /** Corner radius in document units; 0 is a square corner. */
+  cornerRadius?: number;
+  kind: "rect";
+  [key: string]: unknown;
+} | {
+  kind: "ellipse";
+  [key: string]: unknown;
+} | {
+  kind: "line";
+  [key: string]: unknown;
+} | unknown;
+
+/// A shape's edge paint.
+export type Stroke = {
+  /** Edge colour. */
+  color: Color;
+  /** Width in document units; must be finite and 0 or more. */
+  width: number;
+  [key: string]: unknown;
+};
+
 /// Add a layer to the document.
 export type CreateLayer = ({
   /** The text; `\n` starts a new line. */
@@ -95,6 +118,15 @@ export type CreateLayer = ({
   /** How it fills its box. */
   fit?: ImageFit;
   type: "svg";
+  [key: string]: unknown;
+} | {
+  /** The geometry. A kind this build does not draw is refused here */
+  shape: ShapeKind;
+  /** Interior paint, or none. */
+  fill?: Color | null;
+  /** Edge paint, or none. */
+  stroke?: Stroke | null;
+  type: "shape";
   [key: string]: unknown;
 }) & {
   /** Where it goes. */
@@ -157,6 +189,17 @@ export type Effect = {
   scale?: number;
   type: "grain";
   [key: string]: unknown;
+} | {
+  /** Horizontal offset in document units. */
+  dx: number;
+  /** Vertical offset in document units. See `dx`. */
+  dy: number;
+  /** Standard deviation of the blur, 0 or more. 0 is a hard-edged */
+  blur: number;
+  /** Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so */
+  color: Color;
+  type: "dropShadow";
+  [key: string]: unknown;
 } | unknown;
 
 /// Change properties of an existing layer.
@@ -196,6 +239,12 @@ export type UpdateLayer = {
   fit?: ImageFit | null;
   /** Image and SVG layers: draw a different asset. */
   asset?: AssetId | null;
+  /** Shape layers: new interior paint. Absent leaves it, `null` clears it. */
+  fill?: Color | null;
+  /** Shape layers: the whole stroke. Absent leaves it, `null` clears it. */
+  stroke?: Stroke | null;
+  /** Shape layers whose geometry is a rect: new corner radius. */
+  cornerRadius?: number | null;
   /** Change the layer even though it is locked. */
   allowLocked?: boolean;
   [key: string]: unknown;
@@ -258,6 +307,10 @@ export type PresetProperties = {
   blendMode?: BlendMode | null;
   /** Any layer: the whole effect stack. */
   effects?: Effect[] | null;
+  /** Shape layers: interior paint. */
+  fill?: Color | null;
+  /** Shape layers: edge paint. See [`PresetProperties::fill`] for why it */
+  stroke?: Stroke | null;
   [key: string]: unknown;
 };
 

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <defs>
+    <filter id="fx-layer_1" filterUnits="userSpaceOnUse" x="-30" y="0" width="250" height="132" color-interpolation-filters="sRGB">
+      <feDropShadow in="SourceGraphic" result="e0" dx="-20" dy="0" stdDeviation="1" flood-color="#000000"/>
+      <feDropShadow in="e0" result="e1" dx="30" dy="12" stdDeviation="2" flood-color="#ff0000"/>
+    </filter>
+  </defs>
+  <rect x="40" y="30" width="100" height="60" fill="#3366cc" filter="url(#fx-layer_1)"/>
+</svg>
