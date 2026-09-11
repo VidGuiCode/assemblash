@@ -611,6 +611,67 @@ impl Effect {
     pub fn is_rendered(&self) -> bool {
         !matches!(self, Self::Other(_))
     }
+
+    /// The line `assemblash styles` prints for this effect — an example
+    /// document fragment plus a short note. `None` for [`Effect::Other`],
+    /// which this build does not render and so does not advertise.
+    ///
+    /// The match names every variant, so a new `Effect` fails to compile
+    /// until it is given a line here — the same guarantee
+    /// [`BlendMode::RENDERED`] gives the blend-mode half of the listing.
+    /// This is where the `dropShadow` fields (`dx`, `dy`, `blur`, `color`)
+    /// are documented for discovery: `dx`/`dy` at 0 is a glow, and an
+    /// `#rrggbbaa` alpha sets flood opacity.
+    pub fn styles_line(&self) -> Option<&'static str> {
+        match self {
+            Self::Brightness { .. } => {
+                Some(r#"  {"type":"brightness","amount":1.2}   1 is unchanged"#)
+            }
+            Self::Contrast { .. } => {
+                Some(r#"  {"type":"contrast","amount":1.4}     1 is unchanged"#)
+            }
+            Self::Saturation { .. } => {
+                Some(r#"  {"type":"saturation","amount":0}     1 is unchanged, 0 is greyscale"#)
+            }
+            Self::Blur { .. } => {
+                Some(r#"  {"type":"blur","radius":3}           0 is unchanged"#)
+            }
+            Self::Grain { .. } => Some(concat!(
+                r#"  {"type":"grain","amount":0.2,"seed":7,"scale":1}"#,
+                "\n                                       seeded, so the same document grains the same way"
+            )),
+            Self::DropShadow { .. } => Some(concat!(
+                r##"  {"type":"dropShadow","dx":0,"dy":6,"blur":12,"color":"#00000055"}"##,
+                "\n                                       fields dx, dy, blur, color; dx/dy at 0 is a glow,",
+                "\n                                       #rrggbbaa alpha sets flood opacity"
+            )),
+            Self::Other(_) => None,
+        }
+    }
+
+    /// One rendered instance per effect variant, in `styles` order — the
+    /// listing the CLI's `styles` command iterates, so discovery cannot
+    /// drift from this enum the way it did in 1.6.0, where `dropShadow`
+    /// rendered but was never advertised.
+    pub fn rendered_examples() -> Vec<Self> {
+        vec![
+            Self::Brightness { amount: 1.2 },
+            Self::Contrast { amount: 1.4 },
+            Self::Saturation { amount: 0.0 },
+            Self::Blur { radius: 3.0 },
+            Self::Grain {
+                amount: 0.2,
+                seed: 7,
+                scale: 1.0,
+            },
+            Self::DropShadow {
+                dx: 0.0,
+                dy: 6.0,
+                blur: 12.0,
+                color: Color::new("#00000055"),
+            },
+        ]
+    }
 }
 
 /// How a layer composites onto what is beneath it.

@@ -65,7 +65,8 @@ enum Command {
     AddText {
         /// Project directory.
         project: PathBuf,
-        /// The text. `\n` is a line break.
+        /// The text, taken verbatim: a shell-typed `\n` is stored as the two
+        /// characters, not translated into a line break.
         #[arg(long)]
         text: String,
         /// Font family, as named by one of the loaded font files.
@@ -547,13 +548,14 @@ enum Command {
         /// Read the effect stack from a JSON file instead.
         #[arg(long, conflicts_with = "effects")]
         effects_file: Option<PathBuf>,
-        /// Text layers: the text. `\n` is a line break.
+        /// Text layers: the text, taken verbatim. A shell-typed `\n` is
+        /// stored as the two characters, not a line break.
         #[arg(long)]
         text: Option<String>,
         /// Read the text from a file instead, verbatim.
         ///
-        /// A file is the only way to set text containing a line break from a
-        /// shell that will not pass one through.
+        /// A file is the only way to set text containing a real line break
+        /// from a shell that will not pass one through.
         #[arg(long, conflicts_with = "text")]
         text_file: Option<PathBuf>,
         /// Text layers: font family.
@@ -2113,14 +2115,10 @@ fn run(command: Command) -> Result<(), CliError> {
                 println!("  {}", mode.as_str());
             }
             println!("effects:");
-            for line in [
-                r#"  {"type":"brightness","amount":1.2}   1 is unchanged"#,
-                r#"  {"type":"contrast","amount":1.4}     1 is unchanged"#,
-                r#"  {"type":"saturation","amount":0}     1 is unchanged, 0 is greyscale"#,
-                r#"  {"type":"blur","radius":3}           0 is unchanged"#,
-                r#"  {"type":"grain","amount":0.2,"seed":7,"scale":1}"#,
-                "                                       seeded, so the same document grains the same way",
-            ] {
+            for line in assemblash_core::document::Effect::rendered_examples()
+                .iter()
+                .filter_map(assemblash_core::document::Effect::styles_line)
+            {
                 println!("{line}");
             }
             Ok(())

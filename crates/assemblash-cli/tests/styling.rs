@@ -452,7 +452,85 @@ fn the_styles_command_lists_only_what_this_build_renders() {
     ] {
         assert!(listed.contains(mode), "{mode} missing from: {listed}");
     }
-    for effect in ["brightness", "contrast", "saturation", "blur", "grain"] {
-        assert!(listed.contains(effect), "{effect} missing from: {listed}");
+    // The effect half derives from the enum, so the assertion must too: the
+    // match names every `Effect` variant, and a new variant fails to compile
+    // until it is listed here — the same guarantee `BlendMode::RENDERED`
+    // gives the blend-mode half above.
+    use assemblash_core::document::Effect;
+    for effect in Effect::rendered_examples() {
+        let name = match &effect {
+            Effect::Brightness { .. } => "brightness",
+            Effect::Contrast { .. } => "contrast",
+            Effect::Saturation { .. } => "saturation",
+            Effect::Blur { .. } => "blur",
+            Effect::Grain { .. } => "grain",
+            Effect::DropShadow { .. } => "dropShadow",
+            Effect::Other(_) => unreachable!("rendered_examples never holds Other"),
+        };
+        assert!(listed.contains(name), "{name} missing from: {listed}");
     }
+}
+
+#[test]
+fn a_shell_typed_backslash_n_in_text_is_stored_verbatim_and_help_says_so() {
+    let scratch = tempfile::tempdir().unwrap();
+    let (project, store, _layer) = project(scratch.path());
+    let project_arg = project.to_str().unwrap();
+
+    // DEF-23: the help must not claim `\n` is a line break, because a
+    // backslash-n typed at the shell is stored as the two characters.
+    for (command, help) in [
+        ("add-text", run(&["add-text", "--help"])),
+        ("set", run(&["set", "--help"])),
+    ] {
+        assert!(
+            !help.contains("is a line break"),
+            "{command} --help still claims `\\n` is a line break: {help}"
+        );
+    }
+    let set_help = run(&["set", "--help"]);
+    assert!(
+        set_help.contains("--text-file"),
+        "set --help should point at --text-file for real line breaks: {set_help}"
+    );
+
+    // And the behaviour matches the wording: the two characters survive.
+    let layer = run(&[
+        "add-text",
+        project_arg,
+        "--text",
+        "a\\nb",
+        "--font",
+        "Noto Sans",
+        "--size",
+        "28",
+        "--x",
+        "10",
+        "--y",
+        "10",
+        "--width",
+        "180",
+        "--height",
+        "60",
+        "--font-store",
+        store.to_str().unwrap(),
+    ])
+    .trim()
+    .to_owned();
+    run(&["set", project_arg, "--layer", &layer, "--text", "a\\nb"]);
+
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(project.join("document.json")).unwrap())
+            .unwrap();
+    let stored: serde_json::Value = doc["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"].as_str() == Some(layer.as_str()))
+        .unwrap_or_else(|| panic!("layer {layer} not in the document"))["text"]
+        .clone();
+    assert_eq!(
+        stored, "a\\nb",
+        "a shell-typed backslash-n must stay the two characters"
+    );
 }

@@ -10,6 +10,30 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-09-11
+
+A defect sweep on 1.6.0. No schema change: `schemaVersion` stays 1, and no
+operation, route, tool, flag or control changed.
+
+### Fixed
+
+- **`assemblash styles` now lists `dropShadow`.** 1.6.0 rendered the effect
+  but the CLI's discovery listing still named only the five pre-1.6 effects,
+  so an agent reading `styles` — the surface agents read to learn what a
+  build can do — concluded drop shadows were unsupported and fell back to a
+  blurred rectangle behind the layer. The listing is now derived from the
+  `Effect` enum in core instead of a literal array in the CLI, a new effect
+  variant fails to compile until it is given its line, and the regression
+  test asserts every variant by an exhaustive match. The `dropShadow` entry
+  documents its four fields (`dx`, `dy`, `blur`, `color`), notes that
+  `dx`/`dy` at 0 is a glow, and that an `#rrggbbaa` alpha sets flood opacity.
+- **The `add-text --text` and `set --text` help no longer claim `` `\n` ``
+  is a line break.** A backslash-n typed at the shell is stored as the two
+  characters and renders as such; only `--text-file` produces a real line
+  break. The help now says the text is taken verbatim and points at
+  `--text-file` for a line break. Behaviour is unchanged — this corrects
+  the documentation, not the engine.
+
 ## [1.6.0] — 2026-09-09
 
 No 1.5.1 was released: no defect was outstanding after 1.5.0.
