@@ -50,6 +50,16 @@ subfolders, plus `handoffs/`, `goals/`, `decisions/`, `roadmap/`, `skills/`,
   which decisions are still open (resolved ones are marked there, with the
   rationale in §16.1 — the stack is Rust). Draft options for open ones in
   `.ai/decisions/` and let the maintainer choose.
+- **Write all documentation in ASD-STE100 Simplified Technical English.** This
+  applies to every new or edited documentation file (README, guides, PRD
+  sections, examples, release-notes prose) from now on:
+  - short sentences — one instruction per step, about 20 words maximum;
+  - active voice, simple present tense, imperative for procedures;
+  - one word, one meaning — no synonyms for the same technical term;
+  - no idioms, colloquialisms, or metaphors;
+  - keep technical names, commands, code, versions, and links unchanged.
+  Do not rewrite verbatim license texts (for example
+  `THIRD_PARTY_LICENSES.md`), and leave `CHANGELOG.md` history as-is.
 - **Do not run `git init`, create remotes, commit, or push unless asked.**
 - **Check changes against the PRD invariants** before proposing them —
   one operation layer, determinism, reversibility, protected layers, the

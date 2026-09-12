@@ -1,28 +1,28 @@
 # Assemblash Product Requirements Document
 
 **Product:** Assemblash  
-**Status:** **1.6.0 released 2026-09-09** — the document schema remains `schemaVersion` 1 and the operation API remains compatible with 1.0; breaking either requires a MAJOR release. A fifth layer kind, `shape`, draws a rectangle, an ellipse or a line from the document itself with `fill`, an inset `stroke` and a corner radius, and a `dropShadow` effect joins the stack; presets carry fill and stroke, a colour slot may target a shape, and every surface — CLI, HTTP, MCP and the reference interface — creates and edits them. Rounded corners and ellipses are emitted as cubic curves so the rasteriser never reaches the platform maths library. Builds 1.0 through 1.5 refuse a document containing a shape layer; the CHANGELOG names that. Asset uploads accept 64 MiB and every over-limit body answers with the JSON envelope. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) remain demonstrated. Use case D remains out of scope by design.
+**Status:** **1.6.0 released 2026-09-09** — the document schema stays at `schemaVersion` 1 and the operation API stays compatible with 1.0; a change that breaks either requires a MAJOR release. A fifth layer kind, `shape`, draws a rectangle, an ellipse or a line from the document itself with `fill`, an inset `stroke` and a corner radius, and a `dropShadow` effect joins the stack. Presets carry fill and stroke. A colour slot may target a shape. Every surface — CLI, HTTP, MCP and the reference interface — creates and edits them. Rounded corners and ellipses become cubic curves, so the rasteriser never reaches the platform maths library. Builds 1.0 through 1.5 refuse a document that contains a shape layer; the CHANGELOG names that. Asset uploads accept 64 MiB. Every body over that limit answers with the JSON envelope. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) remain demonstrated. Use case D stays out of scope by design.
 **Document type:** Product and technical requirements  
 **Audience:** Maintainers, contributors, downstream integrators, and coding agents  
 **Primary deployment model:** Local machine or self-hosted server  
-**Public/private boundary:** Generic engine public; downstream brand assets and private integrations remain outside this repository
+**Public/private boundary:** Generic engine public; downstream brand assets and private integrations stay outside this repository
 
 ---
 
 ## 1. Product summary
 
-Assemblash is a local-first, headless visual document engine designed to be used by both humans and AI agents.
+Assemblash is a local-first, headless visual document engine. Humans and AI agents both use it.
 
 It provides:
 
 - a structured document model for layered visual compositions;
-- an operation API for creating and editing documents;
+- an operation API to create and edit documents;
 - deterministic rendering and export;
 - an optional local reference web interface;
 - an MCP server that exposes document inspection and editing capabilities to AI agents;
 - extension points for image processing, AI providers, animation workflows, and downstream applications.
 
-Assemblash is deliberately smaller than Photoshop, GIMP, or a full design platform. Its purpose is to make visual composition programmable without flattening the document or forcing agents to operate a graphical interface through unreliable clicks.
+Assemblash is deliberately smaller than Photoshop, GIMP, or a full design platform. Its purpose is to make visual composition programmable. It does not flatten the document, and it does not force agents to operate a graphical interface through unreliable clicks.
 
 ### One-sentence definition
 
@@ -36,7 +36,7 @@ Current visual workflows create a gap between human editing and agent automation
 
 ### Existing editor problem
 
-Mature editors are powerful, but external agents generally lack a stable, typed interface for:
+Mature editors are powerful. But external agents generally lack a stable, typed interface for:
 
 - reading the document structure;
 - identifying layers and groups;
@@ -47,11 +47,11 @@ Mature editors are powerful, but external agents generally lack a stable, typed 
 
 ### Existing code pipeline problem
 
-Code-first pipelines are reproducible, but they often produce flattened output. A human may then need to rewrite code to make a small visual adjustment.
+Code-first pipelines are reproducible. But they often produce flattened output. A human may then need to rewrite code to make a small visual adjustment.
 
 ### Existing image-generation problem
 
-Image-generation systems can produce visually interesting results, but they are not reliable for:
+Image-generation systems can produce visually interesting results. But they are not reliable for:
 
 - exact text;
 - logos and marks;
@@ -62,7 +62,7 @@ Image-generation systems can produce visually interesting results, but they are 
 
 ### Required middle layer
 
-Assemblash should preserve structure while allowing both programmatic and human editing:
+Assemblash should preserve structure and allow both programmatic and human editing:
 
 ```text
 Structured document
@@ -79,11 +79,11 @@ Structured document
 
 ### G1 — Provide a stable structured document model
 
-Documents must represent visual compositions as layers, groups, assets, styles, and transforms rather than only as a flattened bitmap.
+Documents must represent visual compositions as layers, groups, assets, styles, and transforms. They must not represent them only as a flattened bitmap.
 
 ### G2 — Make the core usable without a frontend
 
-The document engine, renderer, and API must be usable by scripts, services, and downstream products without requiring the reference UI.
+Scripts, services, and downstream products must be able to use the document engine, renderer, and API without the reference UI.
 
 ### G3 — Make agent operations safe and predictable
 
@@ -95,7 +95,7 @@ Text, layout, vector elements, and protected assets should render consistently a
 
 ### G5 — Keep the project local-first
 
-The core must work without a cloud account, mandatory hosted service, or paid AI provider.
+The core must work without a cloud account, a mandatory hosted service, or a paid AI provider.
 
 ### G6 — Enable downstream applications
 
@@ -103,7 +103,7 @@ Other applications should be able to provide their own frontend, templates, perm
 
 ### G7 — Publish a useful open-source foundation
 
-The public project should be generic, documented, testable, and extensible without exposing private downstream assets or credentials.
+The public project should be generic, documented, testable, and extensible. It must not expose private downstream assets or credentials.
 
 ---
 
@@ -138,11 +138,11 @@ Developers who want to embed visual composition into another product and expose 
 
 ### 5.2 Technical creators
 
-People who want reproducible, scriptable visual assets without depending on a cloud design platform.
+People who want reproducible, scriptable visual assets. They do not want to depend on a cloud design platform.
 
 ### 5.3 Small teams and organizations
 
-Teams that need reusable templates, local or self-hosted operation, and controlled asset handling without adopting a large design platform.
+Teams that need reusable templates, local or self-hosted operation, and controlled asset handling. They do not want to adopt a large design platform.
 
 ### 5.4 Human reviewers
 
@@ -156,10 +156,10 @@ People who want to inspect and adjust an agent-created composition in a simple v
 
 1. The user asks an agent to create a document from a template.
 2. The agent creates text, image, SVG, and group layers.
-3. The agent positions and styles those layers using typed operations.
+3. The agent positions and styles those layers with typed operations.
 4. The user reviews the result in a frontend.
 5. The user or agent makes revisions.
-6. The document is exported.
+6. The system exports the document.
 
 ### Use case B — Agent edits an existing document
 
@@ -175,16 +175,16 @@ People who want to inspect and adjust an agent-created composition in a simple v
 1. A template contains named slots and protected layers.
 2. A script or agent supplies content and parameters.
 3. Assemblash renders several variants.
-4. Each variant remains traceable to its source document and parameters.
-5. The variants are exported in one or more dimensions.
+4. Each variant stays traceable to its source document and parameters.
+5. The system exports the variants in one or more dimensions.
 
 ### Use case D — Optional AI image operation
 
 1. The user selects an editable raster layer or region.
 2. An optional adapter sends a controlled operation to a local or remote image provider.
 3. The result returns as a new or replacement layer.
-4. Protected layers remain unchanged.
-5. The user reviews and accepts or discards the result.
+4. Protected layers stay unchanged.
+5. The user reviews the result. Then the user accepts it or discards it.
 
 ### Use case E — Downstream application integration
 
@@ -203,11 +203,11 @@ The document model and operation semantics are the product foundation. The refer
 
 ### 7.2 One operation layer
 
-The UI, CLI, API, and MCP server must call the same validated operations. There must not be separate implementations with inconsistent behavior.
+The UI, CLI, API, and MCP server must call the same validated operations. Separate implementations with inconsistent behavior must not exist.
 
 ### 7.3 Preview before mutation
 
-Agents should be able to inspect a document and preview proposed changes before applying them.
+Agents should be able to inspect a document and preview proposed changes before they apply them.
 
 ### 7.4 Protected content must be explicit
 
@@ -215,7 +215,7 @@ Documents should be able to mark layers as protected, locked, or read-only. AI o
 
 ### 7.5 Determinism is a feature
 
-If an operation can be deterministic, it should be. Random or provider-dependent operations must record their provider, parameters, seed where applicable, and source asset metadata.
+If an operation can be deterministic, then it should be. Random or provider-dependent operations must record their provider, parameters, seed where applicable, and source asset metadata.
 
 ### 7.6 Private integrations stay private
 
@@ -297,7 +297,7 @@ Assets MUST have:
 - a storage reference;
 - optional content hash.
 
-The initial implementation MUST avoid unrestricted arbitrary filesystem access from agent tools.
+The initial implementation MUST NOT give agent tools unrestricted arbitrary filesystem access.
 
 ### FR-6 — Transforms
 
@@ -310,7 +310,7 @@ The system MUST support:
 - transform origin or equivalent behavior;
 - opacity.
 
-The system SHOULD support non-destructive transforms where practical.
+Where practical, the system SHOULD support non-destructive transforms.
 
 ### FR-7 — Layer operations
 
@@ -330,22 +330,22 @@ The operation layer MUST support:
 - lock/unlock;
 - rename.
 
-Each mutation MUST be validated before commit.
+The system MUST validate each mutation before commit.
 
 **Selection is a client concern, not document state** (amended 2026-08-04;
 this list originally included `select`). Each client — a UI session, an API
-consumer, an MCP session — keeps its own selection, and every operation that
-acts on layers takes explicit layer-id lists. Rationale: concurrent sessions
-must not fight over one stored selection; selection changes must not dirty
-the document or its history journal; and explicit id lists keep agent
-operations auditable in the journal ("align these three ids" rather than
-"align whatever was selected").
+consumer, an MCP session — keeps its own selection. Every operation that acts
+on layers takes explicit layer-id lists. Rationale: concurrent sessions must
+not fight over one stored selection. Selection changes must not dirty the
+document or its history journal. Explicit id lists keep agent operations
+auditable in the journal ("align these three ids" rather than "align whatever
+was selected").
 
 ### FR-8 — Undo and history
 
 Mutating operations MUST be represented as history entries or reversible transactions.
 
-The first release MUST support undo for operations performed through the API and reference UI. MCP-triggered writes MUST also be reversible.
+The first release MUST support undo for operations performed through the API and reference UI. Writes triggered through MCP MUST also be reversible.
 
 ### FR-9 — Persistence
 
@@ -360,13 +360,13 @@ assets/
   asset-id-2.svg
 ```
 
-A packaged `.assemblash` format MAY be added later after the directory representation is stable.
+A packaged `.assemblash` format MAY be added later, after the directory representation is stable.
 
-Documents MUST include a schema version and SHOULD support migration between compatible versions.
+Documents MUST include a schema version. They SHOULD support migration between compatible versions.
 
 ### FR-10 — Rendering
 
-The renderer MUST produce a preview from the document model without requiring the reference UI.
+The renderer MUST produce a preview from the document model. It MUST NOT require the reference UI.
 
 The renderer MUST report errors for:
 
@@ -419,8 +419,8 @@ Initial MCP capabilities MUST be divided into:
 - read text and metadata.
 
 (This list originally included "get selection". Removed 2026-08-05 to follow
-the FR-7 amendment: selection is a client concern, so an MCP session holds its
-own and there is nothing on the server to read.)
+the FR-7 amendment: selection is a client concern. An MCP session holds its
+own, so there is nothing on the server to read.)
 
 #### Mutating
 
@@ -454,26 +454,26 @@ It SHOULD include:
 - export;
 - operation history.
 
-The UI MUST remain replaceable by downstream applications.
+Downstream applications MUST be able to replace the UI.
 
 ### FR-15 — Optional AI adapters
 
-AI providers MUST be optional integrations and MUST NOT be required by the core.
+AI providers MUST be optional integrations. The core MUST NOT require them.
 
 An AI adapter MUST:
 
 - identify the provider and operation;
-- preserve the original asset or layer unless replacement is explicitly accepted;
+- preserve the original asset or layer, unless replacement is explicitly accepted;
 - record relevant parameters;
 - respect protected layers;
 - return structured errors;
-- avoid leaking local project data without explicit configuration.
+- not leak local project data without explicit configuration.
 
 ---
 
 ## 9. Proposed document model
 
-The exact schema is a technical design decision, but the first model should have a shape similar to:
+The exact schema is a technical design decision. But the first model should have a shape similar to:
 
 ```json
 {
@@ -520,7 +520,7 @@ The exact schema is a technical design decision, but the first model should have
 }
 ```
 
-The schema MUST remain implementation-independent enough to support multiple renderers and frontends.
+The schema MUST stay independent of the implementation enough to support multiple renderers and frontends.
 
 ---
 
@@ -534,13 +534,13 @@ The server MUST operate inside an explicitly configured project root or asset di
 
 Layers may be marked:
 
-- `locked` — cannot be changed by normal operations;
+- `locked` — normal operations cannot change it;
 - `protected` — AI adapters cannot replace or edit the content;
-- `readOnly` — visible and inspectable but not mutable through the API.
+- `readOnly` — visible and inspectable, but the API cannot change it.
 
 ### 10.3 Version checks
 
-Every document mutation SHOULD include an expected document version. If the document changed since the agent inspected it, the API should reject the mutation and require a fresh read.
+Every document mutation SHOULD include an expected document version. If the document changed since the agent inspected it, then the API should reject the mutation and require a fresh read.
 
 ### 10.4 Dry-run operations
 
@@ -574,7 +574,7 @@ The core MUST run locally without a hosted service or mandatory network access.
 
 ### NFR-2 — Cross-platform support
 
-The initial target environments are Windows and Linux. The project SHOULD avoid platform-specific assumptions in the core.
+The initial target environments are Windows and Linux. The core SHOULD avoid platform-specific assumptions.
 
 ### NFR-3 — Reproducible output
 
@@ -582,7 +582,7 @@ The same document, assets, renderer version, and configuration SHOULD produce eq
 
 ### NFR-4 — Structured errors
 
-Errors MUST identify the operation, relevant IDs, and a human-readable cause without exposing secrets.
+Errors MUST identify the operation, relevant IDs, and a human-readable cause. They MUST NOT expose secrets.
 
 ### NFR-5 — Testability
 
@@ -590,7 +590,7 @@ Core operations, schema validation, serialization, rendering, export, and MCP to
 
 ### NFR-6 — Extension safety
 
-Optional providers and downstream adapters MUST be isolated from the core so that failure in an AI integration cannot corrupt the base document model.
+Optional providers and downstream adapters MUST be isolated from the core. A failure in an AI integration then cannot corrupt the base document model.
 
 ### NFR-7 — Documentation
 
@@ -606,16 +606,16 @@ The MVP is complete only when all of the following are demonstrated with real ex
 2. Text and image layers can be added.
 3. Layers can be grouped and reordered.
 4. Layers can be moved and resized.
-5. A document can be saved and loaded without losing structure.
+5. A document can be saved and loaded without loss of structure.
 6. A preview can be rendered without opening the reference UI.
 7. A PNG can be exported.
 8. Invalid operations return structured errors.
 9. At least one local MCP client can inspect the document.
 10. At least one local MCP client can apply a reversible layer operation.
-11. Protected or locked layers cannot be modified through normal agent tools.
+11. Normal agent tools cannot modify protected or locked layers.
 12. The reference UI can open, edit, and export the same document format used by the API.
 13. Tests cover the document model, core operations, persistence, export, and MCP schemas.
-14. No cloud account or paid provider is required for the MVP.
+14. The MVP does not require a cloud account or a paid provider.
 
 ---
 
@@ -725,7 +725,7 @@ was selected against:
 
 Summary of the chosen direction (details in §16.1):
 
-- Rust core, shipping as one static binary;
+- Rust core, shipped as one static binary;
 - `serde` document model with JSON Schema generated via `schemars` — the
   document format stays language-neutral;
 - SVG-first rendering rasterized with `resvg`/`tiny-skia` (pure Rust,
@@ -734,10 +734,10 @@ Summary of the chosen direction (details in §16.1):
 - MCP over stdio via the official Rust SDK;
 - web-based reference UI (TypeScript) served as static assets by the same
   binary, with UI types generated from the JSON Schema;
-- Python and other languages remain welcome as adapter implementations
+- Python and other languages stay welcome as adapter implementations
   against the API.
 
-The project MUST avoid selecting a dependency solely because it offers a visually impressive demo. License terms, serialization behavior, export reliability, testability, and agent access are more important. Every renderer-level dependency must pass the Phase 0 determinism gate (§16.1) before the project depends on it.
+The project MUST NOT select a dependency only because it offers a visually impressive demo. License terms, serialization behavior, export reliability, testability, and agent access are more important. Every renderer-level dependency must pass the Phase 0 determinism gate (§16.1) before the project depends on it.
 
 ---
 
@@ -745,7 +745,7 @@ The project MUST avoid selecting a dependency solely because it offers a visuall
 
 ### R1 — Scope expands into Photoshop
 
-**Mitigation:** keep the MVP limited to structured layers, groups, text, images, transforms, and export. Record broader ideas in a roadmap rather than implementing them immediately.
+**Mitigation:** keep the MVP limited to structured layers, groups, text, images, transforms, and export. Record broader ideas in a roadmap. Do not implement them immediately.
 
 ### R2 — Agent makes visually poor decisions
 
@@ -777,7 +777,7 @@ The project MUST avoid selecting a dependency solely because it offers a visuall
 
 ### R9 — Public project receives little contribution
 
-**Mitigation:** design the project to be valuable even with one maintainer. Provide a working reference UI, examples, tests, and clear extension points; do not assume community maintenance.
+**Mitigation:** design the project to be valuable even with one maintainer. Provide a working reference UI, examples, tests, and clear extension points. Do not assume community maintenance.
 
 ---
 
@@ -819,7 +819,7 @@ explicitly deprioritized.
   manager, and no system dependencies to install. Cross-compilation to
   x86_64 and aarch64 is native.
 - **Document model:** `serde`-based, with JSON Schema generated via `schemars`,
-  so the document format remains language-neutral even though the reference
+  so the document format stays language-neutral even though the reference
   implementation is Rust. TypeScript types for the reference UI are generated
   from the JSON Schema.
 - **Renderer: SVG-first.** The document renders to SVG through a pure
@@ -828,7 +828,7 @@ explicitly deprioritized.
   provided font files, never system fonts. This is what makes deterministic,
   bit-comparable output across operating systems and CPU architectures
   achievable (NFR-3): there is no platform-specific code path in the rendering
-  pipeline. SVG export (FR-11) falls out of the intermediate format.
+  pipeline. SVG export (FR-11) comes directly from the intermediate format.
 - **Local API:** the core crate is the embedded interface; a thin HTTP layer
   (`axum`) follows in Phase 2. Both call the same operation layer (§7.2).
 - **MCP:** the official Rust MCP SDK, stdio transport first; HTTP transport
@@ -839,34 +839,34 @@ explicitly deprioritized.
 
 **Home-lab security profile (decision 14, resolved 2026-08-05):** access
 token plus explicit bind. The default stays `127.0.0.1` with no token and no
-configuration. A non-loopback bind is possible but refuses to start unless an
-access token is configured; the token is generated into the workspace
+configuration. A non-loopback bind is possible. But it refuses to start unless
+an access token is configured. The token is generated into the workspace
 configuration on first use, presented as a bearer header to the API and via a
 one-time browser login for the UI, compared in constant time, and never
 logged or placed in URLs. There are no accounts and no built-in OIDC —
-identity-provider integration belongs behind a reverse proxy, which is also
-the documented path for TLS. This keeps the core local-first and
+identity-provider integration belongs behind a reverse proxy. That reverse
+proxy is also the documented path for TLS. This keeps the core local-first and
 single-binary while making self-hosted and Docker deployment genuinely
 usable (decision applies from v0.11.0).
 
 **Reference UI rendering (decision 3, resolved 2026-08-05):** no canvas
-library. The engine already produces the authoritative SVG render; the
+library. The engine already produces the authoritative SVG render. The
 reference UI displays that render and overlays DOM elements for selection
 handles and interaction. Preview is therefore pixel-true to export by
-construction, which eliminates the preview/export divergence risk (R3) rather
+construction. This eliminates the preview/export divergence risk (R3) rather
 than mitigating it. A canvas library would have introduced a second renderer
 whose display could drift from the engine's output, plus a significant
-dependency to license-track. The UI may use a minimal TypeScript build step;
-generated types are compiled in CI from this milestone on.
+dependency to license-track. The UI may use a minimal TypeScript build step.
+Generated types are compiled in CI from this milestone on.
 
 Considered and rejected: **TypeScript/Node** (best iteration speed and MCP
 maturity, but a ~100 MB runtime, roughly an order of magnitude more idle
 memory, and per-platform native-binding artifacts — the weakest fit for the
 resource and portability criteria); **Go** (equal single-binary story, but no
 production-grade pure-Go SVG renderer or text shaper — CGo bindings would
-forfeit exactly the painless cross-compilation being optimized for);
+forfeit exactly the easy cross-compilation that the criteria optimize for);
 **headless-browser rendering** (output varies across browser versions,
-violating NFR-3, and is heavyweight to deploy).
+violates NFR-3, and is heavyweight to deploy).
 
 Accepted trade-offs, recorded deliberately: slower per-feature development,
 Rust compile times, a smaller contributor pool, and a type-generation step
@@ -882,51 +882,52 @@ mode and one filter. The named fallback if resvg fails the gate is
   or `v0.12.2`). Pre-1.0, MINOR may include breaking changes, as SemVer allows.
 - The document `schemaVersion` is an **independent integer**, decoupled from
   the release version. An application release may or may not introduce a new
-  schema version; a schema change always increments `schemaVersion` and MUST
+  schema version. A schema change always increments `schemaVersion` and MUST
   ship with a migration path (FR-9).
 - Every export records both the renderer/application version and the document
   schema version (FR-11).
-- The public API is versioned with the application release; breaking API
+- The public API is versioned with the application release. Breaking API
   changes after 1.0 require a MAJOR increment.
 
 **Font resolution (decision 7, resolved 2026-08-05):** a hash-pinned local
 font store, and no system fonts anywhere. The workspace holds a `fonts/`
-directory in which every file is named by the sha256 of its own bytes, beside
+directory. Every file in it is named by the sha256 of its own bytes, beside
 an `index.json` recording the family, style, weight, hash, provenance, and
-licence of each face; `assemblash font verify` re-hashes everything and names
-the file that changed, because a font replaced behind the engine's back would
-otherwise move the pixels without moving anything the document records. A
+licence of each face. `assemblash font verify` re-hashes everything and names
+the file that changed. Without that check, a font replaced without the engine's
+knowledge would
+move the pixels without moving anything the document records. A
 render uses only the font files it is given — there is no system-font
-discovery and no network access anywhere on the render path — and a family
-the store does not have is a typed error at store, renderer, and command-line
-level rather than a substitution. The one network action is an explicit
-installer, `assemblash font install`, which fetches only what a manifest
+discovery and no network access anywhere on the render path. A family
+the store does not have produces a typed error at store, renderer, and command-line
+level, not a substitution. The one network action is an explicit
+installer, `assemblash font install`. It fetches only what a manifest
 committed in this repository names: twelve OFL families, pinned to one commit
-of the upstream font project and to the sha256 of each file, a download whose
-hash does not match being refused rather than stored. Reporting is by family.
-The store's index records style and weight per face, but a text layer names a
+of the upstream font project and to the sha256 of each file. A download whose
+hash does not match is refused, not stored. Reporting is by family.
+The store's index records style and weight per face. But a text layer names a
 font family and nothing else, so per-face selection is not yet expressible in
 a document.
 
 **Image formats (decision 8, resolved 2026-08-04):** PNG, JPEG, WebP, and GIF
-are imported as raster assets and SVG as a vector asset, each copied into the
+are imported as raster assets and SVG as a vector asset. Each is copied into the
 project's `assets/` directory under the sha256 of its own bytes, with the
 media type recorded from the file extension. An SVG is sanitised on the way
-in rather than on the way out, so everything under `assets/` is safe by
-construction (§10.1). An import with no file extension is refused, and one
+in, not on the way out. So everything under `assets/` is safe by
+construction (§10.1). An import with no file extension is refused. An import
 carrying an extension outside that set is stored as `application/octet-stream`
 rather than as an image. Export writes two formats and only two: SVG, which is
 the renderer's own intermediate form, and PNG rasterized from it (FR-11).
 
 **Atomic operations (decision 9, resolved 2026-08-04):** all of them. Every
-operation runs against a copy of the document and is written back only once
-the result validates, so a refused operation leaves the document
+operation runs against a copy of the document. It is written back only once
+the result validates. So a refused operation leaves the document
 byte-identical rather than half-applied. Each carries an optional
 expected-version check (§10.3), can be asked what it would do without doing
 it (§10.4), and is journalled as one transaction that a single undo reverses.
 `POST /api/projects/{id}/operation-batches`, added in 1.1.0, gives the same
-scope to a group of operations: every member is applied to one cloned
-document, nothing is persisted if any of them fails, and the batch is
+scope to a group of operations. Every member is applied to one cloned
+document. Nothing is persisted if any of them fails. The batch is
 journalled, undone, and redone as one step.
 
 **Audit and history format (decision 10, resolved 2026-08-04):** an
@@ -934,12 +935,12 @@ append-only `history/journal.jsonl` per project — one JSON object per line,
 recording the operation or batch, its transaction id, the actor kind and
 name, a timestamp, and the layers touched (§10.5) — beside periodic
 snapshots of the document under `history/snapshots/`. The file is never
-rewritten, so it stays greppable by a person and no later edit can quietly
-revise it, and undo rebuilds a state by replaying operations forward onto the
-nearest snapshot rather than by inverting them, which is what makes an undone
+rewritten. So it stays greppable by a person and no later edit can quietly
+revise it. Undo rebuilds a state by replaying operations forward onto the
+nearest snapshot, not by inverting them. That is what makes an undone
 document byte-identical rather than merely equivalent. No SQL database is
-ever the source of truth: the workspace `index.db` added in 0.16.0 is a cache
-of what is in `projects/`, rebuilt by scanning it, and deleting the file
+ever the source of truth. The workspace `index.db` added in 0.16.0 is a cache
+of what is in `projects/`, rebuilt by scanning it. Deleting the file
 costs time and never information.
 
 ---
@@ -1011,6 +1012,6 @@ Contributors should be encouraged to add generic capabilities to the core and ke
 
 ## 19. Definition of success
 
-Assemblash is successful if a developer can install it locally, provide a structured document to an agent, ask the agent to make a precise visual change, inspect the result in a frontend, undo or revise the change, and export a reliable image without requiring a cloud design platform.
+Assemblash is successful if a developer can install it locally, provide a structured document to an agent, ask the agent to make a precise visual change, inspect the result in a frontend, undo or revise the change, and export a reliable image without a cloud design platform.
 
 The project does not need to replace professional editors. It needs to make a smaller workflow—structured, repeatable, agent-controlled visual composition—work well.

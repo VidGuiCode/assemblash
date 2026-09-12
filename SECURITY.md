@@ -3,7 +3,7 @@
 ## Project status
 
 Assemblash is **released at 1.3.0**. It is a local-first engine: by default it
-binds `127.0.0.1` and requires no account, no network, and no cloud service.
+binds `127.0.0.1` and needs no account, no network, and no cloud service.
 
 ## Supported versions
 
@@ -16,15 +16,16 @@ binds `127.0.0.1` and requires no account, no network, and no cloud service.
 
 ## What the built-in authentication is, and is not
 
-Binding anything other than loopback **refuses to start without an access
-token**. The token is compared in constant time, is never logged, and is never
-put in a URL. That is the whole of it: there are no users, no roles, and no
-revocation beyond rotating the single token, which logs everyone out.
+If the server binds anything other than loopback, it **refuses to start
+without an access token**. The token comparison runs in constant time. The
+token is never logged and is never put in a URL. That is all it does: there are
+no users, no roles, and no revocation. Rotation of the single token logs
+everyone out.
 
-**The token authenticates; it does not encrypt.** Anything reachable beyond a
-trusted network belongs behind a reverse proxy that terminates TLS, and OIDC or
-SSO belongs there too — see [DEPLOYMENT.md](DEPLOYMENT.md). Assemblash is not an
-identity provider and does not try to be one.
+**The token authenticates; it does not encrypt.** Put anything reachable beyond
+a trusted network behind a reverse proxy that terminates TLS. Put OIDC or SSO
+there too — see [DEPLOYMENT.md](DEPLOYMENT.md). Assemblash is not an identity
+provider and does not try to be one.
 
 ## Reporting a vulnerability
 
@@ -44,26 +45,26 @@ Please include:
 - your environment (OS, runtime version, configuration);
 - any suggested fix.
 
-Expect an acknowledgement within a few days. Because this is a small project,
-please allow reasonable time for a fix before public disclosure, and coordinate
-the disclosure timing with the maintainers.
+Expect an acknowledgement within a few days. This is a small project, so allow
+reasonable time for a fix before public disclosure. Coordinate the disclosure
+timing with the maintainers.
 
 ## Scope — what matters most in this project
 
-Assemblash exposes a document engine to AI agents, so the sharpest risks are in
-the agent boundary rather than in classic web surfaces. The following are
-in scope and treated as security issues, not bugs:
+Assemblash exposes a document engine to AI agents. The sharpest risks are in
+the agent boundary, not in classic web surfaces. The following are in scope and
+are treated as security issues, not bugs:
 
-- **Filesystem escape.** Any path in a document, asset import, export target, or
-  MCP tool argument that reaches outside the configured project root
+- **Filesystem escape.** Any path in a document, asset import, export target,
+  or MCP tool argument that reaches outside the configured project root
   (PRD §10.1) — including symlinks, absolute paths, UNC paths, and `..`
   traversal.
 - **Protected-layer bypass.** Any way to mutate a `locked`, `protected`, or
   `readOnly` layer through normal API, MCP, or adapter operations (PRD §10.2).
-- **Version-check bypass.** Applying a mutation against a stale document version
-  without rejection (PRD §10.3).
-- **Dry-run that mutates.** Any operation that commits changes while reported as
-  a preview (PRD §10.4).
+- **Version-check bypass.** Applying a mutation against a stale document
+  version without rejection (PRD §10.3).
+- **Dry-run that mutates.** Any operation that commits changes while reported
+  as a preview (PRD §10.4).
 - **Data exfiltration through adapters.** An optional AI or downstream adapter
   sending local project data to a remote provider without explicit
   configuration (PRD FR-15).
@@ -77,21 +78,21 @@ in scope and treated as security issues, not bugs:
 
 ## Out of scope
 
-- Vulnerabilities caused solely by exposing plain HTTP to an untrusted network
+- Vulnerabilities caused only by exposing plain HTTP to an untrusted network
   against the deployment guidance. Assemblash provides a shared access token,
   not transport encryption or per-user identity; internet-facing deployments
   need TLS and, where required, an identity-aware reverse proxy.
-- Missing hardening in features that are documented as not yet implemented.
-- Reports generated solely by an automated scanner with no demonstrated impact.
-- Attacks requiring an already-compromised host or a malicious local user with
+- Missing hardening in features documented as not yet implemented.
+- Reports generated only by an automated scanner with no demonstrated impact.
+- Attacks that need an already-compromised host or a malicious local user with
   filesystem access equal to the server's.
 
 ## Deployment guidance for users
 
 - Run Assemblash locally or on a trusted host. Do not expose it directly to the
-  internet without its access token and TLS in front of it; add an identity-aware
-  proxy when you need users, roles, OIDC, or SSO.
-- Configure the project root explicitly and give the process access to nothing
+  internet without its access token and TLS in front of it. Add an
+  identity-aware proxy when you need users, roles, OIDC, or SSO.
+- Configure the project root explicitly. Give the process access to nothing
   beyond it.
 - Treat documents and assets from other people as untrusted input.
 - Keep provider credentials used by downstream adapters out of the repository

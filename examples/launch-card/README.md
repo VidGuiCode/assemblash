@@ -1,8 +1,9 @@
 # Launch card example
 
 This is the editable Assemblash project behind the 1.2 launch card that the
-main README showed before 1.6.0. It is kept as an example of artwork built from
-imported SVG assets, and of a project whose operation history travels with it.
+main README showed before 1.6.0. It stays here as an example of artwork built
+from imported SVG assets, and of a project whose operation history travels
+with it.
 
 The composition contains separate layers for:
 
@@ -12,13 +13,13 @@ The composition contains separate layers for:
 - four capability labels; and
 - the compatibility footer.
 
-Its operation history is included, so the same project also demonstrates how
-scripted changes remain inspectable and undoable.
+Its operation history is included. The same project also shows how scripted
+changes stay inspectable and undoable.
 
 ## Inspect and export it
 
 The example uses Noto Sans. Install the manifest-pinned font once into a local
-store, then export the project:
+store. Then export the project:
 
 ```sh
 assemblash font install "Noto Sans" --font-store ./assemblash-fonts

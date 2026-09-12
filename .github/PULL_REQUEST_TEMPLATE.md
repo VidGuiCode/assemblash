@@ -34,7 +34,7 @@
 ## Project invariants
 
 - [ ] The UI/CLI/API/MCP paths still call one shared operation layer (no duplicated document logic).
-- [ ] Mutations remain validated and reversible.
+- [ ] Mutations stay validated and reversible.
 - [ ] `locked` / `protected` / `readOnly` layers are still respected.
 - [ ] Filesystem access stays inside the configured project root.
 - [ ] The core still works offline, with no AI provider and no cloud account.

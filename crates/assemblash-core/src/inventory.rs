@@ -90,12 +90,12 @@ pub fn render(metadata_json: &[u8]) -> Option<String> {
     let mut out = String::new();
     out.push_str("# Dependency and licence inventory\n\n");
     out.push_str(
-        "Generated from `cargo metadata` — do not edit. Regenerate with:\n\n\
+        "Generated from `cargo metadata` — do not edit. Regenerate it with:\n\n\
          ```sh\ncargo run -p assemblash-core --example generate-inventory\n```\n\n\
-         A test fails when this file and the dependency graph disagree, so a\n\
-         dependency cannot be added without it appearing here.\n\n\
-         Every licence below is on the allowlist in `deny.toml`, which CI\n\
-         enforces on every push (PRD R8). Assemblash itself is Apache-2.0.\n\n",
+         A test fails when this file and the dependency graph do not agree. Then you\n\
+         cannot add a dependency without it appearing here.\n\n\
+         Every licence below is on the allowlist in `deny.toml`. CI enforces the\n\
+         allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.\n\n",
     );
 
     let _ = writeln!(out, "## Summary\n");

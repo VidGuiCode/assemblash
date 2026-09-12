@@ -1,16 +1,16 @@
 # Dependency and licence inventory
 
-Generated from `cargo metadata` — do not edit. Regenerate with:
+Generated from `cargo metadata` — do not edit. Regenerate it with:
 
 ```sh
 cargo run -p assemblash-core --example generate-inventory
 ```
 
-A test fails when this file and the dependency graph disagree, so a
-dependency cannot be added without it appearing here.
+A test fails when this file and the dependency graph do not agree. Then you
+cannot add a dependency without it appearing here.
 
-Every licence below is on the allowlist in `deny.toml`, which CI
-enforces on every push (PRD R8). Assemblash itself is Apache-2.0.
+Every licence below is on the allowlist in `deny.toml`. CI enforces the
+allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 ## Summary
 
