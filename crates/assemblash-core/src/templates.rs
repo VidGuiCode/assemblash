@@ -332,6 +332,7 @@ mod tests {
             LayerKind::Image(ImageLayer {
                 asset: AssetId::new("asset_one"),
                 fit: ImageFit::Contain,
+                crop: None,
                 extra: Extras::new(),
             }),
         ));

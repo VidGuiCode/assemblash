@@ -106,6 +106,7 @@ fn canvas_resize_changes_surface_and_background_without_scaling_then_undoes_pixe
         LayerKind::Image(ImageLayer {
             asset: asset_id.clone(),
             fit: ImageFit::Fill,
+            crop: None,
             extra: Extras::new(),
         }),
     ));

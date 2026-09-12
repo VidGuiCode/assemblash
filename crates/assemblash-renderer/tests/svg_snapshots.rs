@@ -62,6 +62,7 @@ fn image(id: &str, transform: Transform, fit: ImageFit) -> Layer {
         LayerKind::Image(ImageLayer {
             asset: AssetId::new("asset_1"),
             fit,
+            crop: None,
             extra: Extras::new(),
         }),
     )

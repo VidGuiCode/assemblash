@@ -218,6 +218,7 @@ fn an_image_layer_is_never_checked_for_text() {
         LayerKind::Image(assemblash_core::document::ImageLayer {
             asset: asset_id,
             fit: ImageFit::Fill,
+            crop: None,
             extra: Extras::new(),
         }),
     ));

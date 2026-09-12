@@ -81,6 +81,8 @@ export type Layer = (TextLayer & {
   effects?: Effect[];
   /** Reserved (layout constraints): preserved verbatim, never interpreted. */
   constraints?: unknown;
+  /** The mask that hides everything the layer draws outside its box. */
+  clip?: Clip | null;
   [key: string]: unknown;
 };
 
@@ -99,6 +101,10 @@ export type Transform = {
   height: number;
   /** Clockwise rotation in degrees about the box centre. */
   rotation?: number;
+  /** Whether the content mirrors left-to-right about the box centre. */
+  flipHorizontal?: boolean;
+  /** Whether the content mirrors top-to-bottom about the box centre. */
+  flipVertical?: boolean;
   [key: string]: unknown;
 };
 
@@ -166,6 +172,24 @@ export type Effect = {
   [key: string]: unknown;
 } | unknown;
 
+/// The mask shape of a layer's [`Layer::clip`], tagged by `"shape"` in JSON.
+///
+/// The geometry always is the layer's transform box, so the variants carry no
+/// coordinates — only what the box alone does not say. [`Clip::Other`] is an
+/// untagged catch-all (D21): a clip written by a newer build is preserved as
+/// written, refused when an update touches it, and refused at render time —
+/// the same bargain as [`ShapeKind::Other`] (and, like it, never flattened
+/// into its parent, so the catch-all's reach stays with the clip).
+export type Clip = {
+  /** Corner radius in document units; 0 is a square corner. */
+  cornerRadius?: number;
+  shape: "rect";
+  [key: string]: unknown;
+} | {
+  shape: "ellipse";
+  [key: string]: unknown;
+} | unknown;
+
 /// Horizontal text alignment inside the layer box.
 export type TextAlign = "left" | "center" | "right";
 
@@ -216,12 +240,31 @@ export type TextLayer = {
 /// How an image is scaled into its box.
 export type ImageFit = "fill" | "contain" | "cover";
 
+/// A rectangle in an image's source pixel space.
+///
+/// A document type of its own, not [`crate::layout::Rect`]: that one is an
+/// internal `Copy` type in absolute canvas space, and a crop is none of
+/// those things — it serialises, and it is relative to the asset.
+export type Crop = {
+  /** Left edge in source pixels. */
+  x: number;
+  /** Top edge in source pixels. */
+  y: number;
+  /** Width in source pixels; must be positive and finite. */
+  width: number;
+  /** Height in source pixels; must be positive and finite. */
+  height: number;
+  [key: string]: unknown;
+};
+
 /// A reference to an imported asset, drawn into the layer box.
 export type ImageLayer = {
   /** Id of an asset in the document's `assets` list. */
   asset: AssetId;
   /** How the image fills its box. */
   fit?: ImageFit;
+  /** The sub-rectangle of the source image that fills the box, in source */
+  crop?: Crop | null;
   [key: string]: unknown;
 };
 

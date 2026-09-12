@@ -71,6 +71,8 @@ fn transform() -> impl Strategy<Value = Transform> {
             width,
             height,
             rotation,
+            flip_horizontal: false,
+            flip_vertical: false,
             extra,
         })
 }
@@ -121,7 +123,14 @@ fn image_kind(assets: Vec<AssetId>) -> impl Strategy<Value = LayerKind> {
         ],
         extras(),
     )
-        .prop_map(|(asset, fit, extra)| LayerKind::Image(ImageLayer { asset, fit, extra }))
+        .prop_map(|(asset, fit, extra)| {
+            LayerKind::Image(ImageLayer {
+                asset,
+                fit,
+                crop: None,
+                extra,
+            })
+        })
 }
 
 /// Every mode this build renders, plus one it does not.
@@ -231,6 +240,7 @@ fn layer(assets: Vec<AssetId>) -> impl Strategy<Value = Layer> {
                 blend_mode,
                 effects,
                 constraints: None,
+                clip: None,
                 protected,
                 read_only,
                 kind,
@@ -395,4 +405,93 @@ fn a_v0_1_0_document_still_loads() {
     validate(&document).expect("and is still valid");
     assert_eq!(document.layers.len(), 2);
     assert_eq!(document.schema_version, SCHEMA_VERSION);
+}
+
+/// A document written before 1.8.0, re-serialised by this build, is the same
+/// bytes.
+///
+/// The fixture is a real `document.json` written by the released 1.7.1 build:
+/// one shape layer and one text layer, no clip, no crop, no flip. Every 1.8.0
+/// field is skipped when it is unset, so opening and saving such a document
+/// cannot churn the file or the diff. This is exit test 6 of the 1.8.0 rung.
+#[test]
+fn a_document_from_before_1_8_0_re_serialises_to_the_same_bytes() {
+    let json = r##"{
+  "schemaVersion": 1,
+  "id": "doc_01M2B2600ZF0GZZ00WKVZA0CC8",
+  "version": 2,
+  "canvas": {
+    "width": 200.0,
+    "height": 120.0
+  },
+  "assets": [],
+  "layers": [
+    {
+      "id": "layer_01M2B26021TE4Q3CJJR1X3Z8QS",
+      "transform": {
+        "x": 10.0,
+        "y": 10.0,
+        "width": 60.0,
+        "height": 40.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "shape",
+      "shape": {
+        "kind": "rect",
+        "cornerRadius": 0.0
+      },
+      "fill": "#3366cc"
+    },
+    {
+      "id": "layer_01M2B2606XQ374JGBSTHR4GTYF",
+      "transform": {
+        "x": 10.0,
+        "y": 60.0,
+        "width": 180.0,
+        "height": 40.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "text",
+      "text": "Legacy",
+      "fontFamily": "Noto Sans",
+      "fontSize": 48.0,
+      "color": "#000000",
+      "align": "left",
+      "lineHeight": 1.2,
+      "runs": []
+    }
+  ]
+}
+"##;
+
+    let document: Document = serde_json::from_str(json).expect("a pre-1.8.0 document parses");
+    validate(&document).expect("and is still valid");
+
+    // The same bytes `storage::save` writes: pretty JSON plus a final newline.
+    let mut written = serde_json::to_string_pretty(&document).unwrap();
+    written.push('\n');
+    assert_eq!(
+        written, json,
+        "re-serialising a pre-1.8.0 document must not change a byte"
+    );
+    for absent in ["clip", "crop", "flipHorizontal", "flipVertical"] {
+        assert!(
+            !written.contains(absent),
+            "{absent} must not appear in a document that sets none of them"
+        );
+    }
 }

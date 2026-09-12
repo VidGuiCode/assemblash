@@ -15,6 +15,7 @@ pub mod document;
 pub mod error;
 pub mod history;
 pub mod ids;
+pub mod image_size;
 pub mod index;
 pub mod inventory;
 pub mod layout;

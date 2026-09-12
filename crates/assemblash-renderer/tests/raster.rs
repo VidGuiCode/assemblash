@@ -294,6 +294,7 @@ fn blend_document(mode: BlendMode) -> (Document, AssetHrefs) {
             LayerKind::Image(ImageLayer {
                 asset: asset_id,
                 fit: ImageFit::Fill,
+                crop: None,
                 extra: Extras::new(),
             }),
         );

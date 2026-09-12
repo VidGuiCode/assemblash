@@ -8,8 +8,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
-    BlendMode, Color, Document, Effect, Extras, FontStyle, GroupLayer, ImageFit, ImageLayer, Layer,
-    LayerKind, ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer, Transform, VerticalAlign,
+    BlendMode, Clip, Color, Crop, Document, Effect, Extras, FontStyle, GroupLayer, ImageFit,
+    ImageLayer, Layer, LayerKind, ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer, Transform,
+    VerticalAlign,
 };
 use crate::ids::{AssetId, IdSource, LayerId};
 use crate::ops::error::OpError;
@@ -242,6 +243,9 @@ impl CreateLayer {
                 LayerKind::Image(ImageLayer {
                     asset: asset.clone(),
                     fit: *fit,
+                    // Create-side crop stays out of 1.8.0 on purpose: the
+                    // ladder's letter is update-side only.
+                    crop: None,
                     extra: Extras::new(),
                 })
             }
@@ -412,6 +416,39 @@ pub struct UpdateLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f64>,
 
+    /// Any layer: the whole clip. Absent leaves it, `null` clears it.
+    ///
+    /// Doubly optional like `color` and the shape `fill`: "no clip" is a real
+    /// value a layer can have, so there has to be a way to say it that is not
+    /// "leave it alone". The clip geometry is the layer's transform box, so
+    /// nothing here carries coordinates.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_nullable"
+    )]
+    pub clip: Option<Option<Clip>>,
+    /// Image layers: the source rectangle that fills the box. Absent leaves
+    /// it, `null` clears it.
+    ///
+    /// Doubly optional, for the same reason: a whole-image layer and a cropped
+    /// one are two real states, and an update has to be able to say either.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_nullable"
+    )]
+    pub crop: Option<Option<Crop>>,
+    /// Any layer: mirror the content left-to-right about the box centre.
+    ///
+    /// Absent leaves it, present sets it — the `visible` and `locked` shape,
+    /// because a flip has a real default and no third state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip_horizontal: Option<bool>,
+    /// Any layer: mirror the content top-to-bottom about the box centre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip_vertical: Option<bool>,
+
     /// Change the layer even though it is locked.
     ///
     /// Needed to unlock a layer at all, and kept explicit so that no ordinary
@@ -450,6 +487,10 @@ impl UpdateLayer {
             fill: None,
             stroke: None,
             corner_radius: None,
+            clip: None,
+            crop: None,
+            flip_horizontal: None,
+            flip_vertical: None,
             allow_locked: false,
         }
     }
@@ -496,11 +537,48 @@ impl UpdateLayer {
             layer.effects = effects.clone();
         }
 
+        // The clip is a layer-level property, so it applies to every kind,
+        // like opacity. A clip this build cannot draw is refused on the way in
+        // — both when one is being set and when the layer already carries one
+        // and this update would replace or clear it: an unknown mask is
+        // preserved as written, never edited into something else.
+        if let Some(clip) = &self.clip {
+            if let Some(existing) = &layer.clip {
+                if !existing.is_rendered() {
+                    return Err(OpError::UnsupportedClip {
+                        id: Some(layer.id.clone()),
+                        shape: existing.kind_name().to_owned(),
+                    });
+                }
+            }
+            if let Some(new_clip) = clip {
+                if !new_clip.is_rendered() {
+                    return Err(OpError::UnsupportedClip {
+                        id: Some(layer.id.clone()),
+                        shape: new_clip.kind_name().to_owned(),
+                    });
+                }
+            }
+            layer.clip = clip.clone();
+        }
+
+        // Flips are transform-level, so they apply to every kind too: a mirror
+        // means the same thing whatever is being mirrored.
+        if let Some(value) = self.flip_horizontal {
+            layer.transform.flip_horizontal = value;
+        }
+        if let Some(value) = self.flip_vertical {
+            layer.transform.flip_vertical = value;
+        }
+
         let kind_name = kind_name(&layer.kind);
         match &mut layer.kind {
             LayerKind::Text(text) => {
                 if self.fit.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "fit"));
+                }
+                if self.crop.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "crop"));
                 }
                 // The stroke is now shared with shapes; the rest of the
                 // shape-only set is still refused on text.
@@ -557,6 +635,9 @@ impl UpdateLayer {
                 if let Some(asset) = &self.asset {
                     image.asset = asset.clone();
                 }
+                if let Some(value) = &self.crop {
+                    image.crop = *value;
+                }
             }
             LayerKind::Svg(svg) => {
                 if let Some(property) = self.first_text_property() {
@@ -564,6 +645,11 @@ impl UpdateLayer {
                 }
                 if let Some(property) = self.first_shape_property() {
                     return Err(wrong_kind(&layer.id, kind_name, property));
+                }
+                // No crop on a vector layer: source-pixel space is undefined
+                // for an SVG without a viewBox rule to measure against.
+                if self.crop.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "crop"));
                 }
                 if let Some(value) = self.fit {
                     svg.fit = value;
@@ -578,6 +664,9 @@ impl UpdateLayer {
                 }
                 if self.fit.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "fit"));
+                }
+                if self.crop.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "crop"));
                 }
                 if self.asset.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "asset"));
@@ -620,6 +709,9 @@ impl UpdateLayer {
                 }
                 if self.fit.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "fit"));
+                }
+                if self.crop.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "crop"));
                 }
                 if self.asset.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "asset"));

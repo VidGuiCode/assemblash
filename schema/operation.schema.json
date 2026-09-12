@@ -677,6 +677,14 @@
           "type": "number",
           "format": "double",
           "default": 0.0
+        },
+        "flipHorizontal": {
+          "description": "Whether the content mirrors left-to-right about the box centre.\n\nWritten only when set, so no document from before 1.8.0 changes a\nbyte. A flip is a mirror, never a negative size: validation forbids\nnegative box sizes, and a negative size would be a second way of\nsaying where the layer's edges are.",
+          "type": "boolean"
+        },
+        "flipVertical": {
+          "description": "Whether the content mirrors top-to-bottom about the box centre.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1297,6 +1305,78 @@
         }
       ]
     },
+    "Clip": {
+      "description": "The mask shape of a layer's [`Layer::clip`], tagged by `\"shape\"` in JSON.\n\nThe geometry always is the layer's transform box, so the variants carry no\ncoordinates — only what the box alone does not say. [`Clip::Other`] is an\nuntagged catch-all (D21): a clip written by a newer build is preserved as\nwritten, refused when an update touches it, and refused at render time —\nthe same bargain as [`ShapeKind::Other`] (and, like it, never flattened\ninto its parent, so the catch-all's reach stays with the clip).",
+      "anyOf": [
+        {
+          "description": "A rounded rectangle filling the transform box.",
+          "type": "object",
+          "properties": {
+            "cornerRadius": {
+              "description": "Corner radius in document units; 0 is a square corner.\n\nClamped to half the shorter side when it is drawn, exactly like a\nshape rect's radius — a large radius makes a stadium, not an\nerror.",
+              "type": "number",
+              "format": "double",
+              "default": 0.0
+            },
+            "shape": {
+              "type": "string",
+              "const": "rect"
+            }
+          },
+          "required": [
+            "shape"
+          ]
+        },
+        {
+          "description": "An ellipse inscribed in the transform box — the circle avatar.",
+          "type": "object",
+          "properties": {
+            "shape": {
+              "type": "string",
+              "const": "ellipse"
+            }
+          },
+          "required": [
+            "shape"
+          ]
+        },
+        {
+          "description": "A clip this build does not know, preserved as written, refused when an\nupdate touches it, and refused when something tries to draw it (D21)."
+        }
+      ]
+    },
+    "Crop": {
+      "description": "A rectangle in an image's source pixel space.\n\nA document type of its own, not [`crate::layout::Rect`]: that one is an\ninternal `Copy` type in absolute canvas space, and a crop is none of\nthose things — it serialises, and it is relative to the asset.",
+      "type": "object",
+      "properties": {
+        "x": {
+          "description": "Left edge in source pixels.",
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "description": "Top edge in source pixels.",
+          "type": "number",
+          "format": "double"
+        },
+        "width": {
+          "description": "Width in source pixels; must be positive and finite.",
+          "type": "number",
+          "format": "double"
+        },
+        "height": {
+          "description": "Height in source pixels; must be positive and finite.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ]
+    },
     "UpdateLayer": {
       "description": "Change properties of an existing layer.\n\nEvery field is optional and means \"leave alone\" when absent. `name` is\ndoubly optional: `Some(None)` clears the name, `None` leaves it.",
       "type": "object",
@@ -1509,6 +1589,42 @@
             "null"
           ],
           "format": "double"
+        },
+        "clip": {
+          "description": "Any layer: the whole clip. Absent leaves it, `null` clears it.\n\nDoubly optional like `color` and the shape `fill`: \"no clip\" is a real\nvalue a layer can have, so there has to be a way to say it that is not\n\"leave it alone\". The clip geometry is the layer's transform box, so\nnothing here carries coordinates.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Clip"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crop": {
+          "description": "Image layers: the source rectangle that fills the box. Absent leaves\nit, `null` clears it.\n\nDoubly optional, for the same reason: a whole-image layer and a cropped\none are two real states, and an update has to be able to say either.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Crop"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "flipHorizontal": {
+          "description": "Any layer: mirror the content left-to-right about the box centre.\n\nAbsent leaves it, present sets it — the `visible` and `locked` shape,\nbecause a flip has a real default and no third state.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "flipVertical": {
+          "description": "Any layer: mirror the content top-to-bottom about the box centre.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "allowLocked": {
           "description": "Change the layer even though it is locked.\n\nNeeded to unlock a layer at all, and kept explicit so that no ordinary\nedit slips past a lock by accident.",

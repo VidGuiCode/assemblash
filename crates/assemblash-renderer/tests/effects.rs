@@ -91,6 +91,7 @@ fn document(effects: Vec<Effect>) -> (Document, AssetHrefs) {
         LayerKind::Image(ImageLayer {
             asset,
             fit: ImageFit::Fill,
+            crop: None,
             extra: Extras::new(),
         }),
     );

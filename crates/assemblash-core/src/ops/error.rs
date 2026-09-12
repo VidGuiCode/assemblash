@@ -93,6 +93,36 @@ pub enum OpError {
         kind: String,
     },
 
+    /// A clip was set whose shape this build does not draw, or a clip-touching
+    /// update named a layer whose existing clip this build does not draw.
+    ///
+    /// The same bargain as [`OpError::UnsupportedShape`]: a clip written by a
+    /// newer build is preserved as written and refused when something tries to
+    /// change it, or to replace the layer's own unknown clip with a known one.
+    /// Guessing at a mask would silently change which pixels a document shows.
+    #[error("{}clip shape {shape:?} is not one this build draws", layer_prefix(id))]
+    UnsupportedClip {
+        /// The layer in question, when there is one.
+        id: Option<LayerId>,
+        /// The clip shape that was asked for, or the one already there.
+        shape: String,
+    },
+
+    /// A crop was set on an image whose asset records no pixel size.
+    ///
+    /// A crop is a rectangle in the source's own pixels, so without the
+    /// source's width and height the numbers mean nothing. Raster imports
+    /// always record both, so this names a real gap rather than a normal case.
+    #[error(
+        "layer {id}: asset {asset} has no recorded width and height, so a crop cannot be placed"
+    )]
+    MissingAssetDimensions {
+        /// The layer in question.
+        id: LayerId,
+        /// The asset whose size is unknown.
+        asset: AssetId,
+    },
+
     /// No slot of that name is in the document.
     #[error("no slot named {name:?}; this document has: {available}")]
     NoSuchSlot {

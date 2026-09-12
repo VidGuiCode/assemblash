@@ -209,6 +209,36 @@ You can inspect and hand-edit `document.json`. Normal edits should still go
 through an Assemblash interface, so they are validated and recorded in history.
 The published contracts live in [`schema/`](schema/).
 
+### Clipping, cropping, and flips
+
+From 1.8.0, a layer can carry a mask, and an image layer can show only part of
+its source file. Both are ordinary document values, so they are journalled,
+undoable, and reversible like any other property.
+
+- **Clip.** A layer clips to its own box, as a rectangle or an ellipse. A
+  corner radius makes a rounded rectangle. A radius larger than the box makes a
+  stadium. This is how a circle avatar or a rounded screenshot is made.
+- **Crop.** An image layer shows a rectangle of its source file, in source
+  pixels. The crop composes with `fit`: `fill` stretches the rectangle to the
+  box, and `contain` and `cover` work from its shape. Values outside the source
+  clamp to it, and a rectangle that misses the source is refused.
+- **Flip.** A layer mirrors horizontally, vertically, or both, about the centre
+  of its box. Mirroring text mirrors its glyphs.
+
+The clip sits inside the effect stack, not beside it. A shadow the layer
+carries follows the clipped shape, and a rotated clipped layer is cut to the
+box in its parent's space. No clip, no crop, and no flip means the document
+renders exactly as it did before 1.8.0.
+
+An imported image records its pixel size, so a crop can be placed. An asset
+whose size this build cannot read is still imported, and a crop of it is
+refused by name rather than guessed at.
+
+Set these on the CLI with `set --clip-rect`, `--clip-radius`, `--clip-ellipse`,
+`--no-clip`, `--crop X,Y,W,H`, `--no-crop`, `--flip-h`, and `--flip-v`; in the
+interface with the inspector rows; and over MCP with the `clip`, `crop`,
+`flipHorizontal`, and `flipVertical` arguments of `update_layer`.
+
 ### Rendering and export
 
 Assemblash converts a document to SVG as a pure function and rasterizes it with

@@ -58,6 +58,7 @@ fn document() -> Document {
         LayerKind::Image(ImageLayer {
             asset: AssetId::new("asset_1"),
             fit: ImageFit::Contain,
+            crop: None,
             extra: Extras::new(),
         }),
     ));

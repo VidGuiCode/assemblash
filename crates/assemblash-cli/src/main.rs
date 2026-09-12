@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use assemblash_core::document::{
-    FontStyle, ImageFit, LayerKind, ShapeKind, Stroke, TextAlign, Transform, VerticalAlign,
+    Clip, Crop, FontStyle, ImageFit, LayerKind, ShapeKind, Stroke, TextAlign, Transform,
+    VerticalAlign,
 };
 use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::UlidIdSource;
@@ -632,6 +633,35 @@ enum Command {
         /// file, which is not something an undo could take back.
         #[arg(long)]
         asset: Option<String>,
+        /// Any layer: clip to the transform box, with square corners.
+        #[arg(long, conflicts_with_all = ["clip_ellipse", "no_clip"])]
+        clip_rect: bool,
+        /// A rect clip's corner radius, in document units. Needs
+        /// `--clip-rect`; a radius larger than the box makes a stadium.
+        #[arg(long, requires = "clip_rect")]
+        clip_radius: Option<f64>,
+        /// Any layer: clip to the ellipse inscribed in the transform box.
+        #[arg(long, conflicts_with_all = ["clip_rect", "no_clip"])]
+        clip_ellipse: bool,
+        /// Any layer: remove the clip.
+        #[arg(long, conflicts_with_all = ["clip_rect", "clip_ellipse"])]
+        no_clip: bool,
+        /// Image layers: the source rectangle `X,Y,W,H` in source pixels.
+        ///
+        /// It composes with `--fit`: the rectangle is placed into the box as
+        /// if it were the whole image. Out-of-bounds values clamp to the
+        /// source when drawn.
+        #[arg(long, value_delimiter = ',', conflicts_with = "no_crop")]
+        crop: Option<Vec<f64>>,
+        /// Image layers: remove the crop.
+        #[arg(long)]
+        no_crop: bool,
+        /// Any layer: mirror the content left-to-right, or stop mirroring.
+        #[arg(long)]
+        flip_h: Option<bool>,
+        /// Any layer: mirror the content top-to-bottom, or stop mirroring.
+        #[arg(long)]
+        flip_v: Option<bool>,
         /// Change a locked layer.
         #[arg(long)]
         allow_locked: bool,
@@ -1261,6 +1291,14 @@ struct LayerChange {
     vertical_align: Option<VerticalAlignArg>,
     fit: Option<Fit>,
     asset: Option<String>,
+    clip_rect: bool,
+    clip_radius: Option<f64>,
+    clip_ellipse: bool,
+    no_clip: bool,
+    crop: Option<Vec<f64>>,
+    no_crop: bool,
+    flip_h: Option<bool>,
+    flip_v: Option<bool>,
     allow_locked: bool,
 }
 
@@ -1284,6 +1322,30 @@ impl LayerChange {
         let transform = self.transform_for(document, &id);
         let stroke = self.stroke_update(document, &id)?;
         let fill = self.fill.map(optional_color);
+        let clip = if self.no_clip {
+            Some(None)
+        } else if self.clip_rect {
+            Some(Some(Clip::Rect {
+                corner_radius: self.clip_radius.unwrap_or(0.0),
+            }))
+        } else if self.clip_ellipse {
+            Some(Some(Clip::Ellipse))
+        } else {
+            None
+        };
+        let crop = match (&self.crop, self.no_crop) {
+            (_, true) => Some(None),
+            (Some(values), false) => match values.as_slice() {
+                [x, y, width, height] => Some(Some(Crop {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                })),
+                _ => return Err(CliError::CropNeedsFourNumbers),
+            },
+            (None, false) => None,
+        };
         Ok(assemblash_core::ops::UpdateLayer {
             id,
             // An empty string is how a name is removed: `Some(None)` on the
@@ -1312,6 +1374,10 @@ impl LayerChange {
             vertical_align: self.vertical_align.map(Into::into),
             fit: self.fit.map(Into::into),
             asset: self.asset.map(assemblash_core::AssetId::new),
+            clip,
+            crop,
+            flip_horizontal: self.flip_h,
+            flip_vertical: self.flip_v,
             allow_locked: self.allow_locked,
         })
     }
@@ -1395,6 +1461,10 @@ impl LayerChange {
             width: self.width.unwrap_or(current.width),
             height: self.height.unwrap_or(current.height),
             rotation: self.rotation.unwrap_or(current.rotation),
+            // Flips are update-payload flags, not box flags; a box-only
+            // change keeps whatever flips the layer already has.
+            flip_horizontal: current.flip_horizontal,
+            flip_vertical: current.flip_vertical,
             extra: current.extra,
         })
     }
@@ -1564,6 +1634,8 @@ enum CliError {
     NoProperties,
     #[error("say where the font store is: --font-store")]
     NoStore,
+    #[error("a crop is four numbers: X,Y,W,H in source pixels")]
+    CropNeedsFourNumbers,
     #[error(
         "a stroke colour is needed: pass --stroke COLOR when the layer has no existing stroke"
     )]
@@ -2259,6 +2331,14 @@ fn run(command: Command) -> Result<(), CliError> {
             vertical_align,
             fit,
             asset,
+            clip_rect,
+            clip_radius,
+            clip_ellipse,
+            no_clip,
+            crop,
+            no_crop,
+            flip_h,
+            flip_v,
             allow_locked,
             who,
         } => {
@@ -2290,6 +2370,14 @@ fn run(command: Command) -> Result<(), CliError> {
                 vertical_align,
                 fit,
                 asset,
+                clip_rect,
+                clip_radius,
+                clip_ellipse,
+                no_clip,
+                crop,
+                no_crop,
+                flip_h,
+                flip_v,
                 allow_locked,
             };
             run_set(&project, layer, change, &who)

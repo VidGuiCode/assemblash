@@ -12,7 +12,8 @@
 //! id live.
 
 use assemblash_core::document::{
-    BlendMode, Effect, FontStyle, ImageFit, ShapeKind, Stroke, TextAlign, Transform, VerticalAlign,
+    BlendMode, Clip, Crop, Effect, FontStyle, ImageFit, ShapeKind, Stroke, TextAlign, Transform,
+    VerticalAlign,
 };
 use assemblash_core::ops::{
     AlignEdge, Axis, CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, SnapTarget,
@@ -310,6 +311,35 @@ pub struct UpdateArgs {
     /// always produces the same noise.
     #[serde(default)]
     pub effects: Option<Vec<Effect>>,
+    /// The mask on the layer: `{"shape":"rect","cornerRadius":12}` or
+    /// `{"shape":"ellipse"}`. The geometry is the layer's box. It hides
+    /// everything the layer draws outside it, and a shadow the layer carries
+    /// follows the clipped shape. Use `clearClip: true` to remove it; a JSON
+    /// null is treated as omitted. The mask is fixed to the layer's box in
+    /// its parent's space, so a rotated layer is cut to the axis-aligned box.
+    #[serde(default)]
+    pub clip: Option<Clip>,
+    /// The source rectangle an image layer shows, in source pixels:
+    /// `{"x":0,"y":0,"width":400,"height":400}`. It composes with `fit`: the
+    /// rectangle is placed into the layer's box as if it were the whole
+    /// image, so `fill` stretches it and `contain`/`cover` work from its
+    /// aspect. Values outside the source clamp to it; a rectangle that shares
+    /// no area with the source is refused. Use `clearCrop: true` to remove
+    /// it; a JSON null is treated as omitted. Image layers only.
+    #[serde(default)]
+    pub crop: Option<Crop>,
+    /// Set true to remove the clip; cannot be combined with `clip`.
+    #[serde(default)]
+    pub clear_clip: Option<bool>,
+    /// Set true to remove the crop; cannot be combined with `crop`.
+    #[serde(default)]
+    pub clear_crop: Option<bool>,
+    /// Mirror the layer left-to-right about the box centre.
+    #[serde(default)]
+    pub flip_horizontal: Option<bool>,
+    /// Mirror the layer top-to-bottom about the box centre.
+    #[serde(default)]
+    pub flip_vertical: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -664,6 +694,28 @@ impl AssemblashMcp {
                 None,
             ));
         }
+        if args.clear_clip.unwrap_or(false) && args.clip.is_some() {
+            return Err(ErrorData::invalid_request(
+                "clip and clearClip cannot be combined; set clearClip to true to remove the clip",
+                None,
+            ));
+        }
+        if args.clear_crop.unwrap_or(false) && args.crop.is_some() {
+            return Err(ErrorData::invalid_request(
+                "crop and clearCrop cannot be combined; set clearCrop to true to remove the crop",
+                None,
+            ));
+        }
+        let clip = if args.clear_clip.unwrap_or(false) {
+            Some(None)
+        } else {
+            args.clip.clone().map(Some)
+        };
+        let crop = if args.clear_crop.unwrap_or(false) {
+            Some(None)
+        } else {
+            args.crop.map(Some)
+        };
         let fill = if clear_fill {
             Some(None)
         } else {
@@ -694,6 +746,10 @@ impl AssemblashMcp {
             fill,
             stroke,
             corner_radius: args.corner_radius,
+            clip,
+            crop,
+            flip_horizontal: args.flip_horizontal,
+            flip_vertical: args.flip_vertical,
             fit: args.fit,
             blend_mode: args.blend_mode.clone(),
             effects: args.effects.clone(),

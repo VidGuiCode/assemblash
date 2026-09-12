@@ -182,6 +182,17 @@ pub struct Transform {
     /// Clockwise rotation in degrees about the box centre.
     #[serde(default)]
     pub rotation: f64,
+    /// Whether the content mirrors left-to-right about the box centre.
+    ///
+    /// Written only when set, so no document from before 1.8.0 changes a
+    /// byte. A flip is a mirror, never a negative size: validation forbids
+    /// negative box sizes, and a negative size would be a second way of
+    /// saying where the layer's edges are.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_horizontal: bool,
+    /// Whether the content mirrors top-to-bottom about the box centre.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_vertical: bool,
     /// Keys this build does not know about, preserved verbatim.
     #[serde(flatten)]
     pub extra: Extras,
@@ -196,6 +207,8 @@ impl Transform {
             width,
             height,
             rotation: 0.0,
+            flip_horizontal: false,
+            flip_vertical: false,
             extra: Extras::new(),
         }
     }
@@ -263,6 +276,16 @@ pub struct Layer {
     /// Reserved (layout constraints): preserved verbatim, never interpreted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints: Option<serde_json::Value>,
+    /// The mask that hides everything the layer draws outside its box.
+    ///
+    /// The clip geometry is the layer's transform box in its parent's
+    /// coordinate space, at rest: rotation and flips apply to the *clipped*
+    /// result, so a shadow carried by the layer follows the clipped
+    /// silhouette (the 1.8.0 composition spike measured this — the clip must
+    /// sit inside the filter, not beside it). `None` draws everything, as
+    /// every build before 1.8.0 did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<Clip>,
     /// What kind of layer this is, and its payload. Flattened: the payload's
     /// fields sit next to the common ones, tagged by `"type"`.
     #[serde(flatten)]
@@ -282,6 +305,7 @@ impl Layer {
             blend_mode: BlendMode::default(),
             effects: Vec::new(),
             constraints: None,
+            clip: None,
             protected: false,
             read_only: false,
             kind,
@@ -467,10 +491,91 @@ pub struct ImageLayer {
     /// How the image fills its box.
     #[serde(default)]
     pub fit: ImageFit,
+    /// The sub-rectangle of the source image that fills the box, in source
+    /// pixels — a crop is a rectangle, not a fit mode (v1.8.0).
+    ///
+    /// It composes with [`ImageLayer::fit`]: the sub-rectangle is placed into
+    /// the box as if it were the whole image, so `fill` stretches it and
+    /// `contain`/`cover` work from its aspect. `None` uses the whole image,
+    /// as every build before 1.8.0 did. Out-of-bounds rectangles clamp to the
+    /// source when drawn; a crop with no intersection with the source is a
+    /// typed render refusal, never zero ink.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
     /// Keys this build does not know about, preserved verbatim. See
     /// [`TextLayer::extra`].
     #[serde(flatten)]
     pub extra: Extras,
+}
+
+/// A rectangle in an image's source pixel space.
+///
+/// A document type of its own, not [`crate::layout::Rect`]: that one is an
+/// internal `Copy` type in absolute canvas space, and a crop is none of
+/// those things — it serialises, and it is relative to the asset.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Crop {
+    /// Left edge in source pixels.
+    pub x: f64,
+    /// Top edge in source pixels.
+    pub y: f64,
+    /// Width in source pixels; must be positive and finite.
+    pub width: f64,
+    /// Height in source pixels; must be positive and finite.
+    pub height: f64,
+}
+
+/// The mask shape of a layer's [`Layer::clip`], tagged by `"shape"` in JSON.
+///
+/// The geometry always is the layer's transform box, so the variants carry no
+/// coordinates — only what the box alone does not say. [`Clip::Other`] is an
+/// untagged catch-all (D21): a clip written by a newer build is preserved as
+/// written, refused when an update touches it, and refused at render time —
+/// the same bargain as [`ShapeKind::Other`] (and, like it, never flattened
+/// into its parent, so the catch-all's reach stays with the clip).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "shape",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Clip {
+    /// A rounded rectangle filling the transform box.
+    Rect {
+        /// Corner radius in document units; 0 is a square corner.
+        ///
+        /// Clamped to half the shorter side when it is drawn, exactly like a
+        /// shape rect's radius — a large radius makes a stadium, not an
+        /// error.
+        #[serde(default)]
+        corner_radius: f64,
+    },
+    /// An ellipse inscribed in the transform box — the circle avatar.
+    Ellipse,
+    /// A clip this build does not know, preserved as written, refused when an
+    /// update touches it, and refused when something tries to draw it (D21).
+    #[serde(untagged)]
+    Other(serde_json::Value),
+}
+
+impl Clip {
+    /// What this clip is called in the document.
+    pub fn kind_name(&self) -> &str {
+        match self {
+            Self::Rect { .. } => "rect",
+            Self::Ellipse => "ellipse",
+            Self::Other(raw) => raw
+                .get("shape")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("(untyped)"),
+        }
+    }
+
+    /// Whether this build draws this clip rather than refusing it.
+    pub fn is_rendered(&self) -> bool {
+        !matches!(self, Self::Other(_))
+    }
 }
 
 /// A reference to an imported SVG asset, drawn into the layer box.

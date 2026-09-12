@@ -10,6 +10,72 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-09-12
+
+**Clipping and cropping.** A layer can mask itself to a rectangle or an
+ellipse, an image layer can show one rectangle of its source, and any layer can
+mirror horizontally or vertically. Circle avatars, rounded screenshots, and
+crops that are rectangles rather than fit modes.
+
+`schemaVersion` stays **1** and the `Operation` union does not grow: all four
+values are ordinary `UpdateLayer` fields. **Oldest build that opens a 1.8.0
+document: 1.0** — builds 1.0 through 1.7 degrade silently through the `Extras`
+capture map. They keep `clip`, `crop`, `flipHorizontal` and `flipVertical`
+exactly as written and render the layer unclipped, uncropped and unflipped.
+
+### Added
+
+- **`Layer.clip`: `{"shape":"rect","cornerRadius":N}` or
+  `{"shape":"ellipse"}`.** The mask is the layer's transform box, so the clip
+  carries no coordinates and `move`, `resize` and `rotate` mean for a mask
+  exactly what they mean for the layer. A radius larger than the box clamps to
+  a stadium, the same way a shape rect's does. A clip written by a newer build
+  is preserved as written and refused when an update touches it.
+- **`ImageLayer.crop`: `{ x, y, width, height }` in source pixels.** It
+  composes with `fit`: the rectangle is placed into the box as if it were the
+  whole image, so `fill` stretches it and `contain` and `cover` work from its
+  shape. Out-of-bounds rectangles clamp to the source. A rectangle that shares
+  no area with the source is refused typed. A degenerate rectangle is refused
+  by validation.
+- **`Transform.flipHorizontal` / `flipVertical` (default false).** A mirror
+  about the box centre, composed with the rotation — never a negative size,
+  which validation forbids. Mirroring text mirrors its glyphs.
+- **The CLI, MCP and interface carry all four.** `set --clip-rect`,
+  `--clip-radius`, `--clip-ellipse`, `--no-clip`, `--crop X,Y,W,H`, `--no-crop`,
+  `--flip-h`, `--flip-v`; MCP `update_layer` arguments `clip`, `clearClip`,
+  `crop`, `clearCrop`, `flipHorizontal`, `flipVertical`; one inspector row per
+  feature. HTTP needs nothing: `POST /operations` deserialises the union.
+- **An imported image now records its pixel size.** A crop is a rectangle in
+  the source's own pixels, so the header of a PNG, JPEG, GIF or WebP is read at
+  import and its size written to the asset record. A format this build cannot
+  measure is imported with an unknown size, and a crop of it is refused by name
+  rather than guessed at. An asset's `width` and `height` are pre-existing
+  document fields, so this changes no schema.
+
+### Fixed
+
+- **A clip and a shadow on one layer kept the shadow.** The mask is applied
+  inside the effect stack. Measured, not assumed: with the mask beside the
+  filter, SVG applies the clip after the effect and cuts the shadow off at the
+  boundary — 0 ink pixels outside the box against 4390 in the shipped order.
+- **A rotated clipped layer is cut to the box its own coordinates name.** SVG
+  measures a `clip-path` in the referencing element's user space, so the mask
+  carries the inverse of the layer's rotation and stays where the document says
+  it is — 2600 ink pixels outside the box become 0 with the inverse.
+
+### Notes
+
+- Four new determinism gates: `clip-rounded` (including a rotated clipped layer
+  and a clipped layer carrying a drop shadow), `clip-ellipse`, `crop` (square,
+  letterbox, a rectangle clamped to the source, and a scale-2 export), and
+  `flip`. Every golden from 1.7.0 is byte-identical.
+- The crop is emitted as a nested `<svg>` whose viewBox is the source rectangle
+  and whose viewport is the rectangle the fit places it in. The viewBox maps but
+  does not crop, so the placement is computed rather than left to
+  `preserveAspectRatio`.
+- A layer with no clip, no crop and no flip emits the same SVG it emitted in
+  1.7.0, byte for byte.
+
 ## [1.7.1] — 2026-09-12
 
 **Bugfix release: `font install` now delivers a bold face.** This release

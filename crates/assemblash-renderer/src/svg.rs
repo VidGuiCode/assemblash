@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use assemblash_core::document::{
-    Effect, GroupLayer, ImageFit, Layer, LayerKind, ShapeKind, ShapeLayer, TextAlign, Transform,
-    VerticalAlign,
+    Clip, Effect, GroupLayer, ImageFit, Layer, LayerKind, ShapeKind, ShapeLayer, TextAlign,
+    Transform, VerticalAlign,
 };
 use assemblash_core::ids::AssetId;
 use assemblash_core::{svg_import, validate, Color, Document};
@@ -46,19 +46,27 @@ pub fn doc_to_svg(
         h = number(document.canvas.height),
     );
 
-    // Effects become filters in one <defs>, referenced by the layers that ask
-    // for them. Collected up front because a filter has to be defined before
-    // it is used, and because a layer nested three groups deep must still find
-    // its own.
+    // Effects become filters, and clips become clip paths, in one <defs>,
+    // referenced by the layers that ask for them. Collected up front because a
+    // definition has to exist before it is used, and because a layer nested
+    // three groups deep must still find its own.
     let mut defs = String::new();
     let mut failure = None;
     document.walk_layers(&mut |layer| {
-        if failure.is_some() || layer.effects.is_empty() {
+        if failure.is_some() {
             return;
         }
-        match filter_for(layer) {
-            Ok(filter) => defs.push_str(&filter),
-            Err(error) => failure = Some(error),
+        if !layer.effects.is_empty() {
+            match filter_for(layer) {
+                Ok(filter) => defs.push_str(&filter),
+                Err(error) => failure = Some(error),
+            }
+        }
+        if layer.clip.is_some() {
+            match clip_def(layer) {
+                Ok(clip) => defs.push_str(&clip),
+                Err(error) => failure = Some(error),
+            }
         }
     });
     if let Some(error) = failure {
@@ -79,7 +87,7 @@ pub fn doc_to_svg(
     }
 
     for layer in &document.layers {
-        write_layer(&mut out, layer, fonts, assets, 1)?;
+        write_layer(&mut out, layer, fonts, assets, document, 1)?;
     }
 
     out.push_str("</svg>\n");
@@ -91,6 +99,7 @@ fn write_layer(
     layer: &Layer,
     fonts: &FontSet,
     assets: &AssetHrefs,
+    document: &Document,
     depth: usize,
 ) -> Result<(), RenderError> {
     // An invisible layer contributes nothing, and leaving it out keeps the
@@ -101,6 +110,66 @@ fn write_layer(
 
     let pad = "  ".repeat(depth);
     let t = &layer.transform;
+
+    // A clip this build cannot draw is refused, never skipped: dropping a mask
+    // changes which pixels a document shows. A clip on a box with no area is
+    // refused too — it would draw nothing and exit zero, which is worse than
+    // an error.
+    let clipped = match &layer.clip {
+        None => false,
+        Some(clip) => {
+            if !clip.is_rendered() {
+                return Err(RenderError::UnsupportedClip {
+                    layer: layer.id.clone(),
+                    shape: clip.kind_name().to_owned(),
+                });
+            }
+            if t.width <= 0.0 || t.height <= 0.0 {
+                return Err(RenderError::DegenerateClip {
+                    layer: layer.id.clone(),
+                    width: t.width,
+                    height: t.height,
+                });
+            }
+            true
+        }
+    };
+
+    // With a clip, the layer's own attributes move up to a wrapper group and
+    // the clip sits on a group inside it. The 1.8.0 composition spike measured
+    // why: SVG applies `clip-path` after `filter` on one element, so a shadow
+    // carried beside a clip is cut off at the boundary (0 ink outside the box,
+    // against 4390 in this order). Rotation stays on the wrapper, so a clipped
+    // layer's shadow turns with it exactly as an unclipped layer's does.
+    if clipped {
+        let attributes = match &layer.kind {
+            // A group's children live in its own space, so its wrapper carries
+            // the translate and composes the mirror about the local centre;
+            // its blend and isolation stay the group's own business.
+            LayerKind::Group(group) => format!(
+                "{opacity}{transform}{filter}{style}",
+                opacity = opacity_attribute(layer.opacity),
+                transform = group_transform_attribute(t),
+                filter = filter_attribute(layer),
+                style = group_style(layer, group)?,
+            ),
+            _ => layer_attributes(layer, transform_attribute(t))?,
+        };
+        let _ = writeln!(out, "{pad}<g{attributes}>");
+        let _ = writeln!(out, "{pad}  <g clip-path=\"url(#{})\">", clip_id(layer));
+    }
+
+    // A layer with no clip emits exactly what it emitted before 1.8.0: the
+    // same attributes on its own element, with no wrapper in the way.
+    // `transform_attribute` is byte-identical to the old rotation attribute
+    // until a flip is set, which is the only thing it adds.
+    let content_depth = if clipped { depth + 2 } else { depth };
+    let content_pad = "  ".repeat(content_depth);
+    let attributes = if clipped {
+        String::new()
+    } else {
+        layer_attributes(layer, transform_attribute(t))?
+    };
 
     match &layer.kind {
         LayerKind::Text(text) => {
@@ -175,7 +244,8 @@ fn write_layer(
                 out,
                 "{pad}<text x=\"{x}\" y=\"{y}\" font-family=\"{family}\" \
                  font-size=\"{size}\" fill=\"{fill}\" text-anchor=\"{anchor}\"\
-                 {weight}{style}{spacing}{stroke}{opacity}{rotation}{filter}{blend}>",
+                 {weight}{style}{spacing}{stroke}{attributes}>",
+                pad = content_pad,
                 x = number(x),
                 y = number(y),
                 family = attribute(&text.font_family),
@@ -191,10 +261,7 @@ fn write_layer(
                 style = style,
                 spacing = spacing,
                 stroke = stroke,
-                opacity = opacity_attribute(layer.opacity),
-                rotation = rotation_attribute(t),
-                filter = filter_attribute(layer),
-                blend = blend_attribute(layer)?,
+                attributes = attributes,
             );
 
             for (index, line) in layout.lines.iter().enumerate() {
@@ -244,65 +311,233 @@ fn write_layer(
                 ImageFit::Cover => "xMidYMid slice",
             };
 
-            let _ = writeln!(
-                out,
-                "{pad}<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
-                 preserveAspectRatio=\"{preserve}\" href=\"{href}\"{opacity}{rotation}{filter}{blend}/>",
-                x = number(t.x),
-                y = number(t.y),
-                w = number(t.width),
-                h = number(t.height),
-                preserve = preserve,
-                href = attribute(href),
-                opacity = opacity_attribute(layer.opacity),
-                rotation = rotation_attribute(t),
-                filter = filter_attribute(layer),
-                blend = blend_attribute(layer)?,
-            );
-        }
+            // A crop is a nested `<svg>`: the viewBox is the source rectangle
+            // and the viewport is the rectangle the fit places it in. The
+            // viewBox maps, but it does not crop — content outside it is still
+            // drawn if it lands inside the viewport — so the viewport *is* the
+            // placed rectangle, computed here, and the mapping is `none`.
+            // Measured: with the viewport left as the whole box, a crop wider
+            // than its window spilled to the box edges.
+            let crop = match &layer.kind {
+                LayerKind::Image(image) => image.crop,
+                _ => None,
+            };
 
-        LayerKind::Shape(shape) => write_shape(out, layer, shape, &pad)?,
+            if let Some(crop) = crop {
+                let (source_width, source_height) =
+                    source_size(document, asset_id).ok_or_else(|| {
+                        RenderError::CropWithoutSourceSize {
+                            layer: layer.id.clone(),
+                            asset: asset_id.clone(),
+                        }
+                    })?;
 
-        LayerKind::Group(group) => {
-            let _ = writeln!(
-                out,
-                "{pad}<g transform=\"translate({x} {y})\"{opacity}{filter}{style}>",
-                x = number(t.x),
-                y = number(t.y),
-                opacity = opacity_attribute(layer.opacity),
-                filter = filter_attribute(layer),
-                style = group_style(layer, group)?,
-            );
-            // A rotated group rotates its children as a unit, about its own
-            // centre, so the rotation wraps the children rather than sitting
-            // on the translate.
-            let rotated = t.rotation != 0.0;
-            if rotated {
+                // Clamped to the source, the way a corner radius clamps to a
+                // stadium. A rectangle that shares nothing with the source is
+                // refused rather than drawn as an empty box.
+                let left = crop.x.max(0.0);
+                let top = crop.y.max(0.0);
+                let right = (crop.x + crop.width).min(f64::from(source_width));
+                let bottom = (crop.y + crop.height).min(f64::from(source_height));
+                if right <= left || bottom <= top {
+                    return Err(RenderError::CropOutsideSource {
+                        layer: layer.id.clone(),
+                        x: crop.x,
+                        y: crop.y,
+                        width: crop.width,
+                        height: crop.height,
+                        source_width,
+                        source_height,
+                    });
+                }
+
+                // Where the crop is drawn, and which part of the source that
+                // rectangle shows. The arithmetic is multiplication, division
+                // and comparison on `f64` only — the same operations the rest
+                // of the renderer already relies on being identical on every
+                // target.
+                let (crop_width, crop_height) = (right - left, bottom - top);
+                let (box_width, box_height) = (t.width, t.height);
+                let (viewport, window) = match fit {
+                    ImageFit::Fill => (
+                        (t.x, t.y, box_width, box_height),
+                        (left, top, crop_width, crop_height),
+                    ),
+                    ImageFit::Contain => {
+                        // The whole crop, at the largest scale that fits.
+                        let scale = (box_width / crop_width).min(box_height / crop_height);
+                        let (drawn_width, drawn_height) = (crop_width * scale, crop_height * scale);
+                        (
+                            (
+                                t.x + (box_width - drawn_width) / 2.0,
+                                t.y + (box_height - drawn_height) / 2.0,
+                                drawn_width,
+                                drawn_height,
+                            ),
+                            (left, top, crop_width, crop_height),
+                        )
+                    }
+                    ImageFit::Cover => {
+                        // The whole box, showing the middle of the crop.
+                        let scale = (box_width / crop_width).max(box_height / crop_height);
+                        let (shown_width, shown_height) = (box_width / scale, box_height / scale);
+                        (
+                            (t.x, t.y, box_width, box_height),
+                            (
+                                left + (crop_width - shown_width) / 2.0,
+                                top + (crop_height - shown_height) / 2.0,
+                                shown_width,
+                                shown_height,
+                            ),
+                        )
+                    }
+                };
+
                 let _ = writeln!(
                     out,
-                    "{pad}  <g transform=\"rotate({angle} {cx} {cy})\">",
-                    angle = number(t.rotation),
-                    cx = number(t.width / 2.0),
-                    cy = number(t.height / 2.0),
+                    "{pad}<svg x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
+                     viewBox=\"{vx} {vy} {vw} {vh}\" preserveAspectRatio=\"none\"{attributes}>",
+                    pad = content_pad,
+                    x = number(viewport.0),
+                    y = number(viewport.1),
+                    w = number(viewport.2),
+                    h = number(viewport.3),
+                    vx = number(window.0),
+                    vy = number(window.1),
+                    vw = number(window.2),
+                    vh = number(window.3),
+                    attributes = attributes,
+                );
+                let _ = writeln!(
+                    out,
+                    "{pad}  <image x=\"0\" y=\"0\" width=\"{sw}\" height=\"{sh}\" href=\"{href}\"/>",
+                    pad = content_pad,
+                    sw = source_width,
+                    sh = source_height,
+                    href = attribute(href),
+                );
+                let _ = writeln!(out, "{pad}</svg>");
+            } else {
+                let _ = writeln!(
+                    out,
+                    "{pad}<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
+                     preserveAspectRatio=\"{preserve}\" href=\"{href}\"{attributes}/>",
+                    pad = content_pad,
+                    x = number(t.x),
+                    y = number(t.y),
+                    w = number(t.width),
+                    h = number(t.height),
+                    preserve = preserve,
+                    href = attribute(href),
+                    attributes = attributes,
                 );
             }
-            for child in &group.children {
-                write_layer(
+        }
+
+        LayerKind::Shape(shape) => write_shape(out, layer, shape, &content_pad, &attributes)?,
+
+        LayerKind::Group(group) => {
+            if clipped {
+                // The wrapper carried the group's transform, opacity, filter
+                // and blend; the clip group masks the whole subtree, with the
+                // children keeping their own local coordinates.
+                for child in &group.children {
+                    write_layer(out, child, fonts, assets, document, content_depth)?;
+                }
+            } else if t.flip_horizontal || t.flip_vertical {
+                // A mirrored group composes the mirror about its local centre,
+                // so the translate, the rotation and the mirror are one
+                // transform list. A group with no flip keeps the older shape
+                // of output below, byte for byte.
+                let _ = writeln!(
                     out,
-                    child,
-                    fonts,
-                    assets,
-                    depth + if rotated { 2 } else { 1 },
-                )?;
+                    "{pad}<g{transform}{opacity}{filter}{style}>",
+                    pad = content_pad,
+                    transform = group_transform_attribute(t),
+                    opacity = opacity_attribute(layer.opacity),
+                    filter = filter_attribute(layer),
+                    style = group_style(layer, group)?,
+                );
+                for child in &group.children {
+                    write_layer(out, child, fonts, assets, document, content_depth + 1)?;
+                }
+                let _ = writeln!(out, "{pad}</g>", pad = content_pad);
+            } else {
+                let _ = writeln!(
+                    out,
+                    "{pad}<g transform=\"translate({x} {y})\"{opacity}{filter}{style}>",
+                    pad = content_pad,
+                    x = number(t.x),
+                    y = number(t.y),
+                    opacity = opacity_attribute(layer.opacity),
+                    filter = filter_attribute(layer),
+                    style = group_style(layer, group)?,
+                );
+                // A rotated group rotates its children as a unit, about its
+                // own centre, so the rotation wraps the children rather than
+                // sitting on the translate.
+                let rotated = t.rotation != 0.0;
+                if rotated {
+                    let _ = writeln!(
+                        out,
+                        "{pad}  <g transform=\"rotate({angle} {cx} {cy})\">",
+                        pad = content_pad,
+                        angle = number(t.rotation),
+                        cx = number(t.width / 2.0),
+                        cy = number(t.height / 2.0),
+                    );
+                }
+                for child in &group.children {
+                    write_layer(
+                        out,
+                        child,
+                        fonts,
+                        assets,
+                        document,
+                        content_depth + if rotated { 2 } else { 1 },
+                    )?;
+                }
+                if rotated {
+                    let _ = writeln!(out, "{pad}  </g>", pad = content_pad);
+                }
+                let _ = writeln!(out, "{pad}</g>", pad = content_pad);
             }
-            if rotated {
-                let _ = writeln!(out, "{pad}  </g>");
-            }
-            let _ = writeln!(out, "{pad}</g>");
         }
     }
 
+    if clipped {
+        let _ = writeln!(out, "{pad}  </g>");
+        let _ = writeln!(out, "{pad}</g>");
+    }
+
     Ok(())
+}
+
+/// The recorded pixel size of an asset, when the document has it.
+fn source_size(document: &Document, asset: &AssetId) -> Option<(u32, u32)> {
+    document
+        .assets
+        .iter()
+        .find(|candidate| &candidate.id == asset)
+        .and_then(|found| Some((found.width?, found.height?)))
+}
+
+/// The attributes a layer's own element carries: exactly the set and the order
+/// every build up to 1.7 emitted, with the layer's transform standing in for
+/// the rotation alone when a clip or a flip needs the composed form.
+fn layer_attributes(layer: &Layer, transform: String) -> Result<String, RenderError> {
+    Ok(format!(
+        "{opacity}{transform}{filter}{blend}",
+        opacity = opacity_attribute(layer.opacity),
+        transform = transform,
+        filter = filter_attribute(layer),
+        blend = blend_attribute(layer)?,
+    ))
+}
+
+/// The id of a layer's clip path.
+fn clip_id(layer: &Layer) -> String {
+    format!("clip-{}", layer.id)
 }
 
 /// Control-arm length for a quarter arc, as a fraction of the radius.
@@ -348,6 +583,7 @@ fn write_shape(
     layer: &Layer,
     shape: &ShapeLayer,
     pad: &str,
+    attributes: &str,
 ) -> Result<(), RenderError> {
     // A geometry this build does not know is refused rather than skipped: a
     // shape silently missing from an export is the one failure this engine
@@ -361,16 +597,9 @@ fn write_shape(
 
     let t = &layer.transform;
     let (x, y, w, h) = (t.x, t.y, t.width, t.height);
-    // Exactly the image branch's trailing attributes, in the same order.
-    let common = || -> Result<String, RenderError> {
-        Ok(format!(
-            "{opacity}{rotation}{filter}{blend}",
-            opacity = opacity_attribute(layer.opacity),
-            rotation = rotation_attribute(t),
-            filter = filter_attribute(layer),
-            blend = blend_attribute(layer)?,
-        ))
-    };
+    // Exactly the image branch's trailing attributes, in the same order —
+    // whether they are this element's own or its clip wrapper's.
+    let common = attributes.to_owned();
 
     match &shape.shape {
         ShapeKind::Rect { corner_radius } => {
@@ -393,14 +622,14 @@ fn write_shape(
                     by = number(by),
                     bw = number(bw),
                     bh = number(bh),
-                    common = common()?,
+                    common = common,
                 );
             } else {
                 let _ = writeln!(
                     out,
                     "{pad}<path d=\"{d}\" fill=\"{fill}\"{stroke}{common}/>",
                     d = rounded_rect_path(bx, by, bw, bh, radius),
-                    common = common()?,
+                    common = common,
                 );
             }
         }
@@ -411,7 +640,7 @@ fn write_shape(
                 out,
                 "{pad}<path d=\"{d}\" fill=\"{fill}\"{stroke}{common}/>",
                 d = ellipse_path(x + w / 2.0, y + h / 2.0, w / 2.0 - inset, h / 2.0 - inset),
-                common = common()?,
+                common = common,
             );
         }
 
@@ -439,7 +668,7 @@ fn write_shape(
                 y2 = number(y + h / 2.0),
                 color = color(&stroke.color)?,
                 width = number(stroke.width),
-                common = common()?,
+                common = common,
             );
         }
 
@@ -1243,6 +1472,164 @@ fn rotation_attribute(transform: &Transform) -> String {
         number(transform.x + transform.width / 2.0),
         number(transform.y + transform.height / 2.0),
     )
+}
+
+/// The transform attribute for a non-group layer's element or wrapper.
+///
+/// Byte-identical to [`rotation_attribute`] when no flip is set, so no
+/// document from before 1.8.0 changes a byte. With a flip the mirror is
+/// composed about the box centre — never a negative size, which validation
+/// forbids and which would be a second way of saying where the edges are.
+fn transform_attribute(transform: &Transform) -> String {
+    if !transform.flip_horizontal && !transform.flip_vertical {
+        return rotation_attribute(transform);
+    }
+    let (cx, cy) = (
+        transform.x + transform.width / 2.0,
+        transform.y + transform.height / 2.0,
+    );
+    format!(
+        " transform=\"translate({cx} {cy}){rotate} scale({sx} {sy}) translate({ncx} {ncy})\"",
+        cx = number(cx),
+        cy = number(cy),
+        rotate = rotation_term(transform.rotation),
+        sx = number(flip_scale(transform.flip_horizontal)),
+        sy = number(flip_scale(transform.flip_vertical)),
+        ncx = number(-cx),
+        ncy = number(-cy),
+    )
+}
+
+/// The transform attribute for a *group's* wrapper.
+///
+/// A group's children live in the group's own space, so the translate comes
+/// first and the rotation and mirror act about the local centre.
+fn group_transform_attribute(transform: &Transform) -> String {
+    let (cx, cy) = (transform.width / 2.0, transform.height / 2.0);
+    format!(
+        " transform=\"translate({x} {y}){rotate} scale({sx} {sy}) translate({ncx} {ncy})\"",
+        x = number(transform.x),
+        y = number(transform.y),
+        rotate = rotation_term(transform.rotation),
+        sx = number(flip_scale(transform.flip_horizontal)),
+        sy = number(flip_scale(transform.flip_vertical)),
+        ncx = number(-cx),
+        ncy = number(-cy),
+    )
+}
+
+fn rotation_term(rotation: f64) -> String {
+    if rotation == 0.0 {
+        String::new()
+    } else {
+        format!(" rotate({})", number(rotation))
+    }
+}
+
+fn flip_scale(flipped: bool) -> f64 {
+    if flipped {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// A layer's clip, as the `<clipPath>` the `<defs>` block carries.
+///
+/// The mask is the layer's transform box. The referencing group sits inside
+/// the layer's rotation and mirror, and SVG resolves a `clip-path` in the
+/// referencing element's own user space — so the shape carries the inverse
+/// transform and the box stays where the layer's parent space says it is.
+/// Measured, not assumed: without the inverse, a rotated layer's mask turns
+/// with its content (2600 ink pixels outside the box, against 0 with it).
+///
+/// The inverse goes on the shape, never on a `<g>` wrapper: usvg drops a group
+/// inside a `clipPath`, and the whole layer then renders as nothing.
+fn clip_def(layer: &Layer) -> Result<String, RenderError> {
+    let Some(clip) = &layer.clip else {
+        return Ok(String::new());
+    };
+    if !clip.is_rendered() {
+        return Err(RenderError::UnsupportedClip {
+            layer: layer.id.clone(),
+            shape: clip.kind_name().to_owned(),
+        });
+    }
+
+    let t = &layer.transform;
+    if t.width <= 0.0 || t.height <= 0.0 {
+        return Err(RenderError::DegenerateClip {
+            layer: layer.id.clone(),
+            width: t.width,
+            height: t.height,
+        });
+    }
+
+    // A group's children are positioned in the group's own space, so its box
+    // starts at the origin; every other kind is drawn in its parent's space.
+    let group = matches!(layer.kind, LayerKind::Group(_));
+    let (x, y) = if group { (0.0, 0.0) } else { (t.x, t.y) };
+    let (w, h) = (t.width, t.height);
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+
+    let transform = match inverse_transform(t, cx, cy) {
+        Some(list) => format!(" transform=\"{list}\""),
+        None => String::new(),
+    };
+
+    let geometry = match clip {
+        Clip::Rect { corner_radius } => {
+            // Clamped like a shape rect's radius: larger than the box makes a
+            // stadium rather than a refusal.
+            let radius = corner_radius.clamp(0.0, (w.min(h) / 2.0).max(0.0));
+            if radius <= 0.0 {
+                format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{transform}/>",
+                    number(x),
+                    number(y),
+                    number(w),
+                    number(h),
+                )
+            } else {
+                format!(
+                    "<path d=\"{}\"{transform}/>",
+                    rounded_rect_path(x, y, w, h, radius)
+                )
+            }
+        }
+        Clip::Ellipse => format!(
+            "<path d=\"{}\"{transform}/>",
+            ellipse_path(cx, cy, w / 2.0, h / 2.0)
+        ),
+        Clip::Other(_) => unreachable!("refused above"),
+    };
+
+    Ok(format!(
+        "    <clipPath id=\"{}\">\n      {geometry}\n    </clipPath>\n",
+        clip_id(layer)
+    ))
+}
+
+/// The inverse of the rotation and mirror about `(cx, cy)`, or `None` when
+/// there is nothing to invert.
+fn inverse_transform(transform: &Transform, cx: f64, cy: f64) -> Option<String> {
+    let flipped = transform.flip_horizontal || transform.flip_vertical;
+    if transform.rotation == 0.0 && !flipped {
+        return None;
+    }
+    let mut list = format!("translate({} {})", number(cx), number(cy));
+    if flipped {
+        list.push_str(&format!(
+            " scale({} {})",
+            number(flip_scale(transform.flip_horizontal)),
+            number(flip_scale(transform.flip_vertical)),
+        ));
+    }
+    if transform.rotation != 0.0 {
+        list.push_str(&format!(" rotate({})", number(-transform.rotation)));
+    }
+    list.push_str(&format!(" translate({} {})", number(-cx), number(-cy)));
+    Some(list)
 }
 
 fn color(color: &Color) -> Result<String, RenderError> {

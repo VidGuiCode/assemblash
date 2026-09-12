@@ -51,6 +51,10 @@ export type Transform = {
   height: number;
   /** Clockwise rotation in degrees about the box centre. */
   rotation?: number;
+  /** Whether the content mirrors left-to-right about the box centre. */
+  flipHorizontal?: boolean;
+  /** Whether the content mirrors top-to-bottom about the box centre. */
+  flipVertical?: boolean;
   [key: string]: unknown;
 };
 
@@ -218,6 +222,41 @@ export type Effect = {
   [key: string]: unknown;
 } | unknown;
 
+/// The mask shape of a layer's [`Layer::clip`], tagged by `"shape"` in JSON.
+///
+/// The geometry always is the layer's transform box, so the variants carry no
+/// coordinates — only what the box alone does not say. [`Clip::Other`] is an
+/// untagged catch-all (D21): a clip written by a newer build is preserved as
+/// written, refused when an update touches it, and refused at render time —
+/// the same bargain as [`ShapeKind::Other`] (and, like it, never flattened
+/// into its parent, so the catch-all's reach stays with the clip).
+export type Clip = {
+  /** Corner radius in document units; 0 is a square corner. */
+  cornerRadius?: number;
+  shape: "rect";
+  [key: string]: unknown;
+} | {
+  shape: "ellipse";
+  [key: string]: unknown;
+} | unknown;
+
+/// A rectangle in an image's source pixel space.
+///
+/// A document type of its own, not [`crate::layout::Rect`]: that one is an
+/// internal `Copy` type in absolute canvas space, and a crop is none of
+/// those things — it serialises, and it is relative to the asset.
+export type Crop = {
+  /** Left edge in source pixels. */
+  x: number;
+  /** Top edge in source pixels. */
+  y: number;
+  /** Width in source pixels; must be positive and finite. */
+  width: number;
+  /** Height in source pixels; must be positive and finite. */
+  height: number;
+  [key: string]: unknown;
+};
+
 /// Change properties of an existing layer.
 ///
 /// Every field is optional and means "leave alone" when absent. `name` is
@@ -269,6 +308,14 @@ export type UpdateLayer = {
   stroke?: Stroke | null;
   /** Shape layers whose geometry is a rect: new corner radius. */
   cornerRadius?: number | null;
+  /** Any layer: the whole clip. Absent leaves it, `null` clears it. */
+  clip?: Clip | null;
+  /** Image layers: the source rectangle that fills the box. Absent leaves */
+  crop?: Crop | null;
+  /** Any layer: mirror the content left-to-right about the box centre. */
+  flipHorizontal?: boolean | null;
+  /** Any layer: mirror the content top-to-bottom about the box centre. */
+  flipVertical?: boolean | null;
   /** Change the layer even though it is locked. */
   allowLocked?: boolean;
   [key: string]: unknown;

@@ -28,8 +28,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use assemblash_core::document::{
-    Effect, Extras, GroupLayer, ImageFit, ImageLayer, ShapeKind, ShapeLayer, Stroke, TextAlign,
-    TextLayer, Transform,
+    Clip, Crop, Effect, Extras, GroupLayer, ImageFit, ImageLayer, ShapeKind, ShapeLayer, Stroke,
+    TextAlign, TextLayer, Transform,
 };
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::storage::{self, hash_bytes};
@@ -144,6 +144,7 @@ fn mixed_document() -> (Document, AssetHrefs) {
                     LayerKind::Image(ImageLayer {
                         asset: asset_id.clone(),
                         fit: ImageFit::Cover,
+                        crop: None,
                         extra: Extras::new(),
                     }),
                 ),
@@ -250,6 +251,7 @@ fn blend_mode_document(mode: &assemblash_core::BlendMode) -> (Document, AssetHre
         LayerKind::Image(ImageLayer {
             asset: asset_id.clone(),
             fit: ImageFit::Fill,
+            crop: None,
             extra: Extras::new(),
         }),
     );
@@ -314,6 +316,7 @@ fn effects_document() -> (Document, AssetHrefs) {
             LayerKind::Image(ImageLayer {
                 asset: asset_id.clone(),
                 fit: ImageFit::Fill,
+                crop: None,
                 extra: Extras::new(),
             }),
         );
@@ -742,6 +745,324 @@ fn text_valign_document() -> (Document, AssetHrefs) {
     (document, AssetHrefs::new())
 }
 
+/// The 4x4 swatch as a document asset, and the href map that resolves it.
+fn add_swatch(document: &mut Document) -> (AssetId, AssetHrefs) {
+    let asset_id = AssetId::new("asset_00000000000000000000000001");
+    document.assets.push(assemblash_core::Asset {
+        id: asset_id.clone(),
+        path: "swatch.png".to_owned(),
+        hash: hash_bytes(&swatch_png()),
+        media_type: "image/png".to_owned(),
+        width: Some(4),
+        height: Some(4),
+        extra: Extras::new(),
+    });
+    let hrefs = AssetHrefs::from([(
+        asset_id.clone(),
+        format!("data:image/png;base64,{}", base64(&swatch_png())),
+    )]);
+    (asset_id, hrefs)
+}
+
+fn image_layer(index: usize, transform: Transform, asset: &AssetId, fit: ImageFit) -> Layer {
+    Layer::new(
+        LayerId::new(format!("layer_{index:026}")),
+        transform,
+        LayerKind::Image(ImageLayer {
+            asset: asset.clone(),
+            fit,
+            crop: None,
+            extra: Extras::new(),
+        }),
+    )
+}
+
+/// Clips: a rounded rectangle over a photo and over a shape, a rotated clipped
+/// layer, and a clipped layer carrying a drop shadow.
+///
+/// The last two are the spike's proof cases. The shadow must follow the
+/// clipped silhouette, and a rotated layer's mask must stay on the box in its
+/// parent's space rather than turning with the content.
+fn clip_rounded_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 470.0);
+    document.canvas.background = Some(Color::new("#f6f4ef"));
+    let (asset, hrefs) = add_swatch(&mut document);
+
+    let mut photo = image_layer(
+        1,
+        Transform::new(24.0, 24.0, 150.0, 150.0),
+        &asset,
+        ImageFit::Cover,
+    );
+    photo.clip = Some(Clip::Rect {
+        corner_radius: 28.0,
+    });
+    document.layers.push(photo);
+
+    let mut stadium = shape_layer(
+        2,
+        Transform::new(200.0, 24.0, 150.0, 90.0),
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#2f6f4f"),
+        None,
+    );
+    // A radius larger than half the box clamps to a stadium, not a refusal.
+    stadium.clip = Some(Clip::Rect {
+        corner_radius: 400.0,
+    });
+    document.layers.push(stadium);
+
+    let mut rotated = image_layer(
+        3,
+        Transform {
+            rotation: 30.0,
+            ..Transform::new(40.0, 200.0, 150.0, 110.0)
+        },
+        &asset,
+        ImageFit::Fill,
+    );
+    rotated.clip = Some(Clip::Rect {
+        corner_radius: 16.0,
+    });
+    document.layers.push(rotated);
+
+    let mut shadowed = shape_layer(
+        4,
+        Transform::new(240.0, 195.0, 180.0, 90.0),
+        ShapeKind::Rect { corner_radius: 8.0 },
+        Some("#3366cc"),
+        None,
+    );
+    shadowed.clip = Some(Clip::Rect {
+        corner_radius: 20.0,
+    });
+    shadowed.effects = vec![Effect::DropShadow {
+        dx: 8.0,
+        dy: 12.0,
+        blur: 5.0,
+        color: Color::new("#00000099"),
+    }];
+    document.layers.push(shadowed);
+
+    // A clipped group, and a clipped group that is also rotated: a group's
+    // mask is written in the group's own space, so the compensation and the
+    // subtree both have to be right.
+    let mut group = Layer::new(
+        LayerId::new(format!("layer_{:026}", 5)),
+        Transform::new(24.0, 330.0, 200.0, 110.0),
+        LayerKind::Group(GroupLayer {
+            children: vec![
+                shape_layer(
+                    7,
+                    Transform::new(0.0, 0.0, 200.0, 110.0),
+                    ShapeKind::Rect { corner_radius: 0.0 },
+                    Some("#2f6f4f"),
+                    None,
+                ),
+                shape_layer(
+                    8,
+                    Transform::new(40.0, 20.0, 120.0, 70.0),
+                    ShapeKind::Ellipse,
+                    Some("#e0b23c"),
+                    None,
+                ),
+            ],
+            extra: Extras::new(),
+        }),
+    );
+    group.clip = Some(Clip::Rect {
+        corner_radius: 24.0,
+    });
+    document.layers.push(group);
+
+    let mut rotated_group = Layer::new(
+        LayerId::new(format!("layer_{:026}", 6)),
+        Transform {
+            rotation: 15.0,
+            ..Transform::new(256.0, 330.0, 200.0, 110.0)
+        },
+        LayerKind::Group(GroupLayer {
+            children: vec![
+                image_layer(
+                    9,
+                    Transform::new(0.0, 0.0, 200.0, 110.0),
+                    &asset,
+                    ImageFit::Cover,
+                ),
+                shape_layer(
+                    10,
+                    Transform::new(20.0, 20.0, 70.0, 70.0),
+                    ShapeKind::Ellipse,
+                    Some("#cc3366"),
+                    None,
+                ),
+            ],
+            extra: Extras::new(),
+        }),
+    );
+    rotated_group.clip = Some(Clip::Ellipse);
+    document.layers.push(rotated_group);
+
+    (document, hrefs)
+}
+
+/// Circles: an ellipse clip over a photo and over a flat colour.
+fn clip_ellipse_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 260.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    let (asset, hrefs) = add_swatch(&mut document);
+
+    let mut avatar = image_layer(
+        1,
+        Transform::new(40.0, 30.0, 180.0, 180.0),
+        &asset,
+        ImageFit::Cover,
+    );
+    avatar.clip = Some(Clip::Ellipse);
+    document.layers.push(avatar);
+
+    let mut disc = shape_layer(
+        2,
+        Transform::new(260.0, 30.0, 180.0, 180.0),
+        ShapeKind::Ellipse,
+        Some("#cc3366"),
+        None,
+    );
+    disc.clip = Some(Clip::Ellipse);
+    document.layers.push(disc);
+
+    (document, hrefs)
+}
+
+/// Crops: a square crop, a letterbox crop, and a rectangle that runs past the
+/// source so the clamp is drawn rather than described.
+fn crop_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 200.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    let (asset, hrefs) = add_swatch(&mut document);
+
+    // The top-left quadrant, stretched to fill a square box.
+    let mut square = image_layer(
+        1,
+        Transform::new(20.0, 30.0, 120.0, 120.0),
+        &asset,
+        ImageFit::Fill,
+    );
+    if let LayerKind::Image(image) = &mut square.kind {
+        image.crop = Some(Crop {
+            x: 0.0,
+            y: 0.0,
+            width: 2.0,
+            height: 2.0,
+        });
+    }
+    document.layers.push(square);
+
+    // A letterbox crop: wide and short, contained in a wide box.
+    let mut letterbox = image_layer(
+        2,
+        Transform::new(180.0, 30.0, 200.0, 120.0),
+        &asset,
+        ImageFit::Contain,
+    );
+    if let LayerKind::Image(image) = &mut letterbox.kind {
+        image.crop = Some(Crop {
+            x: 1.0,
+            y: 0.0,
+            width: 2.0,
+            height: 4.0,
+        });
+    }
+    document.layers.push(letterbox);
+
+    // Runs two pixels past both edges: clamped to the source's 4x4.
+    let mut clamped = image_layer(
+        3,
+        Transform::new(400.0, 30.0, 60.0, 120.0),
+        &asset,
+        ImageFit::Fill,
+    );
+    if let LayerKind::Image(image) = &mut clamped.kind {
+        image.crop = Some(Crop {
+            x: 2.0,
+            y: 2.0,
+            width: 6.0,
+            height: 6.0,
+        });
+    }
+    document.layers.push(clamped);
+
+    (document, hrefs)
+}
+
+/// Flips: each axis alone and with a rotation, on an image, a shape and a text
+/// layer.
+///
+/// Flipping text mirrors its glyphs — that is what a mirror means — so a text
+/// layer is here deliberately.
+fn flip_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 340.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    let (asset, hrefs) = add_swatch(&mut document);
+
+    let mut horizontal = image_layer(
+        1,
+        Transform {
+            flip_horizontal: true,
+            ..Transform::new(24.0, 24.0, 120.0, 120.0)
+        },
+        &asset,
+        ImageFit::Fill,
+    );
+    horizontal.name = Some("flipped horizontally".to_owned());
+    document.layers.push(horizontal);
+
+    let mut vertical = image_layer(
+        2,
+        Transform {
+            flip_vertical: true,
+            ..Transform::new(180.0, 24.0, 120.0, 120.0)
+        },
+        &asset,
+        ImageFit::Fill,
+    );
+    vertical.name = Some("flipped vertically".to_owned());
+    document.layers.push(vertical);
+
+    // Both axes and a rotation: the mirror is composed about the box centre,
+    // so the rotation turns the mirrored result.
+    let mut both = shape_layer(
+        3,
+        Transform {
+            rotation: 20.0,
+            flip_horizontal: true,
+            flip_vertical: true,
+            ..Transform::new(336.0, 24.0, 120.0, 120.0)
+        },
+        ShapeKind::Rect { corner_radius: 0.0 },
+        Some("#2f6f4f"),
+        Some(("#101820", 6.0)),
+    );
+    both.name = Some("flipped both ways and rotated".to_owned());
+    document.layers.push(both);
+
+    let mut mirrored_text = text_layer(
+        "layer_00000000000000000000000004",
+        Transform {
+            flip_horizontal: true,
+            ..Transform::new(24.0, 190.0, 432.0, 120.0)
+        },
+        "mirrored text",
+        "Noto Sans",
+        44.0,
+        TextAlign::Left,
+    );
+    mirrored_text.name = Some("mirrored text".to_owned());
+    document.layers.push(mirrored_text);
+
+    (document, hrefs)
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -756,6 +1077,10 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("text-stroke", text_stroke_document()),
         ("text-spacing", text_spacing_document()),
         ("text-valign", text_valign_document()),
+        ("clip-rounded", clip_rounded_document()),
+        ("clip-ellipse", clip_ellipse_document()),
+        ("crop", crop_document()),
+        ("flip", flip_document()),
     ] {
         out.push((name, document, hrefs));
     }
@@ -767,6 +1092,15 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         out.push((name, document, hrefs));
     }
     out
+}
+
+/// Reference documents that are also rendered at another scale.
+///
+/// The scale multiplies the SVG's own size, so a crop's viewBox placement is
+/// checked in a second pixel grid rather than only in the first.
+fn scaled_reference_documents() -> Vec<(&'static str, Document, AssetHrefs, f32)> {
+    let (document, hrefs) = crop_document();
+    vec![("crop-scale2", document, hrefs, 2.0)]
 }
 
 /// The two SVGs behind G4: a `screen` blend and a Gaussian blur. They are
@@ -885,6 +1219,53 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
+/// The crop document places each rectangle where it says: a square crop fills
+/// its box, a letterbox crop keeps its aspect inside the box, and a rectangle
+/// that runs past the source is clamped rather than refused or stretched.
+#[test]
+fn g5_crops_place_and_clamp() {
+    let fonts = fonts();
+    let (document, hrefs) = crop_document();
+    let png = document_to_png(
+        &document,
+        &fonts,
+        &hrefs,
+        1.0,
+        &gate_metadata(&document.id.to_string()),
+    )
+    .unwrap();
+    let (width, _, pixels) = decode(&png);
+
+    // Ink columns inside a box, against the box's own pixel range.
+    let inked = |from: u32, to: u32| {
+        let mut count = 0;
+        for x in from..to {
+            let mut column = false;
+            for y in 0..200 {
+                let offset = ((y * width + x) * 4) as usize;
+                if pixels[offset] != 255 || pixels[offset + 1] != 255 || pixels[offset + 2] != 255 {
+                    column = true;
+                }
+            }
+            if column {
+                count += 1;
+            }
+        }
+        count
+    };
+
+    // Fill: the crop stretches to the whole 120-pixel box.
+    assert_eq!(inked(20, 140), 120, "a square crop fills its box");
+    // Contain: the 2x4 crop is 60 pixels wide in a 200-pixel box, centred.
+    assert_eq!(
+        inked(180, 380),
+        60,
+        "a letterbox crop keeps its aspect inside the box"
+    );
+    // Out-of-bounds: clamped to the source's 2x2 remainder, still filling.
+    assert_eq!(inked(400, 460), 60, "a clamped crop fills its box");
+}
+
 /// G1 — a document that goes to disk and comes back renders the same pixels,
 /// byte for byte.
 #[test]
@@ -943,6 +1324,27 @@ fn g2_reference_documents_match_the_committed_hashes() {
             &fonts,
             &hrefs,
             1.0,
+            &gate_metadata(&document.id.to_string()),
+        )
+        .unwrap();
+        let (_, _, pixels) = decode(&png);
+
+        computed.insert(format!("{name}.pixels"), hash_bytes(&pixels));
+        computed.insert(format!("{name}.png"), hash_bytes(&png));
+
+        if updating() {
+            std::fs::write(preview_dir().join(format!("{name}.png")), &png).unwrap();
+        }
+    }
+
+    // A crop at scale 2: the viewBox maps into twice the pixels, so the
+    // placement is checked at a second scale rather than only at 1.
+    for (name, document, hrefs, scale) in scaled_reference_documents() {
+        let png = document_to_png(
+            &document,
+            &fonts,
+            &hrefs,
+            scale,
             &gate_metadata(&document.id.to_string()),
         )
         .unwrap();

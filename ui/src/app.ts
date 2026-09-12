@@ -93,6 +93,63 @@ const SHAPE_FILL_COLOUR = "#3366cc";
 const SHAPE_STROKE_COLOUR = "#111111";
 const SHAPE_STROKE_WIDTH = 2;
 
+/** The clip shapes this build draws. A clip of any other shape is shown as
+ * itself, never replaced with one of these. */
+const CLIP_SHAPES = ["rect", "ellipse"] as const;
+
+/**
+ * The `shape` of a layer's clip, or `null` when the layer has no clip.
+ *
+ * The generated `Clip` widens to `unknown`, because its catch-all arm carries
+ * any JSON a newer build might write. So the shape is read once, defensively,
+ * here — the same rule `api.shapeKindOf` follows for a shape kind. A clip
+ * this build does not know is reported as itself.
+ */
+function clipShapeOf(layer: Layer): string | null {
+  const clip: unknown = layer.clip;
+  if (clip && typeof clip === "object" && !Array.isArray(clip)) {
+    const shape = (clip as Record<string, unknown>)["shape"];
+    if (typeof shape === "string") return shape;
+  }
+  return null;
+}
+
+/** A clip rect's corner radius, with the engine's default of 0 applied. */
+function clipRadiusOf(layer: Layer): number {
+  const clip: unknown = layer.clip;
+  if (clip && typeof clip === "object" && !Array.isArray(clip)) {
+    const radius = (clip as Record<string, unknown>)["cornerRadius"];
+    if (typeof radius === "number") return radius;
+  }
+  return 0;
+}
+
+/** A layer's crop, or `null` when it draws the whole image. */
+function cropOf(layer: Layer): { x: number; y: number; width: number; height: number } | null {
+  if (layer.type !== "image") return null;
+  const crop: unknown = layer.crop;
+  if (crop && typeof crop === "object" && !Array.isArray(crop)) {
+    const held = crop as Record<string, unknown>;
+    const x = held["x"];
+    const y = held["y"];
+    const width = held["width"];
+    const height = held["height"];
+    if (
+      typeof x === "number" && typeof y === "number" &&
+      typeof width === "number" && typeof height === "number"
+    ) {
+      return { x, y, width, height };
+    }
+  }
+  return null;
+}
+
+/** The asset a layer draws, or `null` when the layer draws none. */
+function assetOf(layer: Layer): { width?: number | null; height?: number | null } | null {
+  if (layer.type !== "image" && layer.type !== "svg") return null;
+  return (state.document?.assets ?? []).find((one) => one.id === layer.asset) ?? null;
+}
+
 interface DragPreviewCache {
   key: string;
   baseUrl?: string;
@@ -1217,6 +1274,80 @@ function drawInspector(): void {
     );
     fit.append(fitSelect);
     dom.advancedInspector.append(fit);
+
+    if (layer.type === "image") {
+      // A crop is a rectangle in the image's own pixels, not a fit mode. It
+      // works with Fit: the engine places the crop in the box as if it were
+      // the whole image. No crop on a vector layer: a vector has no source
+      // pixels of its own.
+      const crop = cropOf(layer);
+      const asset = assetOf(layer);
+      const sourceWidth = asset?.width ?? null;
+      const sourceHeight = asset?.height ?? null;
+      const sourceKnown =
+        typeof sourceWidth === "number" && sourceWidth > 0 &&
+        typeof sourceHeight === "number" && sourceHeight > 0;
+
+      const hint = document.createElement("p");
+      hint.className = "hint";
+      hint.textContent = sourceKnown
+        ? "Crop uses the image's own pixels. It works with Fit."
+        : "The engine recorded no pixel size for this image, so a crop is not available.";
+      dom.advancedInspector.append(hint);
+
+      // With no crop, the fields show the whole image, so the first change
+      // starts from the truth rather than from four zeros.
+      const shown = crop ?? { x: 0, y: 0, width: sourceWidth ?? 0, height: sourceHeight ?? 0 };
+      const cropRow = (
+        label: string,
+        name: string,
+        value: number,
+        change: (next: number) => Operation | null,
+      ): void => {
+        const wrapper = document.createElement("label");
+        wrapper.className = "field";
+        wrapper.append(document.createTextNode(label));
+        const input = document.createElement("input");
+        input.type = "number";
+        input.className = name;
+        input.value = String(value);
+        input.disabled = why !== null || !sourceKnown;
+        input.addEventListener("change", () => {
+          if (input.value === String(value)) return;
+          const operation = change(Number(input.value));
+          if (operation) void send(`change ${label}`, operation);
+        });
+        wrapper.append(input);
+        dom.advancedInspector.append(wrapper);
+      };
+      // One crop is four numbers, so every field sends the whole rectangle
+      // with the one value the person changed. A crop that is not a positive
+      // rectangle is a typed refusal from the engine, so it is not sent.
+      const setCrop = (next: { x: number; y: number; width: number; height: number }): Operation | null => {
+        if (!Number.isFinite(next.x) || !Number.isFinite(next.y)) return null;
+        if (!(next.width > 0) || !(next.height > 0)) return null;
+        return { op: "update", id: layer.id, crop: next } as Operation;
+      };
+      cropRow("Crop x", "crop-x", shown.x, (next) => setCrop({ ...shown, x: next }));
+      cropRow("Crop y", "crop-y", shown.y, (next) => setCrop({ ...shown, y: next }));
+      cropRow("Crop width", "crop-width", shown.width, (next) => setCrop({ ...shown, width: next }));
+      cropRow("Crop height", "crop-height", shown.height, (next) => setCrop({ ...shown, height: next }));
+
+      const clearRow = document.createElement("div");
+      clearRow.className = "field";
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "small crop-clear";
+      clear.textContent = "Clear crop";
+      clear.title = "Use the whole image";
+      clear.disabled = why !== null || crop === null;
+      clear.addEventListener("click", () => {
+        clear.disabled = true;
+        void send("clear crop", { op: "update", id: layer.id, crop: null } as Operation);
+      });
+      clearRow.append(clear);
+      dom.advancedInspector.append(clearRow);
+    }
   }
 
   if (layer.type === "shape") {
@@ -1319,6 +1450,82 @@ function drawInspector(): void {
       );
     }
   }
+
+  // Clip and mirror apply to every kind: a clip masks whatever the layer
+  // draws, and a flip mirrors it about the box centre.
+  const maskHeading = document.createElement("h2");
+  maskHeading.textContent = "Clip and mirror";
+  dom.advancedInspector.append(maskHeading);
+
+  const clipShape = clipShapeOf(layer);
+  const clipRow = document.createElement("label");
+  clipRow.className = "field";
+  clipRow.append(document.createTextNode("Clip"));
+  const clipSelect = document.createElement("select");
+  clipSelect.className = "clip-shape";
+  clipSelect.disabled = why !== null;
+  clipSelect.setAttribute("aria-label", "Clip");
+  // A clip shape this build does not know is listed as itself, so it can be
+  // seen and replaced but never silently becomes something else.
+  const clipChoices: string[] = [...CLIP_SHAPES];
+  if (clipShape && !clipChoices.includes(clipShape)) clipChoices.push(clipShape);
+  for (const choice of ["none", ...clipChoices]) {
+    const option = document.createElement("option");
+    option.value = choice;
+    option.textContent = choice;
+    clipSelect.append(option);
+  }
+  clipSelect.value = clipShape ?? "none";
+  clipSelect.addEventListener("change", () => {
+    const chosen = clipSelect.value;
+    if (chosen === (clipShape ?? "none")) return;
+    const clip = chosen === "none"
+      ? null
+      : chosen === "rect"
+        ? { shape: "rect", cornerRadius: clipRadiusOf(layer) }
+        : { shape: chosen };
+    void send("change clip", { op: "update", id: layer.id, clip } as Operation);
+  });
+  clipRow.append(clipSelect);
+  dom.advancedInspector.append(clipRow);
+
+  if (clipShape === "rect") {
+    // Only a rect clip has corners. The engine refuses this property on any
+    // other shape, so the row is simply not offered.
+    field(
+      "Clip radius",
+      String(clipRadiusOf(layer)),
+      (next) => ({
+        op: "update",
+        id: layer.id,
+        clip: { shape: "rect", cornerRadius: Number(next) },
+      }) as Operation,
+      "number",
+      undefined,
+      "clip-radius",
+    );
+  }
+
+  const mirror = document.createElement("div");
+  mirror.className = "property-flags";
+  const flip = (label: string, name: string, key: string, current: boolean): void => {
+    const wrapper = document.createElement("label");
+    wrapper.className = "field checkbox";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = name;
+    input.checked = current;
+    input.disabled = why !== null;
+    input.setAttribute("aria-label", label);
+    input.addEventListener("change", () =>
+      void send(label.toLowerCase(), { op: "update", id: layer.id, [key]: input.checked } as Operation),
+    );
+    wrapper.append(input, document.createTextNode(label));
+    mirror.append(wrapper);
+  };
+  flip("Flip horizontal", "flip-horizontal", "flipHorizontal", layer.transform.flipHorizontal ?? false);
+  flip("Flip vertical", "flip-vertical", "flipVertical", layer.transform.flipVertical ?? false);
+  dom.advancedInspector.append(mirror);
 
   const appearanceHeading = document.createElement("h2");
   appearanceHeading.textContent = "Appearance";

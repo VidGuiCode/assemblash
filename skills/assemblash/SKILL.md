@@ -204,6 +204,43 @@ command exits 1 and names `shape` as an unknown layer kind, and nothing in the
 file is repairable — open it with 1.6.0 or newer. A `dropShadow` is milder:
 1.3.0 and newer keep it and refuse only the render.
 
+## Clipping, cropping, and flips (1.8.0 and newer)
+
+Check the running binary first. Three update-only properties arrived in 1.8.0.
+None of them can be set when a layer is created; set them afterwards.
+
+- **`clip`** masks a layer to its own box. It is an object tagged by `shape`:
+  `{"shape":"rect","cornerRadius":12}` or `{"shape":"ellipse"}`. The geometry
+  is the transform box, so the clip carries no coordinates. A radius larger
+  than the box makes a stadium. An explicit JSON `null` clears the clip;
+  omission leaves it alone.
+- **`crop`** shows part of an image layer's source: `{"x":0,"y":0,"width":400,
+  "height":400}`, in source pixels. It composes with `fit`. Values outside the
+  source clamp to it; a rectangle that shares no area with the source is
+  refused. Image layers only — text, shapes, groups and SVG layers refuse it by
+  name. The asset must record its pixel size, which an import does; a crop of
+  an asset with no recorded size is refused.
+- **`flipHorizontal`** and **`flipVertical`** are booleans on any layer: a
+  mirror about the box centre, never a negative size.
+
+Composition: the clip is applied inside the layer's effect stack, so a shadow
+follows the clipped shape. A rotated clipped layer is cut to the box in its
+parent's space — the mask does not turn with the content.
+
+- CLI `set` takes `--clip-rect`, `--clip-radius PX` (rect only), `--clip-ellipse`,
+  `--no-clip`, `--crop X,Y,W,H`, `--no-crop`, `--flip-h true|false`, and
+  `--flip-v true|false`.
+- MCP `update_layer` takes `clip` (object), `clearClip`, `crop` (object),
+  `clearCrop`, `flipHorizontal`, and `flipVertical`. As with the paints, a null
+  argument is indistinguishable from an omitted one: use `clearClip` or
+  `clearCrop` to remove one.
+- HTTP needs nothing new. `POST /operations` deserialises the operation union,
+  so the fields travel with the update.
+
+1.0 through 1.7 preserve all four values and render the layer unclipped,
+uncropped and unflipped. That is a silent degrade, not a refusal: the values
+survive a round trip through an older build.
+
 ## Pass JSON in a file, not on the command line
 
 PowerShell rewrites an inline JSON argument, so a payload typed after a flag

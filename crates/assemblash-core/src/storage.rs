@@ -269,6 +269,19 @@ pub fn import_asset_reporting(
     // actually stored.
     let hash = hash_bytes(&bytes);
 
+    // The pixel size, read from the raster's own header while the bytes are
+    // already in hand. A vector has no pixel size, and an image format this
+    // build does not know answers `None` — both are recorded as unknown
+    // rather than guessed at.
+    let (width, height) = if is_svg {
+        (None, None)
+    } else {
+        match crate::image_size::raster_dimensions(&bytes) {
+            Some((width, height)) => (Some(width), Some(height)),
+            None => (None, None),
+        }
+    };
+
     let extension = source_file
         .extension()
         .and_then(|e| e.to_str())
@@ -293,8 +306,8 @@ pub fn import_asset_reporting(
             path: relative,
             hash,
             media_type: media_type_for(&extension).to_owned(),
-            width: None,
-            height: None,
+            width,
+            height,
             extra: Extras::new(),
         },
         import_report,
@@ -470,6 +483,7 @@ mod tests {
             LayerKind::Image(ImageLayer {
                 asset: asset.id.clone(),
                 fit: ImageFit::Contain,
+                crop: None,
                 extra: Extras::new(),
             }),
         ));
@@ -575,6 +589,7 @@ mod tests {
             LayerKind::Image(ImageLayer {
                 asset: used_asset.id.clone(),
                 fit: ImageFit::Fill,
+                crop: None,
                 extra: Extras::new(),
             }),
         ));

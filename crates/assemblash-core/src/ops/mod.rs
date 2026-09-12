@@ -42,6 +42,12 @@ use crate::validate::validate;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "camelCase")]
 #[non_exhaustive]
+// `Update` carries one optional property per field the document has, so it is
+// the largest variant by a wide margin and grows with every rung. Boxing it
+// would change this crate's published Rust API for no runtime gain: an
+// operation is built once and moved once, and the transports deserialise the
+// union generically.
+#[allow(clippy::large_enum_variant)]
 pub enum Operation {
     /// Changes the canvas without scaling layers.
     UpdateCanvas(UpdateCanvas),
@@ -854,6 +860,30 @@ fn update_layer(document: &mut Document, request: &UpdateLayer) -> Result<OpOutc
 
 fn update(document: &mut Document, request: &UpdateLayer) -> Result<OpOutcome, OpError> {
     ensure_mutable(document, &request.id, request.allow_locked)?;
+
+    // A crop is a rectangle in the source's own pixels, so the numbers only
+    // mean something when the asset records its pixel size. Checked here
+    // rather than in `apply_to`, which sees the layer and not the document.
+    // Only an image layer can reach this: every other kind refuses `crop`
+    // outright.
+    if matches!(request.crop, Some(Some(_))) {
+        if let Some(layer) = tree::find(document, &request.id) {
+            if let LayerKind::Image(image) = &layer.kind {
+                let sized = document
+                    .assets
+                    .iter()
+                    .find(|asset| asset.id == image.asset)
+                    .is_some_and(|asset| asset.width.is_some() && asset.height.is_some());
+                if !sized {
+                    return Err(OpError::MissingAssetDimensions {
+                        id: request.id.clone(),
+                        asset: image.asset.clone(),
+                    });
+                }
+            }
+        }
+    }
+
     let layer = tree::find_mut(document, &request.id).ok_or_else(|| OpError::NoSuchLayer {
         id: request.id.clone(),
     })?;
@@ -900,7 +930,9 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use crate::document::{Extras, FontStyle, GroupLayer, TextAlign, Transform, VerticalAlign};
+    use crate::document::{
+        Clip, Crop, Extras, FontStyle, GroupLayer, TextAlign, Transform, VerticalAlign,
+    };
     use crate::ids::SequentialIdSource;
     use crate::{Color, Layer};
 
@@ -931,6 +963,210 @@ mod tests {
             name: None,
             kind: new_text(),
         })
+    }
+
+    /// One document with a text layer, a shape layer and an image layer whose
+    /// asset records its size — everything the clip, crop and flip fields can
+    /// land on.
+    fn document_with_every_kind() -> Document {
+        let mut doc = document();
+        let mut ids = SequentialIdSource::new();
+        apply(
+            &mut doc,
+            &create_text(LayerPosition::Root { index: None }),
+            &mut ids,
+        )
+        .unwrap();
+
+        let asset = crate::Asset {
+            id: crate::AssetId::new("asset_00000000000000000000000001"),
+            path: "swatch.png".to_owned(),
+            hash: crate::storage::hash_bytes(b"not really a png"),
+            media_type: "image/png".to_owned(),
+            width: Some(64),
+            height: Some(64),
+            extra: Extras::new(),
+        };
+        doc.assets.push(asset);
+        doc.layers.push(Layer::new(
+            crate::LayerId::new("layer_00000000000000000000000009"),
+            Transform::new(0.0, 100.0, 60.0, 60.0),
+            LayerKind::Image(crate::document::ImageLayer {
+                asset: crate::AssetId::new("asset_00000000000000000000000001"),
+                fit: crate::document::ImageFit::Fill,
+                crop: None,
+                extra: Extras::new(),
+            }),
+        ));
+        doc.layers.push(Layer::new(
+            crate::LayerId::new("layer_00000000000000000000000010"),
+            Transform::new(0.0, 0.0, 40.0, 40.0),
+            LayerKind::Shape(crate::document::ShapeLayer {
+                shape: crate::document::ShapeKind::Rect { corner_radius: 0.0 },
+                fill: Some(Color::new("#3366cc")),
+                stroke: None,
+                extra: Extras::new(),
+            }),
+        ));
+        doc
+    }
+
+    fn update(doc: &mut Document, request: UpdateLayer) -> Result<OpOutcome, OpError> {
+        apply(
+            doc,
+            &Operation::Update(request),
+            &mut SequentialIdSource::new(),
+        )
+    }
+
+    #[test]
+    fn a_clip_can_be_set_on_any_kind_and_cleared_again() {
+        let mut doc = document_with_every_kind();
+        for index in 0..doc.layers.len() {
+            let id = doc.layers[index].id.clone();
+            let mut request = UpdateLayer::new(id.clone());
+            request.clip = Some(Some(Clip::Ellipse));
+            update(&mut doc, request).unwrap();
+            assert_eq!(
+                doc.find_layer(&id).unwrap().clip,
+                Some(Clip::Ellipse),
+                "the clip applies to layer {index}"
+            );
+
+            let mut request = UpdateLayer::new(id.clone());
+            request.clip = Some(None);
+            update(&mut doc, request).unwrap();
+            assert_eq!(doc.find_layer(&id).unwrap().clip, None, "cleared");
+        }
+    }
+
+    #[test]
+    fn a_crop_belongs_to_image_layers_only() {
+        let mut doc = document_with_every_kind();
+        let crop = Crop {
+            x: 0.0,
+            y: 0.0,
+            width: 32.0,
+            height: 32.0,
+        };
+
+        let image = doc.layers[1].id.clone();
+        let mut request = UpdateLayer::new(image.clone());
+        request.crop = Some(Some(crop));
+        update(&mut doc, request).unwrap();
+        match &doc.find_layer(&image).unwrap().kind {
+            LayerKind::Image(image) => assert_eq!(image.crop, Some(crop)),
+            other => panic!("expected an image layer, got {other:?}"),
+        }
+
+        // Every other kind refuses the field by name rather than dropping it.
+        for index in [0, 2] {
+            let id = doc.layers[index].id.clone();
+            let mut request = UpdateLayer::new(id);
+            request.crop = Some(Some(crop));
+            assert!(
+                matches!(
+                    update(&mut doc, request),
+                    Err(OpError::WrongLayerKind {
+                        property: "crop",
+                        ..
+                    })
+                ),
+                "a crop on layer {index} must be refused by name"
+            );
+        }
+    }
+
+    #[test]
+    fn a_crop_needs_an_asset_that_records_its_size() {
+        let mut doc = document_with_every_kind();
+        let image = doc.layers[1].id.clone();
+        // An asset whose dimensions were never recorded: the crop's numbers
+        // would mean nothing, so it is refused rather than stored.
+        doc.assets[0].width = None;
+        doc.assets[0].height = None;
+
+        let mut request = UpdateLayer::new(image);
+        request.crop = Some(Some(Crop {
+            x: 0.0,
+            y: 0.0,
+            width: 32.0,
+            height: 32.0,
+        }));
+        assert!(matches!(
+            update(&mut doc, request),
+            Err(OpError::MissingAssetDimensions { .. })
+        ));
+    }
+
+    #[test]
+    fn an_unknown_clip_is_preserved_but_never_set_or_edited() {
+        let mut doc = document_with_every_kind();
+        let id = doc.layers[0].id.clone();
+
+        // A clip written by a newer build is refused when this build is asked
+        // to draw it into place...
+        let mut request = UpdateLayer::new(id.clone());
+        request.clip = Some(Some(Clip::Other(serde_json::json!({"shape": "polygon"}))));
+        assert!(matches!(
+            update(&mut doc, request),
+            Err(OpError::UnsupportedClip { .. })
+        ));
+        assert_eq!(doc.find_layer(&id).unwrap().clip, None, "nothing stored");
+
+        // ...and a layer that already carries one is not edited into a known
+        // shape either: the unknown mask is preserved as written.
+        doc.layers[0].clip = Some(Clip::Other(serde_json::json!({"shape": "polygon"})));
+        let mut request = UpdateLayer::new(id.clone());
+        request.clip = Some(None);
+        assert!(matches!(
+            update(&mut doc, request),
+            Err(OpError::UnsupportedClip { .. })
+        ));
+        assert!(
+            matches!(doc.find_layer(&id).unwrap().clip, Some(Clip::Other(_))),
+            "the unknown clip survives"
+        );
+    }
+
+    #[test]
+    fn flips_apply_to_any_kind_and_clear_again() {
+        let mut doc = document_with_every_kind();
+        let id = doc.layers[0].id.clone();
+
+        let mut request = UpdateLayer::new(id.clone());
+        request.flip_horizontal = Some(true);
+        request.flip_vertical = Some(true);
+        update(&mut doc, request).unwrap();
+        let transform = &doc.find_layer(&id).unwrap().transform;
+        assert!(transform.flip_horizontal && transform.flip_vertical);
+
+        let mut request = UpdateLayer::new(id.clone());
+        request.flip_horizontal = Some(false);
+        update(&mut doc, request).unwrap();
+        let transform = &doc.find_layer(&id).unwrap().transform;
+        assert!(!transform.flip_horizontal, "the horizontal flip cleared");
+        assert!(transform.flip_vertical, "the vertical flip stayed");
+    }
+
+    #[test]
+    fn an_update_carrying_no_new_field_changes_nothing() {
+        // The 1.8.0 fields are absent unless asked for: an update written for
+        // 1.7 must still leave a clip, a crop and both flips alone.
+        let mut doc = document_with_every_kind();
+        let id = doc.layers[1].id.clone();
+        doc.layers[1].clip = Some(Clip::Rect { corner_radius: 4.0 });
+        doc.layers[1].transform.flip_vertical = true;
+        let before = doc.find_layer(&id).unwrap().clone();
+
+        let mut request = UpdateLayer::new(id.clone());
+        request.opacity = Some(0.5);
+        update(&mut doc, request).unwrap();
+
+        let after = doc.find_layer(&id).unwrap();
+        assert_eq!(after.clip, before.clip);
+        assert!(after.transform.flip_vertical);
+        assert!(!after.transform.flip_horizontal);
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::document::{Color, Document, Effect, Layer, LayerKind, ShapeKind, ShapeLayer};
+use crate::document::{Clip, Color, Document, Effect, Layer, LayerKind, ShapeKind, ShapeLayer};
 use crate::error::{ValidationError, ValidationErrors};
 use crate::ids::AssetId;
 use crate::SCHEMA_VERSION;
@@ -155,6 +155,23 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
 
     check_effects(layer, errors);
 
+    // Clip checks, on every kind: the radius follows the shape-rect
+    // precedent — finite, 0 or more, no upper bound, because a radius larger
+    // than the box clamps to a stadium when drawn. A `Clip::Other` is *not*
+    // an error here, exactly as a `ShapeKind::Other` is not: preserving a
+    // newer build's clip is the point, and it is refused where it matters —
+    // on `update`, and at render.
+    if let Some(Clip::Rect { corner_radius }) = &layer.clip {
+        if !corner_radius.is_finite() || *corner_radius < 0.0 {
+            errors.push(ValidationError::InvalidShape {
+                layer: layer.id.clone(),
+                field: "clip.cornerRadius",
+                expected: "a finite number of 0 or more",
+                value: *corner_radius,
+            });
+        }
+    }
+
     match &layer.kind {
         LayerKind::Text(text) => {
             if !text.font_size.is_finite() || text.font_size <= 0.0 {
@@ -206,6 +223,31 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
                     layer: layer.id.clone(),
                     asset: image.asset.clone(),
                 });
+            }
+            // A degenerate crop is refused typed rather than clamped to
+            // nothing. Out of bounds is *not* a validation error: the crop is
+            // clamped to the source at render, the same way a corner radius
+            // clamps to a stadium.
+            if let Some(crop) = &image.crop {
+                for (field, value, positive) in [
+                    ("crop.x", crop.x, false),
+                    ("crop.y", crop.y, false),
+                    ("crop.width", crop.width, true),
+                    ("crop.height", crop.height, true),
+                ] {
+                    if !value.is_finite() || (positive && value <= 0.0) {
+                        errors.push(ValidationError::InvalidShape {
+                            layer: layer.id.clone(),
+                            field,
+                            expected: if positive {
+                                "a finite number greater than 0"
+                            } else {
+                                "a finite number"
+                            },
+                            value,
+                        });
+                    }
+                }
             }
         }
         LayerKind::Svg(svg) => {
@@ -405,6 +447,7 @@ mod tests {
             LayerKind::Image(ImageLayer {
                 asset: AssetId::new(asset),
                 fit: ImageFit::Fill,
+                crop: None,
                 extra: Extras::new(),
             }),
         )

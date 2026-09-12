@@ -78,6 +78,78 @@ pub enum RenderError {
         kind: String,
     },
 
+    /// A layer asks for a clip shape this build does not draw.
+    ///
+    /// Same bargain as an unknown shape: the clip is preserved in the
+    /// document, and refused when something tries to draw it. Drawing the
+    /// layer unmasked instead would change which pixels a document shows
+    /// without saying so.
+    #[error("layer {layer}: clip shape {shape:?} is not one this build draws")]
+    UnsupportedClip {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The clip shape it asked for.
+        shape: String,
+    },
+
+    /// A clip on a box that has no area.
+    ///
+    /// Validation allows a zero-width or zero-height box, and a clip of it
+    /// would draw nothing while reporting success. Refused typed instead,
+    /// because an empty export that exits zero is the failure this engine
+    /// exists not to make.
+    #[error(
+        "layer {layer}: a clip on a {width}x{height} box would draw nothing; \
+         give the layer a positive width and height"
+    )]
+    DegenerateClip {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The box width.
+        width: f64,
+        /// The box height.
+        height: f64,
+    },
+
+    /// A crop rectangle that shares no area with the source image.
+    ///
+    /// The crop is clamped to the source, so this is the case where clamping
+    /// leaves nothing at all. Refused typed rather than drawn as an empty box.
+    #[error(
+        "layer {layer}: the crop {x},{y} {width}x{height} is outside the {source_width}x{source_height} source"
+    )]
+    CropOutsideSource {
+        /// The layer at fault.
+        layer: LayerId,
+        /// Crop left edge.
+        x: f64,
+        /// Crop top edge.
+        y: f64,
+        /// Crop width.
+        width: f64,
+        /// Crop height.
+        height: f64,
+        /// Source width.
+        source_width: u32,
+        /// Source height.
+        source_height: u32,
+    },
+
+    /// A crop was given for an asset that records no pixel size.
+    ///
+    /// A crop is a rectangle in the source's own pixels, so without the
+    /// source's size the numbers mean nothing. The operation layer refuses to
+    /// set such a crop; this catches a document written by something else.
+    #[error(
+        "layer {layer}: asset {asset} has no recorded width and height, so a crop cannot be placed"
+    )]
+    CropWithoutSourceSize {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The asset whose size is unknown.
+        asset: AssetId,
+    },
+
     /// A colour that validation would have rejected reached the renderer.
     #[error("invalid color {0}")]
     InvalidColor(String),
