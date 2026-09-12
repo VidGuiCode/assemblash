@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "https://github.com/google/fonts",
   "commit": "2796410152d4f9524b68ed46e69c1b60f8e0f7c3",
   "urlPrefix": "https://raw.githubusercontent.com/google/fonts/",
@@ -15,6 +15,19 @@
       ]
     },
     {
+      "name": "Noto Sans",
+      "path": "fonts/NotoSans/hinted/ttf/NotoSans-Bold.ttf",
+      "sha256": "sha256:1df075a380fc7cb898acf64c1f7b3b4dd780de3caa860178bf929de35817a913",
+      "bytes": 631484,
+      "license": "OFL-1.1",
+      "packs": [
+        "default"
+      ],
+      "weight": 700,
+      "urlPrefix": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/",
+      "commit": "92d2ea744479d3379927f1fb5f8b0945dd0349b7"
+    },
+    {
       "name": "Noto Serif",
       "path": "ofl/notoserif/NotoSerif[wdth,wght].ttf",
       "sha256": "sha256:4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
@@ -25,6 +38,19 @@
       ]
     },
     {
+      "name": "Noto Serif",
+      "path": "fonts/NotoSerif/hinted/ttf/NotoSerif-Bold.ttf",
+      "sha256": "sha256:96656aa5cec8f1d6fd0e804c1fad397e1a1cfa082e6642124e0bda68cd8363ce",
+      "bytes": 747144,
+      "license": "OFL-1.1",
+      "packs": [
+        "default"
+      ],
+      "weight": 700,
+      "urlPrefix": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/",
+      "commit": "92d2ea744479d3379927f1fb5f8b0945dd0349b7"
+    },
+    {
       "name": "Noto Sans Mono",
       "path": "ofl/notosansmono/NotoSansMono[wdth,wght].ttf",
       "sha256": "sha256:2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
@@ -33,6 +59,19 @@
       "packs": [
         "default"
       ]
+    },
+    {
+      "name": "Noto Sans Mono",
+      "path": "fonts/NotoSansMono/hinted/ttf/NotoSansMono-Bold.ttf",
+      "sha256": "sha256:a21ea0ba6ea49fda7b34ca39a504b487f1130885d36e1a4f9f4255b3ba6994bc",
+      "bytes": 610908,
+      "license": "OFL-1.1",
+      "packs": [
+        "default"
+      ],
+      "weight": 700,
+      "urlPrefix": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/",
+      "commit": "92d2ea744479d3379927f1fb5f8b0945dd0349b7"
     },
     {
       "name": "Noto Sans Arabic",

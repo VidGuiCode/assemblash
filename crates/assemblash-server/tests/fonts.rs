@@ -92,6 +92,9 @@ fn fixture_manifest(entries: &[(&str, &str, &str)]) -> Manifest {
                     bytes: bytes.len() as u64,
                     license: "OFL-1.1".to_owned(),
                     packs: vec![(*pack).to_owned()],
+                    weight: None,
+                    url_prefix: None,
+                    commit: None,
                 }
             })
             .collect(),
@@ -827,8 +830,10 @@ fn the_catalogue_says_what_the_install_button_would_fetch() {
         })
         .sum();
     assert!(
-        (5_000_000..7_000_000).contains(&total),
-        "the default pack is about 5.6 MB, got {total}"
+        (7_000_000..9_000_000).contains(&total),
+        // Since DEF-25's fix each family's total covers its variable font
+        // *and* its bold face, so the pack is about 7.3 MB, not 5.6.
+        "the default pack (variable fonts plus bold faces) is about 7.3 MB, got {total}"
     );
 
     // Reading the catalogue reaches nothing: it is the compiled-in manifest.

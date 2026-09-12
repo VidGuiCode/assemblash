@@ -587,22 +587,36 @@ struct CatalogueFamily {
 async fn font_catalogue(State(state): State<AppState>) -> Result<Json<FontCatalogue>, ApiError> {
     let manifest = state.font_manifest()?;
 
+    // A family may be registered by several entries — the variable font plus
+    // per-weight faces (DEF-25) — and the catalogue answers once per family,
+    // with the bytes an install of the family would download in total.
+    let mut families: Vec<CatalogueFamily> = Vec::new();
+    for entry in &manifest.families {
+        if let Some(existing) = families.iter_mut().find(|f| f.family == entry.name) {
+            existing.bytes += entry.bytes;
+            for pack in &entry.packs {
+                if !existing.packs.contains(pack) {
+                    existing.packs.push(pack.clone());
+                }
+            }
+        } else {
+            families.push(CatalogueFamily {
+                family: entry.name.clone(),
+                license: entry.license.clone(),
+                bytes: entry.bytes,
+                packs: entry.packs.clone(),
+            });
+        }
+    }
     let mut packs: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
-    let mut families = Vec::with_capacity(manifest.families.len());
-    for entry in &manifest.families {
-        for pack in &entry.packs {
+    for family in &families {
+        for pack in &family.packs {
             packs
                 .entry(pack.clone())
                 .or_default()
-                .push(entry.name.clone());
+                .push(family.family.clone());
         }
-        families.push(CatalogueFamily {
-            family: entry.name.clone(),
-            license: entry.license.clone(),
-            bytes: entry.bytes,
-            packs: entry.packs.clone(),
-        });
     }
 
     Ok(Json(FontCatalogue { packs, families }))

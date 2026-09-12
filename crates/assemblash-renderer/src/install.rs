@@ -40,6 +40,24 @@ pub struct ManifestEntry {
     /// Named packs this family belongs to.
     #[serde(default)]
     pub packs: Vec<String>,
+    /// The CSS weight this entry delivers, when it is one weight of a
+    /// family rather than the family's variable font.
+    ///
+    /// Purely descriptive: the store derives the real weight from the face's
+    /// own name table at import. It exists so the manifest can state, and a
+    /// test can check, that installing a family of the `default` pack
+    /// delivers a bold face and not only the variable font's 400 default
+    /// (DEF-25).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u16>,
+    /// Prefix a download URL is built from, when this entry does not come
+    /// from the manifest's own source repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_prefix: Option<String>,
+    /// Commit the entry's path is resolved against, when it is not the
+    /// manifest's own pinned commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
 }
 
 /// The set of families the installer knows about.
@@ -67,8 +85,20 @@ impl Manifest {
     }
 
     /// Looks a family up by name.
+    ///
+    /// A family may be registered more than once — its variable font plus
+    /// explicit per-weight faces (DEF-25) — so this answers the first entry
+    /// only; [`Manifest::entries_for`] answers all of them.
     pub fn family(&self, name: &str) -> Option<&ManifestEntry> {
         self.families.iter().find(|entry| entry.name == name)
+    }
+
+    /// Every entry registered under a family name.
+    pub fn entries_for(&self, name: &str) -> Vec<&ManifestEntry> {
+        self.families
+            .iter()
+            .filter(|entry| entry.name == name)
+            .collect()
     }
 
     /// The families in a named pack.
@@ -82,11 +112,16 @@ impl Manifest {
     /// The URL an entry is fetched from.
     ///
     /// Built from a pinned commit, so the bytes behind it cannot change under
-    /// the manifest. Square brackets, which variable-font filenames use, are
-    /// percent-encoded because a bare one is not legal in a URL path.
+    /// the manifest. An entry carrying its own prefix or commit — a per-weight
+    /// face served from a different repository (DEF-25) — resolves against
+    /// those instead of the manifest's. Square brackets, which variable-font
+    /// filenames use, are percent-encoded because a bare one is not legal in
+    /// a URL path.
     pub fn url(&self, entry: &ManifestEntry) -> String {
         let path = entry.path.replace('[', "%5B").replace(']', "%5D");
-        format!("{}{}/{}", self.url_prefix, self.commit, path)
+        let prefix = entry.url_prefix.as_deref().unwrap_or(&self.url_prefix);
+        let commit = entry.commit.as_deref().unwrap_or(&self.commit);
+        format!("{prefix}{commit}/{path}")
     }
 }
 
@@ -176,18 +211,28 @@ impl FontFetcher for HttpFetcher {
 }
 
 /// Installs one family from the manifest into a store.
+///
+/// A family may be registered by several entries — the variable font plus
+/// explicit per-weight faces (DEF-25) — and installing the family installs
+/// all of them, so a store built only through `font install` holds a face at
+/// every weight the rung's fields can ask for.
 pub fn install_family(
     store: &mut FontStore,
     manifest: &Manifest,
     family: &str,
     fetcher: &dyn FontFetcher,
 ) -> Result<Vec<FontRecord>, InstallError> {
-    let entry = manifest
-        .family(family)
-        .ok_or_else(|| InstallError::UnknownFamily {
+    let entries = manifest.entries_for(family);
+    if entries.is_empty() {
+        return Err(InstallError::UnknownFamily {
             family: family.to_owned(),
-        })?;
-    install_entry(store, manifest, entry, fetcher)
+        });
+    }
+    let mut installed = Vec::new();
+    for entry in entries {
+        installed.extend(install_entry(store, manifest, entry, fetcher)?);
+    }
+    Ok(installed)
 }
 
 /// Installs every family in a named pack.
@@ -297,7 +342,7 @@ mod tests {
     #[test]
     fn the_bundled_manifest_parses_and_is_internally_consistent() {
         let manifest = Manifest::bundled().unwrap();
-        assert_eq!(manifest.version, 1);
+        assert_eq!(manifest.version, 2);
         assert_eq!(manifest.commit.len(), 40, "the commit must be pinned");
         assert!(!manifest.pack("default").is_empty());
 
@@ -311,8 +356,27 @@ mod tests {
             assert_eq!(entry.license, "OFL-1.1", "{}", entry.name);
             assert!(entry.bytes > 0, "{}", entry.name);
             let url = manifest.url(entry);
-            assert!(url.contains(&manifest.commit));
             assert!(!url.contains('['), "{url} must be percent-encoded");
+            // An entry from the manifest's own source resolves against the
+            // manifest's commit; an override carries its own pinned commit.
+            match (&entry.url_prefix, &entry.commit) {
+                (None, None) => assert!(url.contains(&manifest.commit)),
+                (Some(_), Some(override_commit)) => {
+                    assert_eq!(
+                        override_commit.len(),
+                        40,
+                        "{}: the commit must be pinned",
+                        entry.name
+                    );
+                    assert!(url.contains(override_commit));
+                    assert!(!url.contains(&manifest.commit));
+                }
+                _ => assert!(
+                    entry.url_prefix.is_some() && entry.commit.is_some(),
+                    "{}: prefix and commit override together or not at all",
+                    entry.name
+                ),
+            }
         }
     }
 
@@ -320,6 +384,49 @@ mod tests {
     fn an_unknown_name_is_a_typed_error() {
         let manifest = Manifest::bundled().unwrap();
         assert!(manifest.family("Comic Sans MS").is_none());
+        assert!(manifest.entries_for("Comic Sans MS").is_empty());
         assert!(manifest.pack("nonexistent").is_empty());
+    }
+
+    #[test]
+    fn every_default_pack_family_installs_a_bold_face() {
+        // DEF-25: the variable fonts' fontdb-visible default face is 400, so
+        // a store built solely through `font install` held no 700 face and
+        // every `fontWeight: 700` layer was refused at render. Each family of
+        // the pack a fresh user is told to install must therefore also
+        // register an explicit bold entry.
+        let manifest = Manifest::bundled().unwrap();
+        let mut families: Vec<&str> = manifest
+            .pack("default")
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        families.sort_unstable();
+        families.dedup();
+
+        for family in families {
+            let bold = manifest
+                .entries_for(family)
+                .into_iter()
+                .find(|entry| entry.weight == Some(700));
+            assert!(
+                bold.is_some(),
+                "{family}: the default pack installs no bold face"
+            );
+        }
+    }
+
+    #[test]
+    fn a_family_registered_twice_is_installed_from_every_entry() {
+        // `entries_for` answers all of a family's entries, so `font install`
+        // delivers the variable font and the per-weight faces together. The
+        // behavioural half of this lives in `font_store.rs`'s
+        // `installing_a_family_delivers_every_registered_face`, against real
+        // fixture bytes; this one only pins the lookup on the bundled data.
+        let manifest = Manifest::bundled().unwrap();
+        let sans = manifest.entries_for("Noto Sans");
+        assert!(sans.len() >= 2, "the variable font plus a bold face");
+        assert!(sans.iter().any(|entry| entry.weight.is_none()));
+        assert!(sans.iter().any(|entry| entry.weight == Some(700)));
     }
 }

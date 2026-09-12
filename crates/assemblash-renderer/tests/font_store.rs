@@ -423,6 +423,64 @@ fn installing_verifies_the_hash_the_manifest_pins() {
 }
 
 #[test]
+fn installing_a_family_delivers_every_registered_face() {
+    // DEF-25: a family registered as a variable font plus an explicit
+    // per-weight face installs both, so a store built only through
+    // `font install` holds a face at weight 700 and a `fontWeight: 700`
+    // layer renders instead of being refused.
+    let regular = std::fs::read(fixture("NotoSans-Subset.ttf")).unwrap();
+    let bold = std::fs::read(fixture("NotoSans-Bold-Subset.ttf")).unwrap();
+    let json = serde_json::json!({
+        "version": 2,
+        "source": "test fixtures",
+        "commit": "0".repeat(40),
+        "urlPrefix": "https://example.invalid/",
+        "families": [
+            {
+                "name": "Noto Sans",
+                "path": "NotoSans-Subset.ttf",
+                "sha256": assemblash_renderer::store::hash_bytes(&regular),
+                "bytes": regular.len(),
+                "license": "OFL-1.1",
+                "packs": ["default"]
+            },
+            {
+                "name": "Noto Sans",
+                "path": "NotoSans-Bold-Subset.ttf",
+                "sha256": assemblash_renderer::store::hash_bytes(&bold),
+                "bytes": bold.len(),
+                "license": "OFL-1.1",
+                "packs": ["default"],
+                "weight": 700
+            }
+        ]
+    });
+    let manifest: Manifest = serde_json::from_value(json).unwrap();
+    let fetcher = LocalFiles {
+        directory: fixture_dir(),
+        corrupt: false,
+    };
+
+    let (_dir, mut store) = new_store();
+    let installed = install_family(&mut store, &manifest, "Noto Sans", &fetcher).unwrap();
+    let mut weights: Vec<u16> = installed.iter().map(|r| r.weight).collect();
+    weights.sort_unstable();
+    weights.dedup();
+    assert_eq!(
+        weights,
+        vec![400, 700],
+        "both faces installed: {installed:?}"
+    );
+    store.verify().unwrap();
+
+    // And the render path agrees: the family resolves at weight 700.
+    let fonts = store.load_families(["Noto Sans"]).unwrap();
+    assert!(fonts
+        .font_set()
+        .contains_face("Noto Sans", 700, assemblash_core::FontStyle::Normal,));
+}
+
+#[test]
 fn a_download_that_does_not_match_the_manifest_is_refused() {
     let (dir, mut store) = new_store();
     let manifest = fixture_manifest();

@@ -2834,13 +2834,27 @@ fn run_font(command: FontCommand) -> Result<(), CliError> {
         } => {
             let manifest = Manifest::bundled()?;
             if list {
+                // A family may be registered by several entries — the
+                // variable font plus per-weight faces (DEF-25) — and the
+                // listing is one line per family, packs merged.
+                let mut seen: Vec<(String, String, Vec<String>)> = Vec::new();
                 for entry in &manifest.families {
-                    println!(
-                        "{}\t{}\t{}",
-                        entry.name,
-                        entry.license,
-                        entry.packs.join(",")
-                    );
+                    if let Some(line) = seen.iter_mut().find(|(name, _, _)| *name == entry.name) {
+                        for pack in &entry.packs {
+                            if !line.2.contains(pack) {
+                                line.2.push(pack.clone());
+                            }
+                        }
+                    } else {
+                        seen.push((
+                            entry.name.clone(),
+                            entry.license.clone(),
+                            entry.packs.clone(),
+                        ));
+                    }
+                }
+                for (name, license, packs) in seen {
+                    println!("{name}\t{license}\t{}", packs.join(","));
                 }
                 return Ok(());
             }
