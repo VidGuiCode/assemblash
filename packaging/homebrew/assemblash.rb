@@ -19,28 +19,28 @@
 class Assemblash < Formula
   desc "Structured document engine with a local browser-based editor"
   homepage "https://github.com/VidGuiCode/assemblash"
-  version "1.7.1"
+  version "1.8.0"
   license "Apache-2.0"
 
   on_macos do
     on_arm do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.7.1/assemblash-v1.7.1-macos-aarch64.tar.gz"
-      sha256 "1da87d19e1a0158c4a20d85d1b0622b1d490f4f803a37dc893dab9d114a950f3"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.8.0/assemblash-v1.8.0-macos-aarch64.tar.gz"
+      sha256 "2a758a5c48947bc450195422e19cc4dfd4081f5a9920a0db06c7316c173cad94"
     end
     on_intel do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.7.1/assemblash-v1.7.1-macos-x86_64.tar.gz"
-      sha256 "dcb706dfdbbacd2e273b6a1d57fa5b9403f569322c5c5eefedbfcf8d8e848967"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.8.0/assemblash-v1.8.0-macos-x86_64.tar.gz"
+      sha256 "2e68d7ba6b6c1e9669c08597f949b6a9f1f44af699fccc1ab629cd53904abd26"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.7.1/assemblash-v1.7.1-linux-aarch64.tar.gz"
-      sha256 "8f13437722bfaaca4e7dea229eebba9f3547e6b5b47a410cf17afafbf4a8d932"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.8.0/assemblash-v1.8.0-linux-aarch64.tar.gz"
+      sha256 "9ac329008e933b843b03ced2e688e9d9e8288d5fda6e64ed880b935634fce758"
     end
     on_intel do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.7.1/assemblash-v1.7.1-linux-x86_64.tar.gz"
-      sha256 "ba72a90c021e55ce4fa30135483a6320e671fa02b6f49b7f25125bbf46856323"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.8.0/assemblash-v1.8.0-linux-x86_64.tar.gz"
+      sha256 "052227ac416f7669f11a0ffb96b37d9013823e8aad73cc0d389dee410c91cb23"
     end
   end
 
