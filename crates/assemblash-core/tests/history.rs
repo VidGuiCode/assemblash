@@ -37,9 +37,14 @@ fn new_text(text: &str) -> Operation {
             text: text.to_owned(),
             font_family: "Inter".to_owned(),
             font_size: 16.0,
-            color: Color::new("#000000"),
+            color: Some(Color::new("#000000")),
             align: TextAlign::Left,
             line_height: 1.2,
+            font_weight: 400,
+            font_style: assemblash_core::FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: assemblash_core::VerticalAlign::Top,
         },
     })
 }

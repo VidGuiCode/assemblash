@@ -25,8 +25,8 @@ interface, a local HTTP API, an embedded Rust API, and an MCP server. Every
 interface goes through the same validated operation layer, so a change made by
 an agent behaves like a change made by a person.
 
-**Current release: 1.6.1.** The document schema and operation API have been
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.6.1)
+**Current release: 1.7.0.** The document schema and operation API have been
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.7.0)
 or [changelog](CHANGELOG.md) for the full history.
 
 <p align="center">
@@ -103,7 +103,7 @@ the tap is **not published yet**, so there is no `brew install` to run today.
 Building requires [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.6.1 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.7.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -138,12 +138,19 @@ operating system's fonts or the file you imported from.
 
 To change a layer afterwards, `assemblash set` reaches every updatable
 property — name, position, size, rotation, opacity, visibility, lock, blend
-mode, effect stack, text, font, size, colour, alignment, line height, fill,
+mode, effect stack, text, font, size, colour, alignment, line height, font
+weight, font style, letter spacing, stroke, vertical alignment, fill,
 stroke, stroke width, corner radius, fit, and asset:
 
 ```sh
 assemblash set ./poster --layer <LAYER_ID> --color '#1d1d1f' --size 72 --line-height 1.4
+assemblash set ./poster --layer <LAYER_ID> --weight 700 --letter-spacing 3
 ```
+
+A text layer's `--weight` resolves to the exact face the font store holds:
+a weight nobody installed is refused, never substituted. `--color none`
+with a `--stroke` gives hollow (stroke-only) text, and `--vertical-align`
+top | middle | bottom places the block in the box.
 
 However many flags you give it, one invocation is one operation: journalled
 once, undone once.

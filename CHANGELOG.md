@@ -10,6 +10,56 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-09-12
+
+**Typographic control, plus the canonical capability surface.** Bold
+headlines, tracked captions, outlined display text, and text that sits where
+the box says it should — and one capability listing that every surface reads,
+so the DEF-24 drift class (render it but don't advertise it) cannot recur.
+
+`schemaVersion` stays **1** and the `Operation` union does not grow: all five
+typography fields are ordinary `UpdateLayer` and create-payload fields.
+**Oldest build that opens a 1.7.0 document: 1.0** — builds 1.0 through 1.6
+degrade silently through the `Extras` capture map, rendering the regular face
+with no spacing, stroke or vertical alignment (per §1.3, that accepted price
+of staying additive is named here).
+
+### Added
+
+- **`TextLayer.fontWeight` (100–900, default 400) and `fontStyle` (`normal`
+  | `italic`).** Resolved against the caller's font set by *exact face*: a
+  family whose bold is not installed is refused with a typed `MissingFont`
+  naming family, weight and style — never a silent nearest match, because
+  "looks roughly right" is how a wrong render gets trusted. Set everywhere a
+  style can be set: `create`, `update`, presets, CLI `set`/`add-text`, MCP
+  `add_text_layer`/`update_layer`, and a row in the interface.
+- **`TextLayer.letterSpacing` (px, default 0).** Part of measurement, not
+  just of drawing: wrapping, `GET /api/projects/{id}/text-layout`, the
+  overflow warnings and the export all add it per gap, so the measured line
+  and the rendered line are the same line.
+- **`TextLayer.stroke` (`{ color, width }`), painted centred on the glyph
+  outline with `paint-order="stroke"`** (D5, text half): the fill goes down
+  first, so a stroke never eats the letter. A layer with `color: null` and a
+  stroke is hollow display text. `update` accepts `null` to clear it, exactly
+  like a shape's stroke.
+- **`TextLayer.verticalAlign` (`top` | `middle` | `bottom`, default `top`)**
+  (D19). `top` is the behaviour every earlier build had — the baseline one
+  ascent below the box top — so existing documents render pixel-identically.
+- **`TextLayer.color` is nullable.** `null` means no fill, the same bargain
+  a shape's `fill` has; `update` clears it with `null`, and an absent key
+  still means the pre-1.7 default of black. `null` serializes as `null`,
+  never as an omitted key, so a hollow layer survives a round trip exactly.
+- **The canonical capability surface.** One listing, in core, fed by the
+  same sources the renderer is bound to (`BlendMode::RENDERED` and the
+  `Effect` enum), served three ways: CLI `assemblash styles --json`, HTTP
+  `GET /api/capabilities`, and the new MCP `list_capabilities` tool. Plain
+  `styles` prose output is unchanged. Check it before using a mode or an
+  effect: what a build cannot render, it refuses, and now it says so before
+  you build the document.
+- Four new determinism-gate documents — `text-weight`, `text-stroke`,
+  `text-spacing`, `text-valign` — byte-identical across all six targets,
+  beside the existing goldens, none of which moved.
+
 ## [1.6.1] — 2026-09-11
 
 A defect sweep on 1.6.0. No schema change: `schemaVersion` stays 1, and no

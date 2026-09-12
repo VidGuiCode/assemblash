@@ -169,6 +169,21 @@ export type Effect = {
 /// Horizontal text alignment inside the layer box.
 export type TextAlign = "left" | "center" | "right";
 
+/// Whether glyphs stand upright or slant.
+export type FontStyle = "normal" | "italic";
+
+/// A shape's edge paint.
+export type Stroke = {
+  /** Edge colour. */
+  color: Color;
+  /** Width in document units; must be finite and 0 or more. */
+  width: number;
+  [key: string]: unknown;
+};
+
+/// Where the text block sits vertically in the layer box.
+export type VerticalAlign = "top" | "middle" | "bottom";
+
 /// Text content and its single style. Per-run styling arrives in v2.0.
 export type TextLayer = {
   /** The text. `\n` starts a new line. */
@@ -177,12 +192,22 @@ export type TextLayer = {
   fontFamily: string;
   /** Font size in pixels; must be positive and finite. */
   fontSize: number;
-  /** Fill colour. */
-  color?: Color;
+  /** Fill colour. `None` means no fill — SVG's `fill="none"`, the same */
+  color?: Color | null;
   /** Horizontal alignment within the layer box. */
   align?: TextAlign;
   /** Line height as a multiple of the font size. */
   lineHeight?: number;
+  /** Font weight, 100 to 900 as CSS names them. */
+  fontWeight?: number;
+  /** Upright or italic, resolved with the weight. */
+  fontStyle?: FontStyle;
+  /** Extra space between characters, in pixels. */
+  letterSpacing?: number;
+  /** Glyph stroke, painted centred on the outline with */
+  stroke?: Stroke | null;
+  /** Where the text block sits vertically in the layer box. */
+  verticalAlign?: VerticalAlign;
   /** Reserved (v2.0 styled runs): preserved verbatim, never interpreted. */
   runs?: unknown[];
   [key: string]: unknown;
@@ -235,15 +260,6 @@ export type ShapeKind = {
   [key: string]: unknown;
 } | unknown;
 
-/// A shape's edge paint.
-export type Stroke = {
-  /** Edge colour. */
-  color: Color;
-  /** Width in document units; must be finite and 0 or more. */
-  width: number;
-  [key: string]: unknown;
-};
-
 /// A primitive drawn from the document rather than from an imported file.
 ///
 /// The transform box *is* the geometry: a rect fills it, an ellipse is
@@ -291,6 +307,14 @@ export type PresetProperties = {
   align?: TextAlign | null;
   /** Text layers: line height. */
   lineHeight?: number | null;
+  /** Text layers: font weight, 100–900. */
+  fontWeight?: number | null;
+  /** Text layers: upright or italic. */
+  fontStyle?: FontStyle | null;
+  /** Text layers: letter spacing, in pixels. */
+  letterSpacing?: number | null;
+  /** Text layers: vertical alignment in the box. */
+  verticalAlign?: VerticalAlign | null;
   /** Any layer: opacity. */
   opacity?: number | null;
   /** Any layer: how it composites. */

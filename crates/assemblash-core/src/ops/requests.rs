@@ -8,8 +8,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
-    BlendMode, Color, Document, Effect, Extras, GroupLayer, ImageFit, ImageLayer, Layer, LayerKind,
-    ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer, Transform,
+    BlendMode, Color, Document, Effect, Extras, FontStyle, GroupLayer, ImageFit, ImageLayer, Layer,
+    LayerKind, ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer, Transform, VerticalAlign,
 };
 use crate::ids::{AssetId, IdSource, LayerId};
 use crate::ops::error::OpError;
@@ -107,15 +107,31 @@ pub enum NewLayerKind {
         /// Font size in pixels.
         #[serde(alias = "font_size")]
         font_size: f64,
-        /// Fill colour.
-        #[serde(default)]
-        color: Color,
+        /// Fill colour, or none for hollow (stroke-only) text. Absent means
+        /// the pre-1.7 default of black, as it always did.
+        #[serde(default = "crate::document::default_text_color")]
+        color: Option<Color>,
         /// Horizontal alignment in the box.
         #[serde(default)]
         align: TextAlign,
         /// Line height as a multiple of the font size.
         #[serde(default = "default_line_height", alias = "line_height")]
         line_height: f64,
+        /// Font weight, 100–900; 400 is the regular face.
+        #[serde(default = "default_font_weight", alias = "font_weight")]
+        font_weight: u16,
+        /// Upright or italic.
+        #[serde(default)]
+        font_style: FontStyle,
+        /// Extra space between characters, in pixels.
+        #[serde(default, alias = "letter_spacing")]
+        letter_spacing: f64,
+        /// Glyph stroke, painted centred with `paint-order="stroke"`.
+        #[serde(default)]
+        stroke: Option<Stroke>,
+        /// Where the block sits vertically in the box.
+        #[serde(default)]
+        vertical_align: VerticalAlign,
     },
     /// An image layer referencing an asset already in the document.
     Image {
@@ -160,6 +176,10 @@ fn default_line_height() -> f64 {
     1.2
 }
 
+fn default_font_weight() -> u16 {
+    400
+}
+
 /// Add a layer to the document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -191,6 +211,11 @@ impl CreateLayer {
                 color,
                 align,
                 line_height,
+                font_weight,
+                font_style,
+                letter_spacing,
+                stroke,
+                vertical_align,
             } => LayerKind::Text(TextLayer {
                 text: text.clone(),
                 font_family: font_family.clone(),
@@ -198,6 +223,11 @@ impl CreateLayer {
                 color: color.clone(),
                 align: *align,
                 line_height: *line_height,
+                font_weight: *font_weight,
+                font_style: *font_style,
+                letter_spacing: *letter_spacing,
+                stroke: stroke.clone(),
+                vertical_align: *vertical_align,
                 runs: Vec::new(),
                 extra: Extras::new(),
             }),
@@ -308,15 +338,36 @@ pub struct UpdateLayer {
     /// Text layers: new font size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f64>,
-    /// Text layers: new colour.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color: Option<Color>,
+    /// Text layers: new colour. Absent leaves it, `null` clears it.
+    ///
+    /// Doubly optional like `name` and the shape `fill`, and for the same
+    /// reason: "no fill" is a real value text can have — a stroke-only layer
+    /// is the hollow style — so there has to be a way to say it that is not
+    /// "leave it alone".
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_nullable"
+    )]
+    pub color: Option<Option<Color>>,
     /// Text layers: new alignment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TextAlign>,
     /// Text layers: new line height.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_height: Option<f64>,
+    /// Text layers: new font weight, 100–900.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<u16>,
+    /// Text layers: new font style.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_style: Option<FontStyle>,
+    /// Text layers: new letter spacing, in pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<f64>,
+    /// Text layers: new vertical alignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_align: Option<VerticalAlign>,
 
     /// Image layers: new fit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -340,11 +391,14 @@ pub struct UpdateLayer {
         deserialize_with = "deserialize_optional_nullable"
     )]
     pub fill: Option<Option<Color>>,
-    /// Shape layers: the whole stroke. Absent leaves it, `null` clears it.
+    /// Shape and text layers: the whole stroke. Absent leaves it, `null`
+    /// clears it.
     ///
     /// The whole stroke rather than colour and width separately: a width
     /// without a colour is not a stroke, and letting one be set alone would
-    /// mean inventing a colour nobody asked for.
+    /// mean inventing a colour nobody asked for. On a text layer the stroke
+    /// is painted centred on the glyph outline, fill first, so it never eats
+    /// the letter.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -387,6 +441,10 @@ impl UpdateLayer {
             color: None,
             align: None,
             line_height: None,
+            font_weight: None,
+            font_style: None,
+            letter_spacing: None,
+            vertical_align: None,
             fit: None,
             asset: None,
             fill: None,
@@ -444,8 +502,13 @@ impl UpdateLayer {
                 if self.fit.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "fit"));
                 }
-                if let Some(property) = self.first_shape_property() {
-                    return Err(wrong_kind(&layer.id, kind_name, property));
+                // The stroke is now shared with shapes; the rest of the
+                // shape-only set is still refused on text.
+                if self.fill.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "fill"));
+                }
+                if self.corner_radius.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "cornerRadius"));
                 }
                 if let Some(value) = &self.text {
                     text.text = value.clone();
@@ -464,6 +527,21 @@ impl UpdateLayer {
                 }
                 if let Some(value) = self.line_height {
                     text.line_height = value;
+                }
+                if let Some(value) = self.font_weight {
+                    text.font_weight = value;
+                }
+                if let Some(value) = self.font_style {
+                    text.font_style = value;
+                }
+                if let Some(value) = self.letter_spacing {
+                    text.letter_spacing = value;
+                }
+                if let Some(value) = &self.stroke {
+                    text.stroke = value.clone();
+                }
+                if let Some(value) = self.vertical_align {
+                    text.vertical_align = value;
                 }
             }
             LayerKind::Image(image) => {
@@ -559,6 +637,10 @@ impl UpdateLayer {
             self.color.is_some().then_some("color"),
             self.align.is_some().then_some("align"),
             self.line_height.is_some().then_some("lineHeight"),
+            self.font_weight.is_some().then_some("fontWeight"),
+            self.font_style.is_some().then_some("fontStyle"),
+            self.letter_spacing.is_some().then_some("letterSpacing"),
+            self.vertical_align.is_some().then_some("verticalAlign"),
         ]
         .into_iter()
         .flatten()

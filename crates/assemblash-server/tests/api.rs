@@ -891,9 +891,14 @@ fn write_template(harness: &Harness, id: &str, family: &str) {
             text: "placeholder".to_owned(),
             font_family: family.to_owned(),
             font_size: 32.0,
-            color: Color::new("#101820"),
+            color: Some(Color::new("#101820")),
             align: TextAlign::Left,
             line_height: 1.2,
+            font_weight: 400,
+            font_style: assemblash_core::FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: assemblash_core::VerticalAlign::Top,
             runs: Vec::new(),
             extra: Extras::new(),
         }),
@@ -1306,7 +1311,7 @@ fn an_unknown_property_on_an_update_is_refused() {
     // success is worse than a refusal, so it is a refusal now.
     let response = http::post_json(
         &harness.url("/api/projects/poster/operations"),
-        &json!({ "operation": { "op": "update", "id": layer, "letterSpacing": 4 } }),
+        &json!({ "operation": { "op": "update", "id": layer, "tracking": 4 } }),
     );
     assert_eq!(response.status, 422, "{}", response.json());
     assert_eq!(error_code(&response), "operationRefused");
@@ -1315,7 +1320,7 @@ fn an_unknown_property_on_an_update_is_refused() {
         .unwrap_or_default()
         .to_owned();
     assert!(
-        message.contains("letterSpacing"),
+        message.contains("tracking"),
         "the message must name the property: {message}"
     );
 
@@ -1343,7 +1348,7 @@ fn an_unknown_property_on_a_create_is_refused() {
                 "text": "over http",
                 "fontFamily": "Noto Sans",
                 "fontSize": 32.0,
-                "letterSpacing": 9
+                "tracking": 9
             }
         }),
     );
@@ -1352,7 +1357,7 @@ fn an_unknown_property_on_a_create_is_refused() {
     assert!(response.json()["error"]["message"]
         .as_str()
         .unwrap_or_default()
-        .contains("letterSpacing"));
+        .contains("tracking"));
 
     assert_eq!(journal_and_version(&harness, "poster"), before);
 
@@ -1367,7 +1372,7 @@ fn an_unknown_property_on_a_create_is_refused() {
         &json!({
             "expectedVersion": before.1,
             "label": "Add a heading",
-            "commands": [{ "op": "update", "id": "layer_nope", "letterSpacing": 4 }]
+            "commands": [{ "op": "update", "id": "layer_nope", "tracking": 4 }]
         }),
     );
     assert_eq!(batch.status, 422, "{}", batch.json());
@@ -1375,7 +1380,7 @@ fn an_unknown_property_on_a_create_is_refused() {
     assert!(batch.json()["error"]["message"]
         .as_str()
         .unwrap_or_default()
-        .contains("letterSpacing"));
+        .contains("tracking"));
     assert_eq!(journal_and_version(&harness, "poster"), before);
 }
 
@@ -1426,6 +1431,29 @@ fn the_published_schemas_are_the_ones_the_engine_uses() {
         String::from_utf8(operation.body).unwrap(),
         assemblash_core::schema::operation_schema_json()
     );
+}
+
+#[test]
+fn capabilities_endpoint_serves_the_canonical_listing() {
+    let harness = Harness::start();
+
+    let response = http::get(&harness.url("/api/capabilities"));
+    assert_eq!(response.status, 200);
+    let served: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+    let canonical = serde_json::to_value(assemblash_core::capabilities::capabilities()).unwrap();
+    assert_eq!(
+        served, canonical,
+        "/api/capabilities must serve the core listing, not a copy"
+    );
+    // The DEF-24 regression, one surface down: what the engine renders, the
+    // endpoint advertises.
+    let kinds: Vec<&str> = served["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|effect| effect["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"dropShadow"));
 }
 
 fn solid_png() -> Vec<u8> {

@@ -86,6 +86,7 @@ pub fn export_warnings(
                 layer.transform.width,
                 text.font_size,
                 text.line_height,
+                text.letter_spacing,
                 &text.font_family,
                 fonts,
             );

@@ -323,15 +323,52 @@ pub struct TextLayer {
     pub font_family: String,
     /// Font size in pixels; must be positive and finite.
     pub font_size: f64,
-    /// Fill colour.
-    #[serde(default)]
-    pub color: Color,
+    /// Fill colour. `None` means no fill — SVG's `fill="none"`, the same
+    /// bargain as a shape's. A stroke-only text layer is the hollow style.
+    ///
+    /// `None` serializes as `null`, never as an omitted key: a round trip
+    /// through a build that omits the key has to come back as the same
+    /// layer, and an absent key means the pre-1.7 default of black.
+    #[serde(default = "default_text_color")]
+    pub color: Option<Color>,
     /// Horizontal alignment within the layer box.
     #[serde(default)]
     pub align: TextAlign,
     /// Line height as a multiple of the font size.
     #[serde(default = "default_line_height")]
     pub line_height: f64,
+    /// Font weight, 100 to 900 as CSS names them.
+    ///
+    /// Resolved against the caller's font set by exact face: a family whose
+    /// bold face is not loaded is a typed refusal at render time, not a
+    /// silent nearest match. 400 is the regular face.
+    #[serde(
+        default = "default_font_weight",
+        skip_serializing_if = "is_default_font_weight"
+    )]
+    pub font_weight: u16,
+    /// Upright or italic, resolved with the weight.
+    #[serde(default, skip_serializing_if = "FontStyle::is_normal")]
+    pub font_style: FontStyle,
+    /// Extra space between characters, in pixels.
+    ///
+    /// Part of measurement, not just of drawing: wrapping, the text-layout
+    /// endpoint and the export all add it per gap, so a line measured here is
+    /// the line that renders.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub letter_spacing: f64,
+    /// Glyph stroke, painted centred on the outline with
+    /// `paint-order="stroke"` — the fill goes down first, so a stroke never
+    /// eats the letter (D5, text half). `None` means no stroke.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<Stroke>,
+    /// Where the text block sits vertically in the layer box.
+    ///
+    /// `top` is the only behaviour every earlier build had — the baseline
+    /// fixed one ascent below the box top — so it is the default and existing
+    /// documents render pixel-identically (D19).
+    #[serde(default, skip_serializing_if = "VerticalAlign::is_top")]
+    pub vertical_align: VerticalAlign,
     /// Reserved (v2.0 styled runs): preserved verbatim, never interpreted.
     #[serde(default)]
     pub runs: Vec<serde_json::Value>,
@@ -342,6 +379,79 @@ pub struct TextLayer {
     /// the same struct. Unknown keys anywhere on the layer land here.
     #[serde(flatten)]
     pub extra: Extras,
+}
+
+pub(crate) fn default_text_color() -> Option<Color> {
+    Some(Color::default())
+}
+
+fn default_font_weight() -> u16 {
+    400
+}
+
+fn is_default_font_weight(weight: &u16) -> bool {
+    *weight == 400
+}
+
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
+/// Whether glyphs stand upright or slant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum FontStyle {
+    /// The upright face.
+    #[default]
+    Normal,
+    /// The italic face (an oblique stands in when the family has no true
+    /// italic — the font set still keys it as italic).
+    Italic,
+}
+
+impl FontStyle {
+    /// Whether this is the default, which need not be written.
+    pub fn is_normal(&self) -> bool {
+        matches!(self, Self::Normal)
+    }
+
+    /// The name as it is written in the document.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Italic => "italic",
+        }
+    }
+}
+
+/// Where the text block sits vertically in the layer box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum VerticalAlign {
+    /// The first baseline one ascent below the box top — the behaviour every
+    /// build up to 1.6 had, and the default so nothing moves.
+    #[default]
+    Top,
+    /// The block centred in the box's height.
+    Middle,
+    /// The block's last line resting on the box bottom.
+    Bottom,
+}
+
+impl VerticalAlign {
+    /// Whether this is the default, which need not be written.
+    pub fn is_top(&self) -> bool {
+        matches!(self, Self::Top)
+    }
+
+    /// The name as it is written in the document.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::Middle => "middle",
+            Self::Bottom => "bottom",
+        }
+    }
 }
 
 fn default_line_height() -> f64 {
@@ -612,41 +722,71 @@ impl Effect {
         !matches!(self, Self::Other(_))
     }
 
-    /// The line `assemblash styles` prints for this effect — an example
-    /// document fragment plus a short note. `None` for [`Effect::Other`],
-    /// which this build does not render and so does not advertise.
+    /// The example document fragment `styles` and the capability listing
+    /// show for this effect. `None` for [`Effect::Other`], which this build
+    /// does not render and so does not advertise.
     ///
     /// The match names every variant, so a new `Effect` fails to compile
     /// until it is given a line here — the same guarantee
     /// [`BlendMode::RENDERED`] gives the blend-mode half of the listing.
-    /// This is where the `dropShadow` fields (`dx`, `dy`, `blur`, `color`)
-    /// are documented for discovery: `dx`/`dy` at 0 is a glow, and an
-    /// `#rrggbbaa` alpha sets flood opacity.
-    pub fn styles_line(&self) -> Option<&'static str> {
+    pub fn styles_example(&self) -> Option<&'static str> {
         match self {
-            Self::Brightness { .. } => {
-                Some(r#"  {"type":"brightness","amount":1.2}   1 is unchanged"#)
+            Self::Brightness { .. } => Some(r#"{"type":"brightness","amount":1.2}"#),
+            Self::Contrast { .. } => Some(r#"{"type":"contrast","amount":1.4}"#),
+            Self::Saturation { .. } => Some(r#"{"type":"saturation","amount":0}"#),
+            Self::Blur { .. } => Some(r#"{"type":"blur","radius":3}"#),
+            Self::Grain { .. } => Some(r#"{"type":"grain","amount":0.2,"seed":7,"scale":1}"#),
+            Self::DropShadow { .. } => {
+                Some(r##"{"type":"dropShadow","dx":0,"dy":6,"blur":12,"color":"#00000055"}"##)
             }
-            Self::Contrast { .. } => {
-                Some(r#"  {"type":"contrast","amount":1.4}     1 is unchanged"#)
-            }
-            Self::Saturation { .. } => {
-                Some(r#"  {"type":"saturation","amount":0}     1 is unchanged, 0 is greyscale"#)
-            }
-            Self::Blur { .. } => {
-                Some(r#"  {"type":"blur","radius":3}           0 is unchanged"#)
-            }
-            Self::Grain { .. } => Some(concat!(
-                r#"  {"type":"grain","amount":0.2,"seed":7,"scale":1}"#,
-                "\n                                       seeded, so the same document grains the same way"
-            )),
-            Self::DropShadow { .. } => Some(concat!(
-                r##"  {"type":"dropShadow","dx":0,"dy":6,"blur":12,"color":"#00000055"}"##,
-                "\n                                       fields dx, dy, blur, color; dx/dy at 0 is a glow,",
-                "\n                                       #rrggbbaa alpha sets flood opacity"
-            )),
             Self::Other(_) => None,
         }
+    }
+
+    /// The short notes that accompany the example — where the `dropShadow`
+    /// fields (`dx`, `dy`, `blur`, `color`), the dx/dy-at-0 glow and the
+    /// `#rrggbbaa` flood opacity are documented for discovery.
+    pub fn styles_notes(&self) -> &'static [&'static str] {
+        match self {
+            Self::Brightness { .. } => &["1 is unchanged"],
+            Self::Contrast { .. } => &["1 is unchanged"],
+            Self::Saturation { .. } => &["1 is unchanged, 0 is greyscale"],
+            Self::Blur { .. } => &["0 is unchanged"],
+            Self::Grain { .. } => &["seeded, so the same document grains the same way"],
+            Self::DropShadow { .. } => &[
+                "fields dx, dy, blur, color; dx/dy at 0 is a glow,",
+                "#rrggbbaa alpha sets flood opacity",
+            ],
+            Self::Other(_) => &[],
+        }
+    }
+
+    /// The line `assemblash styles` prints for this effect: the example and
+    /// its notes laid out in the listing's two-column shape.
+    pub fn styles_line(&self) -> Option<String> {
+        let example = self.styles_example()?;
+        let notes = self.styles_notes();
+        let mut line = format!("  {example}");
+        match notes.split_first() {
+            None => {}
+            Some((first, rest)) => {
+                if example.len() <= 38 {
+                    // The note column starts at character 40.
+                    line.push_str(&" ".repeat(40 - 2 - example.len()));
+                    line.push_str(first);
+                } else {
+                    line.push('\n');
+                    line.push_str(&" ".repeat(39));
+                    line.push_str(first);
+                }
+                for note in rest {
+                    line.push('\n');
+                    line.push_str(&" ".repeat(39));
+                    line.push_str(note);
+                }
+            }
+        }
+        Some(line)
     }
 
     /// One rendered instance per effect variant, in `styles` order — the
@@ -884,9 +1024,14 @@ mod tests {
                 text: "hello".into(),
                 font_family: "Inter".into(),
                 font_size: 16.0,
-                color: Color::default(),
+                color: Some(Color::default()),
                 align: TextAlign::Left,
                 line_height: 1.2,
+                font_weight: 400,
+                font_style: FontStyle::Normal,
+                letter_spacing: 0.0,
+                stroke: None,
+                vertical_align: VerticalAlign::Top,
                 runs: Vec::new(),
                 extra: Extras::new(),
             }),

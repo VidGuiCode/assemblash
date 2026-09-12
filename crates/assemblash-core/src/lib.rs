@@ -10,6 +10,7 @@
 //! validate(&document).expect("a fresh document is valid");
 //! ```
 
+pub mod capabilities;
 pub mod document;
 pub mod error;
 pub mod history;
@@ -36,8 +37,9 @@ pub mod workspace;
 /// Nothing about `assemblash_core::liveness::*` changed when it moved.
 pub use assemblash_liveness as liveness;
 pub use document::{
-    Asset, BlendMode, Canvas, Color, Document, Extras, GroupLayer, ImageFit, ImageLayer, Layer,
-    LayerKind, ShapeKind, ShapeLayer, Stroke, SvgLayer, TextAlign, TextLayer, Transform,
+    Asset, BlendMode, Canvas, Color, Document, Extras, FontStyle, GroupLayer, ImageFit, ImageLayer,
+    Layer, LayerKind, ShapeKind, ShapeLayer, Stroke, SvgLayer, TextAlign, TextLayer, Transform,
+    VerticalAlign,
 };
 pub use error::{ValidationError, ValidationErrors};
 pub use history::{Actor, ActorKind, History, HistoryError};

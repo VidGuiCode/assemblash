@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 
 use assemblash_core::document::{
     Effect, GroupLayer, ImageFit, Layer, LayerKind, ShapeKind, ShapeLayer, TextAlign, Transform,
+    VerticalAlign,
 };
 use assemblash_core::ids::AssetId;
 use assemblash_core::{svg_import, validate, Color, Document};
@@ -103,10 +104,12 @@ fn write_layer(
 
     match &layer.kind {
         LayerKind::Text(text) => {
-            if !fonts.contains(&text.font_family) {
+            if !fonts.contains_face(&text.font_family, text.font_weight, text.font_style) {
                 return Err(RenderError::MissingFont {
                     layer: layer.id.clone(),
                     family: text.font_family.clone(),
+                    weight: text.font_weight,
+                    style: text.font_style.as_str(),
                 });
             }
 
@@ -116,40 +119,85 @@ fn write_layer(
                 TextAlign::Right => ("end", t.x + t.width),
             };
 
+            let layout = layout_text(
+                &text.text,
+                t.width,
+                text.font_size,
+                text.line_height,
+                text.letter_spacing,
+                &text.font_family,
+                fonts,
+            );
+
+            // The first baseline sits one ascent below the text block's top,
+            // and where the block's top sits depends on the vertical
+            // alignment. `top` puts it at the box top — the behaviour every
+            // build up to 1.6 had, so existing documents render identically
+            // (D19). The ascent is measured by whoever loaded the fonts and
+            // arrives in `fonts`, so this stays a pure function and two
+            // machines with the same font files agree to the last decimal.
+            let block_top = match text.vertical_align {
+                VerticalAlign::Top => t.y,
+                VerticalAlign::Middle => t.y + (t.height - layout.height) / 2.0,
+                VerticalAlign::Bottom => t.y + t.height - layout.height,
+            };
+            let y = block_top + text.font_size * fonts.ascent_ratio(&text.font_family);
+
+            // A weight, style, spacing or stroke at its default emits
+            // nothing, so a text layer that uses none of 1.7.0's typography
+            // renders byte-identically to 1.6.
+            let weight = if text.font_weight == 400 {
+                String::new()
+            } else {
+                format!(" font-weight=\"{}\"", text.font_weight)
+            };
+            let style = if text.font_style.is_normal() {
+                String::new()
+            } else {
+                format!(" font-style=\"{}\"", text.font_style.as_str())
+            };
+            let spacing = if text.letter_spacing == 0.0 {
+                String::new()
+            } else {
+                format!(" letter-spacing=\"{}\"", number(text.letter_spacing))
+            };
+            let stroke = match &text.stroke {
+                None => String::new(),
+                Some(stroke) => format!(
+                    " stroke=\"{}\" stroke-width=\"{}\" stroke-linejoin=\"round\" \
+                     paint-order=\"stroke\"",
+                    color(&stroke.color)?,
+                    number(stroke.width)
+                ),
+            };
+
             let _ = write!(
                 out,
                 "{pad}<text x=\"{x}\" y=\"{y}\" font-family=\"{family}\" \
                  font-size=\"{size}\" fill=\"{fill}\" text-anchor=\"{anchor}\"\
-                 {opacity}{rotation}{filter}{blend}>",
+                 {weight}{style}{spacing}{stroke}{opacity}{rotation}{filter}{blend}>",
                 x = number(x),
-                // The first baseline sits one ascent below the box top, taken
-                // from the font file itself. The ascent is measured by
-                // whoever loaded the fonts and arrives in `fonts`, so this
-                // stays a pure function and two machines with the same font
-                // files agree to the last decimal.
-                y = number(t.y + text.font_size * fonts.ascent_ratio(&text.font_family)),
+                y = number(y),
                 family = attribute(&text.font_family),
                 size = number(text.font_size),
-                fill = color(&text.color)?,
+                fill = text
+                    .color
+                    .as_ref()
+                    .map(color)
+                    .transpose()?
+                    .unwrap_or_else(|| "none".to_owned()),
                 anchor = anchor,
+                weight = weight,
+                style = style,
+                spacing = spacing,
+                stroke = stroke,
                 opacity = opacity_attribute(layer.opacity),
                 rotation = rotation_attribute(t),
                 filter = filter_attribute(layer),
                 blend = blend_attribute(layer)?,
             );
 
-            for (index, line) in layout_text(
-                &text.text,
-                t.width,
-                text.font_size,
-                text.line_height,
-                &text.font_family,
-                fonts,
-            )
-            .lines
-            .iter()
-            .enumerate()
-            {
+            for (index, line) in layout.lines.iter().enumerate() {
                 let dy = if index == 0 {
                     0.0
                 } else {
@@ -743,11 +791,16 @@ pub struct TextLayout {
 }
 
 /// Measures and wraps text with the same pinned metrics used by rendering.
+///
+/// `letter_spacing` is part of measurement, not just of drawing: it is added
+/// per gap (between characters, not after the last), so wrapping, the
+/// text-layout endpoint and the export all agree on where a line breaks.
 pub fn layout_text(
     text: &str,
     width: f64,
     font_size: f64,
     line_height: f64,
+    letter_spacing: f64,
     family: &str,
     fonts: &FontSet,
 ) -> TextLayout {
@@ -761,9 +814,12 @@ pub fn layout_text(
         };
     };
     let max_ratio = width / font_size;
+    let spacing_ratio = letter_spacing / font_size;
     let measure = |value: &str| {
+        let gaps = value.chars().count().saturating_sub(1) as f64;
         fonts
             .text_advance_ratio(family, value)
+            .map(|advance| advance + spacing_ratio * gaps)
             .unwrap_or(f64::INFINITY)
     };
     let mut lines = Vec::new();

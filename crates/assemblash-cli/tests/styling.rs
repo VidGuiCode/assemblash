@@ -472,6 +472,55 @@ fn the_styles_command_lists_only_what_this_build_renders() {
 }
 
 #[test]
+fn the_styles_json_is_the_canonical_capability_listing() {
+    use assemblash_core::document::Effect;
+
+    let listed = run(&["styles", "--json"]);
+    let capabilities: serde_json::Value = serde_json::from_str(&listed)
+        .unwrap_or_else(|error| panic!("styles --json must print JSON: {error}\n{listed}"));
+
+    // Every rendered blend mode, and nothing that refuses to draw.
+    for mode in assemblash_core::BlendMode::RENDERED {
+        assert!(
+            capabilities["blendModes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == mode.as_str()),
+            "{} missing from the JSON listing",
+            mode.as_str()
+        );
+    }
+    assert!(!capabilities["blendModes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "color-dodge"));
+
+    // Every Effect variant — a non-wildcard match, so a new variant fails
+    // to compile until the canonical listing can name it.
+    for effect in Effect::rendered_examples() {
+        let name = match &effect {
+            Effect::Brightness { .. } => "brightness",
+            Effect::Contrast { .. } => "contrast",
+            Effect::Saturation { .. } => "saturation",
+            Effect::Blur { .. } => "blur",
+            Effect::Grain { .. } => "grain",
+            Effect::DropShadow { .. } => "dropShadow",
+            Effect::Other(_) => unreachable!("rendered_examples never holds Other"),
+        };
+        assert!(
+            capabilities["effects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value["kind"] == name),
+            "{name} missing from the JSON listing"
+        );
+    }
+}
+
+#[test]
 fn a_shell_typed_backslash_n_in_text_is_stored_verbatim_and_help_says_so() {
     let scratch = tempfile::tempdir().unwrap();
     let (project, store, _layer) = project(scratch.path());
@@ -533,4 +582,211 @@ fn a_shell_typed_backslash_n_in_text_is_stored_verbatim_and_help_says_so() {
         stored, "a\\nb",
         "a shell-typed backslash-n must stay the two characters"
     );
+}
+
+/// A font store holding exactly the faces the test names, built by the real
+/// `font add` so the store's per-face weight records are in the loop.
+fn store_with(bold: bool, scratch: &Path) -> PathBuf {
+    let store = scratch.join("fonts");
+    run(&[
+        "font",
+        "add",
+        font_dir().join("NotoSans-Subset.ttf").to_str().unwrap(),
+        "--license",
+        "OFL-1.1",
+        "--font-store",
+        store.to_str().unwrap(),
+    ]);
+    if bold {
+        run(&[
+            "font",
+            "add",
+            font_dir()
+                .join("NotoSans-Bold-Subset.ttf")
+                .to_str()
+                .unwrap(),
+            "--license",
+            "OFL-1.1",
+            "--font-store",
+            store.to_str().unwrap(),
+        ]);
+    }
+    store
+}
+
+#[track_caller]
+fn stdout_and_stderr(args: &[&str]) -> (String, String) {
+    let output = Command::new(binary())
+        .args(args)
+        .output()
+        .expect("the binary runs");
+    assert!(
+        output.status.success(),
+        "assemblash {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// Exit test 1: with 400 and 700 in the store, `--weight 700` renders the
+/// bold face; with only 400 present, the same document is refused typed,
+/// naming family, weight and style — never silently drawn with the regular
+/// face.
+#[test]
+fn a_weight_the_store_has_renders_and_one_it_lacks_is_refused_typed() {
+    let scratch = tempfile::tempdir().unwrap();
+    let bold_store = store_with(true, scratch.path());
+    let project = scratch.path().join("weights");
+    run(&[
+        "new",
+        project.to_str().unwrap(),
+        "--width",
+        "300",
+        "--height",
+        "150",
+        "--background",
+        "#ffffff",
+    ]);
+    let regular = run(&[
+        "add-text",
+        project.to_str().unwrap(),
+        "--text",
+        "Regular",
+        "--font",
+        "Noto Sans",
+        "--font-store",
+        bold_store.to_str().unwrap(),
+        "--x",
+        "10",
+        "--y",
+        "10",
+        "--width",
+        "280",
+        "--height",
+        "60",
+    ])
+    .trim()
+    .to_owned();
+    let bold = run(&[
+        "add-text",
+        project.to_str().unwrap(),
+        "--text",
+        "Bold",
+        "--font",
+        "Noto Sans",
+        "--weight",
+        "700",
+        "--font-store",
+        bold_store.to_str().unwrap(),
+        "--x",
+        "10",
+        "--y",
+        "80",
+        "--width",
+        "280",
+        "--height",
+        "60",
+    ])
+    .trim()
+    .to_owned();
+    assert_ne!(regular, bold, "the two layers must be distinct");
+
+    let regular_png = export(&project, &bold_store, &scratch.path().join("regular.png"));
+    run(&[
+        "set",
+        project.to_str().unwrap(),
+        "--layer",
+        &regular,
+        "--weight",
+        "700",
+    ]);
+    let bold_png = export(&project, &bold_store, &scratch.path().join("bold.png"));
+    assert_ne!(
+        regular_png, bold_png,
+        "weight 700 must render a different picture from the default"
+    );
+
+    // The same request against a store that holds only the regular face:
+    // refused, naming family, weight and style.
+    let thin_store = scratch.path().join("fonts-thin");
+    run(&[
+        "font",
+        "add",
+        font_dir().join("NotoSans-Subset.ttf").to_str().unwrap(),
+        "--license",
+        "OFL-1.1",
+        "--font-store",
+        thin_store.to_str().unwrap(),
+    ]);
+    let refused = run_failing(&[
+        "export",
+        project.to_str().unwrap(),
+        "--out",
+        scratch.path().join("refused.png").to_str().unwrap(),
+        "--font-store",
+        thin_store.to_str().unwrap(),
+    ]);
+    assert!(
+        refused.contains("Noto Sans") && refused.contains("700"),
+        "the refusal must name the family and the weight: {refused}"
+    );
+}
+
+/// Exit test 4, through the CLI: a paragraph that no longer fits its box —
+/// here because letter spacing widened it past the wrap width — exports with
+/// a `textOverflowsBox` warning.
+#[test]
+fn letter_spacing_that_overflows_the_box_warns_on_export() {
+    let scratch = tempfile::tempdir().unwrap();
+    let store = store_with(false, scratch.path());
+    let project = scratch.path().join("tracked");
+    run(&[
+        "new",
+        project.to_str().unwrap(),
+        "--width",
+        "200",
+        "--height",
+        "100",
+        "--background",
+        "#ffffff",
+    ]);
+    let layer = run(&[
+        "add-text",
+        project.to_str().unwrap(),
+        "--text",
+        "handgloves",
+        "--font",
+        "Noto Sans",
+        "--letter-spacing",
+        "8",
+        "--font-store",
+        store.to_str().unwrap(),
+        "--x",
+        "10",
+        "--y",
+        "10",
+        "--width",
+        "180",
+        "--height",
+        "30",
+    ])
+    .trim()
+    .to_owned();
+
+    let (_, stderr) = stdout_and_stderr(&[
+        "export",
+        project.to_str().unwrap(),
+        "--out",
+        scratch.path().join("tracked.png").to_str().unwrap(),
+        "--font-store",
+        store.to_str().unwrap(),
+    ]);
+    assert!(
+        stderr.contains("textOverflowsBox"),
+        "the export must warn that the tracked text overflows: {stderr}"
+    );
+    assert!(stderr.contains(&layer), "the warning names its layer");
 }

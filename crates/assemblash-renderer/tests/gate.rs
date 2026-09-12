@@ -88,9 +88,14 @@ fn text_layer(
             text: body.to_owned(),
             font_family: family.to_owned(),
             font_size: size,
-            color: Color::new("#101820"),
+            color: Some(Color::new("#101820")),
             align,
             line_height: 1.4,
+            font_weight: 400,
+            font_style: assemblash_core::FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: assemblash_core::VerticalAlign::Top,
             runs: Vec::new(),
             extra: Extras::new(),
         }),
@@ -560,6 +565,183 @@ fn shadow_document() -> (Document, AssetHrefs) {
     (document, AssetHrefs::new())
 }
 
+/// A text layer carrying 1.7.0 typography, for the four typographic gates.
+#[allow(clippy::too_many_arguments)]
+fn typography_layer(
+    index: usize,
+    transform: Transform,
+    body: &str,
+    family: &str,
+    size: f64,
+    weight: u16,
+    style: assemblash_core::FontStyle,
+    spacing: f64,
+    stroke: Option<Stroke>,
+    valign: assemblash_core::VerticalAlign,
+) -> Layer {
+    Layer::new(
+        LayerId::new(format!("layer_{index:026}")),
+        transform,
+        LayerKind::Text(TextLayer {
+            text: body.to_owned(),
+            font_family: family.to_owned(),
+            font_size: size,
+            color: Some(Color::new("#101820")),
+            align: TextAlign::Left,
+            line_height: 1.4,
+            font_weight: weight,
+            font_style: style,
+            letter_spacing: spacing,
+            stroke,
+            vertical_align: valign,
+            runs: Vec::new(),
+            extra: Extras::new(),
+        }),
+    )
+}
+
+/// Weight: 400 and 700 of the same family in the same picture.
+///
+/// This is the face-keyed selection the 1.7.0 font set exists for: both faces
+/// come from the same committed fixtures (`NotoSans-Subset.ttf` and
+/// `NotoSans-Bold-Subset.ttf`, instanced from the variable font the bundled
+/// manifest pins), so what the golden proves is that the renderer resolves
+/// the exact face a layer names, deterministically.
+fn text_weight_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 240.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    document.layers.push(typography_layer(
+        1,
+        Transform::new(20.0, 24.0, 440.0, 90.0),
+        "Regular weight",
+        "Noto Sans",
+        36.0,
+        400,
+        assemblash_core::FontStyle::Normal,
+        0.0,
+        None,
+        assemblash_core::VerticalAlign::Top,
+    ));
+    document.layers.push(typography_layer(
+        2,
+        Transform::new(20.0, 120.0, 440.0, 90.0),
+        "Bold weight",
+        "Noto Sans",
+        36.0,
+        700,
+        assemblash_core::FontStyle::Normal,
+        0.0,
+        None,
+        assemblash_core::VerticalAlign::Top,
+    ));
+    (document, AssetHrefs::new())
+}
+
+/// Stroke: a centred stroke over a fill, and a hollow line (no fill).
+fn text_stroke_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 240.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    // Fill first, stroke over it (paint-order="stroke" put the stroke *under*
+    // the fill — either way the centre is what is being pinned, D5).
+    document.layers.push(typography_layer(
+        1,
+        Transform::new(20.0, 24.0, 440.0, 90.0),
+        "Stroked fill",
+        "Noto Sans",
+        36.0,
+        400,
+        assemblash_core::FontStyle::Normal,
+        0.0,
+        Some(Stroke {
+            color: Color::new("#cc3344"),
+            width: 2.5,
+        }),
+        assemblash_core::VerticalAlign::Top,
+    ));
+    // Hollow: no fill at all, the stroke is the whole letter.
+    let mut hollow = typography_layer(
+        2,
+        Transform::new(20.0, 120.0, 440.0, 90.0),
+        "Hollow outline",
+        "Noto Sans",
+        36.0,
+        400,
+        assemblash_core::FontStyle::Normal,
+        0.0,
+        Some(Stroke {
+            color: Color::new("#101820"),
+            width: 1.5,
+        }),
+        assemblash_core::VerticalAlign::Top,
+    );
+    if let LayerKind::Text(text) = &mut hollow.kind {
+        text.color = None;
+    }
+    document.layers.push(hollow);
+    (document, AssetHrefs::new())
+}
+
+/// Letter spacing: tracked Latin, and Arabic that usvg shapes without it.
+fn text_spacing_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 240.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    document.layers.push(typography_layer(
+        1,
+        Transform::new(20.0, 24.0, 440.0, 90.0),
+        "tracked caption",
+        "Noto Sans",
+        36.0,
+        400,
+        assemblash_core::FontStyle::Normal,
+        6.0,
+        None,
+        assemblash_core::VerticalAlign::Top,
+    ));
+    // Arabic ignores inter-character spacing by usvg's shaping rule; the
+    // document demonstrates that it still renders, joined and right-to-left.
+    document.layers.push(typography_layer(
+        2,
+        Transform::new(20.0, 120.0, 440.0, 90.0),
+        "مرحبا بالعالم",
+        "Noto Sans Arabic",
+        36.0,
+        400,
+        assemblash_core::FontStyle::Normal,
+        6.0,
+        None,
+        assemblash_core::VerticalAlign::Top,
+    ));
+    (document, AssetHrefs::new())
+}
+
+/// Vertical alignment: top, middle and bottom in identical boxes.
+fn text_valign_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 360.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    for (index, valign) in [
+        assemblash_core::VerticalAlign::Top,
+        assemblash_core::VerticalAlign::Middle,
+        assemblash_core::VerticalAlign::Bottom,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        document.layers.push(typography_layer(
+            index + 1,
+            Transform::new(20.0, 20.0 + 110.0 * index as f64, 440.0, 100.0),
+            "vertical",
+            "Noto Sans",
+            36.0,
+            400,
+            assemblash_core::FontStyle::Normal,
+            0.0,
+            None,
+            valign,
+        ));
+    }
+    (document, AssetHrefs::new())
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -570,6 +752,10 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("effects", effects_document()),
         ("shapes", shapes_document()),
         ("shadow", shadow_document()),
+        ("text-weight", text_weight_document()),
+        ("text-stroke", text_stroke_document()),
+        ("text-spacing", text_spacing_document()),
+        ("text-valign", text_valign_document()),
     ] {
         out.push((name, document, hrefs));
     }

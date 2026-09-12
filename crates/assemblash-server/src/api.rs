@@ -98,6 +98,7 @@ pub fn router_with_limits(
             post(install_fonts).delete(remove_install_family),
         )
         .route("/api/fonts/{family}", delete(remove_font_family))
+        .route("/api/capabilities", get(get_capabilities))
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/recent", get(recent_projects))
         .route("/api/projects/{id}", get(project_summary))
@@ -1349,6 +1350,11 @@ fn insert_layer(
             color: text.color.clone(),
             align: text.align,
             line_height: text.line_height,
+            font_weight: text.font_weight,
+            font_style: text.font_style,
+            letter_spacing: text.letter_spacing,
+            stroke: text.stroke.clone(),
+            vertical_align: text.vertical_align,
         },
         LayerKind::Image(image) => NewLayerKind::Image {
             asset: image.asset.clone(),
@@ -1754,6 +1760,16 @@ async fn preview_svg(
     ))
 }
 
+/// The canonical capability listing.
+///
+/// Fed by the same core function the CLI's `styles` command and the MCP
+/// `list_capabilities` tool read, so the three discovery surfaces cannot
+/// disagree about what this build renders — the drift that made 1.6.0
+/// advertise five effects while drawing six.
+async fn get_capabilities() -> Json<assemblash_core::capabilities::Capabilities> {
+    Json(assemblash_core::capabilities::capabilities())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TextLayoutQuery {
@@ -1805,6 +1821,7 @@ async fn text_layout(
         query.width,
         text.font_size,
         text.line_height,
+        text.letter_spacing,
         &text.font_family,
         fonts.font_set(),
     );

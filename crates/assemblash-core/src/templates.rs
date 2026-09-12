@@ -259,7 +259,7 @@ pub fn fill_operations(
                     }
                 } else {
                     UpdateLayer {
-                        color: Some(Color::new(value.clone())),
+                        color: Some(Some(Color::new(value.clone()))),
                         ..UpdateLayer::new(slot.layer.clone())
                     }
                 }
@@ -290,7 +290,9 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use crate::document::{Extras, ImageFit, ImageLayer, TextAlign, TextLayer, Transform};
+    use crate::document::{
+        Extras, FontStyle, ImageFit, ImageLayer, TextAlign, TextLayer, Transform, VerticalAlign,
+    };
     use crate::ids::SequentialIdSource;
     use crate::{Asset, Layer};
 
@@ -303,9 +305,14 @@ mod tests {
                 text: "default".to_owned(),
                 font_family: "Inter".to_owned(),
                 font_size: 12.0,
-                color: Color::new("#000000"),
+                color: Some(Color::new("#000000")),
                 align: TextAlign::Left,
                 line_height: 1.2,
+                font_weight: 400,
+                font_style: FontStyle::Normal,
+                letter_spacing: 0.0,
+                stroke: None,
+                vertical_align: VerticalAlign::Top,
                 runs: Vec::new(),
                 extra: Extras::new(),
             }),
@@ -479,7 +486,7 @@ mod tests {
         let Operation::Update(update) = &operations[0] else {
             panic!("expected an update, got {:?}", operations[0]);
         };
-        assert_eq!(update.color, Some(Color::new("#ff0000")));
+        assert_eq!(update.color, Some(Some(Color::new("#ff0000"))));
         assert_eq!(update.fill, None, "a text layer has no fill");
     }
 

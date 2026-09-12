@@ -12,7 +12,7 @@
 //! id live.
 
 use assemblash_core::document::{
-    BlendMode, Effect, ImageFit, ShapeKind, Stroke, TextAlign, Transform,
+    BlendMode, Effect, FontStyle, ImageFit, ShapeKind, Stroke, TextAlign, Transform, VerticalAlign,
 };
 use assemblash_core::ops::{
     AlignEdge, Axis, CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, SnapTarget,
@@ -104,6 +104,25 @@ pub struct AddTextArgs {
     /// Line height as a multiple of the font size.
     #[serde(default)]
     pub line_height: Option<f64>,
+    /// Font weight, 100–900; 400 is the regular face. A weight the font
+    /// store has no face for is an error at render time, never a
+    /// substitution.
+    #[serde(default)]
+    pub font_weight: Option<u16>,
+    /// `normal` or `italic`.
+    #[serde(default)]
+    pub font_style: Option<FontStyle>,
+    /// Extra space between characters, in pixels.
+    #[serde(default)]
+    pub letter_spacing: Option<f64>,
+    /// Glyph stroke, drawn centred on the outline with the fill painted
+    /// first (so a stroke never eats the letter).
+    #[serde(default)]
+    pub stroke: Option<StrokeArgs>,
+    /// Where the text block sits vertically in the box: `top`, `middle`,
+    /// or `bottom`.
+    #[serde(default)]
+    pub vertical_align: Option<VerticalAlign>,
     /// Human-facing layer name.
     #[serde(default)]
     pub name: Option<String>,
@@ -239,15 +258,32 @@ pub struct UpdateArgs {
     /// New line height, as a multiple of the font size, for a text layer.
     #[serde(default)]
     pub line_height: Option<f64>,
+    /// New font weight, 100–900, for a text layer.
+    #[serde(default)]
+    pub font_weight: Option<u16>,
+    /// `normal` or `italic`, for a text layer.
+    #[serde(default)]
+    pub font_style: Option<FontStyle>,
+    /// New letter spacing, in pixels, for a text layer.
+    #[serde(default)]
+    pub letter_spacing: Option<f64>,
+    /// Where the text block sits vertically in the box: `top`, `middle`, or
+    /// `bottom`, for a text layer.
+    #[serde(default)]
+    pub vertical_align: Option<VerticalAlign>,
     /// New fill colour for a shape layer, `#rrggbb` or `#rrggbbaa`. Use
     /// `clearFill: true` to remove the fill; a JSON null is treated as omitted.
     #[serde(default)]
     pub fill: Option<String>,
-    /// Replace the whole stroke on a shape layer. Its width defaults to 1.
-    /// Use `clearStroke: true` to remove it; a JSON null is treated as
+    /// Replace the whole stroke on a shape or text layer. Its width defaults
+    /// to 1. Use `clearStroke: true` to remove it; a JSON null is treated as
     /// omitted.
     #[serde(default)]
     pub stroke: Option<StrokeArgs>,
+    /// Set true to remove the text layer's colour, leaving a stroke-only
+    /// (hollow) layer; cannot be combined with `color`.
+    #[serde(default)]
+    pub clear_color: Option<bool>,
     /// New corner radius for a rectangular shape, in document units.
     #[serde(default)]
     pub corner_radius: Option<f64>,
@@ -487,9 +523,19 @@ impl AssemblashMcp {
                 text: args.text.clone(),
                 font_family: args.font_family.clone(),
                 font_size: args.font_size,
-                color: args.color.clone().map(Color::new).unwrap_or_default(),
+                color: Some(
+                    args.color
+                        .clone()
+                        .map(Color::new)
+                        .unwrap_or_else(Color::default),
+                ),
                 align: args.align.unwrap_or_default(),
                 line_height: args.line_height.unwrap_or(1.2),
+                font_weight: args.font_weight.unwrap_or(400),
+                font_style: args.font_style.unwrap_or_default(),
+                letter_spacing: args.letter_spacing.unwrap_or(0.0),
+                stroke: args.stroke.as_ref().map(StrokeArgs::to_stroke),
+                vertical_align: args.vertical_align.unwrap_or_default(),
             },
         });
         self.write(&args.write, operation)
@@ -612,6 +658,12 @@ impl AssemblashMcp {
                 None,
             ));
         }
+        if args.clear_color.unwrap_or(false) && args.color.is_some() {
+            return Err(ErrorData::invalid_request(
+                "color and clearColor cannot be combined; set clearColor to true to remove the colour",
+                None,
+            ));
+        }
         let fill = if clear_fill {
             Some(None)
         } else {
@@ -622,14 +674,23 @@ impl AssemblashMcp {
         } else {
             args.stroke.as_ref().map(|value| Some(value.to_stroke()))
         };
+        let color = if args.clear_color.unwrap_or(false) {
+            Some(None)
+        } else {
+            args.color.clone().map(|value| Some(Color::new(value)))
+        };
         let operation = Operation::Update(UpdateLayer {
             opacity: args.opacity,
             text: args.text.clone(),
             font_family: args.font_family.clone(),
             font_size: args.font_size,
-            color: args.color.clone().map(Color::new),
+            color,
             align: args.align,
             line_height: args.line_height,
+            font_weight: args.font_weight,
+            font_style: args.font_style,
+            letter_spacing: args.letter_spacing,
+            vertical_align: args.vertical_align,
             fill,
             stroke,
             corner_radius: args.corner_radius,

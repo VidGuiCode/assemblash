@@ -128,6 +128,59 @@ def main():
         print("wrote", destination)
     reflavour()
     two_names()
+    bold()
+
+
+def bold():
+    """Writes the weight-700 face of the "Noto Sans" family.
+
+    Instanced from the variable font the bundled install manifest pins
+    (`google/fonts` commit 2796410, `ofl/notosans/NotoSans[wdth,wght].ttf` —
+    verify its sha256 against `../../fonts/manifest.json` before using it).
+    Expects the downloaded variable font in the working directory as
+    `NotoSansVF.ttf`.
+    """
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fontTools.varLib.instancer",
+            "NotoSansVF.ttf",
+            "wght=700",
+            "wdth=100",
+            "-o",
+            "NotoSans-Bold-full.ttf",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fontTools.subset",
+            "NotoSans-Bold-full.ttf",
+            "--text=" + LATIN,
+            "--layout-features=*",
+            "--glyph-names",
+            "--notdef-outline",
+            "--recalc-bounds",
+            "--output-file=NotoSans-Bold-Subset.ttf",
+        ],
+        check=True,
+    )
+    font = TTFont("NotoSans-Bold-Subset.ttf")
+    for record in font["name"].names:
+        if record.nameID == 2:
+            record.string = "Bold"
+        elif record.nameID == 4:
+            record.string = "Noto Sans Bold"
+        elif record.nameID == 6:
+            record.string = "NotoSans-Bold"
+    font["name"].names = [n for n in font["name"].names if n.nameID not in (16, 17)]
+    font["OS/2"].usWeightClass = 700
+    font["head"].macStyle |= 1
+    font.save("NotoSans-Bold-Subset.ttf")
+    print("wrote NotoSans-Bold-Subset.ttf")
 
 
 if __name__ == "__main__":

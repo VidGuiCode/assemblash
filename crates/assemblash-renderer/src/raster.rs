@@ -78,8 +78,16 @@ impl LoadedFonts {
                     )
                 })
                 .unwrap_or((None, None));
+            // The weight and style come from the face's own name tables, the
+            // same place fontdb matches from — so what the membership check
+            // sees is exactly what the rasterizer would use.
+            let weight = face.weight.0;
+            let italic = matches!(
+                face.style,
+                usvg::fontdb::Style::Italic | usvg::fontdb::Style::Oblique
+            );
             for (name, _) in &face.families {
-                faces.push((name.clone(), metrics, advances.clone()));
+                faces.push((name.clone(), metrics, advances.clone(), weight, italic));
             }
         }
         Self {

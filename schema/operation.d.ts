@@ -57,6 +57,21 @@ export type Transform = {
 /// Horizontal text alignment inside the layer box.
 export type TextAlign = "left" | "center" | "right";
 
+/// Whether glyphs stand upright or slant.
+export type FontStyle = "normal" | "italic";
+
+/// A shape's edge paint.
+export type Stroke = {
+  /** Edge colour. */
+  color: Color;
+  /** Width in document units; must be finite and 0 or more. */
+  width: number;
+  [key: string]: unknown;
+};
+
+/// Where the text block sits vertically in the layer box.
+export type VerticalAlign = "top" | "middle" | "bottom";
+
 /// Identifier of an imported asset.
 export type AssetId = string;
 
@@ -77,15 +92,6 @@ export type ShapeKind = {
   [key: string]: unknown;
 } | unknown;
 
-/// A shape's edge paint.
-export type Stroke = {
-  /** Edge colour. */
-  color: Color;
-  /** Width in document units; must be finite and 0 or more. */
-  width: number;
-  [key: string]: unknown;
-};
-
 /// Add a layer to the document.
 export type CreateLayer = ({
   /** The text; `\n` starts a new line. */
@@ -94,12 +100,22 @@ export type CreateLayer = ({
   fontFamily: string;
   /** Font size in pixels. */
   fontSize: number;
-  /** Fill colour. */
-  color?: Color;
+  /** Fill colour, or none for hollow (stroke-only) text. Absent means */
+  color?: Color | null;
   /** Horizontal alignment in the box. */
   align?: TextAlign;
   /** Line height as a multiple of the font size. */
   lineHeight?: number;
+  /** Font weight, 100–900; 400 is the regular face. */
+  fontWeight?: number;
+  /** Upright or italic. */
+  fontStyle?: FontStyle;
+  /** Extra space between characters, in pixels. */
+  letterSpacing?: number;
+  /** Glyph stroke, painted centred with `paint-order="stroke"`. */
+  stroke?: Stroke | null;
+  /** Where the block sits vertically in the box. */
+  verticalAlign?: VerticalAlign;
   type: "text";
   [key: string]: unknown;
 } | {
@@ -229,19 +245,27 @@ export type UpdateLayer = {
   fontFamily?: string | null;
   /** Text layers: new font size. */
   fontSize?: number | null;
-  /** Text layers: new colour. */
+  /** Text layers: new colour. Absent leaves it, `null` clears it. */
   color?: Color | null;
   /** Text layers: new alignment. */
   align?: TextAlign | null;
   /** Text layers: new line height. */
   lineHeight?: number | null;
+  /** Text layers: new font weight, 100–900. */
+  fontWeight?: number | null;
+  /** Text layers: new font style. */
+  fontStyle?: FontStyle | null;
+  /** Text layers: new letter spacing, in pixels. */
+  letterSpacing?: number | null;
+  /** Text layers: new vertical alignment. */
+  verticalAlign?: VerticalAlign | null;
   /** Image layers: new fit. */
   fit?: ImageFit | null;
   /** Image and SVG layers: draw a different asset. */
   asset?: AssetId | null;
   /** Shape layers: new interior paint. Absent leaves it, `null` clears it. */
   fill?: Color | null;
-  /** Shape layers: the whole stroke. Absent leaves it, `null` clears it. */
+  /** Shape and text layers: the whole stroke. Absent leaves it, `null` */
   stroke?: Stroke | null;
   /** Shape layers whose geometry is a rect: new corner radius. */
   cornerRadius?: number | null;
@@ -301,6 +325,14 @@ export type PresetProperties = {
   align?: TextAlign | null;
   /** Text layers: line height. */
   lineHeight?: number | null;
+  /** Text layers: font weight, 100–900. */
+  fontWeight?: number | null;
+  /** Text layers: upright or italic. */
+  fontStyle?: FontStyle | null;
+  /** Text layers: letter spacing, in pixels. */
+  letterSpacing?: number | null;
+  /** Text layers: vertical alignment in the box. */
+  verticalAlign?: VerticalAlign | null;
   /** Any layer: opacity. */
   opacity?: number | null;
   /** Any layer: how it composites. */

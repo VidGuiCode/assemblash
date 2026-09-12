@@ -73,11 +73,18 @@ kits, customer assets, or downstream workflow data.
   property: `--name` (an empty string removes the name), `--x`, `--y`,
   `--width`, `--height`, `--rotation`, `--opacity`, `--visible`, `--locked`,
   `--blend`, `--effects`, `--effects-file`, `--text`, `--text-file`, `--font`,
-  `--size`, `--color`, `--align`, `--line-height`, `--fit`, `--asset`, and
+  `--size`, `--color`, `--align`, `--line-height`, `--weight`, `--font-style`,
+  `--letter-spacing`, `--vertical-align`, `--fit`, `--asset`, and
   `--allow-locked`. However many flags one invocation carries, it is one
   `update` operation: journalled once, undone once. A property the layer's kind
   does not have is refused, naming it. `assemblash style` still exists and is
   the same builder.
+- `assemblash styles` lists what this build renders — blend modes and effects
+  with examples. `assemblash styles --json` prints the same listing as JSON;
+  it is byte-for-byte what `GET /api/capabilities` and the MCP
+  `list_capabilities` tool serve. Check it (or the endpoint, or the tool)
+  before using a blend mode or effect: what a build cannot render, it
+  refuses.
 - `assemblash render` and `assemblash export` take the output path positionally
   or through `--out`, and print `<path>`, a tab, and the written file's
   `sha256:<hex>` digest on stdout. Compare that digest instead of re-hashing
@@ -241,8 +248,14 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
 - `find_overlaps` — `project`, `layerIds`; returns `pairs`. An empty `layerIds`
   means the whole document; an id that is not in the document is refused, not
   ignored.
-- `update_layer` takes `lineHeight` beside `opacity`, `text`, `fontFamily`,
-  `fontSize`, `color`, `align`, `fit`, `blendMode`, and `effects`.
+- `update_layer` takes `lineHeight`, `fontWeight`, `fontStyle`,
+  `letterSpacing`, and `verticalAlign` beside `opacity`, `text`,
+  `fontFamily`, `fontSize`, `color`, `align`, `fit`, `blendMode`, and
+  `effects`. A `fontWeight` the font store has no face for is refused at
+  render time, naming family, weight and style — never substituted.
+- `list_capabilities` takes no arguments and returns this build's blend modes
+  and effects with examples — the same JSON `GET /api/capabilities` and
+  `assemblash styles --json` serve.
 - `export_document` returns `warnings` beside `path`, `bytes`, `width`, and
   `height`.
 

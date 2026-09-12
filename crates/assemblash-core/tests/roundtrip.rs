@@ -9,10 +9,12 @@
 
 use std::collections::BTreeMap;
 
-use assemblash_core::document::Effect;
-use assemblash_core::document::{Extras, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer};
-use assemblash_core::ids::{AssetId, DocumentId, LayerId};
 use assemblash_core::{
+    document::Effect,
+    document::{
+        Extras, FontStyle, GroupLayer, ImageFit, ImageLayer, TextAlign, TextLayer, VerticalAlign,
+    },
+    ids::{AssetId, DocumentId, LayerId},
     validate, Asset, BlendMode, Canvas, Color, Document, Layer, LayerKind, Transform,
     SCHEMA_VERSION,
 };
@@ -94,9 +96,14 @@ fn text_kind() -> impl Strategy<Value = LayerKind> {
                     text,
                     font_family,
                     font_size,
-                    color,
+                    color: Some(color),
                     align,
                     line_height,
+                    font_weight: 400,
+                    font_style: FontStyle::Normal,
+                    letter_spacing: 0.0,
+                    stroke: None,
+                    vertical_align: VerticalAlign::Top,
                     runs,
                     extra,
                 })

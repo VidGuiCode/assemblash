@@ -204,10 +204,14 @@ impl From<RenderError> for ApiError {
     fn from(error: RenderError) -> Self {
         let message = error.to_string();
         match error {
-            RenderError::MissingFont { layer, family } => {
-                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "missingFont", message)
-                    .with_details(json!({ "layer": layer, "family": family }))
-            }
+            RenderError::MissingFont {
+                layer,
+                family,
+                weight,
+                style,
+            } => Self::new(StatusCode::UNPROCESSABLE_ENTITY, "missingFont", message).with_details(
+                json!({ "layer": layer, "family": family, "weight": weight, "style": style }),
+            ),
             RenderError::InvalidDocument(_) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalidDocument", message)
             }

@@ -169,7 +169,36 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
                     value: text.line_height,
                 });
             }
-            check_color(&text.color, &format!("layer {}", layer.id), errors);
+            if !(100..=900).contains(&text.font_weight) {
+                errors.push(ValidationError::InvalidShape {
+                    layer: layer.id.clone(),
+                    field: "fontWeight",
+                    expected: "between 100 and 900",
+                    value: f64::from(text.font_weight),
+                });
+            }
+            if !text.letter_spacing.is_finite() || text.letter_spacing < 0.0 {
+                errors.push(ValidationError::InvalidShape {
+                    layer: layer.id.clone(),
+                    field: "letterSpacing",
+                    expected: "a finite number of 0 or more",
+                    value: text.letter_spacing,
+                });
+            }
+            if let Some(stroke) = &text.stroke {
+                if !stroke.width.is_finite() || stroke.width < 0.0 {
+                    errors.push(ValidationError::InvalidShape {
+                        layer: layer.id.clone(),
+                        field: "stroke.width",
+                        expected: "a finite number of 0 or more",
+                        value: stroke.width,
+                    });
+                }
+                check_color(&stroke.color, &format!("layer {} stroke", layer.id), errors);
+            }
+            if let Some(color) = &text.color {
+                check_color(color, &format!("layer {}", layer.id), errors);
+            }
         }
         LayerKind::Image(image) => {
             if !known_assets.contains(&image.asset) {
@@ -492,9 +521,14 @@ mod tests {
                 text: "x".into(),
                 font_family: "Inter".into(),
                 font_size: 0.0,
-                color: Color::new("nope"),
+                color: Some(Color::new("nope")),
                 align: TextAlign::Left,
                 line_height: 1.2,
+                font_weight: 400,
+                font_style: crate::document::FontStyle::Normal,
+                letter_spacing: 0.0,
+                stroke: None,
+                vertical_align: crate::document::VerticalAlign::Top,
                 runs: Vec::new(),
                 extra: Extras::new(),
             }),

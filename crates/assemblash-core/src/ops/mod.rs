@@ -900,7 +900,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use crate::document::{Extras, GroupLayer, TextAlign, Transform};
+    use crate::document::{Extras, FontStyle, GroupLayer, TextAlign, Transform, VerticalAlign};
     use crate::ids::SequentialIdSource;
     use crate::{Color, Layer};
 
@@ -913,9 +913,14 @@ mod tests {
             text: "hello".to_owned(),
             font_family: "Inter".to_owned(),
             font_size: 16.0,
-            color: Color::new("#000000"),
+            color: Some(Color::new("#000000")),
             align: TextAlign::Left,
             line_height: 1.2,
+            font_weight: 400,
+            font_style: FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: VerticalAlign::Top,
         }
     }
 
@@ -1118,9 +1123,14 @@ mod tests {
                 text: "x".to_owned(),
                 font_family: "Inter".to_owned(),
                 font_size: 10.0,
-                color: Color::new("#000000"),
+                color: Some(Color::new("#000000")),
                 align: TextAlign::Left,
                 line_height: 1.2,
+                font_weight: 400,
+                font_style: FontStyle::Normal,
+                letter_spacing: 0.0,
+                stroke: None,
+                vertical_align: VerticalAlign::Top,
                 runs: Vec::new(),
                 extra: Extras::new(),
             }),
@@ -1393,7 +1403,7 @@ mod tests {
                 text: Some("changed".to_owned()),
                 font_family: Some("Inter".to_owned()),
                 font_size: Some(12.0),
-                color: Some(Color::new("#ffffff")),
+                color: Some(Some(Color::new("#ffffff"))),
                 align: Some(TextAlign::Center),
                 line_height: Some(1.5),
                 fit: Some(crate::document::ImageFit::Cover),
@@ -1500,18 +1510,18 @@ mod tests {
         let update = serde_json::json!({
             "op": "update",
             "id": "layer_one",
-            "letterSpacing": 4
+            "tracking": 4
         });
         assert_eq!(
             check_properties(&update),
             Err(OpError::UnknownProperty {
                 op: "update",
-                property: "letterSpacing".to_owned(),
+                property: "tracking".to_owned(),
             })
         );
         assert_eq!(
             check_properties(&update).unwrap_err().to_string(),
-            r#"unknown property "letterSpacing" on an update operation"#
+            r#"unknown property "tracking" on an update operation"#
         );
 
         let create = serde_json::json!({
@@ -1521,11 +1531,11 @@ mod tests {
             "text": "hi",
             "fontFamily": "Inter",
             "fontSize": 12,
-            "letterSpacing": 9
+            "tracking": 9
         });
         assert_eq!(
             check_properties(&create).unwrap_err().to_string(),
-            r#"unknown property "letterSpacing" on a create operation"#
+            r#"unknown property "tracking" on a create operation"#
         );
     }
 

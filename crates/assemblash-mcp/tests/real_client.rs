@@ -50,9 +50,14 @@ fn build_project(directory: &Path) -> Document {
             text: "read me".to_owned(),
             font_family: "Noto Sans".to_owned(),
             font_size: 40.0,
-            color: Color::new("#101820"),
+            color: Some(Color::new("#101820")),
             align: TextAlign::Left,
             line_height: 1.2,
+            font_weight: 400,
+            font_style: assemblash_core::FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: assemblash_core::VerticalAlign::Top,
             runs: Vec::new(),
             extra: Extras::new(),
         }),
@@ -65,9 +70,14 @@ fn build_project(directory: &Path) -> Document {
             text: "the logo".to_owned(),
             font_family: "Noto Sans".to_owned(),
             font_size: 20.0,
-            color: Color::new("#101820"),
+            color: Some(Color::new("#101820")),
             align: TextAlign::Left,
             line_height: 1.2,
+            font_weight: 400,
+            font_style: assemblash_core::FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: assemblash_core::VerticalAlign::Top,
             runs: Vec::new(),
             extra: Extras::new(),
         }),
@@ -458,9 +468,12 @@ async fn every_new_tool_is_advertised_and_callable() {
     ] {
         assert!(names.contains(&expected), "no {expected} in {names:?}");
     }
+    // 1.7.0 added `list_capabilities` — the canonical capability listing,
+    // the same one the CLI's `styles --json` and `GET /api/capabilities`
+    // serve — so the count moved from 45 to 46.
     assert_eq!(
         tools.len(),
-        45,
+        46,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 

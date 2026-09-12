@@ -1023,7 +1023,47 @@ function drawInspector() {
         field("Font", layer.fontFamily, (next) => ({ op: "update", id: layer.id, fontFamily: next }), "text", "font-families");
         field("Font size", String(layer.fontSize), (next) => ({ op: "update", id: layer.id, fontSize: Number(next) }));
         field("Line height", String(layer.lineHeight ?? 1.2), (next) => ({ op: "update", id: layer.id, lineHeight: Number(next) }));
-        field("Colour", layer.color ?? "#000000", (next) => ({ op: "update", id: layer.id, color: next }), "color");
+        field("Weight", String(layer.fontWeight ?? 400), (next) => ({ op: "update", id: layer.id, fontWeight: Number(next) }));
+        field("Letter spacing", String(layer.letterSpacing ?? 0), (next) => ({ op: "update", id: layer.id, letterSpacing: Number(next) }));
+        const fontStyle = document.createElement("label");
+        fontStyle.className = "field";
+        fontStyle.append(document.createTextNode("Style"));
+        const fontStyleSelect = document.createElement("select");
+        fontStyleSelect.disabled = why !== null;
+        fontStyleSelect.setAttribute("aria-label", "Font style");
+        for (const style of ["normal", "italic"]) {
+            const option = document.createElement("option");
+            option.value = style;
+            option.textContent = style;
+            fontStyleSelect.append(option);
+        }
+        fontStyleSelect.value = layer.fontStyle ?? "normal";
+        fontStyleSelect.addEventListener("change", () => void send("change font style", { op: "update", id: layer.id, fontStyle: fontStyleSelect.value }));
+        fontStyle.append(fontStyleSelect);
+        dom.advancedInspector.append(fontStyle);
+        const valign = document.createElement("label");
+        valign.className = "field";
+        valign.append(document.createTextNode("Vertical align"));
+        const valignSelect = document.createElement("select");
+        valignSelect.disabled = why !== null;
+        valignSelect.setAttribute("aria-label", "Vertical align");
+        for (const mode of ["top", "middle", "bottom"]) {
+            const option = document.createElement("option");
+            option.value = mode;
+            option.textContent = mode;
+            valignSelect.append(option);
+        }
+        valignSelect.value = layer.verticalAlign ?? "top";
+        valignSelect.addEventListener("change", () => void send("change vertical align", { op: "update", id: layer.id, verticalAlign: valignSelect.value }));
+        valign.append(valignSelect);
+        dom.advancedInspector.append(valign);
+        field("Colour", layer.color ?? "#000000", (next) => next === "none"
+            ? ({ op: "update", id: layer.id, color: null })
+            : ({ op: "update", id: layer.id, color: next }), "color");
+        field("Stroke colour", layer.stroke?.color ?? "none", (next) => next === "none"
+            ? ({ op: "update", id: layer.id, stroke: null })
+            : ({ op: "update", id: layer.id, stroke: { color: next, width: layer.stroke?.width ?? 1 } }), "color");
+        field("Stroke width", String(layer.stroke?.width ?? 1), (next) => ({ op: "update", id: layer.id, stroke: { color: layer.stroke?.color ?? "#000000", width: Number(next) } }));
     }
     if (layer.type === "image" || layer.type === "svg") {
         // How the asset meets its box. The engine's default is `fill`, which

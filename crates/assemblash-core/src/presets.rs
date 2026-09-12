@@ -29,7 +29,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::document::{BlendMode, Color, Document, Effect, TextAlign};
+use crate::document::{BlendMode, Color, Document, Effect, FontStyle, TextAlign, VerticalAlign};
 use crate::ids::LayerId;
 use crate::ops::UpdateLayer;
 
@@ -76,6 +76,18 @@ pub struct PresetProperties {
     /// Text layers: line height.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_height: Option<f64>,
+    /// Text layers: font weight, 100–900.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<u16>,
+    /// Text layers: upright or italic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_style: Option<FontStyle>,
+    /// Text layers: letter spacing, in pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<f64>,
+    /// Text layers: vertical alignment in the box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_align: Option<VerticalAlign>,
     /// Any layer: opacity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
@@ -113,9 +125,13 @@ impl PresetProperties {
         UpdateLayer {
             font_family: self.font_family.clone(),
             font_size: self.font_size,
-            color: self.color.clone(),
+            color: self.color.clone().map(Some),
             align: self.align,
             line_height: self.line_height,
+            font_weight: self.font_weight,
+            font_style: self.font_style,
+            letter_spacing: self.letter_spacing,
+            vertical_align: self.vertical_align,
             opacity: self.opacity,
             blend_mode: self.blend_mode.clone(),
             effects: self.effects.clone(),
@@ -136,6 +152,10 @@ impl PresetProperties {
             && self.color.is_none()
             && self.align.is_none()
             && self.line_height.is_none()
+            && self.font_weight.is_none()
+            && self.font_style.is_none()
+            && self.letter_spacing.is_none()
+            && self.vertical_align.is_none()
             && self.opacity.is_none()
             && self.blend_mode.is_none()
             && self.effects.is_none()
@@ -190,7 +210,7 @@ mod tests {
 
         assert_eq!(update.id, LayerId::new("layer_1"));
         assert_eq!(update.font_size, Some(48.0));
-        assert_eq!(update.color, Some(Color::new("#101820")));
+        assert_eq!(update.color, Some(Some(Color::new("#101820"))));
         assert_eq!(update.blend_mode, Some(BlendMode::Multiply));
         assert_eq!(update.effects, Some(vec![Effect::Blur { radius: 1.0 }]));
         // Untouched by a style: a preset never moves anything.
@@ -211,7 +231,7 @@ mod tests {
             extra: crate::document::Extras::new(),
         };
         let update = preset.properties.update_for(LayerId::new("layer_1"), false);
-        assert_eq!(update.color, Some(Color::new("#ff0000")));
+        assert_eq!(update.color, Some(Some(Color::new("#ff0000"))));
         assert_eq!(
             update.font_size, None,
             "a colour preset is not a font preset"
@@ -317,10 +337,11 @@ mod tests {
         assert_eq!(back, preset);
 
         // And one from a build that knows more than this one keeps what it
-        // knew, like every other part of the document.
+        // knew, like every other part of the document. (`tracking` stands in
+        // for a key a future build adds; `letterSpacing` is ours now.)
         let newer = serde_json::json!({
             "name": "future",
-            "properties": { "opacity": 0.5, "letterSpacing": 2 },
+            "properties": { "opacity": 0.5, "tracking": 2 },
             "appliesTo": ["text"]
         });
         let loaded: Preset = serde_json::from_value(newer.clone()).unwrap();

@@ -87,7 +87,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "assemblash-cli"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "assemblash-core",
  "assemblash-mcp",
@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-core"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "assemblash-liveness",
  "proptest",
@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-liveness"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "libc",
  "serde",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-mcp"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "assemblash-core",
  "assemblash-renderer",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-renderer"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "assemblash-core",
  "png",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-server"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "assemblash-core",
  "assemblash-renderer",

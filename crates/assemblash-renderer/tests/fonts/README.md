@@ -7,6 +7,7 @@ them. Determinism (NFR-1) is meaningless if the font can vary.
 | File | Upstream | Covers |
 | ---- | -------- | ------ |
 | `NotoSans-Subset.ttf` | [notofonts/latin-greek-cyrillic](https://github.com/notofonts/notofonts.github.io), `NotoSans-Regular.ttf` | ASCII plus combining diacritics |
+| `NotoSans-Bold-Subset.ttf` | [google/fonts](https://github.com/google/fonts/tree/main/ofl/notosans), `NotoSans[wdth,wght].ttf` (the file the bundled manifest pins) instanced at `wght=700, wdth=100` | ASCII; the weight-700 face of the "Noto Sans" family |
 | `NotoSansArabic-Subset.ttf` | [notofonts/arabic](https://github.com/notofonts/notofonts.github.io), `NotoSansArabic-Regular.ttf` | the Arabic sample strings |
 | `NotoSansJP-Subset.ttf` | [google/fonts](https://github.com/google/fonts/tree/main/ofl/notosansjp), `NotoSansJP[wght].ttf` instanced at `wght=400` | the Japanese sample strings |
 | `NotoSans-Subset.woff` | `NotoSans-Subset.ttf`, re-flavoured | WOFF import |
@@ -40,6 +41,13 @@ these subsets keep the original family names.
 the same OFL-licensed Noto Sans subset, and a modified version must not claim
 to be the original, so it is renamed. It remains under the OFL, and its
 copyright record still names the Noto Project Authors.
+
+`NotoSans-Bold-Subset.ttf` is the weight-700 instance of the same
+variable font the bundled install manifest pins (`google/fonts` commit
+`2796410`, verified against the manifest's sha256 before instancing). Its
+name table keeps the plain "Noto Sans" family with subfamily "Bold" and
+`OS/2.usWeightClass = 700`, which is what makes it the exact face a
+`fontWeight: 700` layer names.
 
 ## Rebuilding
 

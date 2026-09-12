@@ -220,6 +220,18 @@ impl AssemblashMcp {
         self.backend.list_projects().map(Json).map_err(to_error)
     }
 
+    /// What this build can render.
+    #[tool(
+        description = "List this build's capabilities: the blend modes it composites with and \
+                       the effects it draws, each with an example document fragment and short \
+                       notes. The same listing the CLI's styles command and the HTTP \
+                       /api/capabilities route serve. Check here before using an effect or \
+                       blend mode: what a build cannot render, it refuses."
+    )]
+    async fn list_capabilities(&self) -> Json<assemblash_core::capabilities::Capabilities> {
+        Json(assemblash_core::capabilities::capabilities())
+    }
+
     /// The whole document.
     #[tool(
         description = "Read a project's whole document: canvas, assets, and the nested layer \

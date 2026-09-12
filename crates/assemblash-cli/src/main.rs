@@ -8,7 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use assemblash_core::document::{ImageFit, LayerKind, ShapeKind, Stroke, TextAlign, Transform};
+use assemblash_core::document::{
+    FontStyle, ImageFit, LayerKind, ShapeKind, Stroke, TextAlign, Transform, VerticalAlign,
+};
 use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::UlidIdSource;
 use assemblash_core::layout;
@@ -84,6 +86,25 @@ enum Command {
         /// Line height, as a multiple of the font size.
         #[arg(long, default_value_t = 1.2)]
         line_height: f64,
+        /// Font weight, 100-900; 400 is the regular face.
+        #[arg(long, default_value_t = 400)]
+        weight: u16,
+        /// Upright or italic.
+        #[arg(long, value_enum, default_value_t = FontStyleArg::Normal)]
+        font_style: FontStyleArg,
+        /// Letter spacing, in pixels.
+        #[arg(long, default_value_t = 0.0)]
+        letter_spacing: f64,
+        /// Where the text block sits vertically in the box.
+        #[arg(long, value_enum, default_value_t = VerticalAlignArg::Top)]
+        vertical_align: VerticalAlignArg,
+        /// Glyph stroke colour. Omit for no stroke. `none` on `--color`
+        /// with a stroke is the hollow style.
+        #[arg(long)]
+        stroke: Option<String>,
+        /// Glyph stroke width in pixels. Defaults to 1 with `--stroke`.
+        #[arg(long)]
+        stroke_width: Option<f64>,
         /// Font store to check the family against.
         ///
         /// Optional, and only a check: naming a font that is not installed is
@@ -589,6 +610,19 @@ enum Command {
         /// Text layers: line height, as a multiple of the font size.
         #[arg(long)]
         line_height: Option<f64>,
+        /// Text layers: font weight, 100-900. A weight the font store has no
+        /// face for is refused at render time, never substituted.
+        #[arg(long)]
+        weight: Option<u16>,
+        /// Text layers: `normal` or `italic`.
+        #[arg(long, value_enum)]
+        font_style: Option<FontStyleArg>,
+        /// Text layers: letter spacing, in pixels.
+        #[arg(long)]
+        letter_spacing: Option<f64>,
+        /// Text layers: where the text block sits vertically in the box.
+        #[arg(long, value_enum)]
+        vertical_align: Option<VerticalAlignArg>,
         /// Image and SVG layers: how the picture fills its box.
         #[arg(long, value_enum)]
         fit: Option<Fit>,
@@ -656,7 +690,15 @@ enum Command {
     ///
     /// The list comes from the engine rather than from documentation, so it
     /// cannot describe a mode that does not draw.
-    Styles,
+    ///
+    /// With `--json`, prints exactly the JSON `GET /api/capabilities` and
+    /// the MCP `list_capabilities` tool serve — one canonical listing, read
+    /// by every discovery surface.
+    Styles {
+        /// Print the canonical capability listing as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Authoring a template: the openings a caller may fill.
@@ -1151,6 +1193,38 @@ impl From<Fit> for ImageFit {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum FontStyleArg {
+    Normal,
+    Italic,
+}
+
+impl From<FontStyleArg> for FontStyle {
+    fn from(style: FontStyleArg) -> Self {
+        match style {
+            FontStyleArg::Normal => Self::Normal,
+            FontStyleArg::Italic => Self::Italic,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum VerticalAlignArg {
+    Top,
+    Middle,
+    Bottom,
+}
+
+impl From<VerticalAlignArg> for VerticalAlign {
+    fn from(align: VerticalAlignArg) -> Self {
+        match align {
+            VerticalAlignArg::Top => Self::Top,
+            VerticalAlignArg::Middle => Self::Middle,
+            VerticalAlignArg::Bottom => Self::Bottom,
+        }
+    }
+}
+
 /// Everything `set` can change, with the file-valued flags already read.
 ///
 /// One struct rather than a long argument list because `style` builds one of
@@ -1181,6 +1255,10 @@ struct LayerChange {
     corner_radius: Option<f64>,
     align: Option<Align>,
     line_height: Option<f64>,
+    weight: Option<u16>,
+    font_style: Option<FontStyleArg>,
+    letter_spacing: Option<f64>,
+    vertical_align: Option<VerticalAlignArg>,
     fit: Option<Fit>,
     asset: Option<String>,
     allow_locked: bool,
@@ -1222,12 +1300,16 @@ impl LayerChange {
             text: self.text,
             font_family: self.font,
             font_size: self.size,
-            color: self.color.map(Color::new),
+            color: self.color.map(optional_color),
             fill,
             stroke,
             corner_radius: self.corner_radius,
             align: self.align.map(Into::into),
             line_height: self.line_height,
+            font_weight: self.weight,
+            font_style: self.font_style.map(Into::into),
+            letter_spacing: self.letter_spacing,
+            vertical_align: self.vertical_align.map(Into::into),
             fit: self.fit.map(Into::into),
             asset: self.asset.map(assemblash_core::AssetId::new),
             allow_locked: self.allow_locked,
@@ -1532,6 +1614,12 @@ fn run(command: Command) -> Result<(), CliError> {
             color,
             align,
             line_height,
+            weight,
+            font_style,
+            letter_spacing,
+            vertical_align,
+            stroke,
+            stroke_width,
             font_store,
             box_,
             who,
@@ -1546,9 +1634,17 @@ fn run(command: Command) -> Result<(), CliError> {
                     text,
                     font_family: font,
                     font_size: size,
-                    color: Color::new(color),
+                    color: optional_color(color),
                     align: align.into(),
                     line_height,
+                    font_weight: weight,
+                    font_style: font_style.into(),
+                    letter_spacing,
+                    stroke: stroke.map(|color| Stroke {
+                        color: Color::new(color),
+                        width: stroke_width.unwrap_or(1.0),
+                    }),
+                    vertical_align: vertical_align.into(),
                 },
                 &box_,
                 &who,
@@ -2109,7 +2205,14 @@ fn run(command: Command) -> Result<(), CliError> {
 
         Command::Preset(command) => run_preset(command),
 
-        Command::Styles => {
+        Command::Styles { json } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&assemblash_core::capabilities::capabilities())?
+                );
+                return Ok(());
+            }
             println!("blend modes:");
             for mode in assemblash_core::BlendMode::RENDERED {
                 println!("  {}", mode.as_str());
@@ -2150,6 +2253,10 @@ fn run(command: Command) -> Result<(), CliError> {
             corner_radius,
             align,
             line_height,
+            weight,
+            font_style,
+            letter_spacing,
+            vertical_align,
             fit,
             asset,
             allow_locked,
@@ -2177,6 +2284,10 @@ fn run(command: Command) -> Result<(), CliError> {
                 corner_radius,
                 align,
                 line_height,
+                weight,
+                font_style,
+                letter_spacing,
+                vertical_align,
                 fit,
                 asset,
                 allow_locked,

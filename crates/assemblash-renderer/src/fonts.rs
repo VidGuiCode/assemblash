@@ -11,6 +11,11 @@
 
 use std::collections::BTreeMap;
 
+use assemblash_core::FontStyle;
+
+/// One loaded face of a family, by the two properties a text layer names.
+type FaceKey = (u16, bool);
+
 /// Vertical metrics of a face, in the font's own units.
 ///
 /// Kept unscaled so a change of `fontSize` is a multiplication rather than a
@@ -64,6 +69,11 @@ pub const UNMEASURED_ASCENT_RATIO: f64 = 1.0;
 pub struct FontSet {
     families: BTreeMap<String, Option<FontMetrics>>,
     advances: BTreeMap<String, FontAdvances>,
+    /// Which (weight, italic) faces each family actually provides, when that
+    /// is known. A text layer is resolved against this list exactly — a bold
+    /// nobody loaded is a typed refusal, not a silent nearest match — except
+    /// in name-only sets, which never claimed to know faces at all.
+    faces: BTreeMap<String, Vec<FaceKey>>,
     accept_any: bool,
 }
 
@@ -89,6 +99,7 @@ impl FontSet {
                 .map(|family| (family.into(), None))
                 .collect(),
             advances: BTreeMap::new(),
+            faces: BTreeMap::new(),
             accept_any: false,
         }
     }
@@ -109,34 +120,55 @@ impl FontSet {
         S: Into<String>,
     {
         let mut families: BTreeMap<String, Option<FontMetrics>> = BTreeMap::new();
+        let mut faces_by_family: BTreeMap<String, Vec<FaceKey>> = BTreeMap::new();
         for (family, metrics) in faces {
-            families.entry(family.into()).or_insert(metrics);
+            let family = family.into();
+            families.entry(family.clone()).or_insert(metrics);
+            // A caller that measures without naming the face is recording the
+            // family's regular face; membership is exact only when the set
+            // knows better.
+            faces_by_family
+                .entry(family)
+                .or_default()
+                .push((400, false));
         }
         Self {
             families,
             advances: BTreeMap::new(),
+            faces: faces_by_family,
             accept_any: false,
         }
     }
 
     /// A measured set including the horizontal metrics used for wrapping.
+    ///
+    /// Each face arrives as `(family, metrics, advances, weight, italic)`.
+    /// Faces are recorded per family so text can be resolved to the exact
+    /// face it names.
     pub(crate) fn measured_with_advances<I, S>(faces: I) -> Self
     where
-        I: IntoIterator<Item = (S, Option<FontMetrics>, Option<FontAdvances>)>,
+        I: IntoIterator<Item = (S, Option<FontMetrics>, Option<FontAdvances>, u16, bool)>,
         S: Into<String>,
     {
-        let mut families = BTreeMap::new();
-        let mut advances = BTreeMap::new();
-        for (family, metrics, widths) in faces {
+        let mut families: BTreeMap<String, Option<FontMetrics>> = BTreeMap::new();
+        let mut advances: BTreeMap<String, FontAdvances> = BTreeMap::new();
+        let mut faces_by_family: BTreeMap<String, Vec<FaceKey>> = BTreeMap::new();
+        for (family, metrics, widths, weight, italic) in faces {
             let family = family.into();
             families.entry(family.clone()).or_insert(metrics);
             if let Some(widths) = widths {
-                advances.entry(family).or_insert(widths);
+                advances.entry(family.clone()).or_insert(widths);
+            }
+            let key = (weight, italic);
+            let list = faces_by_family.entry(family).or_default();
+            if !list.contains(&key) {
+                list.push(key);
             }
         }
         Self {
             families,
             advances,
+            faces: faces_by_family,
             accept_any: false,
         }
     }
@@ -151,6 +183,7 @@ impl FontSet {
         Self {
             families: BTreeMap::new(),
             advances: BTreeMap::new(),
+            faces: BTreeMap::new(),
             accept_any: true,
         }
     }
@@ -158,6 +191,26 @@ impl FontSet {
     /// Whether a family may be used.
     pub fn contains(&self, family: &str) -> bool {
         self.accept_any || self.families.contains_key(family)
+    }
+
+    /// Whether the family provides the exact face a text layer names.
+    ///
+    /// Exact, never nearest: a bold nobody loaded is reported as missing
+    /// rather than silently drawn with the regular face, because "looks
+    /// roughly right" is how a wrong render gets trusted. A name-only set
+    /// (built with [`FontSet::new`]) never claimed to know faces, so it
+    /// answers from family membership alone, exactly as it always did.
+    pub fn contains_face(&self, family: &str, weight: u16, style: FontStyle) -> bool {
+        if self.accept_any {
+            return true;
+        }
+        match self.faces.get(family) {
+            Some(faces) => {
+                let italic = matches!(style, FontStyle::Italic);
+                faces.iter().any(|(w, i)| *w == weight && *i == italic)
+            }
+            None => self.families.contains_key(family),
+        }
     }
 
     /// The metrics measured for a family, if any were.

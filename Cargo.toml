@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.6.1"
+version = "1.7.0"
 edition = "2021"
 rust-version = "1.92"
 license = "Apache-2.0"
@@ -18,11 +18,11 @@ repository = "https://github.com/VidGuiCode/assemblash"
 authors = ["VidGuiCode"]
 
 [workspace.dependencies]
-assemblash-liveness = { path = "crates/assemblash-liveness", version = "1.6.1" }
-assemblash-core = { path = "crates/assemblash-core", version = "1.6.1" }
-assemblash-renderer = { path = "crates/assemblash-renderer", version = "1.6.1" }
-assemblash-server = { path = "crates/assemblash-server", version = "1.6.1" }
-assemblash-mcp = { path = "crates/assemblash-mcp", version = "1.6.1" }
+assemblash-liveness = { path = "crates/assemblash-liveness", version = "1.7.0" }
+assemblash-core = { path = "crates/assemblash-core", version = "1.7.0" }
+assemblash-renderer = { path = "crates/assemblash-renderer", version = "1.7.0" }
+assemblash-server = { path = "crates/assemblash-server", version = "1.7.0" }
+assemblash-mcp = { path = "crates/assemblash-mcp", version = "1.7.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

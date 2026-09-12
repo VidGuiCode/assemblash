@@ -36,9 +36,14 @@ fn document() -> Document {
             text: "Preset".to_owned(),
             font_family: "Noto Sans".to_owned(),
             font_size: 24.0,
-            color: Color::new("#000000"),
+            color: Some(Color::new("#000000")),
             align: TextAlign::Left,
             line_height: 1.2,
+            font_weight: 400,
+            font_style: assemblash_core::FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: assemblash_core::VerticalAlign::Top,
             runs: Vec::new(),
             extra: Extras::new(),
         }),
@@ -113,7 +118,7 @@ fn a_preset_renders_identically_to_the_same_properties_set_by_hand() {
         &mut by_hand,
         &Operation::Update(UpdateLayer {
             font_size: properties.font_size,
-            color: properties.color.clone(),
+            color: properties.color.clone().map(Some),
             align: properties.align,
             line_height: properties.line_height,
             opacity: properties.opacity,
@@ -202,7 +207,7 @@ fn a_preset_only_sets_what_it_names() {
     let LayerKind::Text(text) = &document.layers[0].kind else {
         panic!("expected a text layer");
     };
-    assert_eq!(text.color, Color::new("#2f6fb8"));
+    assert_eq!(text.color, Some(Color::new("#2f6fb8")));
     // Everything the preset did not name is untouched: a colour preset is not
     // a font preset, and applying one must not quietly reset a layer.
     assert_eq!(text.font_size, 24.0);

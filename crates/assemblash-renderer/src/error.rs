@@ -16,13 +16,18 @@ pub enum RenderError {
     #[error("cannot render an invalid document: {0}")]
     InvalidDocument(#[from] ValidationErrors),
 
-    /// A text layer asks for a font family the caller did not provide.
-    #[error("layer {layer}: font family {family:?} is not available")]
+    /// A text layer asks for a font face the caller did not provide — a
+    /// family with no loaded face at that weight and style.
+    #[error("layer {layer}: font {family:?} with weight {weight} {style} is not available")]
     MissingFont {
         /// The layer at fault.
         layer: LayerId,
         /// The family it asked for.
         family: String,
+        /// The weight it asked for, as CSS names weights.
+        weight: u16,
+        /// The style it asked for, `normal` or `italic`.
+        style: &'static str,
     },
 
     /// An image layer's asset has no href.
