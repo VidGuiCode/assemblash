@@ -12,27 +12,26 @@ schema change is always noted explicitly.
 
 ## [1.7.1] — 2026-09-12
 
-**Bugfix release: `font install` now delivers a bold face.** Contains only the
-register's defect against 1.7.0; no new capability, no `schemaVersion` change,
-no change to the `Operation` union or any operation's shape, no new surface,
-and no dependency bump. Gate goldens are untouched.
+**Bugfix release: `font install` now delivers a bold face.** This release
+contains only the defect registered against 1.7.0. No new capability. No
+`schemaVersion` change. No change to the `Operation` union or any operation
+shape. No new surface. No dependency bump. The gate goldens do not change.
 
 ### Fixed
 
-- **A store built only through `font install` held no bold face, so every
-  `fontWeight: 700` layer was refused with a typed `MissingFont`.** The
-  bundled install manifest pinned Noto Sans, Noto Serif and Noto Sans Mono as
-  their variable fonts, whose fontdb-visible default face is 400; the 1.7.0
-  weight field was therefore unusable for install-only users until a bold
-  face was added by hand. The refusal was honest (never a substitution), but
-  it made the rung's headline field dead on arrival for the default path. The
-  manifest now also registers an explicit bold (700) face for each of the
-  three `default`-pack families, pinned by sha256 to a commit of the
-  notofonts distribution, and installing a family installs every face
-  registered under its name. `font install --list` and
-  `GET /api/fonts/catalogue` still answer once per family, with the byte
-  totals an install now downloads. Rendering is unchanged: same engine, same
-  goldens, same typed refusal when a face really is absent.
+- **A store built only through `font install` held no bold face. Every
+  `fontWeight: 700` layer then failed with a typed `MissingFont`.** The
+  bundled manifest pinned Noto Sans, Noto Serif and Noto Sans Mono as
+  variable fonts. The font database sees only the 400 default face of a
+  variable font. The 1.7.0 weight field then did not work for install-only
+  users. The refusal was honest. It was never a substitution. The manifest
+  now also registers a bold (700) face for each of the three `default`-pack
+  families. Each new entry pins sha256 to a commit of the notofonts
+  distribution. An install of a family now installs every face registered
+  under its name. `font install --list` and `GET /api/fonts/catalogue` still
+  answer once per family. The byte totals now include the bold faces.
+  Rendering does not change. The engine, the goldens, and the typed refusal
+  for a truly absent face stay the same.
 
 ## [1.7.0] — 2026-09-12
 
