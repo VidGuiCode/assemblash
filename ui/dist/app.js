@@ -18,6 +18,7 @@ import * as api from "./api.js";
 import { mountExport } from "./export.js";
 import { placedAssetSize, resizeItemInSelection, resizedBounds, resizedRotatedBounds, rotatedRectBounds, selectionBounds, } from "./geometry.js";
 import { mountFonts } from "./fonts.js";
+import { ActionQueue } from "./queue.js";
 import { mountTemplates } from "./templates.js";
 const state = {
     project: null,
@@ -31,6 +32,77 @@ const state = {
     pan: { x: 0, y: 0 },
     editingText: null,
 };
+// --- the action queue and the interaction measurements ------------------------
+//
+// Every interface action that talks to the engine goes through one serial
+// queue. Before it existed, an action that arrived while another was in
+// flight was dropped with no message, so a fast human lost edits — the
+// "rapid actions rejected" report. The queue never drops: each action runs
+// after the ones before it, and only a newer action that sets the same
+// property of the same layer may replace one that has not run yet.
+const queue = new ActionQueue();
+const perf = [];
+queue.onSettled = (settlement) => {
+    perf.push({
+        label: settlement.label,
+        ok: settlement.ok,
+        superseded: settlement.superseded,
+        at: performance.now() - settlement.waitedMs,
+        waitedMs: settlement.waitedMs,
+        ranMs: settlement.ranMs,
+        previewSettledAt: null,
+    });
+    if (perf.length > 50)
+        perf.shift();
+    drawPerfOverlay();
+};
+queue.onActiveChange = (active) => {
+    state.busy = active;
+    if (active) {
+        dom.status.dataset["kind"] = "info";
+        dom.saveState.innerHTML =
+            '<i class="ph ph-circle-notch" aria-hidden="true"></i><span>Working…</span>';
+    }
+    else if (dom.status.dataset["kind"] !== "error") {
+        dom.saveState.innerHTML =
+            '<i class="ph ph-check-circle" aria-hidden="true"></i><span>All changes saved</span>';
+    }
+};
+/** Stamps the preview arrival on the newest interaction still missing one. */
+function markPreviewSettled() {
+    for (let i = perf.length - 1; i >= 0; i--) {
+        const record = perf[i];
+        if (record && record.previewSettledAt === null) {
+            record.previewSettledAt = performance.now();
+            break;
+        }
+    }
+    drawPerfOverlay();
+}
+const perfOverlayEnabled = new URLSearchParams(window.location.search).has("perf");
+window.__assemblashPerf = perf;
+/** A one-line diagnostic of the last interaction, shown only with `?perf`. */
+function drawPerfOverlay() {
+    if (!perfOverlayEnabled)
+        return;
+    let overlay = document.getElementById("assemblash-perf");
+    if (!overlay) {
+        overlay = document.createElement("div");
+        overlay.id = "assemblash-perf";
+        overlay.setAttribute("style", "position:fixed;bottom:8px;left:8px;z-index:9999;font:11px/1.5 ui-monospace,monospace"
+            + ";background:rgba(0,0,0,.82);color:#eee;padding:6px 9px;border-radius:6px"
+            + ";pointer-events:none;white-space:pre");
+        document.body.append(overlay);
+    }
+    const last = perf[perf.length - 1];
+    const total = last && last.previewSettledAt !== null
+        ? `${Math.round(last.previewSettledAt - last.at)}ms`
+        : "…";
+    overlay.textContent = last
+        ? `${last.label}: waited ${last.waitedMs}ms, ran ${last.ranMs ?? "–"}ms, settled ${total}`
+            + `\nqueue ${queue.size}, records ${perf.length}`
+        : "no interactions yet";
+}
 /**
  * What a new shape is painted with, and what the inspector offers a shape
  * that has no paint at all.
@@ -231,34 +303,27 @@ function setFontFamilies(families) {
         dom.fontFamilies.append(option);
     }
 }
-/** Runs something that talks to the engine, reporting whatever it refuses. */
+/**
+ * Runs something that talks to the engine, reporting whatever it refuses.
+ *
+ * The action is queued, not dropped: `guard` returns a promise that settles
+ * when the action has run (or failed) — including after waiting behind
+ * earlier ones. Busy chrome and error text are the queue's and `report`'s
+ * business now, so nothing here decides whether "now" is a good moment.
+ */
 async function guard(what, run) {
-    if (state.busy)
-        return;
-    state.busy = true;
-    dom.status.dataset["kind"] = "info";
+    await queue.enqueue({ label: what, coalesceKey: null, run, onError: (error) => report(what, error) });
+}
+/** Shows an engine refusal or a transport failure, and why it mattered. */
+function report(what, error) {
     dom.saveState.innerHTML =
-        '<i class="ph ph-circle-notch" aria-hidden="true"></i><span>Working…</span>';
-    try {
-        await run();
+        '<i class="ph ph-warning-circle" aria-hidden="true"></i><span>Needs attention</span>';
+    if (error instanceof api.ApiError) {
+        // The engine's own words. A refusal is information, not a crash.
+        say(`${what}: ${error.message} (${error.code})`, "error");
     }
-    catch (error) {
-        dom.saveState.innerHTML =
-            '<i class="ph ph-warning-circle" aria-hidden="true"></i><span>Needs attention</span>';
-        if (error instanceof api.ApiError) {
-            // The engine's own words. A refusal is information, not a crash.
-            say(`${what}: ${error.message} (${error.code})`, "error");
-        }
-        else {
-            say(`${what}: ${String(error)}`, "error");
-        }
-    }
-    finally {
-        state.busy = false;
-        if (dom.status.dataset["kind"] !== "error") {
-            dom.saveState.innerHTML =
-                '<i class="ph ph-check-circle" aria-hidden="true"></i><span>All changes saved</span>';
-        }
+    else {
+        say(`${what}: ${String(error)}`, "error");
     }
 }
 /**
@@ -337,10 +402,15 @@ function wireLongPressMenu(target, beforeOpen) {
     target.addEventListener("pointercancel", cancel);
 }
 // --- rendering ---------------------------------------------------------------
+/** Refreshes issued later own the page state; a stale response steps aside. */
+let refreshSequence = 0;
 async function refresh() {
     if (!state.project)
         return;
+    const sequence = ++refreshSequence;
     const doc = await api.getDocument(state.project);
+    if (sequence !== refreshSequence || !state.project)
+        return;
     state.document = doc;
     state.selection = state.selection.filter((id) => api.flatten(api.layersOf(doc)).some(({ layer }) => layer.id === id));
     dom.version.textContent = String(api.versionOf(doc));
@@ -348,28 +418,76 @@ async function refresh() {
     dom.canvas.hidden = false;
     dom.documentDimensions.textContent =
         `${Math.round(doc.canvas.width).toLocaleString()} × ${Math.round(doc.canvas.height).toLocaleString()}`;
-    // A render the engine produced, shown as an image. Nothing from the
-    // document is ever interpreted as markup by this page. Fetched rather than
-    // pointed at, because an <img src> cannot carry the access token and the
-    // token must never go in a URL.
-    const previous = dom.canvasImage.src;
-    dom.canvasImage.src = await api.imageObjectUrl(api.pngUrl(state.project, api.versionOf(doc), interactivePreviewScale()));
-    if (previous.startsWith("blob:"))
-        URL.revokeObjectURL(previous);
-    clearDragPreviewCache();
-    dom.canvasImage.alt = `Preview of ${doc.name ?? state.project}`;
-    dom.canvas.style.aspectRatio = `${doc.canvas.width} / ${doc.canvas.height}`;
-    applyZoom();
-    // Read with the document, because defining or deleting one is an ordinary
-    // operation and every operation refreshes.
-    state.presets = await api.getPresets(state.project);
     // Slots come with the document itself, so there is nothing extra to fetch:
     // a template is a document that names some of its own layers.
     state.slots = (doc.slots ?? []);
     drawLayers();
     drawOverlay();
     drawInspector();
-    await drawHistory();
+    // The pixels and the side panels trail the state on purpose. Neither
+    // belongs in the serial window an interaction waits on: the preview fetch
+    // is the dominant cost of a commit, and blocking further input on it is
+    // what used to make rapid actions disappear.
+    requestPreview();
+    void loadPresets();
+    void drawHistory();
+}
+/** Reads the presets without holding anything open. Later reads win. */
+let presetsSequence = 0;
+async function loadPresets() {
+    if (!state.project)
+        return;
+    const sequence = ++presetsSequence;
+    const presets = await api.getPresets(state.project);
+    if (sequence === presetsSequence)
+        state.presets = presets;
+}
+/**
+ * Asks for the authoritative pixels, coalesced: while one preview streams,
+ * any number of newer wants collapse into the latest, and only that one is
+ * fetched next. The interaction that caused the want is already finished —
+ * this is display, not commitment, and it must never hold the queue.
+ */
+let previewStreaming = null;
+let previewWanted = null;
+function requestPreview() {
+    if (!state.project || !state.document)
+        return;
+    previewWanted = api.versionOf(state.document);
+    if (previewStreaming)
+        return;
+    const project = state.project;
+    previewStreaming = (async () => {
+        try {
+            while (previewWanted !== null) {
+                const version = previewWanted;
+                previewWanted = null;
+                // A render the engine produced, shown as an image. Nothing from the
+                // document is ever interpreted as markup by this page. Fetched rather
+                // than pointed at, because an <img src> cannot carry the access token
+                // and the token must never go in a URL.
+                const url = await api.imageObjectUrl(api.pngUrl(project, version, interactivePreviewScale()));
+                const current = state.document;
+                if (state.project !== project || !current || api.versionOf(current) !== version) {
+                    continue; // a newer state owns the canvas; its want is pending
+                }
+                const previous = dom.canvasImage.src;
+                dom.canvasImage.src = url;
+                if (previous.startsWith("blob:"))
+                    URL.revokeObjectURL(previous);
+                clearDragPreviewCache();
+                dom.canvasImage.alt = `Preview of ${current.name ?? project}`;
+                dom.canvas.style.aspectRatio = `${current.canvas.width} / ${current.canvas.height}`;
+                applyZoom();
+                markPreviewSettled();
+            }
+        }
+        finally {
+            previewStreaming = null;
+            if (previewWanted !== null)
+                requestPreview();
+        }
+    })();
 }
 /**
  * Ask the deterministic renderer for the pixels the editor can actually show.
@@ -860,8 +978,6 @@ function drawCanvasInspector() {
     form.addEventListener("change", update);
     form.addEventListener("submit", (event) => {
         event.preventDefault();
-        if (state.busy)
-            return;
         update();
         if (apply.disabled || !form.reportValidity())
             return;
@@ -1629,10 +1745,15 @@ function drawSlots(target, layer) {
     buttons.append(kind, offer);
     target.append(buttons);
 }
+/** Draws the journal when it is still the newest one requested. */
+let historySequence = 0;
 async function drawHistory() {
     if (!state.project)
         return;
+    const sequence = ++historySequence;
     const history = await api.getHistory(state.project);
+    if (sequence !== historySequence)
+        return;
     dom.history.replaceChildren();
     for (const entry of history.entries.slice().reverse()) {
         const item = document.createElement("li");
@@ -1661,15 +1782,106 @@ function resizeTo(layer, width, height) {
         return null;
     return { op: "resize", id: layer.id, width, height };
 }
-async function send(what, operation) {
-    await guard(what, async () => {
-        if (!state.project || !state.document)
+/**
+ * Latest-wins coalescing key for one operation. Only an absolute setter may
+ * coalesce: a newer "set this property to this value" says everything an
+ * older undelivered one said, only more recently. A delta (a drag's move), a
+ * create, a delete — anything where dropping an earlier intent would lose
+ * information — gets `null` and always runs.
+ */
+function coalesceKeyOf(operation) {
+    if (!("id" in operation) || operation.op !== "update")
+        return null;
+    const id = operation.id;
+    if (typeof id !== "string")
+        return null;
+    const properties = Object.keys(operation)
+        .filter((key) => key !== "op" && key !== "id" && key !== "expectedVersion")
+        .sort();
+    return properties.length > 0 ? `update:${id}:${properties.join(",")}` : null;
+}
+/**
+ * Applies an operation's geometry to the local document copy, so the page
+ * reflects the edit at once. This is arithmetic on the same numbers the drag
+ * preview already carries — not a second renderer; the authoritative pixels
+ * still come from the engine, and the response reconciles whatever this
+ * predicted. Returns `null` when the operation has no geometry to echo.
+ */
+function echoOperations(operations) {
+    if (!state.document)
+        return false;
+    let echoed = false;
+    for (const entry of operations) {
+        if (entry.op === "move" || entry.op === "resize" || entry.op === "rotate") {
+            const layer = api
+                .flatten(api.layersOf(state.document))
+                .find(({ layer }) => layer.id === entry.id)?.layer;
+            if (!layer)
+                continue;
+            if (entry.op === "move") {
+                layer.transform.x += entry.dx;
+                layer.transform.y += entry.dy;
+            }
+            else if (entry.op === "resize") {
+                layer.transform.width = entry.width;
+                layer.transform.height = entry.height;
+            }
+            else {
+                layer.transform.rotation = entry.degrees;
+            }
+            echoed = true;
+        }
+    }
+    if (echoed) {
+        drawLayers();
+        drawOverlay();
+        drawInspector();
+    }
+    return echoed;
+}
+/**
+ * A snapshot of the local document an echo changed, restorable when the
+ * engine refuses the echo'd intent: the prediction is undone and the refusal
+ * is shown, so the page never keeps a state the server never accepted.
+ */
+function snapshotForEcho() {
+    const before = state.document ? structuredClone(state.document) : null;
+    return () => {
+        if (!before || state.document === before)
             return;
-        const result = await api.applyOperation(state.project, operation, api.versionOf(state.document));
-        say(`${what}: done (version ${result.version})`);
-        if (result.created?.length)
-            state.selection = result.created;
-        await refresh();
+        state.document = before;
+        drawLayers();
+        drawOverlay();
+        drawInspector();
+    };
+}
+async function send(what, operation) {
+    if (!state.project || !state.document)
+        return;
+    // The project the edit belongs to is read here, at intent time: dispatch
+    // may wait behind earlier actions, and by then the page may have opened a
+    // different project. An edit is never re-targeted at the project that
+    // happens to be open when it leaves.
+    const project = state.project;
+    const restore = snapshotForEcho();
+    echoOperations([operation]);
+    await queue.enqueue({
+        label: what,
+        coalesceKey: coalesceKeyOf(operation),
+        run: async () => {
+            if (state.project !== project || !state.document)
+                return;
+            const result = await api.applyOperation(project, operation, api.versionOf(state.document));
+            say(`${what}: done (version ${result.version})`);
+            if (result.created?.length)
+                state.selection = result.created;
+            await refresh();
+        },
+        onError: (error) => {
+            restore();
+            report(what, error);
+        },
+        onSuperseded: restore,
     });
 }
 /**
@@ -1682,14 +1894,31 @@ async function sendSequence(what, operations) {
     await sendBatch(what, operations);
 }
 async function sendBatch(what, operations) {
-    await guard(what, async () => {
-        if (!state.project || !state.document || operations.length === 0)
-            return;
-        const result = await api.applyOperationBatch(state.project, what, operations, api.versionOf(state.document));
-        if (result.created?.length)
-            state.selection = result.created;
-        say(`${what}: done (version ${result.version})`);
-        await refresh();
+    if (!state.project || !state.document || operations.length === 0)
+        return;
+    // A batch is a delta intent — one drag, one paste — so it never coalesces:
+    // every pointerup is one journalled transaction, and the journal must match
+    // the edits a fast human actually made. As with `send`, the project is read
+    // at intent time so a queued edit is never re-targeted by a later open.
+    const project = state.project;
+    const restore = snapshotForEcho();
+    echoOperations(operations);
+    await queue.enqueue({
+        label: what,
+        coalesceKey: null,
+        run: async () => {
+            if (state.project !== project || !state.document)
+                return;
+            const result = await api.applyOperationBatch(project, what, operations, api.versionOf(state.document));
+            if (result.created?.length)
+                state.selection = result.created;
+            say(`${what}: done (version ${result.version})`);
+            await refresh();
+        },
+        onError: (error) => {
+            restore();
+            report(what, error);
+        },
     });
 }
 function beginDrag(event, selected, bounds, mode, handle) {

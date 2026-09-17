@@ -286,6 +286,14 @@ restarts.
   just hidden behind UI controls.
 - Project and asset paths stay inside the configured filesystem boundary.
 - Imported SVGs are sanitized before they enter the asset store.
+- The editor queues every action instead of dropping a rapid one. Each edit
+  reaches the journal. The canvas echoes your edit at once. The authoritative
+  render then reconciles it, so what you see stays what you get.
+
+Open the editor with `?perf` in the address bar to see how long each
+interaction took: the wait in the queue, the run, and the settle of the
+authoritative preview. The same numbers are on `window.__assemblashPerf` for
+a script to read.
 
 ## Choose the interface that fits
 

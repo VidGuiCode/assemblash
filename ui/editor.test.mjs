@@ -366,7 +366,7 @@ async function startFixtureServer() {
 
     const requested = url.pathname === "/" ? "index.html" : basename(url.pathname);
     const allowed = new Set([
-      "index.html", "app.js", "api.js", "export.js", "fonts.js", "geometry.js", "templates.js", "token.js",
+      "index.html", "app.js", "api.js", "export.js", "fonts.js", "geometry.js", "queue.js", "templates.js", "token.js",
       "studio.css", "style.css", "phosphor.css", "Phosphor.woff2",
     ]);
     if (!allowed.has(requested)) return send(404, { error: { code: "notFound", message: url.pathname } });
@@ -1150,8 +1150,10 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
   await t.test("each shape is added by one create carrying its geometry and paint", async () => {
     fixture.reset();
     await openProject(page);
-    // Opening says so before its last read has returned, and a create sent
-    // while the page is still busy is dropped rather than queued.
+    // Opening says so before its last read has returned. Waiting for the
+    // saved state keeps this journey counting one interaction's writes at a
+    // time; a create rushed in before that would queue behind the open and
+    // still land, in order.
     await waitForSaved(page);
     await page.click("#add-shape");
     assert.deepEqual(await page.evaluate(`({
@@ -1326,6 +1328,90 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.deepEqual(fixture.writes[0].body.operation.effects, [
       { type: "dropShadow", dx: 4, dy: 10, blur: 6, color: "#00000080" },
     ]);
+  });
+
+  await t.test("a rapid burst of edits is never dropped, and the journal matches", async () => {
+    await selectLayer(page, "layer_text");
+    const before = await page.evaluate(`document.querySelector(".layer[data-id='layer_text']") !== null`);
+    assert.ok(before, "the text layer is on the page");
+    const startX = fixture.layers().find((one) => one.id === "layer_text")?.transform.x ?? 0;
+
+    // Twenty nudges with no waiting between them: faster than any round trip
+    // can finish. Dropping these was the defect this queue exists to fix —
+    // every keypress is an intent, and every intent must reach the journal.
+    fixture.writes.length = 0;
+    for (let i = 0; i < 20; i++) {
+      await page.key("ArrowRight", { code: "ArrowRight" });
+    }
+    await waitForWrites(fixture, 20);
+    await waitForSaved(page);
+
+    assert.equal(fixture.writes.length, 20, "one write per keypress, none dropped");
+    const moves = fixture.writes.map((one) => one.body.commands[0]);
+    assert.ok(moves.every((move) => move.op === "move" && move.id === "layer_text" && move.dx === 1 && move.dy === 0));
+    const finalX = fixture.layers().find((one) => one.id === "layer_text")?.transform.x ?? 0;
+    assert.equal(finalX, startX + 20, "the document moved by exactly the nudges sent");
+    const status = await page.evaluate(`({
+      kind: document.querySelector("#status").dataset["kind"] ?? "",
+      saved: document.querySelector("#save-state")?.textContent ?? ""
+    })`);
+    assert.notEqual(status.kind, "error", "a fast human generated no error");
+    assert.match(status.saved, /All changes saved/);
+  });
+
+  await t.test("rapid edits on one field coalesce to the newest; different fields never do", async () => {
+    await selectLayer(page, "layer_text");
+    // Both edits of a pair are dispatched inside one browser task: between
+    // two separate evaluates the whole queue could drain, and the journey
+    // would measure a coincidence rather than the contract.
+    const setFields = async (edits) => {
+      await page.evaluate(`(() => {
+        const set = (label, value) => {
+          const wrapper = [...document.querySelectorAll("#advanced-inspector label.field")]
+            .find((one) => one.textContent.trim().startsWith(label));
+          const input = wrapper && wrapper.querySelector("input");
+          if (!input) throw new Error("no " + label + " field");
+          input.value = value;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        ${edits.map(([label, value]) => `set(${JSON.stringify(label)}, ${JSON.stringify(value)});`).join("\n        ")}
+      })()`);
+    };
+
+    // Coalescing is a statement about a queue that cannot dispatch fast
+    // enough, so the journey loads it first: twenty nudges still draining
+    // when the field edits land behind them.
+    fixture.writes.length = 0;
+    for (let i = 0; i < 20; i++) {
+      await page.key("ArrowRight", { code: "ArrowRight" });
+    }
+    // Two changes to the same property before either can dispatch: the newer
+    // says everything the older said, so only it is sent.
+    await setFields([["Font size", "36"], ["Font size", "40"]]);
+    await waitForWrites(fixture, 21);
+    await waitForSaved(page);
+
+    assert.equal(fixture.writes.length, 21, "twenty nudges and one — not two — font size write");
+    const moves = fixture.writes.slice(0, 20).map((one) => one.body.commands[0].op);
+    assert.ok(moves.every((op) => op === "move"));
+    assert.deepEqual(fixture.writes[20].body.operation, {
+      op: "update",
+      id: "layer_text",
+      fontSize: 40,
+    }, "the coalesced write carries the newest value");
+
+    // Alternating properties say different things; loaded or idle, neither
+    // may replace the other, and the journal must match the edits exactly.
+    fixture.writes.length = 0;
+    for (let i = 0; i < 20; i++) {
+      await page.key("ArrowRight", { code: "ArrowRight" });
+    }
+    await setFields([["Font size", "52"], ["Line height", "1.6"]]);
+    await waitForWrites(fixture, 22);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 22, "different properties never replace each other");
+    assert.deepEqual(fixture.writes[20].body.operation, { op: "update", id: "layer_text", fontSize: 52 });
+    assert.deepEqual(fixture.writes[21].body.operation, { op: "update", id: "layer_text", lineHeight: 1.6 });
   });
 
 });

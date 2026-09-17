@@ -10,6 +10,65 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+**Target: 1.9.0 — interaction responsiveness.** The date is set when the
+release is cut.
+
+No 1.8.1 was released: no defect was outstanding after 1.8.0. The sweep ran
+on the released windows-x86_64 artefact on 2026-09-16. Every 1.8.0 feature
+probed clean on all three transports.
+
+**The interface stops dropping rapid edits.** A fast human lost edits before:
+an action that arrived while another was in flight was discarded, with no
+message and no journal entry. Every action is queued now. The canvas echoes
+an edit at once, and the authoritative render reconciles it.
+
+`schemaVersion` stays **1** and the `Operation` union does not grow. No
+engine surface changes. **Oldest build that opens a 1.9.0 document: 1.0.**
+
+### Added
+
+- **A serial action queue in the interface** (`ui/src/queue.ts`). Every
+  action runs; none is dropped. An error in one action reports and lets the
+  next one run. A newer edit that sets the same property of the same layer
+  replaces an older one that has not left yet. Different properties never
+  replace each other, and a delta — a drag, a nudge, a paste — never
+  coalesces: each pointerup stays one journalled transaction.
+- **A local echo for transform edits.** The page applies a move, a resize or
+  a rotation to its document copy at once, with the same arithmetic the drag
+  preview already uses. This is not a second renderer. The engine's pixels
+  stay the only truth. A refusal rolls the echo back and shows the error.
+- **The preview, presets and history fetches left the serial window.** An
+  interaction now waits on the operation and the document read only. On the
+  measurement fixture (1920 × 1080, 30 layers, loopback, released 1.8.0
+  binary) the blocking path falls from about 124 ms median to about 21 ms;
+  the preview fetch was about 80 ms of the old total and now streams behind
+  the queue, coalesced to the newest version.
+- **Latency instrumentation.** Each interaction records dispatch, wait, run
+  and preview-settle timings. Read them from `window.__assemblashPerf`, or
+  open the editor with `?perf` for a one-line overlay. The numbers above come
+  from this counter's server-side equivalent, measured before the change.
+- **Tests.** `ui/queue.test.mjs` covers the queue contract without a browser:
+  no drop, order, latest-wins, error isolation, observer safety. Two new
+  editor journeys cover the same contract through the real interface: twenty
+  rapid nudges produce twenty journal writes and no error, and same-property
+  edits under load coalesce to the newest value while different properties
+  never do.
+
+### Notes
+
+- **The defect was a silent drop, not a version conflict.** The original
+  diagnosis guessed a 409. Reading the landed code showed the interface
+  dropped a concurrent action before any request was sent, so a fast human
+  could not reach the version check at all. The check still protects real
+  cross-client races: twenty concurrent same-version batches against a local
+  server answer one 200 and nineteen `409 versionConflict`, and the journal
+  gains exactly one entry.
+- `queue.js` joins the interface assets the binary embeds (`ui.rs`) and the
+  journey fixture's allowlist.
+- Engine behaviour is unchanged. The full Rust workspace suite passes with
+  every determinism-gate golden in place. CLI, HTTP and MCP surfaces did not
+  move, and export bytes do not change.
+
 ## [1.8.0] — 2026-09-12
 
 **Clipping and cropping.** A layer can mask itself to a rectangle or an
