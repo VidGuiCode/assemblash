@@ -11,16 +11,26 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_assemblash")
 }
 
+/// Spawns the binary with the ambient font-store configuration removed.
+///
+/// `--font-store` also reads `ASSEMBLASH_FONT_STORE`, so a machine that sets
+/// it would turn every spawn into "a store was given" — and the add-text
+/// family check that is a courtesy of an explicit store would refuse fonts
+/// these fixtures never installed. Several tests here mean "no store given"
+/// on purpose, and now say so.
+fn assemblash() -> Command {
+    let mut command = Command::new(binary());
+    command.env_remove("ASSEMBLASH_FONT_STORE");
+    command
+}
+
 fn font_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../assemblash-renderer/tests/fonts")
 }
 
 #[track_caller]
 fn run(args: &[&str]) -> String {
-    let output = Command::new(binary())
-        .args(args)
-        .output()
-        .expect("the binary runs");
+    let output = assemblash().args(args).output().expect("the binary runs");
     assert!(
         output.status.success(),
         "assemblash {args:?} failed: {}",
@@ -31,10 +41,7 @@ fn run(args: &[&str]) -> String {
 
 #[track_caller]
 fn run_failing(args: &[&str]) -> String {
-    let output = Command::new(binary())
-        .args(args)
-        .output()
-        .expect("the binary runs");
+    let output = assemblash().args(args).output().expect("the binary runs");
     assert!(!output.status.success(), "assemblash {args:?} should fail");
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
@@ -45,10 +52,7 @@ fn run_failing(args: &[&str]) -> String {
 /// test about warnings has to read both and keep them apart.
 #[track_caller]
 fn run_output(args: &[&str]) -> (String, String) {
-    let output = Command::new(binary())
-        .args(args)
-        .output()
-        .expect("the binary runs");
+    let output = assemblash().args(args).output().expect("the binary runs");
     assert!(
         output.status.success(),
         "assemblash {args:?} failed: {}",
@@ -562,7 +566,7 @@ fn the_workspace_command_creates_a_workspace_on_first_run() {
     let scratch = tempfile::tempdir().unwrap();
     let root = scratch.path().join("data");
 
-    let output = Command::new(binary())
+    let output = assemblash()
         .args(["workspace"])
         .env("ASSEMBLASH_WORKSPACE", &root)
         .output()
@@ -583,7 +587,7 @@ fn the_workspace_command_creates_a_workspace_on_first_run() {
 
     // Running it again reports the same place and changes nothing.
     let settings = std::fs::read_to_string(root.join("config.toml")).unwrap();
-    Command::new(binary())
+    assemblash()
         .args(["workspace"])
         .env("ASSEMBLASH_WORKSPACE", &root)
         .output()
@@ -982,7 +986,7 @@ fn canvas_set_resizes_clears_background_and_undoes() {
         std::fs::read(project.join("document.json")).unwrap(),
         before
     );
-    let output = std::process::Command::new(binary())
+    let output = assemblash()
         .args([
             "canvas",
             "set",

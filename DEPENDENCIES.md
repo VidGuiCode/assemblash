@@ -211,9 +211,9 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | rsqlite-vfs | 0.1.1 | MIT |
 | rusqlite | 0.38.0 | MIT |
 | rustix | 1.1.4 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| rustls | 0.23.43 | Apache-2.0 OR ISC OR MIT |
+| rustls | 0.23.45 | Apache-2.0 OR ISC OR MIT |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
-| rustls-webpki | 0.103.13 | ISC |
+| rustls-webpki | 0.103.15 | ISC |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | rusty-fork | 0.3.1 | MIT/Apache-2.0 |
 | ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 |

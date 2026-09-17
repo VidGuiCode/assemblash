@@ -25,9 +25,21 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_assemblash")
 }
 
+/// Spawns the binary with the ambient font-store configuration removed.
+///
+/// `--font-store` also reads `ASSEMBLASH_FONT_STORE`, so a machine that sets
+/// it would hand these tests a personal library the fixtures never installed
+/// into, and `add-text --font Inter` would refuse for a reason the test never
+/// chose. Every spawn here means "no store given", and now says so.
+fn assemblash() -> std::process::Command {
+    let mut command = Command::new(binary());
+    command.env_remove("ASSEMBLASH_FONT_STORE");
+    command
+}
+
 #[track_caller]
 fn run(args: &[&str]) -> String {
-    let output = Command::new(binary()).args(args).output().unwrap();
+    let output = assemblash().args(args).output().unwrap();
     assert!(
         output.status.success(),
         "assemblash {args:?} failed: {}",
@@ -39,7 +51,7 @@ fn run(args: &[&str]) -> String {
 /// Runs a command that is expected to be killed part-way through.
 #[track_caller]
 fn run_crashing(args: &[&str], at: &str) {
-    let output = Command::new(binary())
+    let output = assemblash()
         .args(args)
         .env("ASSEMBLASH_CRASH_AT", at)
         .output()
@@ -153,7 +165,7 @@ fn a_kill_during_the_document_write_leaves_nothing_corrupt() {
 fn a_kill_during_project_creation_leaves_no_broken_project() {
     let workspace = tempfile::tempdir().unwrap();
     let project = workspace.path().join("half-made");
-    let output = Command::new(binary())
+    let output = assemblash()
         .args(["new", project.to_str().unwrap()])
         .env("ASSEMBLASH_CRASH_AT", "document-tmp-written")
         .output()
@@ -162,7 +174,7 @@ fn a_kill_during_project_creation_leaves_no_broken_project() {
 
     // There is no document.json, so opening it fails with the honest error
     // rather than pretending there is a project here.
-    let show = Command::new(binary())
+    let show = assemblash()
         .args(["show", project.to_str().unwrap()])
         .output()
         .unwrap();
@@ -200,7 +212,7 @@ fn a_locked_project_is_refused_to_a_second_process() {
     // Hold the lock by hand, the way a live process would.
     std::fs::write(project.join(".assemblash-lock"), "{\"pid\":424242}").unwrap();
 
-    let output = Command::new(binary())
+    let output = assemblash()
         .args(as_args(&add_text(&project, "blocked")))
         .output()
         .unwrap();
