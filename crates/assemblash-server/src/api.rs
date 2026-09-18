@@ -43,7 +43,7 @@ pub fn router(
     state: AppState,
     ui: crate::UiSource,
     shutdown: crate::Shutdown,
-    stop: tokio::sync::watch::Sender<bool>,
+    stop: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
     access: crate::Access,
 ) -> Router {
     router_with_limits(state, ui, shutdown, stop, access, BodyLimits::default())
@@ -61,7 +61,7 @@ pub fn router_with_limits(
     state: AppState,
     ui: crate::UiSource,
     shutdown: crate::Shutdown,
-    stop: tokio::sync::watch::Sender<bool>,
+    stop: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
     access: crate::Access,
     limits: BodyLimits,
 ) -> Router {
@@ -147,8 +147,30 @@ pub fn router_with_limits(
         .layer(axum::Extension(ui))
         .layer(axum::Extension(shutdown))
         .layer(axum::Extension(access))
-        .layer(axum::Extension(std::sync::Arc::new(stop)))
+        .layer(axum::Extension(stop))
         .with_state(state)
+}
+
+/// What `GET /api/agent-sessions` answers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentSessions {
+    /// How many MCP sessions the endpoint holds now.
+    pub(crate) count: usize,
+}
+
+/// What `GET /api/agent-access` answers. Never the token.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentAccess {
+    /// The MCP endpoint this process serves.
+    pub(crate) mcp_url: String,
+    /// The running executable, for a stdio configuration.
+    pub(crate) executable: String,
+    /// The workspace this server serves.
+    pub(crate) workspace: String,
+    /// Whether a client must send the access token.
+    pub(crate) token_required: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -168,7 +190,7 @@ struct Version {
 ///
 /// One place, wrapping every route, because an authentication check each
 /// handler has to remember is one a new handler will forget.
-async fn require_access(
+pub(crate) async fn require_access(
     axum::extract::State(access): axum::extract::State<crate::Access>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -180,6 +202,21 @@ async fn require_access(
         return next.run(request).await;
     }
     match access.check(request.headers()) {
+        Ok(()) => next.run(request).await,
+        Err(error) => error.into_response(),
+    }
+}
+
+/// Refuses a request from a web page that must not use this server.
+///
+/// See [`crate::site`]: on a loopback server with no token, a foreign `Host`
+/// is DNS rebinding and a foreign `Origin` is a cross-site request.
+pub(crate) async fn require_same_site(
+    axum::extract::State(guard): axum::extract::State<crate::SiteGuard>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    match guard.check(request.headers()) {
         Ok(()) => next.run(request).await,
         Err(error) => error.into_response(),
     }

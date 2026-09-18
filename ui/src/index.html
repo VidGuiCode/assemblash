@@ -47,6 +47,9 @@
           </span>
         </div>
         <div class="topbar-actions">
+          <button id="agents" class="icon-button" type="button" title="Connect an AI agent">
+            <i class="ph ph-robot" aria-hidden="true"></i><span class="sr-only">Connect an AI agent</span>
+          </button>
           <button id="reload" class="icon-button" type="button" title="Reload project">
             <i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span class="sr-only">Reload project</span>
           </button>
@@ -162,6 +165,7 @@
                 <h1>Create precisely.<br />Keep control.</h1>
                 <p>Build layered visuals, make reversible edits, and export the exact pixels you see.</p>
                 <button id="empty-create" class="button button-primary" type="button"><i class="ph ph-plus" aria-hidden="true"></i> Create a project</button>
+                <button id="empty-agents" class="button button-quiet" type="button"><i class="ph ph-robot" aria-hidden="true"></i> Connect an AI agent</button>
                 <div id="recents" class="recents" hidden aria-label="Recent projects"></div>
               </div>
               <div id="canvas" hidden tabindex="0" aria-label="Canvas">
@@ -203,6 +207,7 @@
         <div id="status" data-kind="info" aria-live="polite">Starting Assemblash…</div>
         <span class="status-divider" aria-hidden="true"></span>
         <span class="local-status"><i class="ph ph-check-circle" aria-hidden="true"></i> Saved locally</span>
+        <span id="agents-connected" class="agents-connected" hidden></span>
         <span class="statusbar-spacer"></span>
         <span class="pixel-status"><i class="ph ph-eye" aria-hidden="true"></i> Pixel-true preview</span>
         <span id="document-dimensions">No project open</span>
@@ -289,6 +294,25 @@
           <button id="export-confirm" class="button button-primary" value="default">
             <i class="ph ph-export" aria-hidden="true"></i> Export PNG
           </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="agents-dialog" class="modal agents-modal">
+      <form method="dialog">
+        <div class="modal-heading">
+          <div><p class="eyebrow">MCP</p><h2>Connect an AI agent</h2></div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">
+            <i class="ph ph-x" aria-hidden="true"></i><span class="sr-only">Close</span>
+          </button>
+        </div>
+        <p class="agents-intro">An agent on this computer can work on your projects while this editor runs. You and the agent edit the same projects, and the editor shows the agent's changes.</p>
+        <p class="agents-intro">Use a command configuration when your client supports it. The port can change when 8787 is in use, and the command finds this editor on any port.</p>
+        <p id="agents-token" class="agents-intro" hidden>This server requires the access token. <code>assemblash token show</code> prints it. A client that uses the URL sends it as <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+        <div id="agents-blocks" class="agent-blocks"></div>
+        <div class="modal-actions">
+          <span class="modal-spacer"></span>
+          <button class="button button-primary" value="cancel" formnovalidate>Done</button>
         </div>
       </form>
     </dialog>

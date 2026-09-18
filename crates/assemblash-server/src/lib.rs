@@ -18,6 +18,7 @@ pub mod auth;
 pub mod error;
 pub mod instance;
 pub mod render;
+pub mod site;
 pub mod state;
 pub mod ui;
 
@@ -29,6 +30,7 @@ use axum::Router;
 pub use auth::{Access, AccessError};
 pub use error::ApiError;
 pub use instance::Shutdown;
+pub use site::SiteGuard;
 pub use state::AppState;
 pub use ui::UiSource;
 
@@ -75,6 +77,15 @@ pub struct Server {
     address: SocketAddr,
     /// Flipped when the interface asks the server to stop.
     stopping: tokio::sync::watch::Receiver<bool>,
+    /// The state the routes share, so another transport mounted on this
+    /// server works on the same open projects rather than a second registry.
+    state: AppState,
+    /// Who may talk to this server, applied to mounted services as well.
+    access: Access,
+    /// Which web pages may use it, applied to every route when it serves.
+    site: SiteGuard,
+    /// Asks this server to stop, the way the interface's button does.
+    stop: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl Server {
@@ -144,10 +155,12 @@ impl Server {
     ) -> Result<Self, ServeError> {
         let access = auth::policy_for(address, workspace.config().token.as_deref())
             .map_err(|source| ServeError::Access { source })?;
+        let site = SiteGuard::for_bind(address, &access, &workspace.config().allowed_hosts);
 
         let (send, receive) = tokio::sync::watch::channel(false);
+        let stop = std::sync::Arc::new(send);
         let state = AppState::with_reclaim(workspace, reclaim_stale_locks);
-        let router = api::router(state, ui, shutdown, send, access);
+        let router = api::router(state.clone(), ui, shutdown, stop.clone(), access.clone());
 
         // Port 0 as a fallback only for loopback: a server meant to be
         // reachable at a known address that quietly moved to another port
@@ -171,6 +184,10 @@ impl Server {
                         router,
                         address,
                         stopping: receive,
+                        state,
+                        access,
+                        site: site.clone(),
+                        stop: stop.clone(),
                     });
                 }
                 Err(source) => last = Some(source),
@@ -197,13 +214,152 @@ impl Server {
         format!("http://{}", self.address)
     }
 
+    /// The shared state behind every route.
+    ///
+    /// A clone over the same open projects, not a copy: a transport built from
+    /// it — the hosted MCP endpoint — reads and writes the sessions the HTTP
+    /// API holds, under the same lock.
+    pub fn state(&self) -> AppState {
+        self.state.clone()
+    }
+
+    /// Whether requests to this server need a token.
+    pub fn needs_token(&self) -> bool {
+        self.access.needs_token()
+    }
+
+    /// Whether the bound address reaches only this machine.
+    pub fn is_loopback(&self) -> bool {
+        auth::is_loopback(self.address.ip())
+    }
+
+    /// The `Host` and `Origin` checks this server applies to every route.
+    pub fn site_guard(&self) -> &SiteGuard {
+        &self.site
+    }
+
+    /// A handle that asks this server to stop, as `POST /api/shutdown` does.
+    ///
+    /// For a caller that must stop it from outside a request: the command
+    /// line, when the person presses Ctrl-C. Sending `true` starts the same
+    /// graceful shutdown, so in-flight requests finish and every open project
+    /// is released.
+    pub fn stop_handle(&self) -> std::sync::Arc<tokio::sync::watch::Sender<bool>> {
+        self.stop.clone()
+    }
+
+    /// Adds `GET /api/agent-sessions`: how many AI agents are connected.
+    ///
+    /// The count comes from the mounted MCP endpoint, which the server crate
+    /// cannot see, so the caller that mounts it passes a way to ask.
+    pub fn with_agent_sessions(
+        mut self,
+        count: impl Fn() -> usize + Send + Sync + 'static,
+    ) -> Self {
+        let count = std::sync::Arc::new(count);
+        let route = Router::new()
+            .route(
+                "/api/agent-sessions",
+                axum::routing::get(move || {
+                    let count = count.clone();
+                    async move { axum::Json(api::AgentSessions { count: count() }) }
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                self.access.clone(),
+                api::require_access,
+            ));
+        self.router = self.router.merge(route);
+        self
+    }
+
+    /// A receiver that changes when this server is asked to stop.
+    ///
+    /// A mounted service that holds connections open — an event stream —
+    /// watches this to close them, so a graceful shutdown does not wait for
+    /// clients that will never disconnect.
+    pub fn stop_signal(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.stopping.clone()
+    }
+
+    /// Mounts another service at a fixed path, behind the same access check
+    /// as every route.
+    ///
+    /// The server crate cannot depend on the transports built over it, so
+    /// the caller that knows both does the wiring. The access check is
+    /// applied here and not left to the caller: a mounted service that
+    /// skipped it would be a way around the token.
+    ///
+    /// # Panics
+    ///
+    /// When `path` is not a valid route or is already taken — a programming
+    /// error in the caller, found the first time the binary starts.
+    pub fn with_service<S>(mut self, path: &str, service: S) -> Self
+    where
+        S: tower_service::Service<axum::extract::Request, Error = std::convert::Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        S::Response: axum::response::IntoResponse,
+        S::Future: Send + 'static,
+    {
+        let guarded =
+            Router::new()
+                .route_service(path, service)
+                .layer(axum::middleware::from_fn_with_state(
+                    self.access.clone(),
+                    api::require_access,
+                ));
+        self.router = self.router.merge(guarded);
+        self
+    }
+
+    /// Adds `GET /api/agent-access`: what an AI agent needs to connect to the
+    /// MCP endpoint mounted at `mcp_path`.
+    ///
+    /// Added by the caller that mounts the endpoint, so a server without one
+    /// never advertises it. The answer is local information for a local page
+    /// — the executable path and the workspace — and it sits behind the same
+    /// access check as every route. It never contains the token.
+    pub fn with_agent_access(mut self, mcp_path: &str) -> Self {
+        let access = api::AgentAccess {
+            mcp_url: format!("{}{mcp_path}", self.url()),
+            executable: std::env::current_exe()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            workspace: self.state.workspace().root().to_string_lossy().into_owned(),
+            token_required: self.access.needs_token(),
+        };
+        let route = Router::new()
+            .route(
+                "/api/agent-access",
+                axum::routing::get(move || {
+                    let access = access.clone();
+                    async move { axum::Json(access) }
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                self.access.clone(),
+                api::require_access,
+            ));
+        self.router = self.router.merge(route);
+        self
+    }
+
     /// Serves until the process is stopped, or the interface asks it to stop.
     ///
     /// A graceful shutdown: in-flight requests finish, and every open session
     /// is dropped — which releases its lock file — before this returns.
     pub async fn serve(self) -> Result<(), ServeError> {
         let mut stopping = self.stopping;
-        axum::serve(self.listener, self.router)
+        // Applied here, to the finished router, so that routes and services
+        // mounted after the bind are covered too.
+        let router = self.router.layer(axum::middleware::from_fn_with_state(
+            self.site,
+            api::require_same_site,
+        ));
+        axum::serve(self.listener, router)
             .with_graceful_shutdown(async move {
                 // `changed()` only returns once someone sets it, which is the
                 // shutdown endpoint.

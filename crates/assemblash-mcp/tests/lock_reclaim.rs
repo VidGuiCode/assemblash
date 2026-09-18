@@ -229,3 +229,28 @@ async fn without_the_flag_a_stale_lock_is_still_the_typed_refusal() {
 
     client.cancel().await.unwrap();
 }
+
+/// An agent on the editor's own endpoint opens the project first. It is told
+/// about the reclaimed lock, and the notice stays for the person's editor,
+/// whose project summary delivers it once.
+#[test]
+fn a_hosted_agent_does_not_take_the_reclaim_notice_from_the_editor() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    let directory = workspace_with_project(&root);
+    leave_a_stale_lock(&directory);
+
+    let state =
+        assemblash_server::AppState::with_reclaim(Workspace::open_or_create(&root).unwrap(), true);
+    let agent = assemblash_mcp::Backend::from_state(state.clone());
+    let opened = agent.open_project("poster").unwrap();
+    assert!(opened.note.is_some(), "the agent is told about the reclaim");
+    // A second open by the agent still tells it: the notice was not taken.
+    assert!(agent.open_project("poster").unwrap().note.is_some());
+
+    assert!(
+        state.take_reclaim_event("poster").is_some(),
+        "the editor still has the notice to deliver"
+    );
+    assert!(state.take_reclaim_event("poster").is_none());
+}

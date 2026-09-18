@@ -1200,3 +1200,134 @@ impl IsSomeStr for Value {
         self.as_str().is_some_and(|text| !text.is_empty())
     }
 }
+
+/// An agent cannot see its own render, so a write says at once when the text
+/// it just wrote does not fit. Before, the same words arrived only at export.
+#[tokio::test]
+async fn a_text_write_reports_what_the_export_would_report() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let client = connect(&root).await;
+
+    let outcome = structured(
+        &client
+            .call_tool(call(
+                "add_text_layer",
+                args(json!({
+                    "project": "poster",
+                    "expectedVersion": 0,
+                    "x": 0.0, "y": 0.0, "width": 120.0, "height": 12.0,
+                    "text": "this line needs far more height than twelve pixels",
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 24.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let codes: Vec<&str> = outcome["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|warning| warning["code"].as_str().unwrap())
+        .collect();
+    assert!(codes.contains(&"textOverflowsBox"), "{outcome}");
+    let layer = outcome["created"][0].as_str().unwrap();
+    assert!(
+        outcome["warnings"][0]["layerId"] == json!(layer),
+        "{outcome}"
+    );
+
+    // Making the box tall enough is one change, and it says nothing more.
+    let fixed = structured(
+        &client
+            .call_tool(call(
+                "set_layer_box",
+                args(json!({
+                    "project": "poster",
+                    "expectedVersion": 1,
+                    "layerId": layer,
+                    "y": 20.0,
+                    "height": 260.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(fixed["version"], 2, "one transaction, not two: {fixed}");
+    let after: Vec<&str> = fixed["warnings"]
+        .as_array()
+        .map(|warnings| {
+            warnings
+                .iter()
+                .map(|warning| warning["code"].as_str().unwrap())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !after.contains(&"textOverflowsBox"),
+        "the text fits its box now: {fixed}"
+    );
+
+    // One undo puts the box back, because it was one transaction.
+    client
+        .call_tool(call("undo", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+    let state = structured(
+        &client
+            .call_tool(call(
+                "get_document_state",
+                args(json!({ "project": "poster" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let placed = layer_of(&state, layer);
+    assert_eq!(placed["transform"]["height"], 12.0);
+    assert_eq!(placed["transform"]["y"], 0.0);
+    client.cancel().await.unwrap();
+}
+
+/// An export never replaces a file unless the call says so.
+#[tokio::test]
+async fn an_export_refuses_to_replace_a_file_unless_asked() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let client = connect(&root).await;
+
+    let first = structured(
+        &client
+            .call_tool(call(
+                "export_document",
+                args(json!({ "project": "poster", "name": "sheet" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(first["path"], "exports/sheet.png");
+    assert_eq!(first["replaced"], false);
+
+    let again = client
+        .call_tool(call(
+            "export_document",
+            args(json!({ "project": "poster", "name": "sheet" })),
+        ))
+        .await;
+    let refusal = format!("{:?}", again.unwrap_err());
+    assert!(refusal.contains("exportExists"), "{refusal}");
+
+    let replaced = structured(
+        &client
+            .call_tool(call(
+                "export_document",
+                args(json!({ "project": "poster", "name": "sheet", "overwrite": true })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(replaced["replaced"], true);
+    client.cancel().await.unwrap();
+}

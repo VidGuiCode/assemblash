@@ -306,6 +306,27 @@ export async function serverInfo(): Promise<ServerInfo> {
   return request<ServerInfo>("/api/version");
 }
 
+/** What an AI agent needs to connect to this editor. Never the token. */
+export interface AgentAccess {
+  /** The MCP endpoint this process serves. */
+  mcpUrl: string;
+  /** The full path of the running executable, for a stdio configuration. */
+  executable: string;
+  /** The workspace this editor serves. */
+  workspace: string;
+  /** Whether a client must send the workspace access token. */
+  tokenRequired: boolean;
+}
+
+export async function agentAccess(): Promise<AgentAccess> {
+  return request<AgentAccess>("/api/agent-access");
+}
+
+/** How many AI agents are connected to this editor's MCP endpoint. */
+export async function agentSessions(): Promise<{ count: number }> {
+  return request<{ count: number }>("/api/agent-sessions");
+}
+
 /**
  * Uploads a file into a project's assets.
  *
@@ -767,7 +788,22 @@ export async function fetchBlob(url: string): Promise<Blob> {
     throw new ApiError("unauthorized", "this server needs an access token", null);
   }
   if (!response.ok) {
-    throw new ApiError(`http${response.status}`, response.statusText, null);
+    // A refused render (a missing font, say) comes in the API envelope, and
+    // its code is the useful part: read it like every other refusal.
+    let code = `http${response.status}`;
+    let message = response.statusText;
+    let details: unknown = null;
+    try {
+      const body = await response.json();
+      if (body?.error) {
+        code = body.error.code ?? code;
+        message = body.error.message ?? message;
+        details = body.error.details ?? null;
+      }
+    } catch {
+      // Not the envelope: keep the status as the code.
+    }
+    throw new ApiError(code, message, details);
   }
   return await response.blob();
 }

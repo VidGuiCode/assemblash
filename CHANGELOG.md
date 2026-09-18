@@ -10,8 +10,9 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
-**Target: 1.9.0 — interaction responsiveness.** The date is set when the
-release is cut.
+## [1.9.0] — 2026-09-18
+
+**Interaction responsiveness, and MCP hosted by the editor.**
 
 No 1.8.1 was released: no defect was outstanding after 1.8.0. The sweep ran
 on the released windows-x86_64 artefact on 2026-09-16. Every 1.8.0 feature
@@ -22,8 +23,17 @@ an action that arrived while another was in flight was discarded, with no
 message and no journal entry. Every action is queued now. The canvas echoes
 an edit at once, and the authoritative render reconciles it.
 
-`schemaVersion` stays **1** and the `Operation` union does not grow. No
-engine surface changes. **Oldest build that opens a 1.9.0 document: 1.0.**
+**The editor hosts MCP.** Before, the editor and `assemblash mcp` were two
+processes, and each opened projects for itself. The first one to open a
+project locked the other out, so a person with the editor open could not let
+an agent work on the same project. Now the editor process serves MCP at
+`/mcp` over its own open projects. `assemblash mcp` sends its requests to a
+running editor. The editor shows an agent's edits without a reload, and a
+dialog in the editor shows how to connect an agent.
+
+`schemaVersion` stays **1** and the `Operation` union does not grow. The
+HTTP API gains two routes and the server gains the `/mcp` endpoint; nothing
+existing changes shape. **Oldest build that opens a 1.9.0 document: 1.0.**
 
 ### Added
 
@@ -53,6 +63,120 @@ engine surface changes. **Oldest build that opens a 1.9.0 document: 1.0.**
   rapid nudges produce twenty journal writes and no error, and same-property
   edits under load coalesce to the newest value while different properties
   never do.
+- **MCP at `/mcp` on every server** (Streamable HTTP). `assemblash serve` and
+  the double-click launch serve it over the same state as the HTTP API: one
+  registry of open projects, one lock per project, one writer. An agent and
+  the editor edit one project with no `projectLocked`, in one journal, and
+  the agent is recorded as an agent. When an agent's session ends, the
+  editor's projects stay open. The access token applies to `/mcp` as to every
+  route. On a loopback bind, `/mcp` also refuses a `Host` that is not a
+  loopback name (DNS rebinding) and a browser `Origin` other than the
+  server's own. The server prints the MCP URL on standard error.
+- **`assemblash mcp` relays to a running server.** On a workspace, it finds a
+  loopback server of the same workspace and forwards the client's messages
+  to that server's `/mcp`. It opens no project itself while the server runs.
+  It checks about once a second: an agent that started first releases its
+  projects when the person starts the editor, and moves back when the editor
+  stops, in the same client session. With no server, it serves the workspace
+  as before. `--project` does not change.
+  - It uses a server only when the server confirms, through
+    `GET /api/agent-access`, that it serves the same workspace. A
+    `running.json` left by a stopped server, or copied by a synchronised
+    folder, can name the server of another workspace on the same port.
+  - It sends the workspace access token, also in the check, so a server that
+    requires a token is found.
+  - When the editor ends an idle session, the relay starts a new session and
+    sends the request again.
+  - Every request gets an answer: a request whose answer stream ends early,
+    or that is open when the relay changes target, gets a JSON-RPC error.
+  - A busy editor that misses one check is not left: the relay leaves only
+    when the record is gone or three checks in a row fail.
+- **"Connect an AI agent" in the editor.** A toolbar button (and a button on
+  the start screen) opens a dialog with copy-ready configuration: JSON for
+  clients that start a command, TOML for Codex, and the URL. The
+  configuration contains the full executable path and the workspace. The
+  dialog opens by itself once, on the first launch of an empty workspace.
+- **`GET /api/agent-access`** returns `{ mcpUrl, executable, workspace,
+  tokenRequired }` for that dialog. It is behind the access check and never
+  contains the token.
+- **The editor follows other clients.** About every 1.5 s, while the page is
+  visible and no action, drag or text edit is in progress, the editor reads
+  the project list. When the open project has a newer version, it reads the
+  document again through the action queue. A project that an agent creates
+  appears in the project list.
+- **The interface queue, made safe with other clients.**
+  - A newer edit replaces only the last waiting edit with the same key.
+    Before, it could replace an older one behind an undo, and the undo then
+    reverted a different change.
+  - A refused edit restores its echo only while the document is still at the
+    version of the snapshot. Otherwise the page reads the document again.
+    Before, a refusal behind an accepted edit put an old version back, and
+    every later edit was refused as a version conflict. A failure after the
+    engine accepted an edit no longer rolls the edit back.
+  - Opening a project is a queued action. Actions that were already waiting
+    run on the project they were made for.
+  - A refused preview (for example a missing font) is reported with its code.
+    Refused preset and history reads are reported too. A skipped preview
+    releases its image.
+  - The page does not follow another client while the person types in a
+    field, and it does not rebuild the open project list.
+- **A write reports what an agent cannot see.** A change to a text layer
+  returns `warnings` with the same codes an export gives, so text that does
+  not fit its box is reported when it is written, not only at export time.
+- **`textCoveredByLayer`, a new export warning.** A visible text layer that a
+  solid sibling layer covers by more than half is reported. This is the
+  mistake an agent cannot see in its own render. Boxes are compared upright,
+  and only inside one parent, so a design with a shape behind its text says
+  nothing.
+- **`set_layer_box`, a new MCP tool.** It sets a layer's position, size, and
+  rotation in absolute values as **one** transaction that one undo reverts.
+  Before, making a text box taller needed `move_layer` and `resize_layer`,
+  which is two entries in the history. The `Operation` union does not change:
+  the tool sends the existing operations in one batch.
+- **`export_document` no longer replaces a file silently.** A name that is
+  already there is refused with `exportExists`, unless the call passes
+  `overwrite`. The result says `replaced` when it did replace one.
+- **The editor shows connected agents.** The status bar says "1 AI agent
+  connected" while an agent holds a session. New route
+  `GET /api/agent-sessions` returns the count, behind the access check.
+- **Ctrl-C stops `serve` gracefully.** In-flight requests finish, every
+  project is released, and the instance record is cleared, as when the page's
+  button stops it. Before, the process died where it stood.
+- **A loopback server with no token refuses foreign web pages, on every
+  route.** A `Host` that is not `localhost`, `127.0.0.1`, or `::1` gets
+  `403 hostNotAllowed` (DNS rebinding). A request whose `Origin` is not the
+  address it was sent to gets `403 originNotAllowed` (cross-site requests).
+  Before, only `/mcp` checked this, and the rest of the API did not. A client
+  that sends no `Origin` is not affected. A server with a token does not do
+  these checks. New `allowed-hosts` in `config.toml` accepts the public name
+  of a reverse proxy on the same computer; `/mcp` accepts the same names.
+- **An agent does not take the reclaimed-lock notice from the person.** On
+  the editor's endpoint, `open_project` tells the agent that a stale lock was
+  cleared, and the notice stays for the editor, which shows it once.
+- **The relay waits for running requests before it hands projects to the
+  editor.** When the relay moves from serving the workspace itself to the
+  editor, it waits (up to 30 s) until every request that still holds a
+  project has ended, so the editor does not meet `projectLocked`.
+- **Tests.** `crates/assemblash-mcp/tests/hosted.rs` runs a bound server with
+  `/mcp` mounted and a client written from the specification: interleaved
+  agent and person edits in one journal, a stale version, a session that
+  ends, a foreign `Host` and `Origin`, the token, the interface routes,
+  shutdown with an open event stream, and the agent-access route.
+  `crates/assemblash-mcp/tests/relay.rs` runs the real binary twice: the
+  relay against a server that holds the project open, and an agent that
+  started first, then the editor, then the editor stopped, a record that
+  names another workspace, an idle session that the editor ends, and an
+  editor that requires a token. Editor journeys cover the dialog, following
+  an agent's edit, a refusal behind an accepted edit, a refused preview, and
+  typing while an agent edits, and actions that wait while the person opens
+  another project; `ui/agents.test.mjs` covers the configuration text, and
+  `ui/queue.test.mjs` covers coalescing behind an undo.
+  `crates/assemblash-server/tests/site.rs` covers the `Host` and `Origin`
+  checks over a real socket, `allowed-hosts`, and a server with a token.
+  `crates/assemblash-server/tests/stop.rs` covers the stop handle that Ctrl-C
+  uses. The MCP write tests cover warnings on a write, one-transaction box
+  changes, and the export refusal; the renderer covers `textCoveredByLayer`;
+  a journey covers the connected-agent chip.
 
 ### Notes
 
@@ -64,10 +188,45 @@ engine surface changes. **Oldest build that opens a 1.9.0 document: 1.0.**
   server answer one 200 and nineteen `409 versionConflict`, and the journal
   gains exactly one entry.
 - `queue.js` joins the interface assets the binary embeds (`ui.rs`) and the
-  journey fixture's allowlist.
+  journey fixture's allowlist. `agents.js` joins both too.
+- **`projectLocked` no longer tells the reader to delete the lock file.**
+  Agents act on error text, and a lock deleted while its process is alive
+  gives two writers for one project. On HTTP and MCP the message now says
+  that the editor or another agent has the project open. The command line
+  names `assemblash unlock` for a process that is gone. The code and the
+  `pid` detail do not change.
+- The MCP `instructions` tell an agent that a person may have the project
+  open in the editor, that an `expectedVersion` conflict is then normal, and
+  never to delete a lock file.
+- A loopback `assemblash serve` now records itself in the workspace
+  (`running.json`), as the double-click launch always did. The relay needs
+  the record. A double-click on a workspace that such a server already serves
+  now opens that server instead of starting a second one.
+- The rmcp feature `transport-streamable-http-server` adds one crate to the
+  dependency graph: `sse-stream` (MIT OR Apache-2.0).
+- **Security advisory RUSTSEC-2026-0285:** `rustls` moves from 0.23.43 to
+  0.23.45, and `rustls-webpki` to 0.103.15. The font installer reaches rustls
+  through `ureq`. Render output does not change.
+- The CLI tests no longer read `ASSEMBLASH_FONT_STORE` from the environment
+  of the person who runs them, so a personal font store cannot change their
+  result.
+- The server check in `running.json` now accepts only a loopback address, and
+  it sends the workspace token when there is one.
+- `ASSEMBLASH_MCP_SESSION_IDLE_SECS` sets how long an idle MCP session lives
+  on the server, in seconds. The default is five minutes.
+- The MCP tool count moves from 46 to 47 with `set_layer_box`.
+- The project list in the editor refreshes a label when a project's layer
+  count changes, and typing in the project search no longer stops the page
+  from following another client.
+- README: the full executable path in the MCP configuration, the Codex
+  configuration, the macOS first launch without a terminal, and the hosted
+  endpoint. The public skill tells agents to prefer the running editor and
+  never to delete a lock file.
 - Engine behaviour is unchanged. The full Rust workspace suite passes with
-  every determinism-gate golden in place. CLI, HTTP and MCP surfaces did not
-  move, and export bytes do not change.
+  every determinism-gate golden in place, and export bytes do not change.
+  The CLI, HTTP and MCP surfaces only gain: the `/mcp` endpoint, the
+  `agent-access` route, and the relay. No existing tool, route or argument
+  changes shape.
 
 ## [1.8.0] — 2026-09-12
 

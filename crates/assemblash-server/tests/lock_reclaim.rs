@@ -55,7 +55,7 @@ impl Harness {
                     state,
                     Default::default(),
                     Default::default(),
-                    stop,
+                    std::sync::Arc::new(stop),
                     Default::default(),
                 );
                 send.send(format!("http://{address}")).unwrap();

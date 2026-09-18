@@ -56,6 +56,7 @@ impl Backend {
             created: Vec::new(),
             changed: Vec::new(),
             removed: Vec::new(),
+            warnings: Vec::new(),
         };
         for operation in operations {
             // Each is applied on its own, so a refusal — a protected layer,

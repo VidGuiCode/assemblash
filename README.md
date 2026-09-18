@@ -15,19 +15,19 @@
   <img alt="Windows, Linux, and macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-2f3136">
 </p>
 
-Assemblash creates structured visual documents from text, images, SVGs, groups,
-templates, and reusable styles. The result stays editable: you can inspect the
-layer tree, apply a typed operation, undo it, render a preview, and export PNG
-or SVG. No cloud service is necessary.
+Assemblash makes visual documents: posters, social images, diagrams, and
+templates. You build a document from text, shapes, images, and SVG files. The
+document stays editable: every layer stays a layer, every change can be
+undone, and the export is exactly what you see.
 
-It ships as one small executable. It contains a browser-based editor, a
-command-line interface, a local HTTP API, an embedded Rust API, and an MCP
-server. Every interface goes through the same validated operation layer. Thus a
-change made by an agent behaves like a change made by a person.
+Assemblash is one program. It contains a browser-based editor, a
+command-line interface, a local HTTP API, and an MCP server for AI agents.
+You and an AI agent can work on the same document at the same time. No cloud
+service and no account are necessary.
 
-**Current release: 1.7.1.** The document schema and operation API are stable
-since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.7.1)
-or [changelog](CHANGELOG.md) for the full history.
+**Current release: 1.9.0.** The document schema and the operation API are
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.9.0)
+or the [changelog](CHANGELOG.md).
 
 <p align="center">
   <img src="assets/assemblash-example.png" width="960" alt="A near-white diagram in Assemblash red and black: a white outlined document sheet with a simple layout on it and two earlier sheets behind it; on the left, terminal and node-graph icons labelled CLI and MCP connect to it, on the right a cursor icon labelled Canvas; the Assemblash mark and wordmark centred above, and one centred line below, Visuals that stay editable">
@@ -35,11 +35,125 @@ or [changelog](CHANGELOG.md) for the full history.
 
 <p align="center"><sub>Created as a structured Assemblash document and exported by the deterministic renderer. <a href="examples/readme-hero">Inspect the editable project.</a></sub></p>
 
+## Quick start
+
+You do not need a terminal for these steps.
+
+### 1. Download Assemblash
+
+Go to [GitHub Releases](https://github.com/VidGuiCode/assemblash/releases/latest)
+and download the file for your computer:
+
+For example, the Windows file of release 1.9.0 is
+`assemblash-v1.9.0-windows-x86_64.exe`.
+
+| Your computer | Download this file |
+| --- | --- |
+| Windows | `assemblash-<version>-windows-x86_64.exe` (on an ARM laptop: `windows-aarch64`) |
+| Mac with Apple silicon (M1 or newer) | `assemblash-<version>-macos-aarch64.tar.gz` |
+| Mac with an Intel processor | `assemblash-<version>-macos-x86_64.tar.gz` |
+| Debian or Ubuntu | `assemblash_<version>_amd64.deb` (on ARM: `arm64`) |
+
+The file is the complete program. You do not install anything else.
+
+### 2. Start Assemblash
+
+- **Windows:** double-click the `.exe` file. If Windows shows "Windows
+  protected your PC", click **More info**, then **Run anyway**.
+- **Debian or Ubuntu:** install the file with
+  `sudo apt install ./assemblash_<version>_amd64.deb`. Then open Assemblash
+  from the application menu.
+- **Mac:** double-click the `.tar.gz` file to unpack it. Then double-click
+  `assemblash`. The first time, macOS blocks it, because the program is not
+  signed with an Apple Developer ID. Do these steps once:
+  1. In the warning, click **Done**.
+  2. Open **System Settings** → **Privacy & Security**.
+  3. Find the message about `assemblash` and click **Open Anyway**.
+  4. Double-click `assemblash` again and confirm.
+
+The editor opens in your web browser. A small text window also opens (a
+console window on Windows, a Terminal window on a Mac). Keep that window open
+while you use Assemblash.
+
+If you start Assemblash a second time, it opens the editor that already runs.
+
+### 3. Make your first document
+
+1. Click **Create a project**. Type a name, select a size, and click
+   **Create project**.
+2. Use the tools on the left side to add content: **Text**, **Shapes**,
+   **Uploads** (images), and **Vector** (SVG files).
+3. To add text, you need a font. The first time, open **Fonts** and click the
+   button that installs the default fonts (Noto Sans, Noto Serif, and Noto
+   Sans Mono). This is the only step that downloads something.
+4. Click a layer on the canvas to select it. Drag it to move it. Change its
+   properties in the panel. Use **Undo** and **Redo** at the top.
+5. Click **Export** and select PNG or SVG.
+
+Assemblash saves every change immediately. There is no **Save** button.
+
+### 4. Let an AI agent work with you (1.9.0)
+
+An AI agent, for example Codex or Claude, can work on your projects while the
+editor is open. You see the agent's changes in the editor as they happen.
+
+1. Start Assemblash (step 2).
+2. In the editor, click the robot button at the top: **Connect an AI agent**.
+   This window also opens by itself the first time you start Assemblash.
+3. Click **Copy** on the configuration for your AI client.
+4. Paste it into the MCP settings of your AI client:
+   - **Codex:** add it to `~/.codex/config.toml`, or use **Settings** →
+     **MCP servers** → **Add server** → **STDIO**.
+   - **Other clients:** add it to the client's MCP configuration. Use the
+     first block if the client starts a command, or the URL if the client
+     asks for a URL.
+5. Restart the AI client. Then ask the agent, for example: "List my
+   Assemblash projects."
+
+The copied configuration already contains the full path of the program and of
+your workspace. Do not replace the path with only `assemblash`: a downloaded
+program is not on your `PATH`, so the client cannot find it by name.
+
+Keep the editor open while the agent works. If the agent starts before the
+editor, it works alone. When you start the editor, the agent moves to it
+automatically.
+
+### 5. Stop Assemblash
+
+Click the power button at the top right of the editor: **Stop Assemblash**.
+Your work is already saved. If you started Assemblash from a terminal, you
+can also press Ctrl+C there.
+
+### Where your projects are
+
+Assemblash keeps your projects, fonts, and settings in one folder, the
+**workspace**:
+
+| System | Workspace folder |
+| --- | --- |
+| Windows | `%APPDATA%\Assemblash` |
+| Mac | `~/Library/Application Support/Assemblash` |
+| Linux | `~/.local/share/assemblash` |
+
+Each project is a folder in `projects/`. You can copy a project folder to
+back it up or to give it to another person.
+
+### If something does not work
+
+| Problem | What to do |
+| --- | --- |
+| macOS says the program "cannot be opened" | Do the **Open Anyway** steps in step 2. |
+| The browser does not open | Find the address in the small text window, and open it in your browser. Usually it is `http://127.0.0.1:8787`. |
+| The AI client cannot start Assemblash | Use the configuration from **Connect an AI agent**. It contains the full path of the program. |
+| The agent reports `projectLocked` | Another Assemblash process has the project open. Connect the agent to the running editor (step 4). Never delete a `.assemblash-lock` file. |
+| The agent reports `versionConflict` | This is normal when you and the agent edit the same project. The agent reads the document again and retries. |
+| An error says that a font is missing | Install the font in **Fonts** (step 3). Assemblash never uses a different font without telling you. |
+
 ## Why Assemblash?
 
-Usually you get one of two options: a powerful editor that is hard to automate
-reliably, or a code and generation pipeline that produces a flat image. A flat
-image is hard to refine. Assemblash gives you both structure and automation.
+Usually you must choose. A powerful editor is difficult to automate. A code or
+image-generation pipeline gives a flat image, and a flat image is difficult to
+change. Assemblash gives you structure and automation together.
 
 - **Structured, not flattened.** Documents keep their layers, groups, assets,
   metadata, templates, and named slots.
@@ -52,58 +166,48 @@ image is hard to refine. Assemblash gives you both structure and automation.
 - **Easy to embed.** Use the Rust crates, HTTP API, CLI, or MCP server. You do
   not need to drive the reference interface with clicks.
 
-The AI story is deliberately small, and it is the whole story: an MCP server
-and an attributed history. An agent connects over MCP and brings its own model.
-No provider adapter ships with Assemblash, and the core never requires one — a
-document is created, edited, rendered, and exported with no model involved at
-all. What an agent does goes through the same validated operation layer as a
-click or a shell command. It lands in the journal with its actor, so its work
-is reviewable and undoable, not merely trusted.
+Assemblash contains no AI model. It gives an AI agent two things: an MCP
+server, and a history that records who made each change. The agent brings its
+own model. You can create, edit, render, and export documents with no model at
+all. A change from an agent goes through the same validated operations as a
+click or a command. The history records it with the agent as the actor, so you
+can review it and undo it.
 
-Assemblash is deliberately not a Photoshop, GIMP, or Figma replacement. It is
-a focused composition engine for repeatable visual assets, templates, and
-agent-assisted workflows.
+Assemblash does not replace Photoshop, GIMP, or Figma. It is a composition
+engine for repeatable visual assets, templates, and work with AI agents.
 
-## Get started
+---
 
-### Download a release
+## Technical guide
 
-Download the file for your machine from
-[GitHub Releases](https://github.com/VidGuiCode/assemblash/releases/latest):
+The sections below are for developers, scripts, and self-hosting. You do not
+need them to use the editor or to connect an agent.
 
-| Platform | Download | Run it |
-| --- | --- | --- |
-| Windows | `assemblash-<version>-windows-<arch>.exe` | Double-click it. |
-| Debian, Ubuntu | `assemblash_<version>_<arch>.deb` | `sudo apt install ./assemblash_<version>_<arch>.deb`, then pick Assemblash from the application menu. |
-| macOS | the `.tar.gz` archive | Unpack it, then see the note below before first launch. |
-| Anything else | the `.zip` or `.tar.gz` archive | Unpack it and launch `assemblash`. |
+## Get started from a terminal
 
-The executable is self-contained — the editor is compiled into it — so the
-single file is the whole program. The archives and the `.deb` additionally
-carry the licence texts and the changelog.
+### Launch options
 
-A launch without arguments creates a local workspace, starts the server,
-and opens the editor in your browser. A second launch opens the server that is
-already running. You can stop it from the editor.
+A launch without arguments creates the workspace, starts the server, and opens
+the editor in your browser. A second launch opens the server that already
+runs. `assemblash workspace` prints the workspace folder.
 
-The macOS binaries are not signed with an Apple Developer ID. Thus macOS
-quarantines them on download and Gatekeeper refuses the first launch. Clear
-the flag yourself after unpacking:
+On macOS, you can also clear the quarantine flag in a terminal instead of the
+**Open Anyway** steps:
 
 ```sh
 xattr -d com.apple.quarantine ./assemblash
 ```
 
-A Homebrew tap would remove that step, because Homebrew clears the flag on what
-it installs. The formula is written and lives in `packaging/homebrew/`, but
-the tap is **not published yet**. So there is no `brew install` to run today.
+A Homebrew tap would remove that step, because Homebrew clears the flag on the
+files it installs. The formula is in `packaging/homebrew/`, but the tap is
+**not published yet**.
 
 ### Install from source
 
 Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.7.1 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.9.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -126,35 +230,38 @@ Do you have a font file? Then use `--font /path/to/SomeFont.ttf` or
 `add-ellipse` and `add-line` take the same box flags. A line's box is the line,
 so `--width` is its length and `--rotation` its angle.
 
-The editor manages the same store without a terminal. Its Add panel has a
-**Fonts** section (1.5.0 and newer). The section lists the installed families
-and their faces, imports TTF, OTF, TTC, OTC, WOFF and WOFF2 files from disk,
-and removes a family. Before it removes the family it confirms that projects
-using it will report a missing font until it is imported again. When the store
-is empty it offers a single button that installs the bundled `default` pack —
-Noto Sans, Noto Serif and Noto Sans Mono — and names what it will download
-before anything is fetched. The font picker and the canvas update immediately,
-and a family removal never touches your operating system's fonts or the file
-you imported from.
+The editor manages the same store without a terminal, in the **Fonts** section
+of the Add panel (1.5.0 and newer):
 
-To change a layer afterwards, use `assemblash set`. It reaches every updatable
-property — name, position, size, rotation, opacity, visibility, lock, blend
-mode, effect stack, text, font, size, colour, alignment, line height, font
-weight, font style, letter spacing, stroke, vertical alignment, fill,
-stroke, stroke width, corner radius, fit, and asset:
+- It lists the installed families and their faces.
+- It imports TTF, OTF, TTC, OTC, WOFF, and WOFF2 files from disk.
+- It removes a family. Before it removes one, it tells you that projects that
+  use the family will report a missing font.
+- When the store is empty, it shows one button that installs the `default`
+  pack: Noto Sans, Noto Serif, and Noto Sans Mono. It names the download
+  before it starts.
+
+The font picker and the canvas update immediately. A removal never changes
+the fonts of your operating system or the file that you imported.
+
+To change a layer later, use `assemblash set`. It changes every property that
+can change: name, position, size, rotation, opacity, visibility, lock, blend
+mode, effect stack, text, font, font size, colour, alignment, line height, font
+weight, font style, letter spacing, vertical alignment, fill, stroke, stroke
+width, corner radius, fit, and asset:
 
 ```sh
 assemblash set ./poster --layer <LAYER_ID> --color '#1d1d1f' --size 72 --line-height 1.4
 assemblash set ./poster --layer <LAYER_ID> --weight 700 --letter-spacing 3
 ```
 
-A text layer's `--weight` resolves to the exact face the font store holds. A
-weight nobody installed is refused, never substituted. `--color none` with a
-`--stroke` gives hollow (stroke-only) text, and `--vertical-align`
-top | middle | bottom places the block in the box.
+For a text layer, `--weight` selects the exact face in the font store. A
+weight that is not installed is refused. It is never replaced by another
+weight. `--color none` with `--stroke` gives outlined text. `--vertical-align`
+`top`, `middle`, or `bottom` places the text in its box.
 
-However many flags you give it, one invocation is one operation. It is
-journalled once and undone once.
+One command is one operation, however many flags it has. The history records
+it once, and one undo reverts it.
 
 `render` and `export` take the output path positionally as well as through
 `--out`. Both print the written path and its `sha256:` digest as one
@@ -175,9 +282,9 @@ The same six platforms are built, tested, and included in every release:
 | Linux | ✅ `.deb`, `.tar.gz` | ✅ `.deb`, `.tar.gz` |
 | macOS | ✅ Intel `.tar.gz` | ✅ Apple silicon `.tar.gz` |
 
-Every release carries a bare `.exe` per Windows target and a `.deb` per Linux
-target beside the archives. macOS has no installer of its own yet — see the
-note above about the quarantine flag.
+Every release also contains a single `.exe` for each Windows target and a
+`.deb` for each Linux target. macOS has no installer yet. See the
+**Open Anyway** steps in the Quick start.
 
 The release workflow checks that every binary starts before it attaches the
 binary. CI also runs the Rust workspace tests on all six targets. The reference
@@ -241,44 +348,45 @@ interface with the inspector rows; and over MCP with the `clip`, `crop`,
 
 ### Rendering and export
 
-Assemblash converts a document to SVG as a pure function and rasterizes it with
-`resvg` and `tiny-skia`. It supports PNG export, compatible SVG export,
-configurable output dimensions, fourteen deterministic blend modes, and a
-non-destructive effect stack. The stack covers brightness, contrast,
-saturation, blur, seeded grain, and drop shadow — a glow is that shadow with no
-offset.
+Assemblash converts a document to SVG with a pure function. Then `resvg` and
+`tiny-skia` convert the SVG to pixels. Assemblash exports PNG and SVG at the
+output size that you set. It has fourteen deterministic blend modes and a
+non-destructive effect stack: brightness, contrast, saturation, blur, seeded
+grain, and drop shadow. A glow is a drop shadow with no offset.
 
-Fonts are loaded only from files you explicitly provide or install into the
-font store. Their bytes are hashed and pinned. This keeps typography and
-export pixels consistent across operating systems.
+Assemblash loads fonts only from files that you give it or install in the
+font store. It records a hash of each font file. Thus text and exported pixels
+are the same on all operating systems.
 
-An export also reports what it could not do well. It produces
-`wordBrokenMidWord` when a single word is too wide for its box and must be
-split, `textOverflowsBox` when laid-out text is taller than the box holding it,
-and — from 1.5.0, on the HTTP and MCP paths only — `lockReclaimed` when the
-server reclaimed a stale project lock before it produced the export. Each
-warning carries a `code`, a `message`, and the `layerId`
-where one applies. A warning is advisory: it changes no pixel and no exit
-status. The HTTP export response and the MCP `export_document` result carry a
-`warnings` array. The CLI prints one line per warning on stderr, or the whole
-array as JSON on stdout with `--warnings-json`.
+An export also reports problems that did not stop it:
 
-Text inside an imported SVG asset is not advisory. From 1.5.0 a render refuses
-with a typed error that names the asset, unless every `<text>` in that asset
-names at least one non-generic font family the render loaded. Text that names
-only a generic family such as `sans-serif` is refused too, because the pinned
-store never holds the renderer's fallback. Earlier releases exported such a
-document successfully with the text simply absent. That looked finished and was
-not. Name a loaded family in the asset, or outline the text before you import
-it. The 1.3.0 warning code `svgAssetTextWithoutFont` is kept but is no longer
-produced for this case, because the refusal comes first.
+- `wordBrokenMidWord`: one word is too wide for its box, so it is split.
+- `textOverflowsBox`: the text is taller than its box.
+- `lockReclaimed` (1.5.0 and newer, HTTP and MCP only): the server cleared a
+  stale project lock before the export.
+
+Each warning has a `code`, a `message`, and a `layerId` when a layer applies.
+A warning changes no pixel and no exit status. The HTTP export response and
+the MCP `export_document` result contain a `warnings` array. The CLI prints
+one line for each warning on stderr. With `--warnings-json`, it prints the
+array as JSON on stdout.
+
+Text in an imported SVG asset is different: it causes an error, not a
+warning. From 1.5.0, a render is refused with a typed error that names the
+asset, unless each `<text>` in the asset names a font family that the render
+loaded. A generic family, such as `sans-serif`, is not sufficient, because the
+font store never contains the fallback font of the renderer. Earlier releases
+exported such a document without the text, and the result looked complete.
+Name a loaded family in the asset, or convert the text to outlines before you
+import the asset. The 1.3.0 warning code `svgAssetTextWithoutFont` still
+exists, but this case now gives the error instead.
 
 ### History and safety
 
-Every mutation uses the same transactional operation layer. A refused
-operation leaves the document unchanged. Successful operations are journalled
-with their actor and transaction ID and can be undone or redone across
-restarts.
+Every change uses the same transactional operation layer. A refused
+operation does not change the document. The history records each successful
+operation with its actor and transaction ID. You can undo and redo it, also
+after a restart.
 
 - Expected-version checks prevent stale clients from overwriting newer work.
 - A dry run shows what a supported mutation would do without committing it.
@@ -286,14 +394,15 @@ restarts.
   just hidden behind UI controls.
 - Project and asset paths stay inside the configured filesystem boundary.
 - Imported SVGs are sanitized before they enter the asset store.
-- The editor queues every action instead of dropping a rapid one. Each edit
-  reaches the journal. The canvas echoes your edit at once. The authoritative
-  render then reconciles it, so what you see stays what you get.
+- The editor puts every action in a queue. It does not drop fast actions. When
+  you set the same property of the same layer again before the first change
+  is sent, only the newest value is sent. The canvas shows your edit
+  immediately, and the engine render then replaces it with the exact pixels.
 
-Open the editor with `?perf` in the address bar to see how long each
-interaction took: the wait in the queue, the run, and the settle of the
-authoritative preview. The same numbers are on `window.__assemblashPerf` for
-a script to read.
+To see how long each interaction took, add `?perf` to the editor address. The
+editor then shows the time in the queue, the run time, and the time until the
+exact preview appeared. A script can read the same numbers from
+`window.__assemblashPerf`.
 
 ## Choose the interface that fits
 
@@ -302,37 +411,114 @@ a script to read.
 | Reference editor | Creating and refining documents visually | Launch `assemblash` |
 | CLI | Shell scripts and straightforward local workflows | `assemblash --help` |
 | HTTP API | Applications and custom frontends | `assemblash serve` |
-| MCP server | AI agents and MCP-compatible clients | `assemblash mcp` |
+| MCP server | AI agents and MCP-compatible clients | **Connect an AI agent** in the editor, or `assemblash mcp` |
 | Rust crates | Embedding the engine directly | [`crates/`](crates/) |
 
-The editor is a reference client, not a privileged implementation. Its edits,
-the CLI, HTTP requests, and MCP tools all compile to the same operations.
+The editor is a reference client. It has no special access. Edits in the
+editor, CLI commands, HTTP requests, and MCP tools all become the same
+operations.
 
-Most MCP clients can start Assemblash with this configuration:
+### MCP in detail (1.9.0)
+
+For the simple steps, see **Let an AI agent work with you** in the Quick
+start. This section explains how the connection works.
+
+The editor process serves MCP. An agent that connects to it works on the same
+open projects as the person, with one lock for each project. The editor shows
+the changes of the agent without a reload.
+
+The **Connect an AI agent** dialog in the editor gives copy-ready
+configuration. It contains the full path of the executable and the workspace.
+It opens by itself on the first launch of an empty workspace.
+
+You can also write the configuration yourself. Most MCP clients start a
+command. Write the full path of the executable in `command`. A downloaded
+binary is not on your `PATH`, so the bare name `assemblash` does not start it:
 
 ```json
 {
-  "command": "assemblash",
+  "command": "C:\\Users\\you\\Downloads\\assemblash-<version>-windows-x86_64.exe",
   "args": ["mcp"]
 }
 ```
 
-Add `--project /path/to/project` to expose one project instead of the
-workspace. The MCP server provides read tools for documents, layers,
-validation, history, and rendered previews, plus mutation tools with dry run,
-version checks, protection checks, and undo transaction IDs.
+On macOS or Linux, the path has the form `/Users/you/Downloads/assemblash`.
+Use the bare name `assemblash` only when the package or `cargo install` put
+the executable on your `PATH`. Add `"--workspace", "<path>"` to `args` when
+the editor uses a workspace other than the default one.
 
-An agent can also start a project with `create_project`, add a layer drawing an
-already-imported SVG asset with `add_svg_layer`, ask for the document's vector
-render as text with `render_document`, and query overlapping layers with
-`find_overlaps` — the same pairs, in the same order, that the CLI and the HTTP
-API report. `update_layer` sets `lineHeight` beside the other text properties,
-and `export_document` returns the same `warnings` array the other interfaces
-report.
+For Codex, add the same command to `~/.codex/config.toml`:
 
-For agents that work from a repository checkout, a reusable public skill is in
+```toml
+[mcp_servers.assemblash]
+command = '/Users/you/Downloads/assemblash'
+args = ['mcp']
+```
+
+`assemblash mcp` finds the editor that runs on the same workspace and sends
+the agent's requests to it. It opens no project itself while the editor runs,
+so it cannot lock you out of a project. When no editor runs, it serves the
+workspace itself. It checks about once a second: if the agent starts first
+and you start the editor later, the agent releases its projects and moves to
+the editor. It moves back when you stop the editor. A request that is in
+progress at the moment of a move can fail with an error; send it again.
+
+Clients that take a URL can connect directly to `http://127.0.0.1:8787/mcp`
+(Streamable HTTP). Use the command form when your client supports it: the
+editor uses another port when 8787 is in use, and the command finds the editor
+on any port. `assemblash serve` prints the MCP URL on standard error.
+
+How the relay finds the editor, and its limits:
+
+- It uses the server that the workspace records, only when the address is
+  loopback and that server confirms that it serves the same workspace. A
+  record for another workspace, for example one that a synchronised folder
+  copied, is ignored.
+- It sends the workspace access token when the workspace has one.
+- A server bound to a wider address is not recorded. Connect to its URL
+  directly, with the token.
+- The editor ends an MCP session after five minutes without activity. The
+  relay then starts a new session by itself. A client that connects to the
+  URL directly must start a new session.
+- It forwards requests and their answers. It does not open the optional
+  event stream for messages that the server starts itself. The Assemblash
+  server sends no such messages today.
+
+Never delete a project's `.assemblash-lock` file while a process uses the
+project. A `projectLocked` refusal means that another process has the project
+open. Connect the agent to that editor instead.
+
+Add `--project /path/to/project` to serve one project instead of the
+workspace. This mode does not look for a running editor.
+
+The MCP server has read tools for documents, layers, validation, history, and
+rendered previews. It has change tools with a dry run, a version check, a
+protection check, and an undo transaction ID. Other tools:
+
+- `create_project` creates a project.
+- `set_layer_box` sets a layer's position, size, and rotation in absolute
+  values, in one change that one undo reverts.
+- `add_svg_layer` adds a layer that draws an imported SVG asset.
+- `render_document` returns the vector render of the document as text.
+- `find_overlaps` returns the overlapping layers, in the same pairs and order
+  as the CLI and the HTTP API.
+- `update_layer` sets `lineHeight` and the other text properties.
+- `export_document` returns the same `warnings` array as the other
+  interfaces. It refuses to replace a file of the same name unless the call
+  passes `overwrite`.
+
+A change to a text layer reports the same warnings immediately, in the
+`warnings` field of the result. An agent cannot see its own render, so it
+learns at once that text does not fit its box (`textOverflowsBox`), that a
+word was split (`wordBrokenMidWord`), or that another layer is drawn over the
+text (`textCoveredByLayer`).
+
+While an agent is connected, the editor shows "1 AI agent connected" in its
+status bar.
+
+For agents that work in a checkout of this repository, a public skill is in
 [`skills/assemblash/SKILL.md`](skills/assemblash/SKILL.md). It explains the
-document-first workflow and the guarantees an integration must preserve.
+document-first workflow and the guarantees that an integration must keep.
 
 ## How the pieces fit together
 
@@ -343,14 +529,15 @@ Custom applications ───┤              │
 AI agents via MCP ──────┘              └──────────────> renderer + export
 ```
 
-The API and MCP server do not contain their own document logic. They are
-adapters over `assemblash-core`, which owns validation and operations;
-`assemblash-renderer` owns rendering; and the server, MCP, and CLI crates
-expose those capabilities to different clients.
+The API and the MCP server contain no document logic of their own:
 
-The implementation is Rust with a TypeScript reference interface. The
-executable embeds the built interface, so users do not need Node.js. The
-official `scratch` container image is about 9 MB.
+- `assemblash-core` does the validation and the operations.
+- `assemblash-renderer` does the rendering.
+- The server, MCP, and CLI crates give these functions to different clients.
+
+Assemblash is written in Rust. The reference interface is written in
+TypeScript and is built into the executable, so you do not need Node.js. The
+official `scratch` container image is approximately 9 MB.
 
 ## Local use and self-hosting
 
@@ -368,29 +555,55 @@ assemblash token show
 assemblash serve --bind 0.0.0.0
 ```
 
+Every server also serves MCP at `/mcp`. The access token applies to `/mcp` as
+to every other route.
+
+A server on a loopback address with no token also protects itself from web
+pages in your browser (1.9.0 and newer). On every route, including `/mcp`, it
+refuses:
+
+- a request whose `Host` is not `localhost`, `127.0.0.1`, or `::1`. This stops
+  DNS rebinding, where a web page makes its own name point to your computer;
+- a request from a web page on another origin (`Origin` header).
+
+A client that is not a web page sends no `Origin`, so the second check does
+not affect it. A reverse proxy on the same computer that sends its public name
+as `Host` needs that name in `config.toml`:
+
+```toml
+allowed-hosts = ["assemblash.example.com"]
+```
+
+A server with a token does not do these checks: a web page cannot know the
+token.
+
 The token authenticates requests; it does not encrypt traffic. Put Assemblash
 behind a TLS reverse proxy when it is reachable beyond a trusted network. See
 [DEPLOYMENT.md](DEPLOYMENT.md) for Docker, Caddy, Traefik, nginx, and identity
 provider guidance.
 
-If a process that died left a project's lock file behind, opening the project
-is refused until someone clears the claim. You can clear it from the editor's
-confirm dialog, or with `assemblash unlock`. `serve --reclaim-stale-locks`
-(also accepted by `assemblash mcp`, and on from 1.5.0 by the double-click or
-`--friendly` launch, where there is nobody at a terminal) lets the server clear
-such a claim on its own. But it clears the claim only when the lock names this
-machine and its process is provably gone. A lock from another machine, or one
-written by an older build that recorded no machine name, still needs a person:
-on a synced project folder a process id from a different computer proves
-nothing. Every reclaim is reported in the server log, in the editor, and as a
-`lockReclaimed` export warning.
+A process that stops unexpectedly can leave the lock file of a project behind.
+Then Assemblash refuses to open the project until the lock is cleared:
+
+- A person can clear it in the confirm dialog of the editor, or with
+  `assemblash unlock`.
+- `serve --reclaim-stale-locks` lets the server clear it automatically.
+  `assemblash mcp` accepts the same flag. From 1.5.0, the double-click launch
+  and `--friendly` do this without the flag.
+- The server clears a lock automatically only when the lock names this
+  computer and its process is not running. A lock from another computer, or
+  from an older build that recorded no computer name, still needs a person.
+  On a synchronized project folder, a process ID from another computer proves
+  nothing.
+- Every automatic clear is reported in the server log, in the editor, and as a
+  `lockReclaimed` export warning.
 
 ## Edit the canvas
 
-Use the **Canvas** button to open the editor's Properties panel.
-Set dimensions, choose a background or transparency, select a resize anchor,
-and apply the changes together. Layers keep their sizes; the anchor controls
-only their positions. The CLI equivalent is:
+Click **Canvas** to open the Properties panel of the editor. Set the size, a
+background colour or transparency, and a resize anchor. Then apply the
+changes together. Layers keep their sizes. The anchor changes only their
+positions. The same change in the CLI:
 
 ```sh
 assemblash canvas set ./poster --width 1200 --height 900 --background "#102030" --anchor center
@@ -398,23 +611,23 @@ assemblash canvas set ./poster --no-background
 assemblash undo ./poster
 ```
 
-MCP exposes `update_canvas` with `width`, `height`, `background`, `anchor`,
-`expectedVersion` and `dryRun`. HTTP accepts the same canvas fields in an
+MCP has `update_canvas` with `width`, `height`, `background`, `anchor`,
+`expectedVersion`, and `dryRun`. HTTP accepts the same fields in an
 `updateCanvas` operation at `POST /api/projects/{id}/operations`. Omit
-`background` to preserve it, or send `null` to clear it. A resize that would
-move locked, protected or read-only content is refused atomically.
+`background` to keep it, or send `null` to remove it. A resize that moves
+locked, protected, or read-only content is refused, and nothing changes.
 
-Canvas editing requires 1.4.0 or newer. Once a project records
-`updateCanvas`, 1.3.1 refuses both `show` and `history` because it cannot parse
-that journal operation, even after undo. Continue using the newer binary;
-do not edit the journal. The document schema remains version 1.
+Canvas editing needs 1.4.0 or newer. When a project history contains
+`updateCanvas`, 1.3.1 refuses `show` and `history`, also after undo, because
+it cannot read that operation. Continue to use the newer executable, and do
+not edit the history files. The document schema stays at version 1.
 
-The Add panel's **Shapes** row (1.6.0 and newer) adds a rectangle, an ellipse
-or a line. The shape's inspector then edits Fill, Stroke, Stroke width and,
-for a rectangle, Corner radius — each row is one undoable change, with a
-**None** button beside each paint for removal. A drop shadow is an effect, not
-a shape property: add `dropShadow` to any layer's effect stack and set its
-`dx`, `dy`, `blur` and colour. Leave both offsets at 0 for a glow.
+The **Shapes** row in the Add panel (1.6.0 and newer) adds a rectangle, an
+ellipse, or a line. The inspector of a shape then changes Fill, Stroke, Stroke
+width, and, for a rectangle, Corner radius. Each row is one change that you
+can undo. The **None** button next to a paint removes it. A drop shadow is an
+effect, not a shape property: add `dropShadow` to the effect stack of a layer
+and set `dx`, `dy`, `blur`, and the colour. For a glow, set both offsets to 0.
 
 ## Stability and current limits
 
@@ -423,35 +636,35 @@ Assemblash 1.x makes two compatibility promises:
 1. A document written by 1.0 remains readable by every 1.x release.
 2. A client written against the 1.0 operation API keeps working across 1.x.
 
-Breaking either contract requires a major release and a documented migration.
-Additive fields use defaults, and unknown document fields survive load and
-save.
+A change that breaks one of these promises needs a major release and a
+documented migration. New fields have default values. Unknown document fields
+stay in the document when it is loaded and saved.
 
-The important limits are stated plainly:
+The important limits:
 
 - Styled text runs are not implemented yet.
-- AI image/provider adapters do not ship and are out of scope for the core.
+- Assemblash contains no AI image generator or AI provider adapter. They are
+  not part of the core.
 - Fourteen blend modes are supported. `color-dodge` and `color-burn` are
   refused because they are not bit-identical across every target.
-- A document that contains a shape layer needs 1.6.0 or newer: 1.0 through
-  1.5 refuse to read the whole document, and they name `shape` as a layer kind
-  they do not know.
-- A shape's stroke is painted inside its box, so the box is the visual box —
-  except below width 1. There the stroke is drawn as a hairline centred on the
-  edge and may spill up to half a pixel outside the box.
+- A document with a shape layer needs 1.6.0 or newer. Releases 1.0 to 1.5
+  refuse the whole document and name `shape` as an unknown layer kind.
+- The stroke of a shape is painted inside its box, so the box is the visible
+  size. A stroke narrower than 1 is the exception: it is a hairline on the
+  edge and can extend half a pixel outside the box.
 - Built-in authentication is one shared token. Accounts, roles, OIDC, SSO,
   TLS, and per-user audit identity belong in a reverse proxy.
-- The editor is intentionally a reference client, not a complete professional
-  design application.
+- The editor is a reference client. It is not a complete professional design
+  application.
 
-For the product scope and design rationale, read [PRD.md](PRD.md). For the
-precise changes in each release, read [CHANGELOG.md](CHANGELOG.md).
+For the product scope and the design decisions, read [PRD.md](PRD.md). For the
+changes in each release, read [CHANGELOG.md](CHANGELOG.md).
 
 ## Try it and tell us what you find
 
-Assemblash is released and the core contracts are stable. The useful next step
-is to see it in real workflows. If you try it, tell the project what you made,
-what felt smooth, and what got in your way.
+Assemblash is released, and its core contracts are stable. Now the project
+needs to see it in real work. If you use it, tell us what you made, what
+worked well, and what caused problems.
 
 - Share a workflow, result, or question in
   [GitHub Discussions](https://github.com/VidGuiCode/assemblash/discussions).
@@ -460,8 +673,8 @@ what felt smooth, and what got in your way.
 - Propose a focused addition with the
   [feature form](https://github.com/VidGuiCode/assemblash/issues/new?template=feature_request.yml).
 
-Security problems are the exception: report those privately as described in
-[SECURITY.md](SECURITY.md).
+Do not report security problems in public. Report them privately, as
+[SECURITY.md](SECURITY.md) describes.
 
 ## Develop and contribute
 
@@ -473,8 +686,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
 
-The TypeScript project is inside `ui/`—there is intentionally no root
-`package.json`:
+The TypeScript project is in `ui/`. There is no `package.json` at the root:
 
 ```sh
 cd ui

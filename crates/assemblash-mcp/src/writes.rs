@@ -62,9 +62,18 @@ pub struct WriteOutcome {
     pub changed: Vec<String>,
     /// Layers removed.
     pub removed: Vec<String>,
+    /// What the change made worse, for the layers it touched.
+    ///
+    /// The same codes an export reports (`textOverflowsBox`,
+    /// `wordBrokenMidWord`, `textCoveredByLayer`), but reported when the text
+    /// is written rather than only when the document is exported. Empty when
+    /// there is nothing to say, and absent for a dry run of a batch.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schemars(with = "Vec<ExportWarningShape>")]
+    pub warnings: Vec<assemblash_renderer::ExportWarning>,
 }
 
-/// Where a document was exported to.
+/// Where a document was exported to, and whether it replaced a file.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportResult {
@@ -76,6 +85,10 @@ pub struct ExportResult {
     pub width: u32,
     /// Pixel height.
     pub height: u32,
+    /// Whether a file of that name was already there and was replaced.
+    ///
+    /// Only `true` when the call asked for `overwrite`.
+    pub replaced: bool,
     /// What the export noticed and did not refuse (FR-11).
     ///
     /// Always present, empty when there is nothing to say. A warning never
@@ -151,6 +164,7 @@ impl Backend {
                 created: ids(&outcome.created),
                 changed: ids(&outcome.changed),
                 removed: ids(&outcome.removed),
+                warnings: Vec::new(),
             });
         }
 
@@ -161,13 +175,81 @@ impl Backend {
             envelope.expected_version,
             &mut UlidIdSource,
         )?;
+        let touched = [outcome.created.clone(), outcome.changed.clone()].concat();
+        let document = session.document().clone();
+        let directory = session.project_dir().to_path_buf();
+        drop(session);
         Ok(WriteOutcome {
-            version: session.version(),
+            version: version_of_document(&document),
             dry_run: false,
             transaction: Some(transaction.to_string()),
             created: ids(&outcome.created),
             changed: ids(&outcome.changed),
             removed: ids(&outcome.removed),
+            warnings: self.warnings_for(&document, &directory, &touched),
+        })
+    }
+
+    /// Applies several operations as one transaction.
+    ///
+    /// For a tool that changes one thing a person would call one change but
+    /// the stable operation API expresses in more than one operation — a
+    /// layer's box, which is a move and a resize. One transaction means one
+    /// undo, and one entry in the history.
+    pub fn apply_batch(
+        &self,
+        envelope: &WriteEnvelope,
+        label: &str,
+        operations: &[Operation],
+    ) -> Result<WriteOutcome, ApiError> {
+        let opened = self.open(envelope.project.as_deref())?;
+        let mut session = lock_project(&opened)?;
+
+        if envelope.dry_run {
+            // Each operation is checked against the document as it is now,
+            // which is what a refusal would be about anyway: a protected
+            // layer, a missing id, a value out of range.
+            let mut created = Vec::new();
+            let mut changed = Vec::new();
+            let mut removed = Vec::new();
+            for operation in operations {
+                let outcome =
+                    session.dry_run(operation, envelope.expected_version, &mut UlidIdSource)?;
+                created.extend(ids(&outcome.created));
+                changed.extend(ids(&outcome.changed));
+                removed.extend(ids(&outcome.removed));
+            }
+            return Ok(WriteOutcome {
+                version: session.version(),
+                dry_run: true,
+                transaction: None,
+                created,
+                changed,
+                removed,
+                warnings: Vec::new(),
+            });
+        }
+
+        let (outcome, transaction) = session.apply_batch(
+            label,
+            operations,
+            &actor_of(envelope),
+            now_millis(),
+            envelope.expected_version,
+            &mut UlidIdSource,
+        )?;
+        let touched = [outcome.created.clone(), outcome.changed.clone()].concat();
+        let document = session.document().clone();
+        let directory = session.project_dir().to_path_buf();
+        drop(session);
+        Ok(WriteOutcome {
+            version: version_of_document(&document),
+            dry_run: false,
+            transaction: Some(transaction.to_string()),
+            created: ids(&outcome.created),
+            changed: ids(&outcome.changed),
+            removed: ids(&outcome.removed),
+            warnings: self.warnings_for(&document, &directory, &touched),
         })
     }
 
@@ -199,6 +281,7 @@ impl Backend {
                 created: Vec::new(),
                 changed: Vec::new(),
                 removed: Vec::new(),
+                warnings: Vec::new(),
             });
         }
 
@@ -214,6 +297,7 @@ impl Backend {
             created: Vec::new(),
             changed: Vec::new(),
             removed: Vec::new(),
+            warnings: Vec::new(),
         })
     }
 
@@ -228,6 +312,7 @@ impl Backend {
         project: Option<&str>,
         scale: f32,
         name: Option<&str>,
+        overwrite: bool,
     ) -> Result<ExportResult, ApiError> {
         let stem = match name {
             Some(name) => safe_stem(name)?,
@@ -246,6 +331,18 @@ impl Backend {
             })
         })?;
         let path = directory.join(&file);
+        let existed = path.exists();
+        if existed && !overwrite {
+            return Err(ApiError::new(
+                assemblash_server::StatusCode::CONFLICT,
+                "exportExists",
+                format!(
+                    "{EXPORTS_DIR}/{file} is already there. Choose another name, or pass \
+                     overwrite to replace it"
+                ),
+            )
+            .with_details(serde_json::json!({ "path": format!("{EXPORTS_DIR}/{file}") })));
+        }
         std::fs::write(&path, &preview.png).map_err(|source| {
             ApiError::from(assemblash_core::storage::StorageError::Io {
                 operation: "writing",
@@ -259,6 +356,7 @@ impl Backend {
             bytes: preview.png.len(),
             width: preview.width,
             height: preview.height,
+            replaced: existed,
             // Measured after the file is written, on purpose: an export that
             // has something to say is still an export that happened.
             warnings: loaded.warnings(),
@@ -278,6 +376,52 @@ impl Backend {
             layers,
             note,
         })
+    }
+}
+
+/// A document's version, as the engine numbers it.
+fn version_of_document(document: &assemblash_core::Document) -> u64 {
+    document.version
+}
+
+impl Backend {
+    /// What a change made worse, for the layers it touched.
+    ///
+    /// Only text layers can produce these, so a change that touched none
+    /// loads no fonts and measures nothing. The check is the export's own, so
+    /// a write and an export cannot disagree about the same document.
+    fn warnings_for(
+        &self,
+        document: &assemblash_core::Document,
+        directory: &std::path::Path,
+        touched: &[LayerId],
+    ) -> Vec<assemblash_renderer::ExportWarning> {
+        if touched.is_empty() {
+            return Vec::new();
+        }
+        let mut has_text = false;
+        document.walk_layers(&mut |layer| {
+            if touched.contains(&layer.id)
+                && matches!(layer.kind, assemblash_core::LayerKind::Text(_))
+            {
+                has_text = true;
+            }
+        });
+        if !has_text {
+            return Vec::new();
+        }
+        let Ok(fonts) = self.fonts_for(document) else {
+            return Vec::new();
+        };
+        assemblash_renderer::export_warnings(document, fonts.font_set(), directory)
+            .into_iter()
+            .filter(|warning| {
+                warning
+                    .layer_id
+                    .as_ref()
+                    .is_some_and(|id| touched.contains(id))
+            })
+            .collect()
     }
 }
 

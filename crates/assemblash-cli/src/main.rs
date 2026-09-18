@@ -2133,7 +2133,10 @@ fn run(command: Command) -> Result<(), CliError> {
             // port, leaving two windows editing the same projects. If one is
             // already running and answering, open that instead.
             if friendly {
-                if let Some(url) = assemblash_server::instance::running_url(&root) {
+                if let Some(url) = assemblash_server::instance::running_url_with_token(
+                    &root,
+                    workspace.config().token.as_deref(),
+                ) {
                     println!("{url}");
                     eprintln!("Assemblash is already running; opening it.");
                     assemblash_server::instance::open_browser(&url);
@@ -2184,9 +2187,47 @@ fn run(command: Command) -> Result<(), CliError> {
                 )
                 .await?;
                 let url = server.url();
+                // MCP from the same process, over the same open projects: an
+                // agent connected here never locks the person out of a
+                // project, and never needs a second process. Mounted after
+                // the bind, because its allowed origins name the real port,
+                // and behind the same access check as every route.
+                let hosting = assemblash_mcp::Hosting {
+                    url: url.clone(),
+                    port: server.address().port(),
+                    local_only: server.site_guard().is_enabled(),
+                    extra_hosts: server.site_guard().extra_hosts().to_vec(),
+                    stopping: server.stop_signal(),
+                    // A seconds value in ASSEMBLASH_MCP_SESSION_IDLE_SECS
+                    // replaces the five-minute default. The relay tests use
+                    // it to make a session expire without waiting.
+                    session_idle: std::env::var("ASSEMBLASH_MCP_SESSION_IDLE_SECS")
+                        .ok()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .map(std::time::Duration::from_secs),
+                };
+                let (mcp, agents) =
+                    assemblash_mcp::http_service_with_sessions(server.state(), hosting);
+                let server = server
+                    .with_service(assemblash_mcp::MCP_PATH, mcp)
+                    .with_agent_access(assemblash_mcp::MCP_PATH)
+                    .with_agent_sessions(move || agents.count());
+
+                // Ctrl-C stops the server the way the page's button does:
+                // in-flight requests finish, every project is released, and
+                // the instance record is cleared below. Without this, the
+                // process dies where it stands and leaves both behind.
+                let stop = server.stop_handle();
+                tokio::spawn(async move {
+                    if tokio::signal::ctrl_c().await.is_ok() {
+                        eprintln!("Stopping Assemblash.");
+                        let _ = stop.send(true);
+                    }
+                });
                 // The URL goes to stdout whatever else happens, so a person on
                 // a machine with no browser — or a script — still has it.
                 println!("{url}");
+                eprintln!("MCP for AI agents: {url}{}", assemblash_mcp::MCP_PATH);
                 if needs_token {
                     // Never the token itself: it would land in whatever
                     // captures this output, which is the one place a secret
@@ -2198,15 +2239,23 @@ fn run(command: Command) -> Result<(), CliError> {
                          with TLS in front of anything reachable beyond a trusted network."
                     );
                 }
-                if friendly {
+                // Recorded for every loopback server, not only a friendly
+                // one: `assemblash mcp` on this workspace finds the record and
+                // uses this server's MCP endpoint instead of opening the
+                // projects a second time. A wider bind is not recorded — it
+                // answers the check only with a token.
+                let recorded = friendly || server.is_loopback();
+                if recorded {
                     let _ = assemblash_server::instance::record(&root, &url);
+                }
+                if friendly {
                     eprintln!("Assemblash is running. Close it from the page, or press Ctrl-C.");
                     if open_browser {
                         assemblash_server::instance::open_browser(&url);
                     }
                 }
                 let result = server.serve().await;
-                if friendly {
+                if recorded {
                     assemblash_server::instance::clear(&root);
                 }
                 result
@@ -2224,10 +2273,14 @@ fn run(command: Command) -> Result<(), CliError> {
                 Some(directory) => {
                     assemblash_mcp::Backend::single_project_with(directory, reclaim_stale_locks)
                 }
-                None => assemblash_mcp::Backend::workspace_with(
-                    open_workspace(workspace)?,
-                    reclaim_stale_locks,
-                ),
+                // A workspace may be open in the person's editor. The relay
+                // uses that editor's endpoint while it runs, so this process
+                // never locks the person out, and serves the workspace itself
+                // while it does not.
+                None => {
+                    assemblash_mcp::relay(open_workspace(workspace)?, reclaim_stale_locks)?;
+                    return Ok(());
+                }
             };
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

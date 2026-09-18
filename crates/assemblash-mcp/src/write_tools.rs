@@ -491,6 +491,31 @@ pub struct SnapArgs {
     pub edge: AlignEdge,
 }
 
+/// Where a layer's box goes, in absolute values.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerBoxArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// Layer to place.
+    pub layer_id: String,
+    /// New left edge, in the parent's coordinate space. Omit to keep it.
+    #[serde(default)]
+    pub x: Option<f64>,
+    /// New top edge. Omit to keep it.
+    #[serde(default)]
+    pub y: Option<f64>,
+    /// New box width. Omit to keep it.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// New box height. Omit to keep it.
+    #[serde(default)]
+    pub height: Option<f64>,
+    /// New clockwise rotation in degrees. Omit to keep it.
+    #[serde(default)]
+    pub rotation: Option<f64>,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportArgs {
@@ -504,6 +529,12 @@ pub struct ExportArgs {
     /// underscores only — the directory is not yours to choose.
     #[serde(default)]
     pub name: Option<String>,
+    /// Replace a file of that name if one is already there.
+    ///
+    /// Off by default: an export that quietly replaced an earlier one would
+    /// lose work nobody asked to lose.
+    #[serde(default)]
+    pub overwrite: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -772,6 +803,64 @@ impl AssemblashMcp {
                 dy: args.dy,
             },
         )
+    }
+
+    /// Places a layer's whole box at once.
+    #[tool(
+        description = "Set a layer's position, size, and rotation in absolute values, in one \
+                       journalled change that one undo reverts. Omitted fields stay as they \
+                       are. Use this to make a text box taller or to place a layer exactly; \
+                       update_layer changes properties, not the box."
+    )]
+    async fn set_layer_box(
+        &self,
+        Parameters(args): Parameters<LayerBoxArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        let envelope = self.resolved(&args.write);
+        let layer = self
+            .backend()
+            .get_layer(envelope.project.as_deref(), &args.layer_id)
+            .map_err(to_error)?;
+        let id = LayerId::new(args.layer_id.clone());
+
+        let mut operations = Vec::new();
+        let dx = args.x.map_or(0.0, |x| x - layer.x);
+        let dy = args.y.map_or(0.0, |y| y - layer.y);
+        if dx != 0.0 || dy != 0.0 {
+            operations.push(Operation::Move {
+                id: id.clone(),
+                dx,
+                dy,
+            });
+        }
+        if args.width.is_some() || args.height.is_some() {
+            let width = args.width.unwrap_or(layer.width);
+            let height = args.height.unwrap_or(layer.height);
+            if width != layer.width || height != layer.height {
+                operations.push(Operation::Resize {
+                    id: id.clone(),
+                    width,
+                    height,
+                });
+            }
+        }
+        if let Some(degrees) = args.rotation {
+            if degrees != layer.rotation {
+                operations.push(Operation::Rotate { id, degrees });
+            }
+        }
+        if operations.is_empty() {
+            return Err(ErrorData::invalid_request(
+                "the layer is already where this asks for: give an x, y, width, height, or \
+                 rotation that differs from the layer's own"
+                    .to_owned(),
+                None,
+            ));
+        }
+        self.backend()
+            .apply_batch(&envelope, "set layer box", &operations)
+            .map(Json)
+            .map_err(to_error)
     }
 
     /// Resizes a layer.
@@ -1066,6 +1155,7 @@ impl AssemblashMcp {
                 project.as_deref(),
                 args.scale.unwrap_or(1.0),
                 args.name.as_deref(),
+                args.overwrite.unwrap_or(false),
             )
             .map(Json)
             .map_err(to_error)

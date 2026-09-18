@@ -62,6 +62,11 @@ const ASSETS: &[Asset] = &[
         body: include_bytes!("../../../ui/dist/app.js"),
     },
     Asset {
+        name: "agents.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/agents.js"),
+    },
+    Asset {
         name: "api.js",
         content_type: "text/javascript; charset=utf-8",
         body: include_bytes!("../../../ui/dist/api.js"),

@@ -23,6 +23,9 @@ axum = { version = "0.8.9", default-features = false, features = [
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 thiserror = "2.0.19"
+# The bound for `Server::with_service`, which mounts another transport's
+# service (the hosted MCP endpoint) behind this server's access check.
+tower-service = "0.3.3"
 # Only the pieces the server needs: a current-thread-capable multi-thread
 # runtime and a TCP listener. No process, signal, or filesystem features.
 tokio = { version = "1.49.0", default-features = false, features = [

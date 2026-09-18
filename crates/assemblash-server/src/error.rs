@@ -156,8 +156,11 @@ impl From<SessionError> for ApiError {
                 Self::new(StatusCode::CONFLICT, "versionConflict", message)
                     .with_details(json!({ "expected": expected, "actual": actual }))
             }
+            // Not the core text: over HTTP and MCP the reader is often an
+            // agent, and the one thing it must never do is delete the lock
+            // file while the editor that holds it is alive.
             SessionError::Locked { pid, .. } => {
-                Self::new(StatusCode::CONFLICT, "projectLocked", message)
+                Self::new(StatusCode::CONFLICT, "projectLocked", locked_message(pid))
                     .with_details(json!({ "pid": pid }))
             }
             // A refused operation is a well-formed request the engine declined
@@ -174,6 +177,18 @@ impl From<SessionError> for ApiError {
             _ => Self::new(StatusCode::INTERNAL_SERVER_ERROR, "session", message),
         }
     }
+}
+
+/// What `projectLocked` says on the HTTP and MCP transports.
+///
+/// No path and no advice to remove anything: the usual holder is the person's
+/// own editor, and the fix is to use that editor's endpoint, not to break its
+/// lock.
+fn locked_message(pid: u32) -> String {
+    format!(
+        "the project is open in the Assemblash editor or another agent (pid {pid}); \
+         close it there, or connect to the running editor"
+    )
 }
 
 impl From<StorageError> for ApiError {
@@ -285,6 +300,33 @@ mod tests {
 
     use super::*;
     use assemblash_core::ids::LayerId;
+
+    /// Agents act on error text. A `projectLocked` that told them to delete
+    /// the lock file would let one break the editor's lock while it is alive.
+    #[test]
+    fn a_locked_project_never_advises_deleting_the_lock() {
+        let error = ApiError::from(SessionError::Locked {
+            pid: 4242,
+            path: std::path::PathBuf::from("/w/projects/demo/.assemblash-lock"),
+        });
+        assert_eq!(error.code(), "projectLocked");
+        assert_eq!(error.status(), StatusCode::CONFLICT);
+        assert_eq!(error.details()["pid"], 4242);
+        let message = error.message();
+        for forbidden in [".assemblash-lock", "remove", "delete", "unlock"] {
+            assert!(!message.contains(forbidden), "{forbidden:?} in {message}");
+        }
+        assert!(message.contains("editor"), "{message}");
+
+        // The core text, which the command line prints, names no file either.
+        let core = SessionError::Locked {
+            pid: 4242,
+            path: std::path::PathBuf::from("/w/projects/demo/.assemblash-lock"),
+        }
+        .to_string();
+        assert!(!core.contains(".assemblash-lock"), "{core}");
+        assert!(!core.contains("remove"), "{core}");
+    }
 
     /// A geometry this build cannot draw reports like an effect it cannot
     /// draw: the document is fine, the request was fine, and the render is

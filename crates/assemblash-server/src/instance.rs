@@ -85,12 +85,25 @@ pub fn read(workspace_root: &Path) -> std::io::Result<Option<Running>> {
 /// address and says it is Assemblash — which is also what makes replacing a
 /// stale claim safe.
 pub fn running_url(workspace_root: &Path) -> Option<String> {
-    let running = read(workspace_root).ok().flatten()?;
-    answers(&running.url).then_some(running.url)
+    running_url_with_token(workspace_root, None)
 }
 
-/// Whether an Assemblash server answers at a URL.
-fn answers(url: &str) -> bool {
+/// [`running_url`], for a workspace whose server requires an access token.
+///
+/// The check reads `/api/version`, which sits behind the token like every
+/// route. Without the token a protected server answers 401 and is not
+/// recognised. The token goes only to a loopback address.
+pub fn running_url_with_token(workspace_root: &Path, token: Option<&str>) -> Option<String> {
+    let running = read(workspace_root).ok().flatten()?;
+    answers(&running.url, token).then_some(running.url)
+}
+
+/// Whether an Assemblash server answers at a loopback URL.
+///
+/// Only loopback: the record is a file in the workspace, and a workspace can
+/// be synchronised from another computer. A record that names any other
+/// address is not this machine's server, and a token must not be sent there.
+fn answers(url: &str, token: Option<&str>) -> bool {
     use std::io::{Read as _, Write as _};
 
     let Some(authority) = url.strip_prefix("http://") else {
@@ -102,6 +115,9 @@ fn answers(url: &str) -> bool {
     else {
         return false;
     };
+    if !address.ip().is_loopback() {
+        return false;
+    }
     // Short timeouts throughout: this runs before a person sees anything, and
     // a server that does not answer promptly is one this launch should replace
     // rather than wait for.
@@ -112,8 +128,13 @@ fn answers(url: &str) -> bool {
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
 
-    let request =
-        format!("GET /api/version HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n");
+    let authorization = token
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    let request = format!(
+        "GET /api/version HTTP/1.1\r\nHost: {authority}\r\n{authorization}Connection: close\r\n\r\n"
+    );
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
@@ -199,7 +220,15 @@ mod tests {
     #[test]
     fn a_claim_that_is_not_a_loopback_url_is_not_believed() {
         let dir = tempfile::tempdir().unwrap();
-        for nonsense in ["", "not a url", "https://example.com", "http://"] {
+        // 192.0.2.1 is a documentation address: not loopback, so it is
+        // refused before any connection is tried.
+        for nonsense in [
+            "",
+            "not a url",
+            "https://example.com",
+            "http://",
+            "http://192.0.2.1:8787",
+        ] {
             std::fs::write(
                 instance_path(dir.path()),
                 serde_json::to_string(&Running {

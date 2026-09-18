@@ -14,7 +14,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 ## Summary
 
-6 workspace crates, 266 third-party crates in the full dependency graph
+6 workspace crates, 267 third-party crates in the full dependency graph
 (all features, all targets).
 
 | Licence | Crates |
@@ -36,7 +36,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | ISC | 2 |
 | MIT | 47 |
 | MIT AND BSD-3-Clause | 1 |
-| MIT OR Apache-2.0 | 149 |
+| MIT OR Apache-2.0 | 150 |
 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | 2 |
 | MIT OR Apache-2.0 OR Zlib | 3 |
 | MIT OR Zlib OR Apache-2.0 | 1 |
@@ -49,12 +49,12 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 | Crate | Version | Licence |
 | ----- | ------- | ------- |
-| assemblash-cli | 1.8.0 | Apache-2.0 |
-| assemblash-core | 1.8.0 | Apache-2.0 |
-| assemblash-liveness | 1.8.0 | Apache-2.0 |
-| assemblash-mcp | 1.8.0 | Apache-2.0 |
-| assemblash-renderer | 1.8.0 | Apache-2.0 |
-| assemblash-server | 1.8.0 | Apache-2.0 |
+| assemblash-cli | 1.9.0 | Apache-2.0 |
+| assemblash-core | 1.9.0 | Apache-2.0 |
+| assemblash-liveness | 1.9.0 | Apache-2.0 |
+| assemblash-mcp | 1.9.0 | Apache-2.0 |
+| assemblash-renderer | 1.9.0 | Apache-2.0 |
+| assemblash-server | 1.9.0 | Apache-2.0 |
 
 ## Dependencies
 
@@ -239,6 +239,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | smallvec | 1.15.2 | MIT OR Apache-2.0 |
 | socket2 | 0.6.5 | MIT OR Apache-2.0 |
 | sqlite-wasm-rs | 0.5.5 | MIT |
+| sse-stream | 0.2.6 | MIT OR Apache-2.0 |
 | strict-num | 0.1.1 | MIT |
 | strsim | 0.11.1 | MIT |
 | subtle | 2.6.1 | BSD-3-Clause |

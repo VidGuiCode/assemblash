@@ -99,21 +99,21 @@ export class ActionQueue {
     return new Promise<void>((resolve) => {
       const settled = { resolve };
       if (action.coalesceKey !== null) {
-        // Latest-wins: an undispatched action with the same key says the
-        // same thing, only staler. Replace it, tell it why, resolve it.
-        for (let i = this.pending.length - 1; i >= 0; i--) {
-          const earlier = this.pending[i];
-          if (earlier && earlier.action.coalesceKey === action.coalesceKey) {
-            this.pending.splice(i, 1);
-            try {
-              earlier.action.onSuperseded?.();
-            } catch {
-              // A listener that throws cannot be allowed to break the queue.
-            }
-            earlier.settled.resolve();
-            this.emitSettled(earlier.action.label, false, true, earlier.queuedAt, null);
-            break;
+        // Latest-wins, but only against the last waiting action. An older
+        // same-key action further back sits before other actions — an undo,
+        // a delete — and removing it would move its intent past them: the
+        // undo would then revert a different change.
+        const last = this.pending.length - 1;
+        const earlier = this.pending[last];
+        if (earlier && earlier.action.coalesceKey === action.coalesceKey) {
+          this.pending.splice(last, 1);
+          try {
+            earlier.action.onSuperseded?.();
+          } catch {
+            // A listener that throws cannot be allowed to break the queue.
           }
+          earlier.settled.resolve();
+          this.emitSettled(earlier.action.label, false, true, earlier.queuedAt, null);
         }
       }
       this.pending.push({

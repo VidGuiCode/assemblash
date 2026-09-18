@@ -453,6 +453,26 @@ impl AppState {
         }
     }
 
+    /// [`AppState::close_all`], then waits until every closed session has
+    /// really been dropped — and its lock file removed.
+    ///
+    /// Clearing the registry drops only the registry's handle. A request that
+    /// is still running holds its own handle, and the project stays locked
+    /// until that request ends. A caller that hands the projects to another
+    /// process next must wait for that, or the other process meets
+    /// `projectLocked`. Returns `false` when `timeout` passed first.
+    pub fn close_all_and_wait(&self, timeout: std::time::Duration) -> bool {
+        let closed: Vec<std::sync::Weak<Mutex<Session>>> = match self.inner.open.lock() {
+            Ok(mut open) => {
+                let handles = open.values().map(Arc::downgrade).collect();
+                open.clear();
+                handles
+            }
+            Err(_) => return false,
+        };
+        wait_until_dropped(&closed, timeout)
+    }
+
     /// Registers a session for a project that has just been created.
     pub fn adopt(&self, id: &ProjectId, session: Session) -> Result<OpenProject, ApiError> {
         let session = Arc::new(Mutex::new(session));
@@ -471,6 +491,23 @@ impl AppState {
                 "the server's project registry is in an unknown state; restart it",
             )
         })
+    }
+}
+
+/// Waits until nothing holds any of these sessions any more.
+pub fn wait_until_dropped(
+    sessions: &[std::sync::Weak<Mutex<Session>>],
+    timeout: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if sessions.iter().all(|session| session.strong_count() == 0) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 

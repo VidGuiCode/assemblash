@@ -123,6 +123,18 @@ server {
 }
 ```
 
+From 1.9.0, a loopback server with **no token** refuses a `Host` that is not
+`localhost`, `127.0.0.1`, or `::1`. This protects it from DNS rebinding. With
+the example above, nginx sends `Host: assemblash.example.com`. Do one of these:
+
+- Keep the token, as the checklist below says. A server with a token does not
+  check `Host`.
+- Or add the public name to `config.toml`:
+
+  ```toml
+  allowed-hosts = ["assemblash.example.com"]
+  ```
+
 ### Identity providers
 
 Assemblash has no accounts and no built-in OIDC. If you need per-person

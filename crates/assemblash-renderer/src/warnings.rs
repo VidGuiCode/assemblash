@@ -35,6 +35,13 @@ pub const WORD_BROKEN_MID_WORD: &str = "wordBrokenMidWord";
 /// A text layer's wrapped text is taller than the layer's own box.
 pub const TEXT_OVERFLOWS_BOX: &str = "textOverflowsBox";
 
+/// A text layer sits under an opaque layer that is drawn over it.
+///
+/// The picture is exactly what the document says; the text is simply not
+/// visible in it. An agent cannot see its own render, so this is the one
+/// mistake it makes that nothing else would report.
+pub const TEXT_COVERED_BY_LAYER: &str = "textCoveredByLayer";
+
 /// An imported SVG asset draws text in a family this render did not load.
 ///
 /// **Superseded in 1.5.0, and no longer reachable from any export.** This was
@@ -126,7 +133,89 @@ pub fn export_warnings(
         // shape draws itself into its own box and has neither.
         LayerKind::Image(_) | LayerKind::Group(_) | LayerKind::Shape(_) => {}
     });
+    warnings.extend(covered_text_warnings(&document.layers));
     warnings
+}
+
+/// How much of a text layer another layer must cover before it is worth
+/// saying. Below this, an overlapping corner is usually the design.
+const COVERED_ENOUGH: f64 = 0.55;
+
+/// How solid a layer must be before it hides what is under it.
+const OPAQUE_ENOUGH: f64 = 0.85;
+
+/// Text that a later sibling covers, everywhere in the tree.
+///
+/// Siblings only: they share one coordinate space and one drawing order, so
+/// "drawn over" is exactly "later in this list". Comparing across groups would
+/// need the whole transform stack and would guess more than it knows.
+/// Rotation is ignored, so a rotated cover is compared by its upright box.
+fn covered_text_warnings(layers: &[assemblash_core::Layer]) -> Vec<ExportWarning> {
+    let mut warnings = Vec::new();
+    for (index, layer) in layers.iter().enumerate() {
+        if let LayerKind::Group(group) = &layer.kind {
+            warnings.extend(covered_text_warnings(&group.children));
+        }
+        if !matches!(layer.kind, LayerKind::Text(_)) || !layer.visible {
+            continue;
+        }
+        let text_area = layer.transform.width * layer.transform.height;
+        if text_area <= 0.0 {
+            continue;
+        }
+        for above in layers.iter().skip(index + 1) {
+            if !covers(above) {
+                continue;
+            }
+            let share = overlap(&layer.transform, &above.transform) / text_area;
+            if share < COVERED_ENOUGH {
+                continue;
+            }
+            warnings.push(ExportWarning {
+                code: TEXT_COVERED_BY_LAYER,
+                message: format!(
+                    "layer {}: layer {} is drawn over it and covers {} percent of its box, \
+                     so the text may not be readable",
+                    layer.id,
+                    above.id,
+                    number((share * 100.0).round())
+                ),
+                layer_id: Some(layer.id.clone()),
+            });
+            break;
+        }
+    }
+    warnings
+}
+
+/// Whether a layer hides what is under it: solid, visible, and something that
+/// paints its whole box.
+fn covers(layer: &assemblash_core::Layer) -> bool {
+    if !layer.visible || layer.opacity < OPAQUE_ENOUGH {
+        return false;
+    }
+    match &layer.kind {
+        // A shape with no fill is an outline; it hides nothing.
+        LayerKind::Shape(shape) => shape.fill.is_some(),
+        LayerKind::Image(_) => true,
+        // An SVG, a group, or text can be mostly empty space, and guessing
+        // would report designs that are fine.
+        LayerKind::Svg(_) | LayerKind::Group(_) | LayerKind::Text(_) => false,
+    }
+}
+
+/// The area two upright boxes share.
+fn overlap(
+    a: &assemblash_core::document::Transform,
+    b: &assemblash_core::document::Transform,
+) -> f64 {
+    let width = (a.x + a.width).min(b.x + b.width) - a.x.max(b.x);
+    let height = (a.y + a.height).min(b.y + b.height) - a.y.max(b.y);
+    if width <= 0.0 || height <= 0.0 {
+        0.0
+    } else {
+        width * height
+    }
 }
 
 /// The DEF-2 symptom, made loud — and, since 1.5.0, never actually said.
@@ -195,6 +284,119 @@ fn rounded(value: f64) -> i64 {
         (value * 1_000_000.0).round() as i64
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod covered_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use assemblash_core::document::{
+        Extras, ShapeKind, ShapeLayer, TextAlign, TextLayer, Transform,
+    };
+    use assemblash_core::{Color, Layer};
+
+    fn text(id: &str, transform: Transform) -> Layer {
+        Layer::new(
+            LayerId::new(id),
+            transform,
+            LayerKind::Text(TextLayer {
+                text: "A COZY ESCAPE".to_owned(),
+                font_family: "Noto Sans".to_owned(),
+                font_size: 24.0,
+                color: Some(Color::new("#101820")),
+                align: TextAlign::Center,
+                line_height: 1.2,
+                font_weight: 400,
+                font_style: assemblash_core::FontStyle::Normal,
+                letter_spacing: 0.0,
+                stroke: None,
+                vertical_align: assemblash_core::VerticalAlign::Top,
+                runs: Vec::new(),
+                extra: Extras::new(),
+            }),
+        )
+    }
+
+    fn disc(id: &str, transform: Transform, fill: Option<Color>) -> Layer {
+        Layer::new(
+            LayerId::new(id),
+            transform,
+            LayerKind::Shape(ShapeLayer {
+                shape: ShapeKind::Ellipse,
+                fill,
+                stroke: None,
+                extra: Extras::new(),
+            }),
+        )
+    }
+
+    /// The mistake an agent cannot see: a sun drawn over the subtitle.
+    #[test]
+    fn a_solid_layer_over_text_is_reported_once() {
+        let layers = vec![
+            text("layer_text", Transform::new(100.0, 100.0, 200.0, 40.0)),
+            disc(
+                "layer_sun",
+                Transform::new(90.0, 90.0, 220.0, 60.0),
+                Some(Color::new("#ffcc00")),
+            ),
+        ];
+        let warnings = covered_text_warnings(&layers);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, TEXT_COVERED_BY_LAYER);
+        assert_eq!(warnings[0].layer_id, Some(LayerId::new("layer_text")));
+        assert!(
+            warnings[0].message.contains("layer_sun"),
+            "{:?}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn a_design_that_is_fine_says_nothing() {
+        let above = || Transform::new(100.0, 100.0, 200.0, 40.0);
+        let cases: Vec<(&str, Vec<Layer>)> = vec![
+            (
+                "the shape is under the text",
+                vec![
+                    disc("layer_card", above(), Some(Color::new("#ffffff"))),
+                    text("layer_text", above()),
+                ],
+            ),
+            (
+                "the shape is an outline",
+                vec![
+                    text("layer_text", above()),
+                    disc("layer_ring", above(), None),
+                ],
+            ),
+            (
+                "the shape barely touches",
+                vec![
+                    text("layer_text", above()),
+                    disc(
+                        "layer_corner",
+                        Transform::new(280.0, 130.0, 60.0, 30.0),
+                        Some(Color::new("#ffcc00")),
+                    ),
+                ],
+            ),
+        ];
+        for (what, layers) in cases {
+            assert!(covered_text_warnings(&layers).is_empty(), "{what}");
+        }
+
+        // A see-through layer does not hide the text either.
+        let mut faint = disc(
+            "layer_wash",
+            Transform::new(90.0, 90.0, 220.0, 60.0),
+            Some(Color::new("#ffcc00")),
+        );
+        faint.opacity = 0.3;
+        let layers = vec![text("layer_text", above()), faint];
+        assert!(covered_text_warnings(&layers).is_empty());
     }
 }
 

@@ -106,6 +106,11 @@ function defaultFontFaces() {
   ];
 }
 
+// A Windows download path with a space in it: the case a person pastes into a
+// client, and the one that goes wrong first when escaping is wrong.
+const AGENT_EXECUTABLE = String.raw`C:\Users\Person One\Downloads\assemblash-1.9.0-windows-x86_64.exe`;
+const AGENT_WORKSPACE = String.raw`C:\Users\Person One\Assemblash`;
+
 function freshDocument() {
   return {
     schemaVersion: 1,
@@ -184,6 +189,18 @@ async function startFixtureServer() {
   let fontFaces = defaultFontFaces();
   let failInstall = null;
   let pendingReclaimedLock = null;
+  // Projects another client (an agent over MCP) created, listed after "demo".
+  let otherProjects = [];
+  // Which upcoming write the engine refuses (1 = the next one), if any.
+  let refuseWriteNumber = 0;
+  let failPreviews = 0;
+  // A second project, and undo requests recorded by project and held for a
+  // while, for the journey about switching projects while actions wait.
+  let secondProject = false;
+  let agentCount = 0;
+  let historyPosition = 0;
+  let undoDelayMs = 0;
+  const undos = [];
   const fontFamilies = () => [...new Set(fontFaces.map((face) => face.family))].sort();
   const writes = [];
   const reads = [];
@@ -197,7 +214,22 @@ async function startFixtureServer() {
       return send(200, { name: "assemblash", version: "ui-test", schemaVersion: 1, canShutdown: false });
     }
     if (request.method === "GET" && url.pathname === "/api/projects") {
-      return send(200, { projects: [{ id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length }] });
+      return send(200, { projects: [
+        { id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length },
+        ...(secondProject ? [{ id: "second", name: "Second project", documentId: "doc_second", version: 1, layers: 0 }] : []),
+        ...otherProjects,
+      ] });
+    }
+    if (request.method === "GET" && url.pathname === "/api/agent-sessions") {
+      return send(200, { count: agentCount });
+    }
+    if (request.method === "GET" && url.pathname === "/api/agent-access") {
+      return send(200, {
+        mcpUrl: "http://127.0.0.1:8787/mcp",
+        executable: AGENT_EXECUTABLE,
+        workspace: AGENT_WORKSPACE,
+        tokenRequired: false,
+      });
     }
     if (request.method === "GET" && url.pathname === "/api/projects/recent") {
       return send(200, { projects: [{ id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length }] });
@@ -217,7 +249,27 @@ async function startFixtureServer() {
       return send(200, structuredClone(document));
     }
     if (request.method === "GET" && url.pathname === "/api/projects/demo/history") {
-      return send(200, { position: 0, head: 0, entries: [] });
+      return send(200, { position: historyPosition, head: historyPosition, entries: [] });
+    }
+    if (request.method === "POST" && /^\/api\/projects\/[^/]+\/undo$/.test(url.pathname)) {
+      const project = url.pathname.split("/")[3];
+      request.resume();
+      request.on("end", () => {
+        undos.push(project);
+        setTimeout(() => send(200, { version: document.version, dryRun: false }), undoDelayMs);
+      });
+      return;
+    }
+    if (secondProject && request.method === "GET" && url.pathname.startsWith("/api/projects/second")) {
+      const second = { ...freshDocument(), id: "doc_second", name: "Second project", layers: [] };
+      const rest = url.pathname.slice("/api/projects/second".length);
+      if (rest === "") {
+        return send(200, { id: "second", name: second.name, documentId: second.id, version: second.version, layers: 0 });
+      }
+      if (rest === "/document") return send(200, second);
+      if (rest === "/history") return send(200, { position: 0, head: 0, entries: [] });
+      if (rest === "/presets") return send(200, { presets: [] });
+      if (rest === "/slots") return send(200, { isTemplate: false, slots: [] });
     }
     if (request.method === "GET" && url.pathname === "/api/projects/demo/presets") {
       return send(200, { presets: [] });
@@ -315,6 +367,10 @@ async function startFixtureServer() {
       return send(200, { families: fontFamilies(), faces: structuredClone(fontFaces) });
     }
     if (request.method === "GET" && url.pathname.endsWith("/preview.png")) {
+      if (failPreviews > 0) {
+        failPreviews -= 1;
+        return send(422, { error: { code: "missingFont", message: "the font store has no face for Brand Sans" } });
+      }
       response.writeHead(200, { "content-type": "image/png" });
       return response.end(png);
     }
@@ -352,6 +408,12 @@ async function startFixtureServer() {
       request.on("data", (chunk) => { raw += chunk; });
       request.on("end", () => {
         const body = JSON.parse(raw);
+        if (refuseWriteNumber > 0) {
+          refuseWriteNumber -= 1;
+          if (refuseWriteNumber === 0) {
+            return send(422, { error: { code: "operationRefused", message: "the layer is protected" } });
+          }
+        }
         writes.push({ path: url.pathname, body });
         const operations = body.commands ?? [body.operation];
         const created = [];
@@ -366,7 +428,7 @@ async function startFixtureServer() {
 
     const requested = url.pathname === "/" ? "index.html" : basename(url.pathname);
     const allowed = new Set([
-      "index.html", "app.js", "api.js", "export.js", "fonts.js", "geometry.js", "queue.js", "templates.js", "token.js",
+      "index.html", "agents.js", "app.js", "api.js", "export.js", "fonts.js", "geometry.js", "queue.js", "templates.js", "token.js",
       "studio.css", "style.css", "phosphor.css", "Phosphor.woff2",
     ]);
     if (!allowed.has(requested)) return send(404, { error: { code: "notFound", message: url.pathname } });
@@ -400,11 +462,50 @@ async function startFixtureServer() {
     armReclaimedLock(lock) {
       pendingReclaimedLock = lock;
     },
+    // What an agent connected to the editor's MCP endpoint does: it changes
+    // the document without the page asking for anything.
+    editAsAgent(dx) {
+      const layer = findLayer(document, "layer_text");
+      layer.transform.x += dx;
+      document.version += 1;
+      return document.version;
+    },
+    setAgentCount(count) {
+      agentCount = count;
+    },
+    useSecondProject(enabled) {
+      secondProject = enabled;
+    },
+    setHistoryPosition(position) {
+      historyPosition = position;
+    },
+    delayUndo(ms) {
+      undoDelayMs = ms;
+    },
+    undos,
+    refuseWrite(number) {
+      refuseWriteNumber = number;
+    },
+    failPreviews(count) {
+      failPreviews = count;
+    },
+    version: () => document.version,
+    createAsAgent(id) {
+      otherProjects.push({ id, name: id, documentId: `doc_${id}`, version: 0, layers: 0 });
+    },
     reset() {
       document = freshDocument();
       fontFaces = defaultFontFaces();
       failInstall = null;
       pendingReclaimedLock = null;
+      otherProjects = [];
+      refuseWriteNumber = 0;
+      failPreviews = 0;
+      secondProject = false;
+      agentCount = 0;
+      historyPosition = 0;
+      undoDelayMs = 0;
+      undos.length = 0;
       writes.length = 0;
       reads.length = 0;
       fontCalls.length = 0;
@@ -1412,6 +1513,235 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.equal(fixture.writes.length, 22, "different properties never replace each other");
     assert.deepEqual(fixture.writes[20].body.operation, { op: "update", id: "layer_text", fontSize: 52 });
     assert.deepEqual(fixture.writes[21].body.operation, { op: "update", id: "layer_text", lineHeight: 1.6 });
+  });
+
+  await t.test("a refused edit behind an accepted one leaves the page on the newest version", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    await selectLayer(page, "layer_text");
+    // Two nudges before either returns: the second one's snapshot is taken
+    // while the first is still on its way. The engine accepts the first and
+    // refuses the second. Restoring the second one's snapshot would put the
+    // page back on the version before the first edit.
+    fixture.refuseWrite(2);
+    await page.evaluate(`(() => {
+      for (let i = 0; i < 2; i++) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", code: "ArrowRight", bubbles: true }));
+      }
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector("#status").dataset.kind === "error"`,
+      "the refusal to be reported",
+    );
+    await page.waitFor(
+      `document.querySelector("#version").textContent === ${JSON.stringify(String(fixture.version()))}`,
+      "the page to show the newest version after the refusal",
+      10000,
+    );
+    await page.waitFor(
+      `!document.querySelector("#save-state").textContent.includes("Working")`,
+      "the queue to finish after the refusal",
+    );
+    // The next edit must be written against the newest version. A restored
+    // stale snapshot would send the version from before the accepted edit,
+    // and a real engine would refuse it as a version conflict.
+    const newest = fixture.version();
+    fixture.writes.length = 0;
+    await page.key("ArrowRight", { code: "ArrowRight" });
+    await waitForWrites(fixture, 1);
+    await waitForSaved(page);
+    assert.equal(
+      fixture.writes[0].body.expectedVersion,
+      newest,
+      "the edit after a refusal quotes the newest version",
+    );
+  });
+
+  await t.test("a preview the engine refuses is reported, not only logged", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    // Every preview fails for the moment, so the one this nudge asks for is
+    // refused whatever the preview of the open was still doing.
+    fixture.failPreviews(1000);
+    await selectLayer(page, "layer_text");
+    await page.key("ArrowRight", { code: "ArrowRight" });
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("preview") && document.querySelector("#status").textContent.includes("missingFont")`,
+      "the refused preview to be reported",
+    );
+    fixture.failPreviews(0);
+  });
+
+  await t.test("following another client waits while the person types in a field", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    await selectLayer(page, "layer_text");
+    const before = await page.evaluate(`document.querySelector("#version").textContent`);
+    // Typing, not yet committed: an input event and no change event.
+    await page.evaluate(`(() => {
+      const wrapper = [...document.querySelectorAll("#advanced-inspector label.field")]
+        .find((one) => one.textContent.trim().startsWith("Font size"));
+      const input = wrapper.querySelector("input");
+      input.focus();
+      input.value = "77";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      window.__typedInto = input;
+      return true;
+    })()`);
+    const version = fixture.editAsAgent(5);
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+    assert.equal(
+      await page.evaluate(`document.querySelector("#version").textContent`),
+      before,
+      "the page did not refresh while the person was typing",
+    );
+    assert.equal(await page.evaluate(`window.__typedInto.value`), "77", "the typed value survived");
+    // The person leaves the field without committing; following resumes. The
+    // test tab is not the focused window, so focus() and blur() do not fire
+    // focus events here: the leave is dispatched as the event it would be.
+    await page.evaluate(`(() => {
+      window.__typedInto.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector("#version").textContent === ${JSON.stringify(String(version))}`,
+      "the page to follow once the person stopped typing",
+      10000,
+    );
+  });
+
+  await t.test("actions waiting in the queue run on their own project when the person opens another", async () => {
+    fixture.reset();
+    fixture.useSecondProject(true);
+    fixture.setHistoryPosition(2);
+    await openProject(page);
+    await waitForSaved(page);
+    // The page lists the second project by itself (it follows the list).
+    await page.waitFor(
+      `[...document.querySelector("#projects").options].some((one) => one.value === "second")`,
+      "the second project to be listed",
+    );
+    await page.waitFor(`!document.querySelector("#undo").disabled`, "undo to be available");
+    await waitForSaved(page);
+
+    // Two undos, the first held by the engine, and then — before either has
+    // finished — the person opens the other project. Both undos were asked
+    // for on "demo" and must run there.
+    fixture.delayUndo(600);
+    await page.evaluate(`(() => {
+      document.querySelector("#undo").click();
+      document.querySelector("#undo").click();
+      const select = document.querySelector("#projects");
+      select.value = "second";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("Opened Second project")`,
+      "the second project to open after the waiting undos",
+      10000,
+    );
+    assert.deepEqual(fixture.undos, ["demo", "demo"], "every undo ran on the project it was made for");
+    fixture.useSecondProject(false);
+  });
+
+  await t.test("the status bar says when AI agents are connected", async () => {
+    fixture.reset();
+    await openProject(page);
+    assert.equal(await page.evaluate(`document.querySelector("#agents-connected").hidden`), true);
+
+    fixture.setAgentCount(1);
+    await page.waitFor(
+      `!document.querySelector("#agents-connected").hidden`,
+      "the connected-agent chip to appear",
+      10000,
+    );
+    assert.match(
+      await page.evaluate(`document.querySelector("#agents-connected").textContent`),
+      /1 AI agent connected/,
+    );
+
+    fixture.setAgentCount(3);
+    await page.waitFor(
+      `document.querySelector("#agents-connected").textContent.includes("3 AI agents connected")`,
+      "the count to follow",
+      10000,
+    );
+
+    fixture.setAgentCount(0);
+    await page.waitFor(
+      `document.querySelector("#agents-connected").hidden`,
+      "the chip to go when the agents leave",
+      10000,
+    );
+  });
+
+  await t.test("the agent dialog shows copy-ready configuration with the real executable path", async () => {
+    await page.click("#agents");
+    await page.waitFor(`document.querySelector("#agents-dialog").open`, "the agent dialog to open");
+    const blocks = await page.evaluate(`Object.fromEntries(
+      [...document.querySelectorAll("#agents-blocks .agent-block")]
+        .map((one) => [one.dataset.block, one.querySelector("code").textContent])
+    )`);
+    assert.deepEqual(Object.keys(blocks), ["json", "codex", "url"]);
+    const json = JSON.parse(blocks.json);
+    assert.deepEqual(json.mcpServers.assemblash, {
+      command: AGENT_EXECUTABLE,
+      args: ["mcp", "--workspace", AGENT_WORKSPACE],
+    });
+    // A TOML literal string keeps the Windows backslashes exactly as they are.
+    const codexLines = blocks.codex.split("\n");
+    assert.equal(codexLines[0], "[mcp_servers.assemblash]");
+    assert.equal(codexLines[1], `command = '${AGENT_EXECUTABLE}'`);
+    assert.equal(codexLines[2], `args = ['mcp', '--workspace', '${AGENT_WORKSPACE}']`);
+    assert.equal(blocks.url, "http://127.0.0.1:8787/mcp");
+    assert.equal(await page.evaluate(`document.querySelector("#agents-token").hidden`), true);
+    await page.evaluate(`document.querySelector("#agents-dialog").close()`);
+  });
+
+  await t.test("an agent's edit appears without any action, and a project it creates is listed", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    const startX = fixture.layers().find((one) => one.id === "layer_text").transform.x;
+    fixture.writes.length = 0;
+
+    const version = fixture.editAsAgent(33);
+    await page.waitFor(
+      `document.querySelector("#version").textContent === ${JSON.stringify(String(version))}`,
+      "the page to follow the agent's edit",
+      10000,
+    );
+    const shownX = await page.evaluate(`(() => {
+      const row = document.querySelector(".layer[data-id='layer_text']");
+      return row !== null;
+    })()`);
+    assert.ok(shownX, "the layer is still listed after the follow");
+    assert.equal(fixture.writes.length, 0, "following writes nothing");
+    assert.equal(fixture.layers().find((one) => one.id === "layer_text").transform.x, startX + 33);
+
+    // A nudge after the follow is written against the agent's version, so it
+    // is not a conflict.
+    await selectLayer(page, "layer_text");
+    await page.key("ArrowRight", { code: "ArrowRight" });
+    await waitForWrites(fixture, 1);
+    await waitForSaved(page);
+    assert.notEqual(
+      await page.evaluate(`document.querySelector("#status").dataset["kind"] ?? ""`),
+      "error",
+    );
+
+    fixture.createAsAgent("from-agent");
+    await page.waitFor(
+      `[...document.querySelector("#projects").options].some((one) => one.value === "from-agent")`,
+      "the project an agent created to be listed",
+      10000,
+    );
+    assert.equal(await page.evaluate(`document.querySelector("#projects").value`), "demo");
   });
 
 });

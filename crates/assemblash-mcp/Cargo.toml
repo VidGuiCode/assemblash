@@ -16,6 +16,9 @@ rmcp = { version = "3.1.0", default-features = false, features = [
     "server",
     "macros",
     "transport-io",
+    # The hosted endpoint: the editor process serves MCP at `/mcp` over the
+    # same state as its HTTP API, so an agent never locks the person out.
+    "transport-streamable-http-server",
 ] }
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -25,7 +28,17 @@ tokio = { version = "1.49.0", default-features = false, features = [
     "io-std",
     "macros",
     "rt-multi-thread",
+    "sync",
+    "io-util",
+    "time",
 ] }
+# The cancellation token rmcp's HTTP service takes, to end open event streams
+# when the editor stops. Already in the graph through rmcp.
+tokio-util = { version = "0.7.19", default-features = false }
+# The stdio relay posts to a running editor's `/mcp` endpoint. Already in the
+# graph through the renderer's font installer; loopback needs no TLS, but the
+# default features are what the graph already carries.
+ureq = "3.3.0"
 
 [lints]
 workspace = true

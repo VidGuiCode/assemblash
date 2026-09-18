@@ -87,7 +87,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "assemblash-cli"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "assemblash-core",
  "assemblash-mcp",
@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-core"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "assemblash-liveness",
  "proptest",
@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-liveness"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "libc",
  "serde",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-mcp"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "assemblash-core",
  "assemblash-renderer",
@@ -144,11 +144,13 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
+ "ureq",
 ]
 
 [[package]]
 name = "assemblash-renderer"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "assemblash-core",
  "png",
@@ -166,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-server"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "assemblash-core",
  "assemblash-renderer",
@@ -179,6 +181,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tower-service",
 ]
 
 [[package]]
@@ -1403,19 +1406,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad26b216c966e987e80e86daf784a455c039c43d98575ceed57b8faa259e5695"
 dependencies = [
  "async-trait",
+ "base64 0.23.0",
+ "bytes",
  "chrono",
  "futures",
+ "http",
+ "http-body",
+ "http-body-util",
  "pastey",
  "pin-project-lite",
  "process-wrap",
+ "rand 0.10.2",
  "rmcp-macros",
  "schemars",
  "serde",
  "serde_json",
+ "sse-stream",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower-service",
  "tracing",
  "uuid",
 ]
@@ -1757,6 +1768,19 @@ dependencies = [
  "js-sys",
  "rsqlite-vfs",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "sse-stream"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c25ac7aff0abd1dbc474536e40416e1102c7dd9bfba0b9861c6d357f835dcfb4"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
 ]
 
 [[package]]

@@ -17,6 +17,7 @@
 
 import * as api from "./api.js";
 import type { Document, Layer, Operation } from "./api.js";
+import { mountAgents } from "./agents.js";
 import { mountExport } from "./export.js";
 import {
   placedAssetSize,
@@ -309,6 +310,9 @@ const dom = {
   fontFamilies: el<HTMLDataListElement>("font-families"),
   shutdown: el<HTMLButtonElement>("shutdown"),
   emptyCreate: el<HTMLButtonElement>("empty-create"),
+  emptyAgents: el<HTMLButtonElement>("empty-agents"),
+  agents: el<HTMLButtonElement>("agents"),
+  agentsConnected: el<HTMLSpanElement>("agents-connected"),
   newProjectDialog: el<HTMLDialogElement>("new-project-dialog"),
   newProjectForm: el<HTMLFormElement>("new-project-form"),
   newProjectName: el<HTMLInputElement>("new-project-name"),
@@ -458,6 +462,8 @@ const exporter = mountExport({
   guard,
 });
 
+const agents = mountAgents({ say });
+
 function selectedLayer(): Layer | null {
   if (!state.document || state.selection.length !== 1) return null;
   const wanted = state.selection[0];
@@ -533,8 +539,8 @@ async function refresh(): Promise<void> {
   // is the dominant cost of a commit, and blocking further input on it is
   // what used to make rapid actions disappear.
   requestPreview();
-  void loadPresets();
-  void drawHistory();
+  void loadPresets().catch((error: unknown) => report("presets", error));
+  void drawHistory().catch((error: unknown) => report("history", error));
 }
 
 /** Reads the presets without holding anything open. Later reads win. */
@@ -572,7 +578,11 @@ function requestPreview(): void {
         const url = await api.imageObjectUrl(api.pngUrl(project, version, interactivePreviewScale()));
         const current = state.document;
         if (state.project !== project || !current || api.versionOf(current) !== version) {
-          continue; // a newer state owns the canvas; its want is pending
+          // A newer state owns the canvas; its want is pending. The image
+          // nobody will show is released, or every skipped preview would
+          // keep a PNG in memory for the life of the page.
+          URL.revokeObjectURL(url);
+          continue;
         }
         const previous = dom.canvasImage.src;
         dom.canvasImage.src = url;
@@ -583,6 +593,10 @@ function requestPreview(): void {
         applyZoom();
         markPreviewSettled();
       }
+    } catch (error) {
+      // Outside the queue, so nothing else would say it: a render the engine
+      // refused (a missing font, say) must reach the person, not the console.
+      report("preview", error);
     } finally {
       previewStreaming = null;
       if (previewWanted !== null) requestPreview();
@@ -2080,15 +2094,27 @@ function echoOperations(operations: api.OperationBatchCommand[]): boolean {
  * A snapshot of the local document an echo changed, restorable when the
  * engine refuses the echo'd intent: the prediction is undone and the refusal
  * is shown, so the page never keeps a state the server never accepted.
+ *
+ * The snapshot is only safe while the document is still at the version it
+ * was taken from. When an earlier queued action has already moved the
+ * document on, restoring it would bring back an old version — and every edit
+ * after it would be written against that version and refused. Then the page
+ * reads the document again instead.
  */
 function snapshotForEcho(): () => void {
+  const project = state.project;
   const before = state.document ? structuredClone(state.document) : null;
   return () => {
-    if (!before || state.document === before) return;
-    state.document = before;
-    drawLayers();
-    drawOverlay();
-    drawInspector();
+    if (!before || state.project !== project) return;
+    const current = state.document;
+    if (current && api.versionOf(current) === api.versionOf(before)) {
+      state.document = before;
+      drawLayers();
+      drawOverlay();
+      drawInspector();
+      return;
+    }
+    void guard("reload", refresh);
   };
 }
 
@@ -2100,23 +2126,30 @@ async function send(what: string, operation: Operation): Promise<void> {
   // happens to be open when it leaves.
   const project = state.project;
   const restore = snapshotForEcho();
+  let applied = false;
   echoOperations([operation]);
   await queue.enqueue({
     label: what,
     coalesceKey: coalesceKeyOf(operation),
     run: async () => {
-      if (state.project !== project || !state.document) return;
+      if (state.project !== project || !state.document) {
+        say(`${what}: not sent, because a different project is open now.`, "error");
+        return;
+      }
       const result = await api.applyOperation(
         project,
         operation,
         api.versionOf(state.document),
       );
+      applied = true;
       say(`${what}: done (version ${result.version})`);
       if (result.created?.length) state.selection = result.created;
       await refresh();
     },
     onError: (error) => {
-      restore();
+      // The engine accepted the change if `applied` is set: only the read
+      // afterwards failed. Rolling the echo back would hide an accepted edit.
+      if (!applied) restore();
       report(what, error);
     },
     onSuperseded: restore,
@@ -2141,24 +2174,29 @@ async function sendBatch(what: string, operations: api.OperationBatchCommand[]):
   // at intent time so a queued edit is never re-targeted by a later open.
   const project = state.project;
   const restore = snapshotForEcho();
+  let applied = false;
   echoOperations(operations);
   await queue.enqueue({
     label: what,
     coalesceKey: null,
     run: async () => {
-      if (state.project !== project || !state.document) return;
+      if (state.project !== project || !state.document) {
+        say(`${what}: not sent, because a different project is open now.`, "error");
+        return;
+      }
       const result = await api.applyOperationBatch(
         project,
         what,
         operations,
         api.versionOf(state.document),
       );
+      applied = true;
       if (result.created?.length) state.selection = result.created;
       say(`${what}: done (version ${result.version})`);
       await refresh();
     },
     onError: (error) => {
-      restore();
+      if (!applied) restore();
       report(what, error);
     },
   });
@@ -3026,10 +3064,24 @@ dom.contextMenu.addEventListener("keydown", (event) => {
 // --- wiring ------------------------------------------------------------------
 
 dom.projects.addEventListener("change", () => {
-  state.project = dom.projects.value || null;
-  state.selection = [];
-  void guard("open", openProject);
+  openFromQueue(dom.projects.value || null);
 });
+
+/**
+ * Opens a project as a queued action, not at the moment of the click.
+ *
+ * Actions already waiting belong to the project that was open when the person
+ * asked for them — an undo, an added shape. Changing `state.project` at the
+ * click would run them against the new project. In the queue, they run first,
+ * on their own project, and the open follows them.
+ */
+function openFromQueue(project: string | null): void {
+  void guard("open", async () => {
+    state.project = project;
+    state.selection = [];
+    await openProject();
+  });
+}
 
 /** Reads a newly opened project, and asks the template panel what it offers. */
 async function openProject(): Promise<void> {
@@ -3105,6 +3157,8 @@ dom.newProject.addEventListener("click", () => {
 });
 
 dom.emptyCreate.addEventListener("click", () => dom.newProject.click());
+dom.agents.addEventListener("click", () => void agents.open());
+dom.emptyAgents.addEventListener("click", () => void agents.open());
 
 dom.canvasPresets.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-size]");
@@ -3810,6 +3864,18 @@ async function loadProjects(select?: string): Promise<void> {
   // Filtered by the engine against its cache: a workspace of two hundred
   // projects should not be sent here in full for this page to look through it.
   const projects = await api.listProjects(query);
+  fillProjectOptions(projects, query);
+  if (select) {
+    dom.projects.value = select;
+    state.project = select;
+    await openProject();
+  }
+  await drawRecents();
+}
+
+/** The project picker's options, keeping the open project selected. */
+function fillProjectOptions(projects: readonly api.ProjectSummary[], query: string): void {
+  listedProjects = projectListKey(projects);
   dom.projects.replaceChildren();
   const placeholder = document.createElement("option");
   placeholder.value = "";
@@ -3825,13 +3891,149 @@ async function loadProjects(select?: string): Promise<void> {
     option.textContent = `${project.name ?? project.id} — ${project.layers} layers`;
     dom.projects.append(option);
   }
-  if (select) {
-    dom.projects.value = select;
-    state.project = select;
-    await openProject();
+  if (state.project && projects.some((project) => project.id === state.project)) {
+    dom.projects.value = state.project;
   }
-  await drawRecents();
 }
+
+// --- following other clients ----------------------------------------------------
+//
+// An agent connected to this editor's MCP endpoint edits the same projects.
+// The page reads the document after its own actions only, so without this an
+// agent's edit stays invisible until the person's next action — which then
+// meets a version conflict. The page asks for the project list at a slow
+// interval and reads the document again when the open project has moved on.
+//
+// The list, not the project summary: the summary delivers a reclaimed-lock
+// notice once and then drains it, and a poll must never consume a notice that
+// is meant for the person. The list also shows a project an agent created.
+//
+// It never competes with the person. It waits while an action is queued or
+// running, during a drag or an inline text edit, and while the page is hidden;
+// the read itself goes through the queue like every other action.
+
+const FOLLOW_INTERVAL_MS = 1500;
+
+/** The ids of the listed projects, to notice a project that came or went. */
+let listedProjects = "";
+
+function projectListKey(projects: readonly api.ProjectSummary[]): string {
+  // Everything an option shows: a project whose layer count changed gets a
+  // fresh label, and a project that came or went rebuilds the list.
+  return projects
+    .map((project) => `${project.id}\u0000${project.name ?? ""}\u0000${project.layers}`)
+    .join("\n");
+}
+
+/** Whether this server answers about connected agents at all. */
+let agentsConnectedKnown = true;
+
+/** Shows how many AI agents are working on this workspace. */
+async function drawAgentsConnected(): Promise<void> {
+  if (!agentsConnectedKnown) return;
+  try {
+    const { count } = await api.agentSessions();
+    dom.agentsConnected.hidden = count === 0;
+    dom.agentsConnected.innerHTML =
+      '<i class="ph ph-robot" aria-hidden="true"></i><span></span>';
+    const label = dom.agentsConnected.querySelector("span");
+    if (label) {
+      label.textContent = count === 1 ? "1 AI agent connected" : `${count} AI agents connected`;
+    }
+  } catch (error) {
+    // A server without the endpoint (an older one, or one this page was not
+    // served by) is not worth asking again.
+    if (error instanceof api.ApiError && error.code.startsWith("http4")) {
+      agentsConnectedKnown = false;
+      dom.agentsConnected.hidden = true;
+    }
+  }
+}
+
+/**
+ * The field the person is typing in, from the first keystroke until the value
+ * is committed (`change`) or the field loses focus. A refresh redraws the
+ * inspector, and a redraw in that window would discard the typed value.
+ */
+let typingIn: EventTarget | null = null;
+
+function isTextEntry(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable);
+}
+
+document.addEventListener("input", (event) => {
+  // The project search is not part of the document: typing there must not
+  // stop the page from following another client.
+  if (event.target === dom.search) return;
+  if (isTextEntry(event.target)) typingIn = event.target;
+}, true);
+document.addEventListener("change", (event) => {
+  if (event.target === typingIn) typingIn = null;
+}, true);
+document.addEventListener("focusout", (event) => {
+  if (event.target === typingIn) typingIn = null;
+}, true);
+
+/** Whether the person is still typing. A field that was removed from the
+ * page (an inline editor that closed) does not always report focusout. */
+function stillTyping(): boolean {
+  if (typingIn instanceof Node && !typingIn.isConnected) typingIn = null;
+  return typingIn !== null;
+}
+
+function followIsQuiet(): boolean {
+  return document.visibilityState === "visible" &&
+    !state.busy &&
+    !state.drag &&
+    !state.editingText &&
+    !stillTyping() &&
+    !document.body.classList.contains("stopped");
+}
+
+let following = false;
+
+async function followOtherClients(): Promise<void> {
+  if (following || !followIsQuiet()) return;
+  following = true;
+  try {
+    const query = dom.search.value.trim();
+    const projects = await api.listProjects(query);
+    // The person may have started something while the list was on its way.
+    if (!followIsQuiet()) return;
+    void drawAgentsConnected();
+
+    // Not while the person has the project list open: replacing its options
+    // closes it under their pointer.
+    if (projectListKey(projects) !== listedProjects && document.activeElement !== dom.projects) {
+      fillProjectOptions(projects, query);
+      if (!state.project) void drawRecents().catch(() => undefined);
+    }
+
+    const project = state.project;
+    const listed = projects.find((one) => one.id === project);
+    const current = state.document;
+    if (!project || !listed || !current) return;
+    // Only the document this page has already read for this project: an open
+    // that failed leaves the previous project's document here, and following
+    // it would repeat that failure every interval.
+    if (listed.documentId !== current.id || listed.version === api.versionOf(current)) return;
+    void guard("follow", async () => {
+      // Checked again inside the queue: an action that ran first has already
+      // read the newest document.
+      if (state.project !== project || state.drag || state.editingText) return;
+      await refresh();
+    });
+  } catch {
+    // A missed poll is not worth a message: the next one tries again, and a
+    // stopped server says so through the person's next action.
+  } finally {
+    following = false;
+  }
+}
+
+window.setInterval(() => void followOtherClients(), FOLLOW_INTERVAL_MS);
 
 /** Blob URLs the recents strip is holding, so they can be given back. */
 let recentThumbnails: string[] = [];
@@ -3878,9 +4080,7 @@ async function drawRecents(): Promise<void> {
 
     button.addEventListener("click", () => {
       dom.projects.value = project.id;
-      state.project = project.id;
-      state.selection = [];
-      void guard("open", openProject);
+      openFromQueue(project.id);
     });
     dom.recents.append(button);
   }
@@ -3912,5 +4112,9 @@ void guard("start", async () => {
     // suggestion list is poorer for it, and the field still takes any name.
   }
   await loadProjects();
+  void drawAgentsConnected();
   say(`ready — Assemblash ${info.version}`);
+  // The moment both first users were lost: a new workspace, and nothing that
+  // said an agent could connect.
+  if (!listedProjects && !dom.search.value.trim()) agents.offerOnFirstRun();
 });

@@ -832,7 +832,13 @@ explicitly deprioritized.
 - **Local API:** the core crate is the embedded interface; a thin HTTP layer
   (`axum`) follows in Phase 2. Both call the same operation layer (§7.2).
 - **MCP:** the official Rust MCP SDK, stdio transport first; HTTP transport
-  may follow.
+  may follow. **Update (1.9.0):** the HTTP transport exists. The server
+  process serves Streamable HTTP MCP at `/mcp` over the same state as the
+  HTTP API, behind the same access check. Thus the editor is the one writer
+  for its projects, and an agent does not lock the person out. The stdio
+  transport stays. `assemblash mcp` on a workspace relays to a running
+  loopback server of that workspace, and serves the workspace itself when no
+  server runs.
 - **Reference UI:** web-based (TypeScript) as always intended, shipped as
   static assets served by the same binary. The UI is a client of the API like
   any downstream application (§7.1).

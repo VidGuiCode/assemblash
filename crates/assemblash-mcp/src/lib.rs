@@ -22,12 +22,16 @@
 //! bug. Nothing in this crate prints to stdout; diagnostics go to stderr.
 
 pub mod backend;
+pub mod hosted;
+pub mod relay;
 pub mod server;
 pub mod templates;
 pub mod write_tools;
 pub mod writes;
 
 pub use backend::Backend;
+pub use hosted::{http_service, http_service_with_sessions, AgentSessions, Hosting, MCP_PATH};
+pub use relay::relay;
 pub use server::AssemblashMcp;
 
 use rmcp::transport::stdio;

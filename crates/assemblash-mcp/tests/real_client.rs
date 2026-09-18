@@ -459,6 +459,7 @@ async fn every_new_tool_is_advertised_and_callable() {
     let tools = client.list_all_tools().await.unwrap();
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
     for expected in [
+        "set_layer_box",
         "update_canvas",
         "add_shape_layer",
         "add_svg_layer",
@@ -470,10 +471,11 @@ async fn every_new_tool_is_advertised_and_callable() {
     }
     // 1.7.0 added `list_capabilities` — the canonical capability listing,
     // the same one the CLI's `styles --json` and `GET /api/capabilities`
-    // serve — so the count moved from 45 to 46.
+    // serve — so the count moved from 45 to 46. 1.9.0 added `set_layer_box`,
+    // which places a layer's whole box in one journalled change: 47.
     assert_eq!(
         tools.len(),
-        46,
+        47,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 

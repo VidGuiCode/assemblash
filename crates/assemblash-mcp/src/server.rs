@@ -388,7 +388,10 @@ impl ServerHandler for AssemblashMcp {
              flags, so check before planning an edit.\n\n\
              Selection is yours to keep — there is none stored here, and tools take \
              explicit layer ids. Fonts are never substituted: a family the font store does \
-             not have is an error, not a fallback."
+             not have is an error, not a fallback.\n\n\
+             A person may have the same project open in the Assemblash editor while you \
+             work. An `expectedVersion` conflict is then normal: read the document again \
+             and retry. Never delete a project's `.assemblash-lock` file."
         );
 
         let mut info = ServerInfo::default();

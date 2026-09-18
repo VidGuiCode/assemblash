@@ -221,6 +221,14 @@ pub struct Config {
     /// it with `assemblash token rotate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    /// Further `Host` names a loopback server with no token accepts, besides
+    /// `localhost`, `127.0.0.1`, and `::1`.
+    ///
+    /// For a reverse proxy on the same machine that sends its public name as
+    /// `Host`. Without it, the server refuses such a request, because the same
+    /// request is how a DNS-rebinding web page reaches a local server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_hosts: Vec<String>,
     /// Keys this build does not know about, preserved verbatim.
     ///
     /// The same promise the document model makes: a settings file written by a
@@ -248,6 +256,7 @@ impl Default for Config {
             open_browser: default_true(),
             bind: default_bind(),
             token: None,
+            allowed_hosts: Vec::new(),
             extra: BTreeMap::new(),
         }
     }

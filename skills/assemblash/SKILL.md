@@ -96,7 +96,24 @@ kits, customer assets, or downstream workflow data.
   its own, but only one this machine wrote whose process is gone; anything else
   still needs `assemblash unlock` or a person in the editor.
 - `assemblash mcp` for agent access over stdio. Inspect, preview, and validate
-  before you use mutating tools.
+  before you use mutating tools. From 1.9.0, prefer the running editor: when
+  a person has Assemblash open, `assemblash mcp` on the same workspace sends
+  your requests to that editor, and a client that takes a URL can connect to
+  its `/mcp` endpoint directly (`http://127.0.0.1:8787/mcp` by default). The
+  person then sees your edits in the editor, and you never lock them out.
+- Never delete a project's `.assemblash-lock` file. A `projectLocked` refusal
+  usually means that the person has the project open in the editor. Connect
+  to the running editor instead. If the lock is really stale, a person decides:
+  in the editor's recovery dialog, or with `assemblash unlock`.
+- An `expectedVersion` conflict is normal when a person edits the same
+  project. Read the document again, then retry the change.
+- Read the `warnings` in a write result. You cannot see the picture: these
+  tell you that text does not fit its box, that a word was split, or that
+  another layer covers the text.
+- Use `set_layer_box` to place or resize a layer in absolute values. It is
+  one journalled change. `update_layer` does not change the box.
+- `export_document` refuses to replace a file of the same name. Pass
+  `overwrite` only when you mean to replace it.
 - `assemblash variants` for deterministic template variants. Its `--values` is
   already a file path.
 

@@ -180,6 +180,13 @@ export async function shutdown() {
 export async function serverInfo() {
     return request("/api/version");
 }
+export async function agentAccess() {
+    return request("/api/agent-access");
+}
+/** How many AI agents are connected to this editor's MCP endpoint. */
+export async function agentSessions() {
+    return request("/api/agent-sessions");
+}
 /**
  * Uploads a file into a project's assets.
  *
@@ -509,7 +516,23 @@ export async function fetchBlob(url) {
         throw new ApiError("unauthorized", "this server needs an access token", null);
     }
     if (!response.ok) {
-        throw new ApiError(`http${response.status}`, response.statusText, null);
+        // A refused render (a missing font, say) comes in the API envelope, and
+        // its code is the useful part: read it like every other refusal.
+        let code = `http${response.status}`;
+        let message = response.statusText;
+        let details = null;
+        try {
+            const body = await response.json();
+            if (body?.error) {
+                code = body.error.code ?? code;
+                message = body.error.message ?? message;
+                details = body.error.details ?? null;
+            }
+        }
+        catch {
+            // Not the envelope: keep the status as the code.
+        }
+        throw new ApiError(code, message, details);
     }
     return await response.blob();
 }

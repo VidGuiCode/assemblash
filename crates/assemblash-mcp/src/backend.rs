@@ -64,6 +64,14 @@ pub struct Backend {
     /// is only ever one project, so one slot is the whole story.
     single_reclaimed:
         std::sync::Arc<std::sync::Mutex<Option<assemblash_server::state::ReclaimEvent>>>,
+    /// Whether the projects belong to someone else: the editor process this
+    /// backend is hosted in.
+    ///
+    /// A hosted backend never releases them. [`Backend::close`] on an owned
+    /// workspace drops every open session; on the editor's state that would
+    /// close every project the person has open the moment one agent
+    /// disconnected.
+    hosted: bool,
 }
 
 /// Milliseconds since the Unix epoch, for the audit trail.
@@ -320,7 +328,31 @@ impl Backend {
             single: Default::default(),
             reclaim_stale_locks,
             single_reclaimed: Default::default(),
+            hosted: false,
         }
+    }
+
+    /// Serves the projects of a running editor, over its own state.
+    ///
+    /// The MCP tools then use the same open sessions — and the same locks —
+    /// as the HTTP API, so an agent and a person work on one project with one
+    /// writer. The state's reclaim policy is the editor's. [`Backend::close`]
+    /// does nothing on this backend: the editor owns the projects.
+    pub fn from_state(state: AppState) -> Self {
+        let reclaim_stale_locks = state.reclaims_stale_locks();
+        Self {
+            root: Root::Workspace(Box::new(state)),
+            single: Default::default(),
+            reclaim_stale_locks,
+            single_reclaimed: Default::default(),
+            hosted: true,
+        }
+    }
+
+    /// Whether this backend is hosted by an editor rather than owning its
+    /// projects.
+    pub fn is_hosted(&self) -> bool {
+        self.hosted
     }
 
     /// Serves a single project directory.
@@ -340,6 +372,7 @@ impl Backend {
             single: Default::default(),
             reclaim_stale_locks,
             single_reclaimed: Default::default(),
+            hosted: false,
         }
     }
 
@@ -348,8 +381,15 @@ impl Backend {
     /// Taken rather than read: `open_project` reports it once, the way the
     /// HTTP project summary does, so a client is told what happened without
     /// being told again on every later call.
+    ///
+    /// A hosted backend reads the notice and leaves it: it belongs to the
+    /// person's editor, whose project summary delivers it once. An agent that
+    /// opened the project first must not take it away from the person.
     pub fn take_reclaim_note(&self, project: Option<&str>) -> Option<String> {
         let event = match &self.root {
+            Root::Workspace(state) if self.hosted => {
+                state.reclaim_event(project.unwrap_or_default())?
+            }
             Root::Workspace(state) => state.take_reclaim_event(project.unwrap_or_default())?,
             Root::SingleProject { .. } => self.single_reclaimed.lock().ok()?.take()?,
         };
@@ -366,13 +406,47 @@ impl Backend {
     /// lock file on drop, and dropping it here rather than relying on process
     /// teardown is the difference between a project that reopens cleanly and
     /// one that needs `assemblash unlock` first.
+    ///
+    /// A hosted backend ([`Backend::from_state`]) releases nothing: its
+    /// projects are the editor's, and they stay open when an agent leaves.
     pub fn close(&self) {
+        if self.hosted {
+            return;
+        }
         if let Root::Workspace(state) = &self.root {
             state.close_all();
         }
         if let Ok(mut single) = self.single.lock() {
             single.clear();
         }
+    }
+
+    /// [`Backend::close`], then waits until a request that is still running
+    /// has dropped its session too, so every lock file is really gone.
+    ///
+    /// For a caller that hands the projects to another process next: the
+    /// stdio relay, when it moves to the editor. Returns `false` when
+    /// `timeout` passed first. A hosted backend releases nothing and returns
+    /// `true` at once.
+    pub fn close_and_wait(&self, timeout: std::time::Duration) -> bool {
+        if self.hosted {
+            return true;
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        let workspace_released = match &self.root {
+            Root::Workspace(state) => state.close_all_and_wait(timeout),
+            Root::SingleProject { .. } => true,
+        };
+        let single: Vec<_> = match self.single.lock() {
+            Ok(mut single) => {
+                let handles = single.values().map(std::sync::Arc::downgrade).collect();
+                single.clear();
+                handles
+            }
+            Err(_) => Vec::new(),
+        };
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        workspace_released && assemblash_server::state::wait_until_dropped(&single, remaining)
     }
 
     /// Whether tools need to be told which project they mean.
@@ -577,6 +651,19 @@ impl Backend {
     /// The font store this server renders with.
     pub(crate) fn font_store(&self) -> Result<assemblash_renderer::FontStore, ApiError> {
         self.fonts()
+    }
+
+    /// Exactly the fonts a document names, through the editor's cache when
+    /// this backend is hosted by one.
+    pub(crate) fn fonts_for(&self, document: &Document) -> Result<LoadedFonts, ApiError> {
+        if let Root::Workspace(state) = &self.root {
+            return state.fonts_for(document);
+        }
+        let families = families_used(document);
+        if families.is_empty() {
+            return Ok(LoadedFonts::from_bytes([]));
+        }
+        Ok(self.fonts()?.load_families(&families)?)
     }
 
     /// The font store this server renders with.

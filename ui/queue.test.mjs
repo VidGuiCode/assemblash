@@ -79,6 +79,30 @@ test("a newer same-key action replaces an undelivered older one", async () => {
   assert.deepEqual(superseded, ["older"]);
 });
 
+test("coalescing never moves an edit past an action queued after it", async () => {
+  // [opacity .5, undo, opacity .7]: replacing the first edit would run the
+  // undo before any opacity change, and the undo would revert a different,
+  // earlier transaction. Only the last waiting action may be replaced.
+  const queue = new ActionQueue();
+  const gate = deferred();
+  const ran = [];
+  const blocker = queue.enqueue({ label: "blocker", coalesceKey: null, run: () => gate.promise });
+  const first = queue.enqueue({
+    label: "opacity .5",
+    coalesceKey: "update:layer_1:opacity",
+    run: async () => { ran.push("opacity .5"); },
+  });
+  const undo = queue.enqueue({ label: "undo", coalesceKey: null, run: async () => { ran.push("undo"); } });
+  const second = queue.enqueue({
+    label: "opacity .7",
+    coalesceKey: "update:layer_1:opacity",
+    run: async () => { ran.push("opacity .7"); },
+  });
+  gate.resolve();
+  await Promise.all([blocker, first, undo, second]);
+  assert.deepEqual(ran, ["opacity .5", "undo", "opacity .7"]);
+});
+
 test("actions with different coalesce keys never replace each other", async () => {
   const queue = new ActionQueue();
   const gate = deferred();

@@ -163,7 +163,7 @@ impl Harness {
                     state,
                     Default::default(),
                     Default::default(),
-                    stop,
+                    std::sync::Arc::new(stop),
                     Default::default(),
                     limits,
                 );

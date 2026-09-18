@@ -48,9 +48,15 @@ pub enum SessionError {
     Operation(#[from] OpError),
 
     /// Another process holds the project.
+    ///
+    /// The message never tells the reader to delete the lock file. Agents act
+    /// on error text, and a lock deleted while its process is alive gives
+    /// two writers for one project — the corruption the lock exists to stop.
+    /// The HTTP and MCP transports replace this text with their own; see
+    /// `assemblash_server::ApiError`.
     #[error(
-        "project is open in another process (pid {pid}); \
-         if that process is gone, remove {path}"
+        "project is open in another process (pid {pid}); close it there. \
+         If that process is gone, a person can run `assemblash unlock` on the project"
     )]
     Locked {
         /// Process that claimed it.
