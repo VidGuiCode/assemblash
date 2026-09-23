@@ -260,7 +260,9 @@ fn the_swap_works_on_a_temp_copy_and_old_is_gone_at_the_next_start() {
     std::fs::create_dir_all(&workspace).unwrap();
     std::fs::create_dir_all(&install).unwrap();
     let installed = install.join(format!("assemblash{}", std::env::consts::EXE_SUFFIX));
-    std::fs::copy(env!("CARGO_BIN_EXE_assemblash"), &installed).unwrap();
+    let source = Path::new(env!("CARGO_BIN_EXE_assemblash"));
+    std::fs::copy(source, &installed).unwrap();
+    std::fs::set_permissions(&installed, std::fs::metadata(source).unwrap().permissions()).unwrap();
 
     // The copy upgrades itself: its `current_exe` is the copy, so the swap
     // replaces the copy, not the build output.

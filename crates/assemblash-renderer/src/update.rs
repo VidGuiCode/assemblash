@@ -586,6 +586,21 @@ fn is_cross_volume(source: &std::io::Error) -> bool {
 /// only one volume. Production always passes `false` and lets
 /// [`is_cross_volume`] decide.
 fn swap_into(exe: &Path, new_binary: &Path, force_copy: bool) -> Result<(), UpdateError> {
+    // A downloaded file has the workspace's default mode, which can omit the
+    // execute bit on Unix. Keep the installed binary's permissions on both
+    // the direct rename and the cross-volume staging copy.
+    let permissions = std::fs::metadata(exe)
+        .map_err(|source| UpdateError::Io {
+            what: format!("reading permissions of {}", exe.display()),
+            source,
+        })?
+        .permissions();
+    std::fs::set_permissions(new_binary, permissions.clone()).map_err(|source| {
+        UpdateError::Io {
+            what: format!("setting permissions of {}", new_binary.display()),
+            source,
+        }
+    })?;
     let old = old_binary_path(exe);
 
     // A previous swap's leftover must not block this one.
@@ -609,7 +624,7 @@ fn swap_into(exe: &Path, new_binary: &Path, force_copy: bool) -> Result<(), Upda
                 source,
             });
         }
-        if let Err(copy_error) = copy_into_place(exe, new_binary) {
+        if let Err(copy_error) = copy_into_place(exe, new_binary, &permissions) {
             let _ = std::fs::rename(&old, exe);
             let _ = std::fs::remove_file(new_binary);
             return Err(copy_error);
@@ -626,7 +641,11 @@ fn swap_into(exe: &Path, new_binary: &Path, force_copy: bool) -> Result<(), Upda
 /// again here and comparing the copy against *that* catches a torn copy, so
 /// a half-written binary can never be renamed onto the running one. A
 /// failure at any step removes the staging file and refuses typed.
-fn copy_into_place(exe: &Path, new_binary: &Path) -> Result<(), UpdateError> {
+fn copy_into_place(
+    exe: &Path,
+    new_binary: &Path,
+    permissions: &std::fs::Permissions,
+) -> Result<(), UpdateError> {
     let staging = staging_path(exe);
     let io = |what: &str, source: std::io::Error| UpdateError::Io {
         what: format!("{what} {}", staging.display()),
@@ -659,6 +678,10 @@ fn copy_into_place(exe: &Path, new_binary: &Path) -> Result<(), UpdateError> {
                 "sha256 mismatch between the copy and the verified download",
             ),
         });
+    }
+    if let Err(source) = std::fs::set_permissions(&staging, permissions.clone()) {
+        let _ = std::fs::remove_file(&staging);
+        return Err(io("setting permissions on", source));
     }
     if let Err(source) = std::fs::rename(&staging, exe) {
         let _ = std::fs::remove_file(&staging);
@@ -1073,6 +1096,29 @@ mod tests {
         // The next start removes the leftover (U4).
         std::fs::remove_file(&old).unwrap();
         assert!(!old.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn both_swap_paths_keep_executable_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        for force_copy in [false, true] {
+            let root = temp_root(if force_copy {
+                "copy-mode"
+            } else {
+                "rename-mode"
+            });
+            let exe = root.join("assemblash");
+            let replacement = root.join("download.part");
+            std::fs::write(&exe, b"old binary").unwrap();
+            std::fs::write(&replacement, b"new binary").unwrap();
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            swap_into(&exe, &replacement, force_copy).unwrap();
+            let mode = std::fs::metadata(&exe).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755);
+        }
     }
 
     #[test]

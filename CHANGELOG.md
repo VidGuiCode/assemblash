@@ -55,6 +55,7 @@ newer build added there.
   `.old` until the next start, and restarts `serve`. A failed or
   interrupted download changes nothing and leaves no partial file. An
   install from a package manager gets advice instead of a swap.
+- The binary swap keeps executable permissions on Unix.
 - The editor shows the answer switch in Settings, and a banner that never
   blocks work. MCP mode never checks for updates.
 
