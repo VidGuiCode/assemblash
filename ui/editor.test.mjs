@@ -29,7 +29,7 @@ const svg = Buffer.from(
 // file waits for anything; there is no bare `await` on an event or a poll.
 const WAIT_MS = 5000; // a condition the page is expected to reach
 const COMMAND_MS = 15000; // one DevTools command, including its own awaits
-const STARTUP_MS = 10000; // the browser's launch handshake
+const STARTUP_MS = 30000; // the browser's launch handshake on a loaded CI runner
 const JOURNEY_MS = 120000; // the whole browser journey, as a last resort
 
 function withTimeout(promise, what, timeoutMs = WAIT_MS) {
