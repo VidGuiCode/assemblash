@@ -5,6 +5,7 @@
 // of browser texture-size limits. The UI only chooses an output size and
 // reports what the engine produced.
 import * as api from "./api.js";
+import { t, formatNumber } from "./i18n.js";
 /**
  * The two things the engine can hand over.
  *
@@ -15,8 +16,8 @@ import * as api from "./api.js";
  * quietly ignoring it.
  */
 export const FORMATS = [
-    { id: "png", label: "PNG", detail: "Rasterized by the engine", icon: "ph-image" },
-    { id: "svg", label: "SVG", detail: "Vector, document size", icon: "ph-file-svg" },
+    { id: "png", label: "PNG", detail: t("export.pngDetail"), icon: "ph-image" },
+    { id: "svg", label: "SVG", detail: t("export.svgDetail"), icon: "ph-file-svg" },
 ];
 /** Where a chosen format's bytes are read from, and what they are called. */
 export function downloadTargetFor(format, project, document, name) {
@@ -31,14 +32,14 @@ export function downloadTargetFor(format, project, document, name) {
 export const RESOLUTIONS = [
     {
         id: "original",
-        label: "Original",
-        detail: "Document size",
+        label: t("export.original"),
+        detail: t("export.documentSize"),
         longEdge: null,
         icon: "ph-frame-corners",
     },
-    { id: "2k", label: "2K", detail: "2,048 px long edge", longEdge: 2048, icon: "ph-image" },
-    { id: "4k", label: "4K", detail: "3,840 px long edge", longEdge: 3840, icon: "ph-image-square" },
-    { id: "8k", label: "8K Ultra", detail: "7,680 px long edge", longEdge: 7680, icon: "ph-sparkle" },
+    { id: "2k", label: "2K", detail: t("export.longEdge2k"), longEdge: 2048, icon: "ph-image" },
+    { id: "4k", label: "4K", detail: t("export.longEdge4k"), longEdge: 3840, icon: "ph-image-square" },
+    { id: "8k", label: t("export.resolution8k"), detail: t("export.longEdge8k"), longEdge: 7680, icon: "ph-sparkle" },
 ];
 /** Exact output dimensions for a document and a selected resolution. */
 export function dimensionsFor(document, resolution) {
@@ -68,10 +69,10 @@ function safeName(value) {
 }
 function humanBytes(bytes) {
     if (bytes < 1024)
-        return `${bytes} bytes`;
+        return t("export.bytes", { count: formatNumber(bytes) });
     if (bytes < 1024 * 1024)
-        return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        return `${formatNumber(Math.round(bytes / 102.4) / 10)} KB`;
+    return `${formatNumber(Math.round(bytes / (1024 * 1024) * 10) / 10)} MB`;
 }
 export function mountExport(host) {
     const dom = {
@@ -101,7 +102,7 @@ export function mountExport(host) {
     function drawSummary() {
         const document = host.document();
         if (!document) {
-            dom.summary.textContent = "Open a project to export.";
+            dom.summary.textContent = t("export.noProject");
             return;
         }
         const output = format === "svg"
@@ -113,10 +114,10 @@ export function mountExport(host) {
         icon.setAttribute("aria-hidden", "true");
         const copy = window.document.createElement("span");
         const dimensions = window.document.createElement("strong");
-        dimensions.textContent = `${output.width.toLocaleString()} × ${output.height.toLocaleString()}`;
+        dimensions.textContent = `${formatNumber(output.width)} × ${formatNumber(output.height)}`;
         copy.append(dimensions, window.document.createTextNode(format === "svg"
-            ? " SVG · the engine's own vector render"
-            : " PNG · rendered locally by the deterministic engine"));
+            ? t("export.svgSummary")
+            : t("export.pngSummary")));
         dom.summary.append(icon, copy);
     }
     function drawFormats() {
@@ -136,7 +137,7 @@ export function mountExport(host) {
             const label = window.document.createElement("b");
             label.textContent = one.label;
             const detail = window.document.createElement("span");
-            detail.textContent = one.detail;
+            detail.textContent = t(one.id === "png" ? "export.pngDetail" : "export.svgDetail");
             button.append(icon, label, detail);
             button.addEventListener("click", () => {
                 if (format === one.id)
@@ -152,7 +153,10 @@ export function mountExport(host) {
         }
     }
     function drawConfirm() {
-        dom.confirm.innerHTML = `<i class="ph ph-export" aria-hidden="true"></i> Export ${format.toUpperCase()}`;
+        const icon = window.document.createElement("i");
+        icon.className = "ph ph-export";
+        icon.setAttribute("aria-hidden", "true");
+        dom.confirm.replaceChildren(icon, window.document.createTextNode(` ${t("export.confirm", { format: format.toUpperCase() })}`));
     }
     function drawOptions() {
         // A scale means nothing to a vector, so the row is put out of use rather
@@ -175,11 +179,11 @@ export function mountExport(host) {
             icon.className = `ph ${resolution.icon}`;
             icon.setAttribute("aria-hidden", "true");
             const label = window.document.createElement("b");
-            label.textContent = resolution.label;
+            label.textContent = resolution.id === "original" ? t("export.original") : resolution.id === "8k" ? t("export.resolution8k") : resolution.label;
             const detail = window.document.createElement("span");
             detail.textContent = output
-                ? `${output.width.toLocaleString()} × ${output.height.toLocaleString()}`
-                : resolution.detail;
+                ? `${formatNumber(output.width)} × ${formatNumber(output.height)}`
+                : t(resolution.id === "original" ? "export.documentSize" : `export.longEdge${resolution.id}`);
             button.append(icon, label, detail);
             button.addEventListener("click", () => {
                 selected = resolution.id;
@@ -194,7 +198,7 @@ export function mountExport(host) {
         const document = host.document();
         const project = host.project();
         if (!document || !project) {
-            host.say("Create or open a project before exporting.", "error");
+            host.say(t("export.projectRequired"), "error");
             return;
         }
         releaseDownload();
@@ -225,11 +229,14 @@ export function mountExport(host) {
         const name = safeName(dom.name.value);
         dom.name.value = name;
         const target = downloadTargetFor(chosen, project, document, name);
-        void host.guard("export", async () => {
+        void host.guard(t("export.openButton"), async () => {
             releaseDownload();
             dom.confirm.disabled = true;
-            dom.confirm.innerHTML = '<i class="ph ph-circle-notch" aria-hidden="true"></i> Rendering…';
-            dom.summary.textContent = `Rendering ${output.width.toLocaleString()} × ${output.height.toLocaleString()}…`;
+            const icon = window.document.createElement("i");
+            icon.className = "ph ph-circle-notch";
+            icon.setAttribute("aria-hidden", "true");
+            dom.confirm.replaceChildren(icon, window.document.createTextNode(` ${t("export.rendering")}`));
+            dom.summary.textContent = t("export.renderingSize", { width: formatNumber(output.width), height: formatNumber(output.height) });
             try {
                 // PNG is written into the project first, because that is what every
                 // other surface's export does and the file is meant to stay there.
@@ -244,8 +251,10 @@ export function mountExport(host) {
                 dom.download.download = target.filename;
                 dom.download.hidden = false;
                 const bytes = chosen === "svg" ? blob.size : result.bytes;
-                dom.summary.innerHTML = `<strong>${result.width.toLocaleString()} × ${result.height.toLocaleString()}</strong> ${chosen.toUpperCase()} · ${humanBytes(bytes)} · ready to download`;
-                host.say(`Exported ${result.width.toLocaleString()} × ${result.height.toLocaleString()} ${chosen.toUpperCase()}.`);
+                const dimensions = window.document.createElement("strong");
+                dimensions.textContent = `${formatNumber(result.width)} × ${formatNumber(result.height)}`;
+                dom.summary.replaceChildren(dimensions, window.document.createTextNode(` ${t("export.ready", { format: chosen.toUpperCase(), size: humanBytes(bytes) })}`));
+                host.say(t("export.exported", { width: formatNumber(result.width), height: formatNumber(result.height), format: chosen.toUpperCase() }));
             }
             finally {
                 dom.confirm.disabled = false;
@@ -256,6 +265,16 @@ export function mountExport(host) {
     dom.dialog.addEventListener("close", () => {
         if (dom.dialog.returnValue === "cancel")
             releaseDownload();
+    });
+    window.addEventListener("assemblash:localechange", () => {
+        if (!dom.dialog.open)
+            return;
+        drawFormats();
+        drawOptions();
+        if (!dom.confirm.disabled) {
+            drawSummary();
+            drawConfirm();
+        }
     });
     return { open };
 }

@@ -61,11 +61,15 @@ fn properties() -> PresetProperties {
         opacity: Some(0.8),
         blend_mode: Some(BlendMode::Multiply),
         effects: Some(vec![
-            Effect::Brightness { amount: 1.2 },
+            Effect::Brightness {
+                amount: 1.2,
+                extra: Extras::new(),
+            },
             Effect::Grain {
                 amount: 0.25,
                 seed: 17,
                 scale: 1.5,
+                extra: Extras::new(),
             },
         ]),
         ..PresetProperties::default()

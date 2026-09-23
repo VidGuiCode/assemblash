@@ -430,6 +430,108 @@ fn a_record_that_names_another_workspace_is_not_used() {
     drop(editor_b);
 }
 
+/// An export still running on the local target does not hold the switch to
+/// the editor back: it is cancelled, answered with an error, and the journal
+/// holds nothing from it.
+#[test]
+fn a_slow_local_export_is_cancelled_when_the_editor_arrives() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = workspace(scratch.path());
+
+    // The agent starts first and builds a heavy project: many blurred layers
+    // on a large canvas at a doubled scale, so one export takes well over
+    // the few seconds the set-up below needs.
+    let mut relay = Relay::start(&root);
+    relay
+        .call(
+            "create_project",
+            json!({ "project": "poster", "width": 6000.0, "height": 6000.0 }),
+        )
+        .unwrap();
+    let mut version = 0;
+    for index in 0..150 {
+        let added = relay
+            .call(
+                "add_shape_layer",
+                json!({
+                    "project": "poster", "expectedVersion": version, "shape": "ellipse",
+                    "x": (index % 30) as f64 * 170.0, "y": (index / 30) as f64 * 170.0,
+                    "width": 800.0, "height": 800.0,
+                    "effects": [{ "type": "blur", "radius": 24.0 }]
+                }),
+            )
+            .unwrap();
+        version = added["version"].as_u64().unwrap();
+    }
+    assert_eq!(version, 150);
+
+    // Send the export without waiting for its answer.
+    let export_id = relay.next_id;
+    relay.next_id += 1;
+    relay.write(&json!({
+        "jsonrpc": "2.0", "id": export_id, "method": "tools/call",
+        "params": { "name": "export_document",
+                    "arguments": { "project": "poster", "scale": 2.0, "name": "slow" } }
+    }));
+    // Give the render time to be under way before the person arrives.
+    std::thread::sleep(Duration::from_secs(3));
+
+    // The editor starts. The relay's own check must now cancel the export,
+    // release the project, and move — instead of draining for up to 30 s.
+    let editor = Editor::start(&root, true);
+    let switch_started = Instant::now();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut export_answer: Option<Value> = None;
+    while export_answer.is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "the cancelled export was never answered"
+        );
+        let line = relay
+            .lines
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("no answer to the cancelled export");
+        let message: Value = serde_json::from_str(&line)
+            .unwrap_or_else(|error| panic!("non-protocol line {line:?}: {error}"));
+        if message["id"] == json!(export_id) {
+            export_answer = Some(message);
+        }
+    }
+    let waited = switch_started.elapsed();
+    assert!(
+        waited < Duration::from_secs(15),
+        "the switch waited {waited:?}; the export was not cancelled promptly"
+    );
+
+    // The cancelled request is answered with an error, not a result.
+    let answer = export_answer.unwrap();
+    assert!(
+        answer.get("error").is_some() || answer["result"]["isError"] == json!(true),
+        "the cancelled export was answered with success: {answer}"
+    );
+
+    // The journal holds exactly the 120 layer adds: one request = one
+    // transaction, and the cancelled export applied nothing.
+    // The journal holds exactly the 150 layer adds: one request = one
+    // transaction, and the cancelled export applied nothing.
+    let (status, history) = editor.api("GET", "/api/projects/poster/history", None);
+    assert_eq!(status, 200);
+    assert_eq!(
+        history["entries"].as_array().map(Vec::len),
+        Some(150),
+        "the journal changed behind the cancelled export: {history}"
+    );
+    assert!(!root.join("projects/poster/exports/slow.png").exists());
+
+    // The relay now serves through the editor.
+    let state = relay
+        .call("get_document_state", json!({ "project": "poster" }))
+        .unwrap_or_else(|error| panic!("the relay did not follow the editor: {error}"));
+    assert_eq!(state["version"], 150);
+    relay.finish();
+    drop(editor);
+}
+
 /// The editor ends an idle session (five minutes by default; two seconds
 /// here). The relay starts a new one and the call succeeds.
 #[test]

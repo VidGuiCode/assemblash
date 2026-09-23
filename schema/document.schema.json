@@ -452,7 +452,7 @@
       ]
     },
     "Effect": {
-      "description": "One adjustment in a layer's effect stack.\n\nTagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps\nan effect written by a newer build verbatim and refuses to render it —\nthe same bargain as [`BlendMode::Other`]: never lose it, never guess at it.\n\nThe amounts are multipliers where 1 means \"unchanged\", which is what\n`filter: brightness(1.2)` means everywhere else, so a number copied from a\nCSS example does what it looks like it does.",
+      "description": "One adjustment in a layer's effect stack.\n\nTagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps\nan effect written by a newer build verbatim and refuses to render it —\nthe same bargain as [`BlendMode::Other`]: never lose it, never guess at it.\n\nThe amounts are multipliers where 1 means \"unchanged\", which is what\n`filter: brightness(1.2)` means everywhere else, so a number copied from a\nCSS example does what it looks like it does.\n\nEvery known variant also carries a `#[serde(flatten)]` capture map\n(D27): a key this build does not know rides along verbatim instead of\nbeing dropped on the next save.",
       "anyOf": [
         {
           "description": "Scales each channel. 1 is unchanged, 0 is black.",
@@ -471,7 +471,8 @@
           "required": [
             "type",
             "amount"
-          ]
+          ],
+          "additionalProperties": true
         },
         {
           "description": "Pushes each channel away from mid grey. 1 is unchanged, 0 is flat grey.",
@@ -490,7 +491,8 @@
           "required": [
             "type",
             "amount"
-          ]
+          ],
+          "additionalProperties": true
         },
         {
           "description": "Scales colourfulness. 1 is unchanged, 0 is greyscale.",
@@ -509,7 +511,8 @@
           "required": [
             "type",
             "amount"
-          ]
+          ],
+          "additionalProperties": true
         },
         {
           "description": "A Gaussian blur.",
@@ -528,7 +531,8 @@
           "required": [
             "type",
             "radius"
-          ]
+          ],
+          "additionalProperties": true
         },
         {
           "description": "Seeded monochrome noise, multiplied over the layer.\n\nThe seed is part of the document, not the run: the same document\nproduces the same grain on every machine and in every render (NFR-3).\nGrain from a clock or a random number generator would quietly break\nthe one property this project is built on.",
@@ -560,7 +564,8 @@
             "type",
             "amount",
             "seed"
-          ]
+          ],
+          "additionalProperties": true
         },
         {
           "description": "A soft offset copy of the layer's alpha, drawn beneath it.\n\nA glow is this with `dx` and `dy` at 0, and Lift is this with a small\noffset and a soft blur. There is no second primitive for either: a\ncentred shadow *is* a glow, and two names for one filter would be two\nthings to keep bit-identical for no gain.",
@@ -596,7 +601,8 @@
             "dy",
             "blur",
             "color"
-          ]
+          ],
+          "additionalProperties": true
         },
         {
           "description": "An effect this build does not know, preserved as written and refused\nwhen something tries to draw it."
@@ -604,7 +610,7 @@
       ]
     },
     "Clip": {
-      "description": "The mask shape of a layer's [`Layer::clip`], tagged by `\"shape\"` in JSON.\n\nThe geometry always is the layer's transform box, so the variants carry no\ncoordinates — only what the box alone does not say. [`Clip::Other`] is an\nuntagged catch-all (D21): a clip written by a newer build is preserved as\nwritten, refused when an update touches it, and refused at render time —\nthe same bargain as [`ShapeKind::Other`] (and, like it, never flattened\ninto its parent, so the catch-all's reach stays with the clip).",
+      "description": "The mask shape of a layer's [`Layer::clip`], tagged by `\"shape\"` in JSON.\n\nThe geometry always is the layer's transform box, so the variants carry no\ncoordinates — only what the box alone does not say (a path's `d` sits in\nthe box, scaled by it, once the renderer draws it). Every known variant\nalso carries a `#[serde(flatten)]` capture map (D27): a key this build\ndoes not know rides along verbatim instead of being dropped.\n[`Clip::Other`] is an untagged catch-all (D21): a clip written by a newer\nbuild is preserved as written, refused when an update touches it, and\nrefused at render time — the same bargain as [`ShapeKind::Other`] (and,\nlike it, never flattened into its parent, so the catch-all's reach stays\nwith the clip).",
       "anyOf": [
         {
           "description": "A rounded rectangle filling the transform box.",
@@ -621,6 +627,7 @@
               "const": "rect"
             }
           },
+          "additionalProperties": true,
           "required": [
             "shape"
           ]
@@ -634,9 +641,29 @@
               "const": "ellipse"
             }
           },
+          "additionalProperties": true,
           "required": [
             "shape"
           ]
+        },
+        {
+          "description": "A path filling the transform box, closed, in the conservative grammar\nof [`crate::path`]. The `d` string is validated at operation time; a\n`d` that fails the grammar cannot be stored through this build.",
+          "type": "object",
+          "properties": {
+            "d": {
+              "description": "The path data, as written in an SVG `d` attribute. Validated\nagainst [`crate::path`] at operation time.",
+              "type": "string"
+            },
+            "shape": {
+              "type": "string",
+              "const": "path"
+            }
+          },
+          "required": [
+            "shape",
+            "d"
+          ],
+          "additionalProperties": true
         },
         {
           "description": "A clip this build does not know, preserved as written, refused when an\nupdate touches it, and refused when something tries to draw it (D21)."
@@ -679,7 +706,7 @@
       ]
     },
     "Stroke": {
-      "description": "A shape's edge paint.",
+      "description": "A shape's edge paint.\n\nLike every payload in the document, a stroke also carries a\n`#[serde(flatten)]` capture map (D27): a key this build does not know\nrides along verbatim instead of being dropped on the next save.",
       "type": "object",
       "properties": {
         "color": {
@@ -690,11 +717,91 @@
           "description": "Width in document units; must be finite and 0 or more.\n\n**Painted inset** on a rect and an ellipse (D5): the stroke grows\ninward from the transform box, so the box is the visual box and\nnothing that reasons about layout has to know whether a shape is\nstroked. A line has no interior, so its stroke is centred on the\nsegment instead — half of it falls either side of the box's middle.\n\nOne caveat, measured rather than assumed: a width below one device\npixel is drawn as a *hairline* centred on the geometric edge, and a\nhairline occupies a whole pixel row. A 0.5-wide stroke therefore\nspills up to half a pixel outside the box on each side. It is\ndeterministic and identical on every target, so it is documented here\nrather than refused — but at that width the box is not quite the\nvisual box.",
           "type": "number",
           "format": "double"
+        },
+        "dashArray": {
+          "description": "The dash pattern, alternating paint and gap in document units,\nstarting with paint. `None` is a solid line.\n\nWhen present: non-empty, at most [`MAX_DASH_ENTRIES`] entries, every\nvalue finite and greater than 0 — validated at operation time, where\nevery stroke limit lives. A pattern this build cannot draw is a\nrefusal at the moment it is set, not a surprise at render time.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "lineCap": {
+          "description": "How the stroke ends, when the stroke is set. `None` means the\nrenderer's default.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LineCap"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lineJoin": {
+          "description": "How two segments of the stroke meet, when the stroke is set. `None`\nmeans the renderer's default.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LineJoin"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "color",
         "width"
+      ],
+      "additionalProperties": true
+    },
+    "LineCap": {
+      "description": "How a stroke ends.\n\nA fixed, named set, with an untagged [`LineCap::Other`] catch-all (D21):\na value written by a newer build round-trips verbatim and is refused when\nsomething tries to draw it — never guessed at and never lost.",
+      "anyOf": [
+        {
+          "description": "Flat, cut off at the endpoint.",
+          "type": "string",
+          "const": "butt"
+        },
+        {
+          "description": "A half-disc past the endpoint.",
+          "type": "string",
+          "const": "round"
+        },
+        {
+          "description": "A square half a width past the endpoint.",
+          "type": "string",
+          "const": "square"
+        },
+        {
+          "description": "A cap this build does not know, preserved verbatim (D21)."
+        }
+      ]
+    },
+    "LineJoin": {
+      "description": "How two segments of a stroke meet at a corner.\n\nThe same fixed set and catch-all bargain as [`LineCap`].",
+      "anyOf": [
+        {
+          "description": "Sharp corner, extended to the stroke width.",
+          "type": "string",
+          "const": "miter"
+        },
+        {
+          "description": "Rounded corner.",
+          "type": "string",
+          "const": "round"
+        },
+        {
+          "description": "Bevelled corner, cut across.",
+          "type": "string",
+          "const": "bevel"
+        },
+        {
+          "description": "A join this build does not know, preserved verbatim (D21)."
+        }
       ]
     },
     "VerticalAlign": {
@@ -852,7 +959,8 @@
         "y",
         "width",
         "height"
-      ]
+      ],
+      "additionalProperties": true
     },
     "ImageLayer": {
       "description": "A reference to an imported asset, drawn into the layer box.",
@@ -919,7 +1027,7 @@
       "additionalProperties": true
     },
     "ShapeKind": {
-      "description": "The geometry of a [`ShapeLayer`], tagged by `\"kind\"` in JSON.",
+      "description": "The geometry of a [`ShapeLayer`], tagged by `\"kind\"` in JSON.\n\nEvery known variant also carries a `#[serde(flatten)]` capture map (D27):\na key this build does not know rides along verbatim instead of being\ndropped. The unit variants became struct variants holding only the map,\nwhich leaves their serialized form byte-identical (the D27 spike measured\nit: `{\"kind\":\"ellipse\"}` stays `{\"kind\":\"ellipse\"}`).",
       "anyOf": [
         {
           "description": "A rectangle filling the transform box.",
@@ -936,6 +1044,7 @@
               "const": "rect"
             }
           },
+          "additionalProperties": true,
           "required": [
             "kind"
           ]
@@ -949,6 +1058,7 @@
               "const": "ellipse"
             }
           },
+          "additionalProperties": true,
           "required": [
             "kind"
           ]
@@ -957,17 +1067,82 @@
           "description": "A straight segment across the middle of the transform box, from the\nleft edge to the right.\n\nThe box *is* the line: `width` is its length, `rotation` is its angle,\nand `height` is layout only — nothing is drawn above or below the\nmiddle. A second endpoint in the payload would be a second way of\nsaying where a layer is, and `move`, `resize` and `rotate` would then\nhave to mean something different for this layer kind than for the\nother four (maintainer's decision, 2026-09-09).",
           "type": "object",
           "properties": {
+            "markerStart": {
+              "description": "What sits at the start of the segment, or `None`.\n\n**Markers are part of the Line payload, never preset-carried**:\nthey describe this segment's ends, not a style, and a preset that\ncarried them would move another line's arrows (Contents A6).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LineMarker"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "markerEnd": {
+              "description": "What sits at the end of the segment, or `None`. See\n`marker_start`: part of the payload, never preset-carried.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LineMarker"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "kind": {
               "type": "string",
               "const": "line"
             }
           },
+          "additionalProperties": true,
           "required": [
             "kind"
           ]
         },
         {
+          "description": "A closed silhouette drawn from path data, filling the transform box.\n\nThe `d` string follows the conservative grammar of [`crate::path`] —\nno quadratics, one leading moveto, closed, bounded length and command\ncount — and is validated at **operation time**, so a `d` that fails\nthe grammar cannot enter a document through this build.",
+          "type": "object",
+          "properties": {
+            "d": {
+              "description": "The path data, as written in an SVG `d` attribute. Validated\nagainst [`crate::path`] at operation time.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "path"
+            }
+          },
+          "required": [
+            "kind",
+            "d"
+          ],
+          "additionalProperties": true
+        },
+        {
           "description": "A geometry this build does not know, preserved as written and refused\nwhen something tries to change or draw it — the same bargain as\n[`Effect::Other`] and [`BlendMode::Other`] (D21)."
+        }
+      ]
+    },
+    "LineMarker": {
+      "description": "What sits at an end of a [`ShapeKind::Line`].\n\nA fixed, named set — never arbitrary marker markup: a marker's geometry\nis part of the engine, deterministic on every target, not part of the\ndocument. A name written by a newer build round-trips verbatim in\n[`LineMarker::Other`] and is refused when something tries to draw it.",
+      "anyOf": [
+        {
+          "description": "No marker: the line just ends.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "An open arrowhead pointing along the line.",
+          "type": "string",
+          "const": "arrow"
+        },
+        {
+          "description": "A small disc centred on the endpoint.",
+          "type": "string",
+          "const": "circle"
+        },
+        {
+          "description": "A marker name this build does not know, preserved verbatim (D21)."
         }
       ]
     },

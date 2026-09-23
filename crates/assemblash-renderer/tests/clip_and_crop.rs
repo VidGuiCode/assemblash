@@ -49,7 +49,10 @@ fn image_document() -> (Document, AssetId) {
         LayerId::new("layer_00000000000000000000000002"),
         Transform::new(100.0, 10.0, 80.0, 80.0),
         LayerKind::Shape(ShapeLayer {
-            shape: ShapeKind::Rect { corner_radius: 0.0 },
+            shape: ShapeKind::Rect {
+                corner_radius: 0.0,
+                extra: Extras::new(),
+            },
             fill: Some(Color::new("#3366cc")),
             stroke: None,
             extra: Extras::new(),
@@ -79,7 +82,9 @@ fn a_layer_with_no_clip_crop_or_flip_is_emitted_as_before() {
 #[test]
 fn a_clip_is_emitted_as_a_definition_and_a_wrapper() {
     let (mut document, asset) = image_document();
-    document.layers[0].clip = Some(Clip::Ellipse);
+    document.layers[0].clip = Some(Clip::Ellipse {
+        extra: Extras::new(),
+    });
     let svg = render(&document, &asset).unwrap();
 
     assert!(
@@ -104,7 +109,10 @@ fn a_clip_is_emitted_as_a_definition_and_a_wrapper() {
 fn a_clip_on_a_box_with_no_area_is_refused() {
     let (mut document, asset) = image_document();
     document.layers[0].transform.width = 0.0;
-    document.layers[0].clip = Some(Clip::Rect { corner_radius: 0.0 });
+    document.layers[0].clip = Some(Clip::Rect {
+        corner_radius: 0.0,
+        extra: Extras::new(),
+    });
 
     assert!(matches!(
         render(&document, &asset),
@@ -134,6 +142,7 @@ fn a_crop_wholly_outside_the_source_is_refused() {
             y: 200.0,
             width: 10.0,
             height: 10.0,
+            extra: Extras::new(),
         });
     }
 
@@ -154,6 +163,7 @@ fn a_crop_without_a_source_size_is_refused() {
             y: 0.0,
             width: 10.0,
             height: 10.0,
+            extra: Extras::new(),
         });
     }
 
@@ -172,6 +182,7 @@ fn a_crop_running_past_the_source_is_clamped_not_refused() {
             y: 20.0,
             width: 100.0,
             height: 100.0,
+            extra: Extras::new(),
         });
     }
 
@@ -203,6 +214,7 @@ fn a_rotated_clipped_layer_writes_the_inverse_rotation_into_the_clip() {
     document.layers[0].transform.rotation = 30.0;
     document.layers[0].clip = Some(Clip::Rect {
         corner_radius: 12.0,
+        extra: Extras::new(),
     });
     let svg = render(&document, &asset).unwrap();
 

@@ -36,6 +36,22 @@
   --text-xl: 1.75rem;
   --text-display: clamp(2.5rem, 5vw, 4.75rem);
 
+  /*
+   * THE SPACING SCALE (plan Step 6 item 5). Every gap, padding, and margin in
+   * this file comes from this one set; nothing else defines spacing.
+   *   --space-1  0.25rem   (4 px)   hairline breathing room, icon gaps
+   *   --space-2  0.5rem    (8 px)   control padding, tight stacks
+   *   --space-3  0.75rem   (12 px)  field and row padding
+   *   --space-4  1rem      (16 px)  panel padding, group gaps
+   *   --space-5  1.25rem   (20 px)  section padding
+   *   --space-6  1.5rem    (24 px)  block separation
+   *   --space-8  2rem      (32 px)  large panel padding, stage rhythm
+   *   --space-10 2.5rem    (40 px)  hero spacing
+   *   --space-12 3rem      (48 px)  stage inset around the canvas
+   * Documented exceptions: 1–2 px border and hairline widths; media-query
+   * breakpoints in px; floating-element placement numbers (see the comments
+   * at their use sites in app.ts). No second scale exists.
+   */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -58,7 +74,7 @@
   --structure-width: 20rem;
   --inspector-height: 5.25rem;
   --transition-fast: 140ms ease;
-  --transition-medium: 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition-medium: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 * {
@@ -151,17 +167,17 @@ button:disabled {
   gap: var(--space-2);
   min-width: max-content;
   color: var(--color-ink);
-  font-size: var(--text-md);
+  font-size: var(--text-lg);
   font-weight: 800;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.035em;
   text-decoration: none;
 }
 
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 2rem;
-  height: 2rem;
+  width: var(--space-10);
+  height: var(--space-10);
 }
 
 .project-control {
@@ -357,7 +373,7 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
+  gap: var(--space-1);
   padding: var(--space-2);
   border: 1px solid transparent;
   border-radius: var(--radius-lg);
@@ -438,7 +454,7 @@ button:disabled {
   flex: 0.65 1 3.5rem;
   flex-direction: column;
   justify-content: center;
-  gap: 0.2rem;
+  gap: var(--space-1);
   padding: 0 var(--space-2);
   border-right: 1px solid var(--color-line);
   color: var(--color-ink-faint);
@@ -470,7 +486,7 @@ button:disabled {
 
 .quick-inspector .field input[type="color"] {
   width: 2rem;
-  padding: 0.15rem;
+  padding: var(--space-1);
   cursor: pointer;
 }
 
@@ -872,7 +888,7 @@ li.layer.hidden-layer .name {
 }
 
 .badge {
-  padding: 0.1rem 0.4rem;
+  padding: var(--space-1) var(--space-2);
   border-radius: 999px;
   background: var(--color-surface-hover);
   color: var(--color-ink-faint);
@@ -884,7 +900,7 @@ li.layer.hidden-layer .name {
 
 .structure-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-2);
   padding: var(--space-3);
   border-top: 1px solid var(--color-line);
@@ -1042,7 +1058,7 @@ ol#history li.undone {
 }
 
 .field input[type="color"] {
-  padding: 0.25rem;
+  padding: var(--space-1);
 }
 
 .field.checkbox {
@@ -1277,12 +1293,12 @@ button.small:disabled {
 }
 
 .dimension-fields > span {
-  padding-bottom: 0.7rem;
+  padding-bottom: var(--space-3);
   color: var(--color-ink-faint);
 }
 
 .color-field input {
-  padding: 0.25rem !important;
+  padding: var(--space-1) !important;
 }
 
 .modal-actions {
@@ -1409,7 +1425,7 @@ button.small:disabled {
 }
 
 .layout-grid-key {
-  padding: 0.25rem 0.5rem;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-line);
   border-radius: 999px;
   color: var(--color-ink-faint);
@@ -1694,7 +1710,7 @@ body.stopped .topbar-actions {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
   :root {
     --structure-width: 17rem;
   }
@@ -1794,7 +1810,7 @@ body.stopped .topbar-actions {
 
   .topbar-history,
   .topbar-actions {
-    gap: 0.15rem;
+    gap: var(--space-1);
   }
 
   .structure {
@@ -1885,7 +1901,7 @@ body.stopped .topbar-actions {
 
 .topbar {
   grid-template-columns: max-content minmax(20rem, 32rem) 1fr max-content;
-  gap: 1rem;
+  gap: var(--space-4);
   padding-inline: 1.25rem;
 }
 
@@ -1900,14 +1916,14 @@ body.stopped .topbar-actions {
 
 .toolrail {
   z-index: 12;
-  gap: 0.125rem;
+  gap: var(--space-1);
   padding: 0.5rem 0.375rem;
 }
 
 .tool {
   min-height: 3.5rem;
-  gap: 0.125rem;
-  padding: 0.25rem;
+  gap: var(--space-1);
+  padding: var(--space-1);
   border-radius: 0.625rem;
   font-size: 0.625rem;
 }
@@ -1942,6 +1958,7 @@ body.stopped .topbar-actions {
 }
 
 .add-panel.collapsed {
+  display: none;
   width: 0;
   overflow: hidden;
   border-right: 0;
@@ -1957,7 +1974,7 @@ body.stopped .topbar-actions {
   height: var(--inspector-height);
   align-items: center;
   justify-content: space-between;
-  padding: 0 1rem;
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--color-line);
   background: var(--color-surface);
 }
@@ -1973,8 +1990,8 @@ body.stopped .topbar-actions {
 
 .add-section {
   display: grid;
-  gap: 0.5rem;
-  padding: 1rem;
+  gap: var(--space-2);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--color-line);
 }
 
@@ -1989,8 +2006,10 @@ body.stopped .topbar-actions {
 }
 
 .add-section h3 {
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -2000,7 +2019,7 @@ body.stopped .topbar-actions {
 .upload-dropzone {
   width: 100%;
   min-height: 2.75rem;
-  padding: 0.625rem 0.75rem;
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--color-line);
   border-radius: 0.625rem;
   background: var(--color-surface);
@@ -2021,13 +2040,13 @@ body.stopped .topbar-actions {
    which primitive arrives before the word does. */
 .shape-row {
   display: grid;
-  gap: 0.4rem;
+  gap: var(--space-2);
 }
 
 .shape-preset {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -2052,7 +2071,7 @@ body.stopped .topbar-actions {
   min-height: 7.5rem;
   place-items: center;
   align-content: center;
-  gap: 0.125rem;
+  gap: var(--space-1);
   border-style: dashed;
   color: var(--color-ink-soft);
   text-align: center;
@@ -2073,7 +2092,7 @@ body.stopped .topbar-actions {
 .wide-action {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   justify-content: center;
   font-size: 0.8rem;
   font-weight: 700;
@@ -2083,7 +2102,7 @@ body.stopped .topbar-actions {
    Uploads section beside it rather than like a settings screen. */
 .font-list {
   display: grid;
-  gap: 0.375rem;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2097,8 +2116,8 @@ body.stopped .topbar-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.625rem;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-line);
   border-radius: 0.625rem;
   background: var(--color-surface);
@@ -2107,7 +2126,7 @@ body.stopped .topbar-actions {
 .font-family-text {
   display: grid;
   min-width: 0;
-  gap: 0.125rem;
+  gap: var(--space-1);
 }
 
 .font-family-text strong {
@@ -2125,13 +2144,129 @@ body.stopped .topbar-actions {
 
 .font-empty {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .font-empty p {
   margin: 0;
   color: var(--color-ink-soft);
   font-size: 0.8rem;
+}
+
+/* The install explanation (Contents E6): short sentences, plain words, so a
+   person can read what the click will do before they click. */
+.font-install-copy {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: 0.625rem;
+  background: var(--color-surface);
+}
+
+.font-install-copy code {
+  font-size: 0.75rem;
+}
+
+/* The font selector (register DEF-27). One component for the contextual
+   toolbar and the Typography section: an input that opens the installed
+   families, a page-owned search, and a refusal message at the control. */
+.font-selector {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.font-selector input {
+  width: 100%;
+  height: 2.35rem;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.font-selector-list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(20rem, 80vw);
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: 0.625rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  animation: section-in var(--transition-fast) ease-out;
+}
+
+.font-selector-heading {
+  margin: 0 0 var(--space-1);
+  color: var(--color-ink-faint);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.font-selector-list ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.font-selector-list li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: 0.45rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.font-selector-list li[data-family]:hover {
+  background: var(--color-surface-hover);
+}
+
+.font-selector-family {
+  color: var(--color-ink);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.font-selector-faces {
+  color: var(--color-ink-faint);
+  font-size: 0.68rem;
+}
+
+.font-selector-none {
+  color: var(--color-ink-faint);
+  font-size: 0.75rem;
+  cursor: default;
+}
+
+.font-selector-message {
+  margin: var(--space-1) 0 0;
+  color: var(--color-danger);
+  font-size: 0.72rem;
+}
+
+/* In the contextual toolbar the refusal floats under the control: the toolbar
+   is one row tall, and an in-flow message would stretch it. */
+.toolbar-font .font-selector-message {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  margin: 0;
+  white-space: nowrap;
 }
 
 /* The install button says what it would download before it downloads it, so
@@ -2143,14 +2278,14 @@ body.stopped .topbar-actions {
 }
 
 .install-pack i {
-  margin-top: 0.1rem;
+  margin-top: var(--space-1);
   color: var(--color-accent);
   font-size: 1.1rem;
 }
 
 .install-pack-text {
   display: grid;
-  gap: 0.125rem;
+  gap: var(--space-1);
 }
 
 .install-pack-detail {
@@ -2160,9 +2295,60 @@ body.stopped .topbar-actions {
   line-height: 1.45;
 }
 
+.font-pack-section {
+  border-top: 1px solid var(--color-line);
+  padding-top: var(--space-2);
+}
+
+.font-pack-section summary {
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.font-pack-options {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+}
+
+.font-pack-button {
+  display: grid;
+  width: 100%;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.font-pack-button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.font-pack-button:disabled {
+  color: var(--color-ink-faint);
+  cursor: default;
+}
+
+.font-pack-button strong {
+  font-size: var(--text-sm);
+}
+
+.font-pack-button span {
+  color: var(--color-ink-faint);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
 .font-feedback {
   display: grid;
-  gap: 0.125rem;
+  gap: var(--space-1);
   color: var(--color-ink-faint);
   font-size: 0.7rem;
 }
@@ -2181,7 +2367,7 @@ body.stopped .topbar-actions {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 0.25rem;
+  gap: var(--space-1);
   padding: 0.5rem 0.75rem;
   overflow-x: auto;
   border-bottom: 1px solid var(--color-line);
@@ -2200,8 +2386,8 @@ body.stopped .topbar-actions {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 0 0.5rem;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
   border: 1px solid transparent;
   border-radius: 0.5rem;
   background: transparent;
@@ -2253,19 +2439,19 @@ body.stopped .topbar-actions {
 }
 
 .toolbar-font input {
-  width: 7rem;
-  padding: 0 0.6rem;
+  width: 11rem;
+  padding: 0 var(--space-2);
 }
 
 .toolbar-number input {
   width: 4rem;
-  padding: 0 0.4rem;
+  padding: 0 var(--space-2);
 }
 
 .toolbar-colour {
   width: 2.5rem;
   height: 2.5rem;
-  padding: 0.2rem;
+  padding: var(--space-1);
   border: 1px solid var(--color-line);
   border-radius: 0.5rem;
   background: var(--color-surface);
@@ -2280,13 +2466,13 @@ body.stopped .topbar-actions {
   width: 1px;
   height: 1.75rem;
   flex: 0 0 auto;
-  margin: 0 0.2rem;
+  margin: 0 var(--space-1);
   background: var(--color-line);
 }
 
 .selection-label {
   min-width: 5rem;
-  padding: 0 0.5rem;
+  padding: 0 var(--space-2);
   color: var(--color-ink-soft);
   font-size: 0.75rem;
   font-weight: 700;
@@ -2304,7 +2490,7 @@ body.stopped .topbar-actions {
 .stage {
   min-width: 100%;
   min-height: 100%;
-  padding: 3rem;
+  padding: var(--space-12);
   overflow: visible;
 }
 
@@ -2430,7 +2616,7 @@ body.stopped .topbar-actions {
   bottom: 1rem;
   display: flex;
   width: max-content;
-  margin: -3.5rem 1rem 1rem auto;
+  margin: -3.5rem var(--space-4) var(--space-4) auto;
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--color-line);
@@ -2442,7 +2628,7 @@ body.stopped .topbar-actions {
 .zoom-controls button {
   min-width: 2.4rem;
   height: 2.4rem;
-  padding: 0 0.6rem;
+  padding: 0 var(--space-2);
   border: 0;
   border-right: 1px solid var(--color-line);
   background: transparent;
@@ -2465,8 +2651,9 @@ body.stopped .topbar-actions {
 }
 
 .dock-tabs {
-  gap: 1rem;
-  padding: 0 1rem;
+  gap: var(--space-4);
+  padding: 0 var(--space-4);
+  flex-wrap: wrap;
 }
 
 .dock-tabs button {
@@ -2486,7 +2673,7 @@ body.stopped .topbar-actions {
 
 .layer-search {
   position: relative;
-  margin: 0.75rem;
+  margin: var(--space-3);
 }
 
 .layer-search i {
@@ -2500,14 +2687,14 @@ body.stopped .topbar-actions {
 .layer-search input {
   width: 100%;
   height: 2.4rem;
-  padding: 0 0.75rem 0 2rem;
+  padding: 0 var(--space-3) 0 var(--space-8);
   border: 1px solid var(--color-line);
   border-radius: 0.5rem;
   background: var(--color-surface-subtle);
 }
 
 ul#layers {
-  padding: 0 0.65rem 0.75rem;
+  padding: 0 var(--space-3) var(--space-3);
 }
 
 .layers-empty {
@@ -2515,7 +2702,7 @@ ul#layers {
   min-height: 13rem;
   place-items: center;
   align-content: center;
-  gap: 0.45rem;
+  gap: var(--space-2);
   padding: 1.5rem;
   color: var(--color-ink-soft);
   text-align: center;
@@ -2525,7 +2712,7 @@ ul#layers {
   display: grid;
   width: 2.75rem;
   height: 2.75rem;
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--space-1);
   place-items: center;
   border: 1px solid var(--color-line);
   border-radius: 0.75rem;
@@ -2581,8 +2768,9 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
 
 #properties-panel {
   position: static;
+  overflow-x: hidden;
   width: auto;
-  padding: 1rem;
+  padding: var(--space-4);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -2590,38 +2778,38 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
 }
 
 #advanced-inspector h2 {
-  margin: 1.25rem 0 0.65rem;
+  margin: var(--space-5) 0 var(--space-3);
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 #advanced-inspector h2:first-child { margin-top: 0; }
-.property-grid, .position-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; }
-.property-grid .field, #advanced-inspector > .field { display: grid; gap: 0.25rem; color: var(--color-ink-soft); font-size: 0.7rem; }
+.property-grid, .position-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.property-grid .field, #advanced-inspector > .field { display: grid; gap: var(--space-1); color: var(--color-ink-soft); font-size: 0.7rem; }
 .property-grid input, #advanced-inspector > .field input, #advanced-inspector > .field select, .position-fields input {
   width: 100%;
   height: 2.35rem;
-  padding: 0 0.55rem;
+  padding: 0 var(--space-2);
   border: 1px solid var(--color-line);
   border-radius: 0.45rem;
   background: var(--color-surface);
 }
 
-#advanced-inspector > .field.shape-field { display: grid; gap: 0.25rem; color: var(--color-ink-soft); font-size: 0.7rem; }
-.shape-paint { display: flex; align-items: center; gap: 0.4rem; }
+#advanced-inspector > .field.shape-field { display: grid; gap: var(--space-1); color: var(--color-ink-soft); font-size: 0.7rem; }
+.shape-paint { display: flex; align-items: center; gap: var(--space-2); }
 .shape-paint input { flex: 1; min-width: 0; }
 .shape-paint button.small { flex: none; }
 
 /* A drop shadow has four values and no single "the" number, so its row wraps
    instead of squeezing four inputs and three buttons onto one line. */
 .effect-row.multi { flex-wrap: wrap; }
-.effect-fields { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.effect-field { display: grid; gap: 0.15rem; color: var(--color-ink-soft); font-size: 0.65rem; }
+.effect-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.effect-field { display: grid; gap: var(--space-1); color: var(--color-ink-soft); font-size: 0.65rem; }
 .effect-field input[type="text"] { width: 7rem; }
 
-.property-flags { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 1rem; }
-.property-flags .checkbox { display: flex; align-items: center; gap: 0.4rem; }
+.property-flags { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: 1rem; }
+.property-flags .checkbox { display: flex; align-items: center; gap: var(--space-2); }
 
 .position-popover,
 .context-menu {
@@ -2636,14 +2824,14 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
 .position-popover {
   width: 20rem;
   max-height: min(32rem, calc(100vh - 2rem));
-  padding: 0.85rem;
+  padding: var(--space-4);
   overflow-y: auto;
 }
 
 .popover-heading { display: flex; align-items: center; justify-content: space-between; }
-.position-popover section { padding-top: 0.8rem; }
-.position-popover h3 { margin: 0 0 0.4rem; color: var(--color-ink-soft); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
-.anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.35rem; }
+.position-popover section { padding-top: var(--space-3); }
+.position-popover h3 { margin: 0 0 var(--space-2); color: var(--color-ink-soft); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-1); }
 .anchor-grid button, .popover-actions button {
   min-height: 2.25rem;
   border: 1px solid var(--color-line);
@@ -2652,16 +2840,16 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
   cursor: pointer;
 }
 .anchor-grid button:hover, .popover-actions button:hover { border-color: var(--color-accent); background: var(--color-accent-soft); }
-.popover-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.35rem; }
+.popover-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-1); }
 .popover-actions.two { grid-template-columns: 1fr 1fr; }
-.popover-actions button { padding: 0.35rem; font-size: 0.68rem; }
+.popover-actions button { padding: var(--space-1); font-size: 0.68rem; }
 .position-fields { grid-template-columns: repeat(3, 1fr); }
-.position-fields label { display: grid; gap: 0.2rem; color: var(--color-ink-faint); font-size: 0.65rem; }
+.position-fields label { display: grid; gap: var(--space-1); color: var(--color-ink-faint); font-size: 0.65rem; }
 
 .context-menu {
   width: 14rem;
   max-height: calc(100vh - 1rem);
-  padding: 0.35rem;
+  padding: var(--space-1);
   overflow-y: auto;
   outline: 0;
 }
@@ -2671,7 +2859,7 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
   width: 100%;
   min-height: 2.1rem;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
   padding: 0 0.65rem;
   border: 0;
   border-radius: 0.35rem;
@@ -2682,14 +2870,14 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
 
 .context-menu button:hover:not(:disabled), .context-menu button:focus-visible { background: var(--color-surface-hover); }
 .context-menu i { width: 1rem; color: var(--color-ink-soft); }
-.context-menu hr { margin: 0.3rem 0; border: 0; border-top: 1px solid var(--color-line); }
+.context-menu hr { margin: var(--space-1) 0; border: 0; border-top: 1px solid var(--color-line); }
 
 .statusbar {
-  padding: 0 0.8rem;
+  padding: 0 var(--space-3);
   font-size: 0.65rem;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
   .topbar { grid-template-columns: max-content minmax(15rem, 1fr) max-content; }
   .topbar-history { display: none; }
   .workspace { grid-template-columns: var(--toolrail-width) auto minmax(0, 1fr) 17rem; }
@@ -2725,7 +2913,7 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
 
 @media (max-width: 720px) {
   :root { --topbar-height: 3.75rem; --statusbar-height: 1.75rem; --inspector-height: 3.5rem; }
-  .topbar { grid-template-columns: minmax(0, 1fr) max-content; padding: 0 0.75rem; }
+  .topbar { grid-template-columns: minmax(0, 1fr) max-content; padding: 0 var(--space-3); }
   .brand span, #project-search, #new-project, .topbar-history, #reload { display: none; }
   .project-control { min-width: 0; }
   #projects { min-width: 0; }
@@ -2740,7 +2928,7 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
     display: grid;
     height: 4rem;
     grid-template-columns: repeat(7, 1fr);
-    padding: 0.25rem;
+    padding: var(--space-1);
     overflow-x: auto;
     border-top: 1px solid var(--color-line);
     border-right: 0;
@@ -2756,13 +2944,13 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
     bottom: 0;
     left: 0;
     min-height: var(--inspector-height);
-    padding: 0.4rem 0.5rem;
+    padding: var(--space-2) var(--space-2);
     border-top: 1px solid var(--color-line);
     border-bottom: 0;
     box-shadow: 0 -0.5rem 1.5rem rgb(24 24 22 / 8%);
   }
   .stage-viewport { grid-row: 1; }
-  .stage { padding: 2rem 1rem 7rem; }
+  .stage { padding: var(--space-8) var(--space-4) 7rem; }
   .statusbar .local-status, .statusbar .pixel-status, .statusbar .status-divider { display: none; }
   .position-popover { right: 0.5rem; left: auto !important; width: min(20rem, calc(100vw - 1rem)); }
 }
@@ -2777,24 +2965,1285 @@ li.layer.drop-target { outline: 2px solid var(--color-focus); }
 }
 
 /* Canvas settings share the Properties panel's compact field rhythm. */
-.canvas-settings { display: grid; gap: 0.7rem; }
-#advanced-inspector .canvas-settings h2 { margin: 0 0 0.1rem; }
+.canvas-settings { display: grid; gap: var(--space-3); }
+#advanced-inspector .canvas-settings h2 { margin: 0 0 var(--space-1); }
 .canvas-background-field { margin: 0; font-size: 0.7rem; color: var(--color-ink-soft); }
-.canvas-background-row { display: grid; grid-template-columns: 2.35rem minmax(0, 1fr); gap: 0.5rem; }
-.canvas-background-row input { width: 100%; min-width: 0; height: 2.35rem; padding: 0.35rem; border: 1px solid var(--color-line); border-radius: 0.45rem; background: var(--color-surface); }
-.canvas-background-row input[type="text"] { padding-inline: 0.55rem; font-variant-numeric: tabular-nums; }
-.canvas-transparent { display: flex; gap: 0.5rem; align-items: center; font-size: 0.75rem; }
-.canvas-anchor-fieldset { margin: 0.4rem 0 0; padding: 0; border: 0; min-width: 0; }
-.canvas-anchor-fieldset legend { margin-bottom: 0.5rem; color: var(--color-ink-soft); font-size: 0.7rem; }
-.canvas-size-anchor-grid { display: grid; grid-template-columns: repeat(3, 2.35rem); gap: 0.3rem; }
+.canvas-background-row { display: grid; grid-template-columns: 2.35rem minmax(0, 1fr); gap: var(--space-2); }
+.canvas-background-row input { width: 100%; min-width: 0; height: 2.35rem; padding: var(--space-1); border: 1px solid var(--color-line); border-radius: 0.45rem; background: var(--color-surface); }
+.canvas-background-row input[type="text"] { padding-inline: var(--space-2); font-variant-numeric: tabular-nums; }
+.canvas-transparent { display: flex; gap: var(--space-2); align-items: center; font-size: 0.75rem; }
+.canvas-anchor-fieldset { margin: var(--space-2) 0 0; padding: 0; border: 0; min-width: 0; }
+.canvas-anchor-fieldset legend { margin-bottom: var(--space-2); color: var(--color-ink-soft); font-size: 0.7rem; }
+.canvas-size-anchor-grid { display: grid; grid-template-columns: repeat(3, 2.35rem); gap: var(--space-1); }
 .canvas-anchor { position: relative; cursor: pointer; }
 .canvas-anchor input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: inherit; }
 .canvas-anchor span { display: grid; place-items: center; height: 2.35rem; border: 1px solid var(--color-line); border-radius: 0.45rem; background: var(--color-surface); font-size: 1.05rem; }
 .canvas-anchor input:checked + span { border-color: var(--color-focus); color: var(--color-ink); background: var(--color-surface-hover); box-shadow: inset 0 0 0 1px var(--color-focus); }
 .canvas-anchor input:focus-visible + span { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .canvas-anchor-fieldset:disabled .canvas-anchor { opacity: 0.45; cursor: default; }
-.canvas-anchor-fieldset .hint { margin: 0.65rem 0 0; line-height: 1.5; }
-#canvas-apply { width: 100%; margin-top: 0.2rem; min-height: 2.35rem; }
+.canvas-anchor-fieldset .hint { margin: var(--space-3) 0 0; line-height: 1.5; }
+#canvas-apply { width: 100%; margin-top: var(--space-1); min-height: 2.35rem; }
 
-.contextual-toolbar #edit-canvas { width: auto; padding: 0 0.65rem; }
+.contextual-toolbar #edit-canvas { width: auto; padding: 0 var(--space-3); }
 .contextual-toolbar #edit-canvas span { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
+
+/* --- Room and softness (plan Step 6 item 3) ---------------------------- */
+
+/* Collapsible Properties sections. Each one opens with a clear header; the
+   short fade keeps open and close inside the 120-200 ms transition budget. */
+.dock-section {
+  margin: 0 0 var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.dock-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.dock-section summary::-webkit-details-marker { display: none; }
+
+.dock-section summary::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid var(--color-ink-faint);
+  border-bottom: 2px solid var(--color-ink-faint);
+  transform: rotate(45deg);
+  transition: transform var(--transition-fast);
+}
+
+.dock-section[open] summary::after { transform: rotate(-135deg); }
+.dock-section summary:hover { background: var(--color-surface-hover); }
+
+.dock-section summary h2 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dock-section-body {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-line);
+  animation: section-in var(--transition-fast) both;
+}
+
+.dock-section-body h2 {
+  margin: var(--space-3) 0 0;
+  color: var(--color-ink-soft);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dock-section-body h2:first-child { margin-top: var(--space-2); }
+
+@keyframes section-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --- Settings modal (plan Step 6 item 2) -------------------------------- */
+
+.settings-modal { width: min(38rem, calc(100vw - var(--space-8))); }
+
+.settings-section {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+  overflow: clip;
+}
+
+.settings-section + .settings-section { margin-top: var(--space-2); }
+.settings-section[open] { padding-bottom: var(--space-4); }
+
+.settings-section-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  list-style: none;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-section-heading::-webkit-details-marker { display: none; }
+.settings-section-heading:hover { background: var(--color-surface-hover); }
+
+.settings-section-heading::after {
+  content: "";
+  width: var(--space-2);
+  height: var(--space-2);
+  margin-left: auto;
+  border-right: 2px solid var(--color-ink-faint);
+  border-bottom: 2px solid var(--color-ink-faint);
+  transform: rotate(45deg);
+  transition: transform var(--transition-fast);
+}
+
+.settings-section[open] .settings-section-heading::after { transform: rotate(-135deg); }
+
+.settings-section-heading > i {
+  display: grid;
+  width: var(--space-10);
+  height: var(--space-10);
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  font-size: var(--text-lg);
+}
+
+.settings-section-heading > span { min-width: 0; }
+.settings-section-heading .eyebrow { display: block; margin: 0 0 var(--space-1); }
+.settings-section-heading strong { display: block; font-size: var(--text-sm); }
+
+.settings-section > :not(summary) {
+  margin-right: var(--space-4);
+  margin-left: var(--space-4);
+}
+
+.settings-section > summary + * { margin-top: var(--space-2); }
+
+.settings-subsection {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+.settings-subsection h4 {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.settings-actions .danger-action { grid-column: 1 / -1; }
+.setting-toggle {
+  min-height: 2.5rem;
+  font-weight: 650;
+}
+
+/* --- Update notices (D28) -------------------------------------------------
+   Non-blocking bars above the status bar. The consent question and the
+   newer-version banner share one shape; neither takes focus or stops work. */
+
+.notice-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-accent));
+  border-top: 1px solid var(--color-border);
+}
+
+.notice-text {
+  flex: 1;
+}
+
+.notice-bar a {
+  color: inherit;
+  font-weight: 600;
+}
+
+
+/* --- Discoverability: the canvas hint (rows 53 and 55) ------------------- */
+
+.canvas-hints {
+  position: sticky;
+  bottom: var(--space-4);
+  left: var(--space-4);
+  width: max-content;
+  max-width: min(28rem, 80vw);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  color: var(--color-ink-faint);
+  font-size: var(--text-xs);
+  box-shadow: 0 0.4rem 1.2rem rgb(24 24 22 / 10%);
+}
+
+/* --- Slot editing (parity row 100, closed UI-side) ----------------------- */
+
+.slot-edit-name,
+.slot-edit-layer {
+  min-width: 0;
+  flex: 1;
+  height: 2rem;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--text-xs);
+}
+
+.slot-edit-kind {
+  height: 2rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--text-xs);
+}
+
+/* --- Path, dash, and marker controls (plan Step 5) ---------------------- */
+
+.shape-path-d {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-family: ui-monospace, monospace;
+  font-size: var(--text-xs);
+  resize: vertical;
+}
+
+/* A typed refusal, shown beside the control that caused it. */
+.control-error {
+  display: block;
+  width: 100%;
+  color: #b3261e;
+  font-size: var(--text-xs);
+}
+
+/* --- Per-project rename and delete on the recents cards ----------------- */
+
+.recent-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.recent-controls {
+  display: flex;
+  gap: var(--space-1);
+}
+
+/* --- Maintainer feedback polish ------------------------------------------ */
+
+/* One visible project control searches and opens projects. */
+.project-control {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.project-combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.project-combobox > i {
+  position: absolute;
+  top: 50%;
+  left: var(--space-3);
+  color: var(--color-ink-faint);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+#project-search {
+  display: block;
+  width: 100%;
+  padding-left: var(--space-8);
+  font-weight: 650;
+}
+
+.project-control #projects {
+  display: none;
+}
+
+/* Grid items keep their columns when a sibling panel is hidden. */
+.toolrail { grid-column: 1; }
+.add-panel { grid-column: 2; }
+.editor { grid-column: 3; }
+.structure { grid-column: 4; }
+
+/* Properties uses the full dock width. Sections read as native rows. */
+#properties-panel {
+  padding: 0;
+}
+
+.dock-section {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.dock-section summary {
+  justify-content: flex-start;
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0;
+}
+
+.dock-section summary:hover {
+  background: var(--color-surface-subtle);
+}
+
+.dock-section[open] summary {
+  color: var(--color-accent);
+  background: var(--color-surface-subtle);
+}
+
+.dock-section summary::after {
+  margin-left: auto;
+}
+
+.dock-section-icon {
+  display: grid;
+  width: var(--space-8);
+  height: var(--space-8);
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--color-ink-soft);
+  font-size: var(--text-md);
+}
+
+.dock-section[open] .dock-section-icon {
+  color: var(--color-accent);
+}
+
+.dock-section-body {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 0;
+}
+
+/* Effects is one compact stack with icon actions and one add row. */
+.effect-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(var(--space-12), 1fr) repeat(3, var(--space-8));
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+
+.effect-name {
+  align-self: center;
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.effect-row > input {
+  width: 100%;
+  min-width: 0;
+}
+
+.effect-row .effect-up { grid-column: 3; }
+.effect-row .effect-down { grid-column: 4; }
+.effect-row .effect-remove { grid-column: 5; color: var(--color-danger); }
+
+.effect-row button.small {
+  width: var(--space-8);
+  padding: 0;
+}
+
+.effect-row.multi .effect-name {
+  grid-column: 1 / 3;
+}
+
+.effect-row.multi .effect-fields {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.effect-row.multi .effect-field input {
+  width: 100%;
+}
+
+.effect-row.multi .effect-up,
+.effect-row.multi .effect-down,
+.effect-row.multi .effect-remove {
+  grid-row: 1;
+}
+
+.effect-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+}
+
+.effect-add-row select,
+.effect-add-row button {
+  min-width: 0;
+  min-height: var(--space-10);
+}
+
+/* Settings uses compact full-width rows instead of floating cards. */
+.settings-modal {
+  width: min(34rem, calc(100vw - var(--space-8)));
+}
+
+.settings-section {
+  border: 0;
+  border-top: 1px solid var(--color-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-section + .settings-section {
+  margin-top: 0;
+}
+
+.settings-section[open] {
+  padding-bottom: var(--space-3);
+}
+
+.settings-section-heading {
+  padding: var(--space-3) 0;
+}
+
+.settings-section-heading:hover {
+  background: transparent;
+  color: var(--color-accent);
+}
+
+.settings-section-heading > i {
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  font-size: var(--text-md);
+}
+
+.settings-section-heading .eyebrow {
+  margin-bottom: 0;
+}
+
+.settings-section > :not(summary) {
+  margin-right: 0;
+  margin-left: calc(var(--space-8) + var(--space-3));
+}
+
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+}
+
+@media (max-width: 1280px) {
+  #project-search { display: block; }
+}
+
+@media (max-width: 1024px) {
+  .editor { grid-column: 2; }
+  .structure { grid-column: auto; }
+}
+
+@media (max-width: 720px) {
+  #project-search { display: block; }
+  .project-control { grid-template-columns: minmax(0, 1fr); }
+  #new-project { display: none; }
+  .editor { grid-column: 1; }
+}
+
+/* Feedback pass: project menu, aligned settings, and one inspector rhythm. */
+.project-combobox {
+  position: relative;
+}
+
+#project-search {
+  padding-right: var(--space-10);
+  font-weight: 500;
+}
+
+.project-picker-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  width: var(--space-10);
+  height: 100%;
+  place-items: center;
+  border: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: transparent;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+}
+
+.project-picker-toggle:hover,
+.project-picker-toggle[aria-expanded="true"] {
+  background: var(--color-surface-hover);
+  color: var(--color-ink);
+}
+
+.project-options {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  left: 0;
+  z-index: 50;
+  max-height: min(20rem, calc(100vh - var(--topbar-height) - var(--space-4)));
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+}
+
+.project-option {
+  display: grid;
+  width: 100%;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-option strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-option span,
+.project-options-empty {
+  color: var(--color-ink-faint);
+  font-size: var(--text-xs);
+}
+
+.project-option:hover,
+.project-option.active,
+.project-option[aria-selected="true"] {
+  background: var(--color-surface-hover);
+}
+
+.project-options-empty {
+  margin: 0;
+  padding: var(--space-3);
+}
+
+.settings-modal {
+  width: min(36rem, calc(100vw - var(--space-8)));
+}
+
+.settings-modal form {
+  min-width: 0;
+  gap: 0;
+  padding: var(--space-5);
+  text-align: left;
+}
+
+.settings-modal .modal-heading {
+  margin-bottom: var(--space-3);
+}
+
+.settings-modal .settings-section {
+  min-width: 0;
+  overflow: visible;
+}
+
+.settings-modal .settings-section-heading {
+  min-height: var(--space-10);
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.settings-modal .settings-section-heading > i {
+  width: var(--space-8);
+  height: var(--space-8);
+  background: transparent;
+}
+
+.settings-modal .settings-section > :not(summary) {
+  min-width: 0;
+  max-width: 100%;
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.settings-modal .settings-section[open] {
+  padding-bottom: var(--space-3);
+}
+
+.settings-modal .settings-section .hint {
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-2);
+  line-height: 1.4;
+}
+
+.settings-modal .setting-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: var(--space-10);
+  gap: var(--space-2);
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+.settings-modal .setting-toggle input {
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.settings-modal .wide-action {
+  justify-content: flex-start;
+  min-height: var(--space-10);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+
+.settings-modal .settings-subsection {
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+.settings-modal .settings-actions {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+
+.settings-modal .settings-actions .danger-action {
+  grid-column: auto;
+}
+
+.agents-modal form {
+  text-align: left;
+}
+
+#advanced-inspector .dock-section summary {
+  min-height: var(--space-10);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+#advanced-inspector .dock-section summary h2 {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.2;
+}
+
+#advanced-inspector .dock-section-icon {
+  width: var(--space-5);
+  height: var(--space-5);
+  font-size: var(--text-sm);
+}
+
+#advanced-inspector .dock-section-body {
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+#advanced-inspector .canvas-settings h2 {
+  display: none;
+}
+
+#advanced-inspector .dock-section-body .field {
+  min-width: 0;
+}
+
+#advanced-inspector .dock-section-body select,
+#advanced-inspector .dock-section-body input:not([type="checkbox"]):not([type="radio"]) {
+  max-width: 100%;
+  border-color: var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+#advanced-inspector .dock-section-body select:hover,
+#advanced-inspector .dock-section-body input:not([type="checkbox"]):not([type="radio"]):hover {
+  border-color: var(--color-line-strong);
+}
+
+#advanced-inspector .dock-section-body select:focus-visible,
+#advanced-inspector .dock-section-body input:not([type="checkbox"]):not([type="radio"]):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+#advanced-inspector .property-flags {
+  margin-top: var(--space-2);
+}
+
+#advanced-inspector .effect-row {
+  min-width: 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+#advanced-inspector .effect-row button.small,
+#advanced-inspector .preset-row button.small,
+#advanced-inspector .slot-row button.small {
+  min-height: var(--space-8);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-soft);
+  cursor: pointer;
+}
+
+#advanced-inspector .effect-row button.small:hover:not(:disabled),
+#advanced-inspector .preset-row button.small:hover:not(:disabled),
+#advanced-inspector .slot-row button.small:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-hover);
+}
+
+#advanced-inspector .effect-row .effect-remove,
+#advanced-inspector .preset-row button:last-child,
+#advanced-inspector .slot-row button:last-child {
+  color: var(--color-danger);
+}
+
+#advanced-inspector .effect-add-row,
+#advanced-inspector .inspector-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  margin: 0;
+  padding-top: var(--space-2);
+}
+
+#advanced-inspector .inspector-add-row:has(> button:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#advanced-inspector .effect-add-row button,
+#advanced-inspector .inspector-add-row button,
+#advanced-inspector .inspector-add-row select {
+  min-width: 0;
+  min-height: var(--space-10);
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+#advanced-inspector .effect-add-row button,
+#advanced-inspector .inspector-add-row button {
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+#advanced-inspector .effect-add-row button:hover,
+#advanced-inspector .inspector-add-row button:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+#advanced-inspector .preset-row,
+#advanced-inspector .slot-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+#advanced-inspector .preset-row .effect-name,
+#advanced-inspector .slot-row .effect-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#advanced-inspector .preset-row button.small,
+#advanced-inspector .slot-row button.small {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+
+#advanced-inspector .slot-row:has(.slot-edit-name) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shape-preset,
+.text-preset {
+  border-radius: var(--radius-lg);
+}
+.wide-action {
+  border-radius: var(--radius-md);
+}
+
+/* Give each effect its own readable value row at dock width. */
+#advanced-inspector .effect-row {
+  grid-template-columns: minmax(0, 1fr) repeat(3, var(--space-8));
+  align-items: center;
+}
+
+#advanced-inspector .effect-row .effect-name {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#advanced-inspector .effect-row > input {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-height: var(--space-10);
+}
+
+#advanced-inspector .effect-row .effect-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+#advanced-inspector .effect-row .effect-down {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+#advanced-inspector .effect-row .effect-remove {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+#advanced-inspector .effect-row.multi .effect-fields {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+#advanced-inspector .effect-row.multi .effect-name {
+  grid-column: 1;
+}
+
+#advanced-inspector .font-selector input {
+  width: 100%;
+  min-height: var(--space-10);
+}
+
+#advanced-inspector .dock-section-body .field select {
+  width: 100%;
+  min-height: var(--space-10);
+  padding: var(--space-2);
+}
+
+/* Shapes use the same calm surfaces as the text presets.
+   A red icon well links each choice to the existing brand mark. */
+.shape-row {
+  gap: var(--space-2);
+}
+
+.shape-preset {
+  display: grid;
+  grid-template-columns: var(--space-8) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--space-12);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.shape-preset-icon {
+  display: grid;
+  width: var(--space-8);
+  height: var(--space-8);
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.shape-preset-icon i {
+  font-size: var(--text-lg);
+}
+
+.shape-preset:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.shape-preset:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.add-section .wide-action {
+  justify-content: flex-start;
+}
+
+.add-section .hint {
+  margin: 0 0 var(--space-2);
+  line-height: 1.4;
+}
+
+/* Keep the text controls on one height and give the font name room to read. */
+.contextual-toolbar .toolbar-font .font-selector,
+.contextual-toolbar .toolbar-font .font-selector input {
+  height: 100%;
+}
+
+.contextual-toolbar .toolbar-font .font-selector input {
+  width: 11rem;
+}
+.toolbar-font .font-selector-list { min-width: 14rem; }
+
+#advanced-inspector .edit-text-button {
+  justify-content: flex-start;
+  gap: var(--space-2);
+}
+/* Visible light identity. Keep editor geometry and document pixels unchanged. */
+:root {
+  --color-canvas: #eae6df;
+  --color-surface-subtle: #faf8f4;
+  --color-surface-hover: #f2eee8;
+  --color-line: #d8d0c6;
+  --color-line-strong: #b9afa3;
+  --color-accent-soft: #fff0ec;
+  --color-success-soft: #e7f4f0;
+}
+
+.topbar {
+  border-top: 3px solid var(--color-accent);
+  border-bottom-color: var(--color-line-strong);
+  background: var(--color-surface-subtle);
+}
+
+.brand { letter-spacing: -0.045em; }
+.brand-mark {
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+
+.project-combobox #project-search {
+  border-color: var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  font-weight: 600;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.project-combobox #project-search:hover { border-color: var(--color-accent); }
+.project-picker-toggle { border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+.project-options { border-color: var(--color-line-strong); border-radius: var(--radius-lg); }
+.project-option:hover,
+.project-option.active,
+.project-option[aria-selected="true"] { background: var(--color-accent-soft); }
+.project-option[aria-selected="true"] strong { color: var(--color-accent); }
+.topbar-actions .icon-button,
+.project-control > .icon-button { border-color: var(--color-line); background: var(--color-surface); }
+.topbar-actions .icon-button:hover,
+.project-control > .icon-button:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+.toolrail { border-right-color: var(--color-line-strong); background: var(--color-surface-subtle); }
+.tool { border-radius: var(--radius-md); }
+.tool:hover:not(.active):not([aria-pressed="true"]) { color: var(--color-accent); background: var(--color-surface-hover); }
+.tool.active,
+.tool[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--color-accent) 25%, var(--color-surface));
+  background: var(--color-accent-soft);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.toolrail-spacer + .tool { border-top: 1px solid var(--color-line); }
+
+.add-panel { border-right-color: var(--color-line-strong); background: var(--color-surface-subtle); }
+.panel-heading {
+  border-bottom-color: var(--color-line-strong);
+  background: var(--color-surface-subtle);
+}
+.panel-heading h2 { font-weight: 800; letter-spacing: -0.025em; }
+.add-section { border-bottom-color: var(--color-line-strong); }
+.add-section h3 { letter-spacing: 0.1em; }
+.text-preset,
+.shape-preset,
+.wide-action,
+.upload-dropzone {
+  background: var(--color-surface);
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+.text-preset:hover,
+.shape-preset:hover,
+.wide-action:hover:not(:disabled),
+.upload-dropzone:hover { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.text-preset:active,
+.shape-preset:active { transform: translateY(1px); }
+
+.editor { background: var(--color-canvas); }
+.contextual-toolbar {
+  border-bottom-color: var(--color-line-strong);
+  background: var(--color-surface-subtle);
+}
+.inspector-empty i { color: var(--color-accent); }
+.stage-viewport {
+  background-color: var(--color-canvas);
+  background-image: radial-gradient(color-mix(in srgb, var(--color-ink) 11%, transparent) 0.7px, transparent 0.7px);
+  background-size: var(--space-6) var(--space-6);
+}
+#canvas { box-shadow: 0 0 0 1px rgb(24 24 22 / 5%), 0 1.25rem 2.5rem rgb(24 24 22 / 13%); }
+.zoom-controls { border-color: var(--color-line-strong); }
+
+.structure { border-left-color: var(--color-line-strong); background: var(--color-surface-subtle); }
+.dock-tabs { border-bottom-color: var(--color-line-strong); background: var(--color-surface-subtle); }
+.dock-tabs button { transition: color var(--transition-fast), background var(--transition-fast); }
+.dock-tabs button:hover { color: var(--color-accent); }
+.dock-tabs button[aria-selected="true"] { color: var(--color-accent); }
+.dock-tabs button[aria-selected="true"]::after { height: 3px; }
+.layer-search input { background: var(--color-surface); }
+.layers-empty i { border-color: var(--color-line-strong); background: var(--color-accent-soft); }
+li.layer.selected { border-color: var(--color-accent); box-shadow: inset 3px 0 0 var(--color-accent); }
+#properties-panel { background: var(--color-surface-subtle); }
+.dock-section[open] summary { box-shadow: inset 3px 0 0 var(--color-accent); }
+.dock-section-body { background: var(--color-surface); }
+
+.statusbar {
+  border-top-color: var(--color-line-strong);
+  background: var(--color-surface-subtle);
+  color: var(--color-ink-soft);
+}
+#status[data-kind="error"] { color: var(--color-danger); }
+
+.modal { border-top: 3px solid var(--color-accent); }
+.modal-heading h2 { font-weight: 800; letter-spacing: -0.035em; }
+.settings-modal form { background: var(--color-surface-subtle); }
+.settings-modal .settings-section[open] .settings-section-heading > i {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+.settings-modal .settings-section-heading:hover { color: var(--color-accent); }
+.modal label > input:focus-visible,
+#project-search:focus-visible { border-color: var(--color-focus); }
+
+/* One scrollbar treatment for the editor's scrollable surfaces. */
+.stage-viewport,
+.add-panel,
+.dock-view,
+ul#layers,
+ol#history,
+.modal,
+.project-options {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) var(--color-surface-subtle);
+}
+
+.stage-viewport::-webkit-scrollbar,
+.add-panel::-webkit-scrollbar,
+.dock-view::-webkit-scrollbar,
+ul#layers::-webkit-scrollbar,
+ol#history::-webkit-scrollbar,
+.modal::-webkit-scrollbar,
+.project-options::-webkit-scrollbar {
+  width: var(--space-3);
+  height: var(--space-3);
+}
+
+.stage-viewport::-webkit-scrollbar-track,
+.add-panel::-webkit-scrollbar-track,
+.dock-view::-webkit-scrollbar-track,
+ul#layers::-webkit-scrollbar-track,
+ol#history::-webkit-scrollbar-track,
+.modal::-webkit-scrollbar-track,
+.project-options::-webkit-scrollbar-track {
+  background: var(--color-surface-subtle);
+}
+
+.stage-viewport::-webkit-scrollbar-thumb,
+.add-panel::-webkit-scrollbar-thumb,
+.dock-view::-webkit-scrollbar-thumb,
+ul#layers::-webkit-scrollbar-thumb,
+ol#history::-webkit-scrollbar-thumb,
+.modal::-webkit-scrollbar-thumb,
+.project-options::-webkit-scrollbar-thumb {
+  border: 3px solid var(--color-surface-subtle);
+  border-radius: 999px;
+  background: var(--color-line-strong);
+  background-clip: padding-box;
+}
+
+.stage-viewport::-webkit-scrollbar-thumb:hover,
+.add-panel::-webkit-scrollbar-thumb:hover,
+.dock-view::-webkit-scrollbar-thumb:hover,
+ul#layers::-webkit-scrollbar-thumb:hover,
+ol#history::-webkit-scrollbar-thumb:hover,
+.modal::-webkit-scrollbar-thumb:hover,
+.project-options::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+.stage-viewport::-webkit-scrollbar-button,
+.add-panel::-webkit-scrollbar-button,
+.dock-view::-webkit-scrollbar-button,
+ul#layers::-webkit-scrollbar-button,
+ol#history::-webkit-scrollbar-button,
+.modal::-webkit-scrollbar-button,
+.project-options::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+#advanced-inspector > .empty-panel-copy {
+  padding-inline: var(--space-4);
+}
+
+/* Chromium gives standard scrollbar colors priority over WebKit parts. */
+@supports selector(::-webkit-scrollbar) {
+  .stage-viewport,
+  .add-panel,
+  .dock-view,
+  ul#layers,
+  ol#history,
+  .modal,
+  .project-options {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+}
+
+
+/* Content categories keep short rail labels and a visible focus target. */
+.toolrail .tool:focus-visible,
+.shape-preset:focus-visible,
+.text-preset:focus-visible,
+.upload-dropzone:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.element-group-title {
+  margin: var(--space-2) 0 0;
+  color: var(--color-ink-soft);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.current-font-summary {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: 0.625rem;
+  background: var(--color-surface-subtle);
+}
+
+.current-font-family {
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+}
+
+.current-font-face,
+.current-font-status {
+  color: var(--color-ink-soft);
+  font-size: var(--text-xs);
+}
+
+.current-font-status { margin: 0; }
+.current-font-specimen:empty { display: none; }
+
+/* Font samples come from the pinned store or bundled outlined specimens. */
+.font-specimen {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  padding: var(--space-1) 0;
+}
+.font-specimen-image {
+  display: block;
+  width: 100%;
+  max-width: 30rem;
+  height: 3.5rem;
+  object-fit: none;
+  object-position: left center;
+}
+.font-specimen-status {
+  display: block;
+  color: var(--color-ink-faint);
+  font-size: var(--text-xs);
+}
+.font-sample-field {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+  font-size: var(--text-sm);
+}
+.font-sample-field[hidden] { display: none; }
+.font-sample-field input { width: 100%; }
+.font-family-text,
+.font-selector-list li[data-family],
+.font-pack-family {
+  min-width: 0;
+}
+.font-pack-samples {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  margin-top: var(--space-2);
+}
+.font-pack-family {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+}
+.font-pack-family-name {
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.current-font-specimen:not(:empty) { display: block; }
+
+
+
+.font-selector-list li[data-family].active {
+  background: var(--color-accent-soft);
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.font-family {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+.font-family > .font-specimen,
+.font-family > .font-specimen-status {
+  grid-column: 1 / -1;
+}
+/* Keep overlay panels in the viewport after the desktop grid placement rules. */
+@media (max-width: 1024px) {
+  .workspace > .add-panel,
+  .workspace > .editor,
+  .workspace > .structure { grid-column: 2; }
+}
+
+@media (max-width: 720px) {
+  .workspace > .add-panel,
+  .workspace > .editor,
+  .workspace > .structure { grid-column: 1; }
+}

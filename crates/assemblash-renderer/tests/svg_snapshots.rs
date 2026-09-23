@@ -584,6 +584,10 @@ fn shape(
             stroke: stroke.map(|(color, width)| Stroke {
                 color: Color::new(color),
                 width,
+                dash_array: None,
+                line_cap: None,
+                line_join: None,
+                extra: Extras::new(),
             }),
             extra: Extras::new(),
         }),
@@ -596,7 +600,10 @@ fn a_filled_rect_with_square_corners_is_a_plain_rect() {
     doc.layers.push(shape(
         "layer_1",
         Transform::new(20.5, 10.25, 160.0, 90.5),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         None,
     ));
@@ -616,6 +623,7 @@ fn a_stroked_rounded_rect_is_cubics_and_never_rx() {
         Transform::new(20.5, 10.25, 160.0, 90.5),
         ShapeKind::Rect {
             corner_radius: 18.0,
+            extra: Extras::new(),
         },
         Some("#3366cc"),
         Some(("#112233", 4.0)),
@@ -640,7 +648,9 @@ fn an_ellipse_is_four_cubics_not_an_ellipse_element() {
     doc.layers.push(shape(
         "layer_1",
         Transform::new(20.5, 10.25, 160.0, 90.5),
-        ShapeKind::Ellipse,
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        },
         None,
         Some(("#204060", 0.5)),
     ));
@@ -661,7 +671,11 @@ fn a_line_runs_across_the_middle_of_its_box() {
             rotation: 17.5,
             ..Transform::new(20.5, 10.25, 160.0, 40.0)
         },
-        ShapeKind::Line,
+        ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        },
         // A line has no interior, so a fill on one means nothing and is left
         // out of the output rather than drawn.
         Some("#3366cc"),
@@ -686,7 +700,10 @@ fn a_stroke_wider_than_its_box_fills_in_the_stroke_colour() {
     doc.layers.push(shape(
         "layer_1",
         Transform::new(20.5, 10.25, 160.0, 40.0),
-        ShapeKind::Rect { corner_radius: 6.0 },
+        ShapeKind::Rect {
+            corner_radius: 6.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         Some(("#8b1a1a", 90.0)),
     ));
@@ -704,7 +721,10 @@ fn a_zero_width_stroke_draws_nothing() {
     doc.layers.push(shape(
         "layer_1",
         Transform::new(20.5, 10.25, 160.0, 40.0),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         Some(("#8b1a1a", 0.0)),
     ));
@@ -713,14 +733,22 @@ fn a_zero_width_stroke_draws_nothing() {
     doc.layers.push(shape(
         "layer_2",
         Transform::new(20.5, 70.0, 160.0, 20.0),
-        ShapeKind::Line,
+        ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        },
         None,
         Some(("#8b1a1a", 0.0)),
     ));
     doc.layers.push(shape(
         "layer_3",
         Transform::new(20.5, 95.0, 160.0, 20.0),
-        ShapeKind::Line,
+        ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        },
         None,
         None,
     ));
@@ -757,7 +785,10 @@ fn a_drop_shadow_gets_an_explicit_user_space_region() {
     let mut layer = shape(
         "layer_1",
         Transform::new(40.0, 30.0, 100.0, 60.0),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         None,
     );
@@ -766,6 +797,7 @@ fn a_drop_shadow_gets_an_explicit_user_space_region() {
         dy: 4.0,
         blur: 3.0,
         color: Color::new("#00000080"),
+        extra: Extras::new(),
     }];
     doc.layers.push(layer);
 
@@ -798,11 +830,16 @@ fn a_stack_without_a_shadow_keeps_the_percentage_region() {
     let mut layer = shape(
         "layer_1",
         Transform::new(40.0, 30.0, 100.0, 60.0),
-        ShapeKind::Ellipse,
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         None,
     );
-    layer.effects = vec![Effect::Blur { radius: 4.0 }];
+    layer.effects = vec![Effect::Blur {
+        radius: 4.0,
+        extra: Extras::new(),
+    }];
     doc.layers.push(layer);
 
     let svg = doc_to_svg(&doc, &fonts(), &AssetHrefs::new()).unwrap();
@@ -820,7 +857,10 @@ fn several_shadows_in_one_stack_union_their_offsets() {
     let mut layer = shape(
         "layer_1",
         Transform::new(40.0, 30.0, 100.0, 60.0),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         None,
     );
@@ -830,12 +870,14 @@ fn several_shadows_in_one_stack_union_their_offsets() {
             dy: 0.0,
             blur: 1.0,
             color: Color::new("#000000"),
+            extra: Extras::new(),
         },
         Effect::DropShadow {
             dx: 30.0,
             dy: 12.0,
             blur: 2.0,
             color: Color::new("#ff0000"),
+            extra: Extras::new(),
         },
     ];
     doc.layers.push(layer);

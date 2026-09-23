@@ -15,12 +15,14 @@
 
 pub mod api;
 pub mod auth;
+pub mod batch;
 pub mod error;
 pub mod instance;
 pub mod render;
 pub mod site;
 pub mod state;
 pub mod ui;
+pub mod update;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -62,6 +64,16 @@ pub enum ServeError {
     Access {
         /// What was wrong.
         source: AccessError,
+    },
+
+    /// A service could not be mounted: the path was not a valid route or was
+    /// already taken.
+    #[error("cannot mount {path}: {reason}")]
+    RouteConflict {
+        /// The path that was refused.
+        path: String,
+        /// Why the router refused it.
+        reason: String,
     },
 }
 
@@ -290,11 +302,9 @@ impl Server {
     /// applied here and not left to the caller: a mounted service that
     /// skipped it would be a way around the token.
     ///
-    /// # Panics
-    ///
-    /// When `path` is not a valid route or is already taken — a programming
-    /// error in the caller, found the first time the binary starts.
-    pub fn with_service<S>(mut self, path: &str, service: S) -> Self
+    /// An invalid `path`, or one already taken, is a typed error — a startup
+    /// misconfiguration the caller reports, not a panic (NFR-4).
+    pub fn with_service<S>(mut self, path: &str, service: S) -> Result<Self, ApiError>
     where
         S: tower_service::Service<axum::extract::Request, Error = std::convert::Infallible>
             + Clone
@@ -304,15 +314,27 @@ impl Server {
         S::Response: axum::response::IntoResponse,
         S::Future: Send + 'static,
     {
-        let guarded =
-            Router::new()
-                .route_service(path, service)
-                .layer(axum::middleware::from_fn_with_state(
-                    self.access.clone(),
-                    api::require_access,
-                ));
-        self.router = self.router.merge(guarded);
-        self
+        // axum's router reports a taken or invalid path by panicking, and
+        // offers no fallible variant. The panic is caught here and turned
+        // into the typed error the product requires, so a caller that mounts
+        // two services at one path sees a message, not a crash.
+        let access = self.access.clone();
+        let merged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let guarded = Router::new().route_service(path, service).layer(
+                axum::middleware::from_fn_with_state(access, api::require_access),
+            );
+            self.router.clone().merge(guarded)
+        }))
+        .map_err(|payload| {
+            let detail = panic_text(&payload);
+            ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "routeConflict",
+                format!("{path} is not a valid route or is already taken: {detail}"),
+            )
+        })?;
+        self.router = merged;
+        Ok(self)
     }
 
     /// Adds `GET /api/agent-access`: what an AI agent needs to connect to the
@@ -367,5 +389,16 @@ impl Server {
             })
             .await
             .map_err(|source| ServeError::Serving { source })
+    }
+}
+
+/// The message a caught panic carried, for the route-conflict error.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_owned()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "the router refused the path".to_owned()
     }
 }

@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "families": {
+    "Inter": {
+      "src": "./inter.svg",
+      "sourceSha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "assetSha256": "70f8e4b9dfd900f7ac62f90ccef678ec2e47468ee884e1d16cd7c6bfbe0ebde2",
+      "face": {
+        "weight": 400,
+        "style": "normal"
+      },
+      "sample": "Aa Bb 0123",
+      "license": "OFL-1.1",
+      "licenseFile": "./licenses/inter-OFL.txt"
+    },
+    "Roboto": {
+      "src": "./roboto.svg",
+      "sourceSha256": "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134",
+      "assetSha256": "cac04cbaee98fbb42c94de063f85dc653f65896d341b17f30bb80117a5f83b9f",
+      "face": {
+        "weight": 400,
+        "style": "normal"
+      },
+      "sample": "Aa Bb 0123",
+      "license": "OFL-1.1",
+      "licenseFile": "./licenses/roboto-OFL.txt"
+    },
+    "Open Sans": {
+      "src": "./open-sans.svg",
+      "sourceSha256": "36643644f318a812aab2d2ed3bb98f8cf0872527f835fe9398d95fe6b9adb878",
+      "assetSha256": "489cff22e3fca5fba8e2f3e9d2f531048cf028a8df3334c82a89b7a348ed516b",
+      "face": {
+        "weight": 400,
+        "style": "normal"
+      },
+      "sample": "Aa Bb 0123",
+      "license": "OFL-1.1",
+      "licenseFile": "./licenses/open-sans-OFL.txt"
+    },
+    "Montserrat": {
+      "src": "./montserrat.svg",
+      "sourceSha256": "0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7",
+      "assetSha256": "315c90aff3e0f82d8469191442ea6e5fa743055242b634154fb599d70648de31",
+      "face": {
+        "weight": 400,
+        "style": "normal"
+      },
+      "sample": "Aa Bb 0123",
+      "license": "OFL-1.1",
+      "licenseFile": "./licenses/montserrat-OFL.txt"
+    },
+    "Playfair Display": {
+      "src": "./playfair-display.svg",
+      "sourceSha256": "c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6",
+      "assetSha256": "8a0b2146b6e53bc4a6e32011b04fc35c8ea776b9f34e0318974a0d09a2a9856a",
+      "face": {
+        "weight": 400,
+        "style": "normal"
+      },
+      "sample": "Aa Bb 0123",
+      "license": "OFL-1.1",
+      "licenseFile": "./licenses/playfair-display-OFL.txt"
+    },
+    "Lora": {
+      "src": "./lora.svg",
+      "sourceSha256": "822a6621ccbe8d97d20ac88c1c41f5615c9c2c202eaa75f272cd452aac6475a7",
+      "assetSha256": "415ad3fcdf7e839b2a556918a017147f12ab8a78d36c708a886cc8d83f3b3df5",
+      "face": {
+        "weight": 400,
+        "style": "normal"
+      },
+      "sample": "Aa Bb 0123",
+      "license": "OFL-1.1",
+      "licenseFile": "./licenses/lora-OFL.txt"
+    },
+    "JetBrains Mono": {
+      "src": "./jetbrains-mono.svg",
+      "sourceSha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda",
+      "assetSha256": "1d69644165be2a27c1ac9ba67a0162ea044b7d95d4517aeae60f93c481288d33",
+      "face": {
+        "weight": 400,
+        "style": "normal"
+      },
+      "sample": "Aa Bb 0123",
+      "license": "OFL-1.1",
+      "licenseFile": "./licenses/jetbrains-mono-OFL.txt"
+    }
+  }
+}

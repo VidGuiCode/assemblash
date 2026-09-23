@@ -6,6 +6,7 @@
 // executable path and the real URL, so nobody looks for a path in a file
 // manager.
 import * as api from "./api.js";
+import { t } from "./i18n.js";
 /**
  * A TOML string for a path.
  *
@@ -30,20 +31,20 @@ export function agentConfigBlocks(access) {
     return [
         {
             id: "json",
-            title: "Claude Desktop and other clients that start a command",
-            hint: "Add this to the client's MCP configuration file.",
+            title: t("agents.jsonTitle"),
+            hint: t("agents.jsonHint"),
             text: json,
         },
         {
             id: "codex",
-            title: "Codex",
-            hint: "Add this to ~/.codex/config.toml, or use Settings → MCP servers → Add server → STDIO.",
+            title: t("agents.codexTitle"),
+            hint: t("agents.codexHint"),
             text: codex,
         },
         {
             id: "url",
-            title: "Clients that take a URL",
-            hint: "This URL works only while this editor runs on this port.",
+            title: t("agents.urlTitle"),
+            hint: t("agents.urlHint"),
             text: access.mcpUrl,
         },
     ];
@@ -64,7 +65,7 @@ async function copyText(text) {
     const copied = document.execCommand("copy");
     area.remove();
     if (!copied)
-        throw new Error("the browser refused to copy; select the text and copy it");
+        throw new Error(t("agents.copyRefused"));
 }
 function el(id) {
     const found = document.getElementById(id);
@@ -80,7 +81,9 @@ export function mountAgents(host) {
         blocks: el("agents-blocks"),
         token: el("agents-token"),
     };
+    let lastAccess = null;
     function draw(access) {
+        lastAccess = access;
         dom.token.hidden = !access.tokenRequired;
         dom.blocks.replaceChildren();
         for (const block of agentConfigBlocks(access)) {
@@ -94,9 +97,14 @@ export function mountAgents(host) {
             const copy = document.createElement("button");
             copy.type = "button";
             copy.className = "button button-quiet agent-copy";
-            copy.innerHTML = '<i class="ph ph-copy" aria-hidden="true"></i><span>Copy</span>';
+            const icon = document.createElement("i");
+            icon.className = "ph ph-copy";
+            icon.setAttribute("aria-hidden", "true");
+            const label = document.createElement("span");
+            label.textContent = t("agents.copyButton");
+            copy.replaceChildren(icon, label);
             copy.addEventListener("click", () => {
-                copyText(block.text).then(() => host.say(`Copied the ${block.title} configuration.`), (error) => host.say(`Copy: ${String(error)}`, "error"));
+                copyText(block.text).then(() => host.say(t("agents.copied", { title: block.title })), (error) => host.say(t("agents.copyError", { error: String(error) }), "error"));
             });
             heading.append(title, copy);
             const hint = document.createElement("p");
@@ -117,7 +125,7 @@ export function mountAgents(host) {
         }
         catch (error) {
             const message = error instanceof api.ApiError ? error.message : String(error);
-            host.say(`Connect an AI agent: ${message}`, "error");
+            host.say(t("agents.openError", { error: message }), "error");
             return;
         }
         if (!dom.dialog.open)
@@ -136,5 +144,9 @@ export function mountAgents(host) {
         if (!shown)
             void open();
     }
+    window.addEventListener("assemblash:localechange", () => {
+        if (dom.dialog.open && lastAccess)
+            draw(lastAccess);
+    });
     return { open, offerOnFirstRun };
 }

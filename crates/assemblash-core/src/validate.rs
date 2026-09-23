@@ -157,19 +157,32 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
 
     // Clip checks, on every kind: the radius follows the shape-rect
     // precedent — finite, 0 or more, no upper bound, because a radius larger
-    // than the box clamps to a stadium when drawn. A `Clip::Other` is *not*
-    // an error here, exactly as a `ShapeKind::Other` is not: preserving a
-    // newer build's clip is the point, and it is refused where it matters —
-    // on `update`, and at render.
-    if let Some(Clip::Rect { corner_radius }) = &layer.clip {
-        if !corner_radius.is_finite() || *corner_radius < 0.0 {
-            errors.push(ValidationError::InvalidShape {
-                layer: layer.id.clone(),
-                field: "clip.cornerRadius",
-                expected: "a finite number of 0 or more",
-                value: *corner_radius,
-            });
+    // than the box clamps to a stadium when drawn. A path clip's `d` is
+    // checked against the path grammar here, so a loaded document that
+    // carries one this build cannot draw is named precisely. A `Clip::Other`
+    // is *not* an error here, exactly as a `ShapeKind::Other` is not:
+    // preserving a newer build's clip is the point, and it is refused where
+    // it matters — on `update`, and at render.
+    match &layer.clip {
+        Some(Clip::Rect { corner_radius, .. }) => {
+            if !corner_radius.is_finite() || *corner_radius < 0.0 {
+                errors.push(ValidationError::InvalidShape {
+                    layer: layer.id.clone(),
+                    field: "clip.cornerRadius",
+                    expected: "a finite number of 0 or more",
+                    value: *corner_radius,
+                });
+            }
         }
+        Some(Clip::Path { d, .. }) => {
+            if let Err(error) = crate::path::validate(d) {
+                errors.push(ValidationError::InvalidPath {
+                    layer: layer.id.clone(),
+                    reason: error.to_string(),
+                });
+            }
+        }
+        _ => {}
     }
 
     match &layer.kind {
@@ -211,6 +224,7 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
                         value: stroke.width,
                     });
                 }
+                check_dash_array(layer, &stroke.dash_array, errors);
                 check_color(&stroke.color, &format!("layer {} stroke", layer.id), errors);
             }
             if let Some(color) = &text.color {
@@ -276,6 +290,17 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
 /// document is allowed to be (so is `opacity: 0`), and refusing it would mean
 /// an editor could not clear one paint before choosing the other.
 fn check_shape(layer: &Layer, shape: &ShapeLayer, errors: &mut Vec<ValidationError>) {
+    // Checked before the `bad` closure below takes its borrow: the path
+    // grammar's refusal is its own error, not a number complaint.
+    if let ShapeKind::Path { d, .. } = &shape.shape {
+        if let Err(error) = crate::path::validate(d) {
+            errors.push(ValidationError::InvalidPath {
+                layer: layer.id.clone(),
+                reason: error.to_string(),
+            });
+        }
+    }
+
     let mut bad = |field: &'static str, expected: &'static str, value: f64| {
         errors.push(ValidationError::InvalidShape {
             layer: layer.id.clone(),
@@ -286,7 +311,7 @@ fn check_shape(layer: &Layer, shape: &ShapeLayer, errors: &mut Vec<ValidationErr
     };
 
     match &shape.shape {
-        ShapeKind::Rect { corner_radius } => {
+        ShapeKind::Rect { corner_radius, .. } => {
             // No upper bound: a radius larger than the box is clamped to a
             // stadium when it is drawn, which is what somebody dragging a
             // corner-radius slider to the end means.
@@ -298,7 +323,8 @@ fn check_shape(layer: &Layer, shape: &ShapeLayer, errors: &mut Vec<ValidationErr
                 );
             }
         }
-        ShapeKind::Ellipse | ShapeKind::Line => {}
+        ShapeKind::Ellipse { .. } | ShapeKind::Line { .. } => {}
+        ShapeKind::Path { .. } => {}
         ShapeKind::Other(_) => {}
     }
 
@@ -306,6 +332,7 @@ fn check_shape(layer: &Layer, shape: &ShapeLayer, errors: &mut Vec<ValidationErr
         if !stroke.width.is_finite() || stroke.width < 0.0 {
             bad("stroke.width", "a finite number of 0 or more", stroke.width);
         }
+        check_dash_array(layer, &stroke.dash_array, errors);
     }
 
     if let Some(fill) = &shape.fill {
@@ -336,14 +363,14 @@ fn check_effects(layer: &Layer, errors: &mut Vec<ValidationError>) {
         match effect {
             // No upper bound: brightness 4 on a dark photograph is a real
             // thing to want, and the renderer clamps at white anyway.
-            Effect::Brightness { amount }
-            | Effect::Contrast { amount }
-            | Effect::Saturation { amount } => {
+            Effect::Brightness { amount, .. }
+            | Effect::Contrast { amount, .. }
+            | Effect::Saturation { amount, .. } => {
                 if !amount.is_finite() || *amount < 0.0 {
                     bad("amount", "a finite number of 0 or more", *amount);
                 }
             }
-            Effect::Blur { radius } => {
+            Effect::Blur { radius, .. } => {
                 if !radius.is_finite() || *radius < 0.0 {
                     bad("radius", "a finite number of 0 or more", *radius);
                 }
@@ -352,6 +379,7 @@ fn check_effects(layer: &Layer, errors: &mut Vec<ValidationError>) {
                 amount,
                 seed: _,
                 scale,
+                ..
             } => {
                 // Grain is a swing either side of unchanged, so more than 1
                 // would mean "darker than black", which is not a stronger
@@ -368,6 +396,7 @@ fn check_effects(layer: &Layer, errors: &mut Vec<ValidationError>) {
                 dy,
                 blur,
                 color: _,
+                ..
             } => {
                 // No bound on the offset: a shadow thrown well clear of its
                 // layer is a legitimate long-shadow look, and the renderer
@@ -392,6 +421,51 @@ fn check_effects(layer: &Layer, errors: &mut Vec<ValidationError>) {
                 &format!("layer {} effect dropShadow", layer.id),
                 errors,
             );
+        }
+    }
+}
+
+/// Checks a stroke's dash pattern against the documented limits.
+///
+/// When present, a pattern is non-empty, at most
+/// [`crate::document::MAX_DASH_ENTRIES`] entries, and every value a finite
+/// number greater than 0. Zero-length dashes do not paint and are refused
+/// rather than silently dropped; a pattern this build would draw as nothing
+/// is a mistake being made, not a style.
+fn check_dash_array(
+    layer: &Layer,
+    dash_array: &Option<Vec<f64>>,
+    errors: &mut Vec<ValidationError>,
+) {
+    use crate::document::MAX_DASH_ENTRIES;
+    let Some(pattern) = dash_array else {
+        return;
+    };
+    if pattern.is_empty() {
+        errors.push(ValidationError::InvalidDashArray {
+            layer: layer.id.clone(),
+            reason: "the pattern is empty".to_owned(),
+        });
+        return;
+    }
+    if pattern.len() > MAX_DASH_ENTRIES {
+        errors.push(ValidationError::InvalidDashArray {
+            layer: layer.id.clone(),
+            reason: format!(
+                "the pattern has {} entries, more than the {MAX_DASH_ENTRIES} entry limit",
+                pattern.len()
+            ),
+        });
+        return;
+    }
+    for (index, value) in pattern.iter().enumerate() {
+        if !value.is_finite() || *value <= 0.0 {
+            errors.push(ValidationError::InvalidDashArray {
+                layer: layer.id.clone(),
+                reason: format!(
+                    "entry {index} must be a finite number greater than 0, got {value}"
+                ),
+            });
         }
     }
 }
@@ -597,6 +671,10 @@ mod tests {
                 stroke: Some(Stroke {
                     color: Color::new("#112233"),
                     width: 2.0,
+                    dash_array: None,
+                    line_cap: None,
+                    line_join: None,
+                    extra: Extras::new(),
                 }),
                 extra: Extras::new(),
             }),
@@ -612,9 +690,22 @@ mod tests {
     #[test]
     fn a_well_formed_shape_is_valid() {
         for shape in [
-            ShapeKind::Rect { corner_radius: 8.0 },
-            ShapeKind::Ellipse,
-            ShapeKind::Line,
+            ShapeKind::Rect {
+                corner_radius: 8.0,
+                extra: Extras::new(),
+            },
+            ShapeKind::Ellipse {
+                extra: Extras::new(),
+            },
+            ShapeKind::Line {
+                marker_start: None,
+                marker_end: None,
+                extra: Extras::new(),
+            },
+            ShapeKind::Path {
+                d: "M0 0L10 10Z".to_owned(),
+                extra: Extras::new(),
+            },
         ] {
             let doc = shape_document(shape);
             assert!(validate(&doc).is_ok(), "{:?}", validate(&doc));
@@ -624,7 +715,10 @@ mod tests {
     #[test]
     fn a_negative_or_nan_corner_radius_is_rejected() {
         for bad in [-1.0, f64::NAN, f64::INFINITY] {
-            let doc = shape_document(ShapeKind::Rect { corner_radius: bad });
+            let doc = shape_document(ShapeKind::Rect {
+                corner_radius: bad,
+                extra: Extras::new(),
+            });
             assert!(
                 errors(&doc).iter().any(|e| matches!(
                     e,
@@ -641,13 +735,19 @@ mod tests {
     #[test]
     fn a_negative_or_nan_stroke_width_is_rejected() {
         for bad in [-0.5, f64::NAN] {
-            let mut doc = shape_document(ShapeKind::Ellipse);
+            let mut doc = shape_document(ShapeKind::Ellipse {
+                extra: Extras::new(),
+            });
             let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
                 panic!("expected a shape");
             };
             shape.stroke = Some(Stroke {
                 color: Color::new("#112233"),
                 width: bad,
+                dash_array: None,
+                line_cap: None,
+                line_join: None,
+                extra: Extras::new(),
             });
             assert!(
                 errors(&doc).iter().any(|e| matches!(
@@ -664,7 +764,9 @@ mod tests {
 
     #[test]
     fn a_malformed_fill_or_stroke_colour_names_which_one() {
-        let mut doc = shape_document(ShapeKind::Ellipse);
+        let mut doc = shape_document(ShapeKind::Ellipse {
+            extra: Extras::new(),
+        });
         let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
             panic!("expected a shape");
         };
@@ -672,6 +774,10 @@ mod tests {
         shape.stroke = Some(Stroke {
             color: Color::new("also nope"),
             width: 1.0,
+            dash_array: None,
+            line_cap: None,
+            line_join: None,
+            extra: Extras::new(),
         });
 
         let found = errors(&doc);
@@ -689,7 +795,10 @@ mod tests {
     #[test]
     fn a_shape_with_no_fill_and_no_stroke_is_valid() {
         // Invisible is allowed, for the same reason `opacity: 0` is.
-        let mut doc = shape_document(ShapeKind::Rect { corner_radius: 0.0 });
+        let mut doc = shape_document(ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        });
         let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
             panic!("expected a shape");
         };
@@ -709,12 +818,15 @@ mod tests {
 
     #[test]
     fn a_drop_shadow_is_checked_number_by_number() {
-        let mut doc = shape_document(ShapeKind::Ellipse);
+        let mut doc = shape_document(ShapeKind::Ellipse {
+            extra: Extras::new(),
+        });
         doc.layers[0].effects = vec![Effect::DropShadow {
             dx: f64::NAN,
             dy: 2.0,
             blur: -1.0,
             color: Color::new("#zzz"),
+            extra: Extras::new(),
         }];
 
         let found = errors(&doc);
@@ -741,7 +853,119 @@ mod tests {
             dy: 0.0,
             blur: 0.0,
             color: Color::new("#00000080"),
+            extra: Extras::new(),
         }];
         assert!(validate(&doc).is_ok(), "a glow is a shadow with no offset");
+    }
+
+    #[test]
+    fn a_dash_pattern_outside_the_limits_is_rejected() {
+        let dash = |values: &[f64]| Some(values.to_vec());
+        let cases: Vec<(Option<Vec<f64>>, &str)> = vec![
+            (dash(&[]), "empty"),
+            (dash(&[4.0, 0.0]), "zero gap"),
+            (dash(&[4.0, -1.0]), "negative"),
+            (dash(&[4.0, f64::NAN]), "not a number"),
+            (
+                dash(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+                "nine entries",
+            ),
+        ];
+        for (pattern, why) in cases {
+            let mut doc = shape_document(ShapeKind::Line {
+                marker_start: None,
+                marker_end: None,
+                extra: Extras::new(),
+            });
+            let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
+                panic!("expected a shape");
+            };
+            shape.stroke = Some(Stroke {
+                color: Color::new("#112233"),
+                width: 2.0,
+                dash_array: pattern,
+                line_cap: None,
+                line_join: None,
+                extra: Extras::new(),
+            });
+            assert!(
+                errors(&doc)
+                    .iter()
+                    .any(|e| matches!(e, ValidationError::InvalidDashArray { .. })),
+                "a dash pattern with a {why} problem should be rejected"
+            );
+        }
+
+        // Eight entries, all positive and finite: fine.
+        let mut doc = shape_document(ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        });
+        let LayerKind::Shape(shape) = &mut doc.layers[0].kind else {
+            panic!("expected a shape");
+        };
+        shape.stroke = Some(Stroke {
+            color: Color::new("#112233"),
+            width: 2.0,
+            dash_array: dash(&[4.0, 2.0, 1.0, 2.0, 4.0, 2.0, 1.0, 2.0]),
+            line_cap: Some(crate::document::LineCap::Round),
+            line_join: Some(crate::document::LineJoin::Bevel),
+            extra: Extras::new(),
+        });
+        assert!(validate(&doc).is_ok(), "{:?}", validate(&doc));
+    }
+
+    #[test]
+    fn a_path_that_breaks_the_grammar_is_rejected_naming_the_fault() {
+        for (d, fragment) in [
+            ("M0 0Q5 5 10 10Z", "Q"),
+            ("M0 0L10 10", "not closed"),
+            ("M0 0M10 10Z", "second moveto"),
+            ("", "empty"),
+        ] {
+            let doc = shape_document(ShapeKind::Path {
+                d: d.to_owned(),
+                extra: Extras::new(),
+            });
+            let found = errors(&doc);
+            assert!(
+                found
+                    .iter()
+                    .any(|e| matches!(e, ValidationError::InvalidPath { .. })),
+                "d {d:?} should be rejected, got {found:?}"
+            );
+            let message = found
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ");
+            assert!(
+                message.contains(fragment),
+                "{fragment} missing from: {message}"
+            );
+        }
+
+        // A path clip is held to the same grammar.
+        let mut doc = shape_document(ShapeKind::Ellipse {
+            extra: Extras::new(),
+        });
+        doc.layers[0].clip = Some(Clip::Path {
+            d: "M0 0Q5 5 10 10Z".to_owned(),
+            extra: Extras::new(),
+        });
+        assert!(
+            errors(&doc)
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidPath { .. })),
+            "a clip path with a Q should be rejected"
+        );
+
+        // And a good clip passes.
+        doc.layers[0].clip = Some(Clip::Path {
+            d: "M0 0L10 10Z".to_owned(),
+            extra: Extras::new(),
+        });
+        assert!(validate(&doc).is_ok(), "{:?}", validate(&doc));
     }
 }

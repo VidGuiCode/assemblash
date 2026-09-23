@@ -728,6 +728,10 @@ fn create_shape(shape: ShapeKind) -> Operation {
             stroke: Some(Stroke {
                 color: Color::new("#112233"),
                 width: 2.0,
+                dash_array: None,
+                line_cap: None,
+                line_join: None,
+                extra: Extras::new(),
             }),
         },
     })
@@ -744,9 +748,18 @@ fn shape_of(document: &Document, index: usize) -> &ShapeLayer {
 fn create_makes_a_rect_an_ellipse_and_a_line() {
     let mut editor = Editor::new();
     for shape in [
-        ShapeKind::Rect { corner_radius: 8.0 },
-        ShapeKind::Ellipse,
-        ShapeKind::Line,
+        ShapeKind::Rect {
+            corner_radius: 8.0,
+            extra: Extras::new(),
+        },
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        },
+        ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        },
     ] {
         let expected = shape.clone();
         let outcome = editor.apply(create_shape(shape));
@@ -770,7 +783,9 @@ fn a_shape_may_be_created_with_no_paint_at_all() {
         transform: Transform::new(0.0, 0.0, 10.0, 10.0),
         name: None,
         kind: NewLayerKind::Shape {
-            shape: ShapeKind::Ellipse,
+            shape: ShapeKind::Ellipse {
+                extra: Extras::new(),
+            },
             fill: None,
             stroke: None,
         },
@@ -806,7 +821,10 @@ fn creating_a_shape_this_build_cannot_draw_is_refused() {
 #[test]
 fn update_sets_fill_stroke_and_corner_radius() {
     let mut editor = Editor::new();
-    editor.apply(create_shape(ShapeKind::Rect { corner_radius: 0.0 }));
+    editor.apply(create_shape(ShapeKind::Rect {
+        corner_radius: 0.0,
+        extra: Extras::new(),
+    }));
     let id = editor.document.layers[0].id.clone();
 
     editor.apply(Operation::Update(UpdateLayer {
@@ -820,7 +838,8 @@ fn update_sets_fill_stroke_and_corner_radius() {
     assert_eq!(
         shape.shape,
         ShapeKind::Rect {
-            corner_radius: 12.0
+            corner_radius: 12.0,
+            extra: Extras::new(),
         }
     );
     assert_eq!(
@@ -828,6 +847,10 @@ fn update_sets_fill_stroke_and_corner_radius() {
         Some(Stroke {
             color: Color::new("#112233"),
             width: 2.0,
+            dash_array: None,
+            line_cap: None,
+            line_join: None,
+            extra: Extras::new(),
         }),
         "an update that does not mention the stroke leaves it alone"
     );
@@ -837,7 +860,9 @@ fn update_sets_fill_stroke_and_corner_radius() {
 fn null_clears_a_fill_and_a_stroke() {
     // The doubly-optional wire shape: absent leaves it, `null` clears it.
     let mut editor = Editor::new();
-    editor.apply(create_shape(ShapeKind::Ellipse));
+    editor.apply(create_shape(ShapeKind::Ellipse {
+        extra: Extras::new(),
+    }));
     let id = editor.document.layers[0].id.clone();
 
     let clear: UpdateLayer = serde_json::from_value(serde_json::json!({
@@ -859,8 +884,14 @@ fn null_clears_a_fill_and_a_stroke() {
 #[test]
 fn corner_radius_is_refused_on_a_shape_that_has_no_corners() {
     let mut editor = Editor::new();
-    editor.apply(create_shape(ShapeKind::Ellipse));
-    editor.apply(create_shape(ShapeKind::Line));
+    editor.apply(create_shape(ShapeKind::Ellipse {
+        extra: Extras::new(),
+    }));
+    editor.apply(create_shape(ShapeKind::Line {
+        marker_start: None,
+        marker_end: None,
+        extra: Extras::new(),
+    }));
 
     for (index, expected) in [(0usize, "ellipse"), (1, "line")] {
         let id = editor.document.layers[index].id.clone();
@@ -905,7 +936,10 @@ fn shape_properties_are_refused_on_every_other_layer_kind() {
 #[test]
 fn text_properties_are_refused_on_a_shape() {
     let mut editor = Editor::new();
-    editor.apply(create_shape(ShapeKind::Rect { corner_radius: 0.0 }));
+    editor.apply(create_shape(ShapeKind::Rect {
+        corner_radius: 0.0,
+        extra: Extras::new(),
+    }));
     let id = editor.document.layers[0].id.clone();
     let error = editor
         .try_apply(Operation::Update(UpdateLayer {
@@ -986,9 +1020,363 @@ fn a_shape_create_round_trips_as_camel_case_json() {
     assert!(matches!(
         &create.kind,
         NewLayerKind::Shape {
-            shape: ShapeKind::Rect { corner_radius },
+            shape: ShapeKind::Rect {
+                corner_radius,
+                extra: _,
+            },
             ..
         } if *corner_radius == 8.0
     ));
     assert_eq!(serde_json::to_value(&operation).unwrap(), json);
+}
+
+fn path_shape(d: &str) -> ShapeKind {
+    ShapeKind::Path {
+        d: d.to_owned(),
+        extra: Extras::new(),
+    }
+}
+
+#[test]
+fn a_create_with_a_q_in_the_d_is_refused_naming_the_command() {
+    let mut editor = Editor::new();
+    let error = editor
+        .try_apply(create_shape(path_shape("M0 0 Q5 5 10 0Z")))
+        .unwrap_err();
+    let OpError::InvalidPath { id, reason } = &error else {
+        panic!("expected InvalidPath, got {error:?}");
+    };
+    assert_eq!(*id, None, "a create names no layer");
+    assert!(reason.contains('Q'), "{reason}");
+    assert!(reason.contains("byte 5"), "{reason}");
+    assert!(editor.document.layers.is_empty(), "nothing was created");
+    assert_eq!(
+        error.to_string(),
+        "invalid path data — unsupported path command 'Q' at byte 5: this grammar accepts M m L l H h V v C c S s A a Z z only"
+    );
+}
+
+#[test]
+fn a_create_with_a_good_d_is_stored_as_written() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(path_shape("M0 0L10 10Z")));
+    let shape = shape_of(&editor.document, 0);
+    assert_eq!(shape.shape, path_shape("M0 0L10 10Z"));
+    validate(&editor.document).unwrap();
+}
+
+#[test]
+fn over_limit_and_multi_m_and_open_paths_are_refused_at_operation_time() {
+    let mut editor = Editor::new();
+    // One byte over the limit. The limit is bytes, so this is checked before
+    // anything else about the string matters.
+    let long = format!("M0 0H{}Z", "9".repeat(assemblash_core::path::MAX_D_BYTES));
+    assert!(matches!(
+        editor.try_apply(create_shape(path_shape(&long))),
+        Err(OpError::InvalidPath { .. })
+    ));
+
+    assert!(matches!(
+        editor.try_apply(create_shape(path_shape("M0 0M10 10Z"))),
+        Err(OpError::InvalidPath { .. })
+    ));
+    assert!(matches!(
+        editor.try_apply(create_shape(path_shape("M0 0L10 10"))),
+        Err(OpError::InvalidPath { .. })
+    ));
+    assert!(matches!(
+        editor.try_apply(create_shape(path_shape("   "))),
+        Err(OpError::InvalidPath { .. })
+    ));
+    assert!(editor.document.layers.is_empty(), "nothing was created");
+}
+
+#[test]
+fn a_clip_update_with_a_bad_d_is_refused_and_changes_nothing() {
+    let mut editor = Editor::new();
+    editor.apply(create_at(0.0, 0.0, 40.0, 40.0));
+    let id = editor.document.layers[0].id.clone();
+    let before = editor.document.clone();
+
+    let error = editor
+        .try_apply(Operation::Update(UpdateLayer {
+            clip: Some(Some(assemblash_core::document::Clip::Path {
+                d: "M0 0Q5 5 10 10Z".to_owned(),
+                extra: Extras::new(),
+            })),
+            ..UpdateLayer::new(id.clone())
+        }))
+        .unwrap_err();
+    let OpError::InvalidPath { id: named, reason } = &error else {
+        panic!("expected InvalidPath, got {error:?}");
+    };
+    assert_eq!(named.as_ref(), Some(&id));
+    assert!(reason.contains('Q'), "{reason}");
+    assert_eq!(editor.document, before, "a refused update changes nothing");
+
+    // And a good clip path goes through.
+    editor.apply(Operation::Update(UpdateLayer {
+        clip: Some(Some(assemblash_core::document::Clip::Path {
+            d: "M0 0L10 10Z".to_owned(),
+            extra: Extras::new(),
+        })),
+        ..UpdateLayer::new(id)
+    }));
+    assert!(matches!(
+        &editor.document.layers[0].clip,
+        Some(assemblash_core::document::Clip::Path { d, .. }) if d == "M0 0L10 10Z"
+    ));
+    validate(&editor.document).unwrap();
+}
+
+#[test]
+fn a_dash_array_outside_the_limits_refuses_the_update() {
+    use assemblash_core::document::MAX_DASH_ENTRIES;
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Ellipse {
+        extra: Extras::new(),
+    }));
+    let id = editor.document.layers[0].id.clone();
+
+    for pattern in [
+        Vec::new(),
+        vec![4.0, 0.0],
+        vec![4.0, f64::NAN],
+        (0..=MAX_DASH_ENTRIES)
+            .map(|i| f64::from(i as u32))
+            .collect::<Vec<_>>(),
+    ] {
+        let error = editor
+            .try_apply(Operation::Update(UpdateLayer {
+                stroke: Some(Some(Stroke {
+                    color: Color::new("#112233"),
+                    width: 2.0,
+                    dash_array: Some(pattern.clone()),
+                    line_cap: None,
+                    line_join: None,
+                    extra: Extras::new(),
+                })),
+                ..UpdateLayer::new(id.clone())
+            }))
+            .unwrap_err();
+        assert!(
+            matches!(error, OpError::Invalid(_)),
+            "{pattern:?} → {error:?}"
+        );
+    }
+
+    // A pattern inside the limits, with a cap and a join, is stored whole.
+    editor.apply(Operation::Update(UpdateLayer {
+        stroke: Some(Some(Stroke {
+            color: Color::new("#112233"),
+            width: 2.0,
+            dash_array: Some(vec![4.0, 2.0]),
+            line_cap: Some(assemblash_core::LineCap::Square),
+            line_join: Some(assemblash_core::LineJoin::Miter),
+            extra: Extras::new(),
+        })),
+        ..UpdateLayer::new(id)
+    }));
+    validate(&editor.document).unwrap();
+}
+
+#[test]
+fn markers_are_part_of_the_line_payload_and_round_trip() {
+    let mut editor = Editor::new();
+    editor.document.layers.push(Layer::new(
+        LayerId::new("layer_line"),
+        Transform::new(0.0, 0.0, 100.0, 10.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Line {
+                marker_start: Some(assemblash_core::LineMarker::Arrow),
+                marker_end: Some(assemblash_core::LineMarker::Circle),
+                extra: Extras::new(),
+            },
+            fill: None,
+            stroke: None,
+            extra: Extras::new(),
+        }),
+    ));
+    validate(&editor.document).unwrap();
+
+    let json = serde_json::to_value(&editor.document.layers[0]).unwrap();
+    assert_eq!(json["shape"]["markerStart"], "arrow");
+    assert_eq!(json["shape"]["markerEnd"], "circle");
+
+    // Absent markers write nothing, so a 1.9.x line keeps its bytes.
+    let plain = serde_json::json!({ "kind": "line" });
+    let line: ShapeKind = serde_json::from_value(plain.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&line).unwrap(), plain);
+}
+
+#[test]
+fn an_update_replaces_the_whole_geometry_and_keeps_the_paint() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Rect {
+        corner_radius: 6.0,
+        extra: Extras::new(),
+    }));
+    let id = editor.document.layers[0].id.clone();
+    let before = editor.document.clone();
+
+    editor.apply(Operation::Update(UpdateLayer {
+        shape: Some(path_shape("M0 0 L10 10 Z")),
+        ..UpdateLayer::new(id.clone())
+    }));
+    let shape = shape_of(&editor.document, 0);
+    assert_eq!(shape.shape, path_shape("M0 0 L10 10 Z"));
+    assert_eq!(shape.fill, Some(Color::new("#3366cc")), "the paint stays");
+    validate(&editor.document).unwrap();
+
+    // The geometry change is an ordinary reversible operation: the inverse
+    // update puts the original document back exactly as it stood.
+    editor.apply(Operation::Update(UpdateLayer {
+        shape: Some(ShapeKind::Rect {
+            corner_radius: 6.0,
+            extra: Extras::new(),
+        }),
+        ..UpdateLayer::new(id)
+    }));
+    assert_eq!(editor.document, before);
+}
+
+#[test]
+fn an_update_sets_markers_on_a_line() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Line {
+        marker_start: None,
+        marker_end: None,
+        extra: Extras::new(),
+    }));
+    let id = editor.document.layers[0].id.clone();
+
+    editor.apply(Operation::Update(UpdateLayer {
+        marker_start: Some(assemblash_core::LineMarker::Arrow),
+        marker_end: Some(assemblash_core::LineMarker::Circle),
+        ..UpdateLayer::new(id)
+    }));
+    assert_eq!(
+        shape_of(&editor.document, 0).shape,
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::Arrow),
+            marker_end: Some(assemblash_core::LineMarker::Circle),
+            extra: Extras::new(),
+        }
+    );
+    validate(&editor.document).unwrap();
+}
+
+#[test]
+fn a_marker_on_a_shape_that_is_not_a_line_is_refused_naming_the_layer() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Rect {
+        corner_radius: 0.0,
+        extra: Extras::new(),
+    }));
+    let id = editor.document.layers[0].id.clone();
+    let before = editor.document.clone();
+
+    for (marker, property) in [
+        (assemblash_core::LineMarker::Arrow, "markerStart"),
+        (assemblash_core::LineMarker::Circle, "markerEnd"),
+    ] {
+        let error = editor
+            .try_apply(Operation::Update(UpdateLayer {
+                marker_start: (property == "markerStart").then(|| marker.clone()),
+                marker_end: (property == "markerEnd").then(|| marker.clone()),
+                ..UpdateLayer::new(id.clone())
+            }))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            OpError::WrongLayerKind {
+                id: id.clone(),
+                actual: "rect",
+                property,
+            },
+            "{property} → {error:?}"
+        );
+        assert_eq!(editor.document, before, "a refused update changes nothing");
+    }
+    assert_eq!(
+        error_message(&mut editor, &id, assemblash_core::LineMarker::Arrow),
+        format!("layer {id} is a rect layer, so markerStart cannot be set on it")
+    );
+}
+
+fn error_message(editor: &mut Editor, id: &LayerId, marker: assemblash_core::LineMarker) -> String {
+    editor
+        .try_apply(Operation::Update(UpdateLayer {
+            marker_start: Some(marker),
+            ..UpdateLayer::new(id.clone())
+        }))
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn a_shape_update_with_a_bad_d_is_refused_and_changes_nothing() {
+    let mut editor = Editor::new();
+    editor.apply(create_shape(ShapeKind::Ellipse {
+        extra: Extras::new(),
+    }));
+    let id = editor.document.layers[0].id.clone();
+    let before = editor.document.clone();
+
+    let error = editor
+        .try_apply(Operation::Update(UpdateLayer {
+            shape: Some(path_shape("M0 0 Q5 5 10 10 Z")),
+            ..UpdateLayer::new(id.clone())
+        }))
+        .unwrap_err();
+    let OpError::InvalidPath { id: named, reason } = &error else {
+        panic!("expected InvalidPath, got {error:?}");
+    };
+    assert_eq!(named.as_ref(), Some(&id));
+    assert!(reason.contains('Q'), "{reason}");
+    assert_eq!(editor.document, before, "a refused update changes nothing");
+
+    // An unknown geometry is refused by kind, naming the layer, the same way
+    // a create is.
+    let error = editor
+        .try_apply(Operation::Update(UpdateLayer {
+            shape: Some(ShapeKind::Other(serde_json::json!({
+                "kind": "star", "points": 5
+            }))),
+            ..UpdateLayer::new(id.clone())
+        }))
+        .unwrap_err();
+    assert_eq!(
+        error,
+        OpError::UnsupportedShape {
+            id: Some(id),
+            kind: "star".to_owned(),
+        }
+    );
+
+    // Replacing an unknown geometry with a known one is the one way through:
+    // nothing about the unknown kind is being edited, it is being replaced.
+    editor.document.layers.push(Layer::new(
+        LayerId::new("layer_future"),
+        Transform::new(0.0, 0.0, 10.0, 10.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Other(serde_json::json!({ "kind": "star", "points": 5 })),
+            fill: Some(Color::new("#000000")),
+            stroke: None,
+            extra: Extras::new(),
+        }),
+    ));
+    editor.apply(Operation::Update(UpdateLayer {
+        shape: Some(ShapeKind::Ellipse {
+            extra: Extras::new(),
+        }),
+        ..UpdateLayer::new(LayerId::new("layer_future"))
+    }));
+    assert_eq!(
+        shape_of(&editor.document, 1).shape,
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        }
+    );
+    validate(&editor.document).unwrap();
 }

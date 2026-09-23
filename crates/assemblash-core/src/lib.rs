@@ -20,6 +20,7 @@ pub mod index;
 pub mod inventory;
 pub mod layout;
 pub mod ops;
+pub mod path;
 pub mod presets;
 pub mod schema;
 pub mod session;
@@ -39,8 +40,8 @@ pub mod workspace;
 pub use assemblash_liveness as liveness;
 pub use document::{
     Asset, BlendMode, Canvas, Color, Document, Extras, FontStyle, GroupLayer, ImageFit, ImageLayer,
-    Layer, LayerKind, ShapeKind, ShapeLayer, Stroke, SvgLayer, TextAlign, TextLayer, Transform,
-    VerticalAlign,
+    Layer, LayerKind, LineCap, LineJoin, LineMarker, ShapeKind, ShapeLayer, Stroke, SvgLayer,
+    TextAlign, TextLayer, Transform, VerticalAlign, MAX_DASH_ENTRIES,
 };
 pub use error::{ValidationError, ValidationErrors};
 pub use history::{Actor, ActorKind, History, HistoryError};
@@ -48,6 +49,7 @@ pub use ids::{AssetId, DocumentId, IdSource, LayerId, SequentialIdSource, UlidId
 pub use layout::{bounding_box, find_overlaps, LayoutError, Rect};
 pub use liveness::{process_is_alive, this_host, Liveness};
 pub use ops::{apply, dry_run, CanvasAnchor, OpError, Operation, UpdateCanvas};
+pub use path::{validate as validate_path, PathError, MAX_COMMANDS, MAX_D_BYTES};
 pub use presets::{Preset, PresetProperties};
 pub use session::{Session, SessionError};
 pub use storage::{load, save, StorageError};

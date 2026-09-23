@@ -13,6 +13,7 @@
 // interface and this is a self-contained concern.
 
 import * as api from "./api.js";
+import { t, formatCount, formatNumber } from "./i18n.js";
 import type { Document, Slot } from "./api.js";
 
 /** What the panel needs from the rest of the interface. */
@@ -108,7 +109,8 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
         select.dataset["slot"] = slot.name;
         const none = window.document.createElement("option");
         none.value = "";
-        none.textContent = assets.length ? "— leave as it is —" : "no images imported yet";
+        none.dataset["i18n"] = assets.length ? "templates.leaveAsIs" : "templates.noImages";
+        none.textContent = assets.length ? t("templates.leaveAsIs") : t("templates.noImages");
         select.append(none);
         for (const asset of assets) {
           const option = window.document.createElement("option");
@@ -123,7 +125,8 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
         const upload = window.document.createElement("button");
         upload.type = "button";
         upload.className = "small";
-        upload.textContent = "Import…";
+        upload.dataset["i18n"] = "templates.importButton";
+        upload.textContent = t("templates.importButton");
         upload.addEventListener("click", () => {
           uploadingFor = slot.name;
           dom.imageFile.click();
@@ -168,7 +171,8 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
       const remove = window.document.createElement("button");
       remove.type = "button";
       remove.className = "small";
-      remove.textContent = "Remove";
+      remove.dataset["i18n"] = "templates.removeButton";
+      remove.textContent = t("templates.removeButton");
       remove.addEventListener("click", () => {
         batch.splice(index, 1);
         drawRows();
@@ -179,8 +183,8 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
     dom.renderBatch.disabled = batch.length === 0;
     dom.clearBatch.disabled = batch.length === 0;
     dom.renderBatch.textContent = batch.length
-      ? `Render ${batch.length} variant${batch.length === 1 ? "" : "s"}`
-      : "Render batch";
+      ? formatCount("templates.renderVariants", batch.length)
+      : t("templates.renderBatch");
   }
 
   /**
@@ -201,14 +205,14 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
       held.push(url);
       const image = window.document.createElement("img");
       image.src = url;
-      image.alt = `Variant ${variant.name}`;
+      image.alt = t("templates.variantAlt", { name: variant.name });
       figure.append(image);
 
       const caption = window.document.createElement("figcaption");
       const name = window.document.createElement("strong");
       name.textContent = variant.name;
       const size = window.document.createElement("span");
-      size.textContent = `${variant.width}×${variant.height} · ${variant.bytes} bytes`;
+      size.textContent = t("templates.bytesSize", { width: formatNumber(variant.width), height: formatNumber(variant.height), bytes: formatNumber(variant.bytes) });
       const hash = window.document.createElement("code");
       // Short in the caption, whole on hover: the short form is for
       // recognising it, the whole one for comparing it with what the CLI
@@ -218,7 +222,8 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
       const download = window.document.createElement("a");
       download.href = url;
       download.download = `${variant.name}.png`;
-      download.textContent = "Download";
+      download.dataset["i18n"] = "templates.downloadButton";
+      download.textContent = t("templates.downloadButton");
       caption.append(name, size, hash, download);
       figure.append(caption);
       dom.gallery.append(figure);
@@ -232,7 +237,7 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
       const rendered = await api.renderVariants(project, variants);
       await drawGallery(project, rendered);
       host.say(
-        `${what}: ${rendered.variants.length} rendered from version ${rendered.templateVersion}`,
+        formatCount("templates.renderedCount", rendered.variants.length, { what, version: formatNumber(rendered.templateVersion) }),
       );
     });
   }
@@ -240,19 +245,19 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
   dom.preview.addEventListener("click", () => {
     // A preview is a batch of one, through the same endpoint. Two code paths
     // would be two chances for the preview and the batch to disagree.
-    void render("preview", [{ name: "preview", values: currentValues() }]);
+    void render(t("templates.preview"), [{ name: "preview", values: currentValues() }]);
   });
 
   dom.addRow.addEventListener("click", () => {
     const name = dom.variantName.value.trim();
     if (!name) {
-      host.say("a variant needs a name — it becomes the file name", "error");
+      host.say(t("templates.variantNameRequired"), "error");
       return;
     }
     batch.push({ name, values: currentValues() });
     dom.variantName.value = "";
     drawRows();
-    host.say(`${name} added to the batch`);
+    host.say(t("templates.addedToBatch", { name }));
   });
 
   dom.clearBatch.addEventListener("click", () => {
@@ -260,7 +265,7 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
     drawRows();
   });
 
-  dom.renderBatch.addEventListener("click", () => void render("batch", batch));
+  dom.renderBatch.addEventListener("click", () => void render(t("templates.renderBatch"), batch));
 
   dom.loadValues.addEventListener("click", () => dom.valuesFile.click());
 
@@ -268,18 +273,18 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
     const file = dom.valuesFile.files?.[0];
     dom.valuesFile.value = "";
     if (!file) return;
-    void host.guard("load values", async () => {
+    void host.guard(t("templates.loadValues"), async () => {
       const text = await file.text();
       // The same file `assemblash variants --values` takes, so a batch that
       // works at the command line works here. Checked before it is used:
       // a helpful message beats a confusing refusal from the engine.
       const parsed: unknown = JSON.parse(text);
-      if (!Array.isArray(parsed)) throw new Error("expected a JSON array of variants");
+      if (!Array.isArray(parsed)) throw new Error(t("templates.expectedArray"));
       const loaded: api.Variant[] = [];
       for (const entry of parsed) {
         const row = entry as { name?: unknown; values?: unknown };
         if (typeof row.name !== "string") {
-          throw new Error('every variant needs a "name"');
+          throw new Error(t("templates.missingName"));
         }
         const rowValues: Record<string, string> = {};
         for (const [key, value] of Object.entries(row.values ?? {})) {
@@ -289,7 +294,7 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
       }
       batch = loaded;
       drawRows();
-      host.say(`loaded ${batch.length} variants from ${file.name}`);
+      host.say(formatCount("templates.loadedVariants", batch.length, { file: file.name }));
     });
   });
 
@@ -299,7 +304,7 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
     const slot = uploadingFor;
     uploadingFor = null;
     if (!file || !slot) return;
-    void host.guard("import image", async () => {
+    void host.guard(t("templates.importImage"), async () => {
       const project = host.project();
       if (!project) return;
       const uploaded = await api.uploadAsset(project, file);
@@ -308,7 +313,7 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
       // built from the document.
       await host.refresh();
       drawForm();
-      host.say(`imported ${file.name} into ${slot}`);
+      host.say(t("templates.importedImage", { file: file.name, slot }));
     });
   });
 
@@ -333,6 +338,15 @@ export function mountTemplates(host: Host): { projectChanged: () => Promise<void
     dom.panel.hidden = slots.length === 0;
     drawForm();
   }
+
+  window.addEventListener("assemblash:localechange", () => {
+    drawRows();
+    for (const figure of dom.gallery.querySelectorAll<HTMLElement>(".variant")) {
+      const image = figure.querySelector<HTMLImageElement>("img");
+      const name = figure.querySelector<HTMLElement>("figcaption strong")?.textContent;
+      if (image && name) image.alt = t("templates.variantAlt", { name });
+    }
+  });
 
   return { projectChanged };
 }

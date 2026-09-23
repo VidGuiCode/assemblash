@@ -41,6 +41,12 @@
 //! that is still open when the relay leaves a target, is answered with a
 //! JSON-RPC error. A client never waits for an answer that cannot come.
 //!
+//! When the relay leaves the local target, its in-flight work is cancelled
+//! rather than waited for: the switch to the editor is not held back by a
+//! long export. A cancelled request is answered with a JSON-RPC error and
+//! applies nothing — an operation is one transaction, so the journal never
+//! holds half of one.
+//!
 //! # Standard output is protocol
 //!
 //! Every line written to stdout is one JSON-RPC message, written whole under
@@ -73,6 +79,14 @@ const FALLBACK_PROTOCOL: &str = "2025-06-18";
 
 /// How long the relay waits for the local server to answer what it was sent
 /// before it leaves.
+///
+/// In-flight work is *cancelled* first (the backend's cancel token), so this
+/// is only the window the cancelled request needs to deliver its error
+/// answer. [`LOCAL_DRAIN`] stays as the backstop for the project locks.
+const CANCEL_DRAIN: Duration = Duration::from_secs(5);
+
+/// How long the relay waits at most for a request that would not be
+/// cancelled to finish, before leaving with projects possibly still locked.
 const LOCAL_DRAIN: Duration = Duration::from_secs(30);
 
 /// Where the client's messages go.
@@ -526,6 +540,9 @@ impl Relay {
     }
 
     fn start_local(&self) -> Local {
+        // A fresh local server serves fresh requests: clear the cancellation
+        // the previous switch set.
+        self.backend.reset_cancel();
         let (client, server) = tokio::io::duplex(64 * 1024);
         let (client_read, client_write) = tokio::io::split(client);
         let backend = self.backend.clone();
@@ -569,16 +586,27 @@ impl Relay {
                 remote.end_session();
             }
             Target::Local(mut local) => {
+                // Ask the work in flight to stop before anything else: a
+                // target switch must not wait out a long export. The request
+                // is answered with a typed error, and nothing it had not
+                // already finished is applied.
+                self.backend.cancel_pending();
                 // Closing the pipe ends the local server once it has
-                // answered what it was sent; the reader ends with it.
+                // answered what it was sent; the reader ends with it. The
+                // cancelled request needs only this window to deliver its
+                // error answer.
                 self.runtime.block_on(async {
                     let _ = local.writer.shutdown().await;
-                    let _ = tokio::time::timeout(LOCAL_DRAIN, &mut local.reader).await;
+                    let _ = tokio::time::timeout(CANCEL_DRAIN, &mut local.reader).await;
                 });
+                // Anything the local server still did not answer — a request
+                // the cancellation reached too late — is answered here.
                 self.output.fail_pending(
                     "the request was not answered: the MCP server changed while it was in \
                      progress; send it again",
                 );
+                // Backstop only: with the work cancelled this returns at
+                // once, in every ordinary case.
                 if !self.backend.close_and_wait(LOCAL_DRAIN) {
                     eprintln!(
                         "assemblash mcp: a request still holds a project after {} s; the editor \

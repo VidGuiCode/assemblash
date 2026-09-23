@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use assemblash_core::document::{
-    Clip, Crop, FontStyle, ImageFit, LayerKind, ShapeKind, Stroke, TextAlign, Transform,
-    VerticalAlign,
+    Clip, Crop, Extras, FontStyle, ImageFit, LayerKind, LineCap, LineJoin, LineMarker, ShapeKind,
+    Stroke, TextAlign, Transform, VerticalAlign,
 };
 use assemblash_core::history::{Actor, ActorKind, EntryKind};
 use assemblash_core::ids::UlidIdSource;
@@ -180,6 +180,36 @@ enum Command {
         #[arg(long, default_value = "#000000")]
         stroke: String,
         /// Stroke width in document units.
+        #[arg(long, default_value_t = 1.0)]
+        stroke_width: f64,
+        #[command(flatten)]
+        box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Appends a path shape layer.
+    ///
+    /// The `d` string follows the engine's conservative path grammar: one
+    /// leading moveto, straight and cubic segments and arcs only, closed. A
+    /// `d` that breaks the grammar is refused with the grammar's own words —
+    /// which command, which byte — and nothing is created.
+    AddPath {
+        /// Project directory.
+        project: PathBuf,
+        /// Path data, as written in an SVG `d` attribute.
+        #[arg(value_name = "D", required_unless_present = "d")]
+        input: Option<String>,
+        /// Path data. The older spelling of the same thing.
+        #[arg(long, conflicts_with = "input")]
+        d: Option<String>,
+        /// Fill colour, or `none` for no fill.
+        #[arg(long, default_value = "#000000")]
+        fill: String,
+        /// Stroke colour, or `none` for no stroke.
+        #[arg(long)]
+        stroke: Option<String>,
+        /// Stroke width in document units. Used only when `--stroke` is given.
         #[arg(long, default_value_t = 1.0)]
         stroke_width: f64,
         #[command(flatten)]
@@ -508,6 +538,21 @@ enum Command {
         workspace: Option<PathBuf>,
     },
 
+    /// Checks the release feed for a newer version, and can install it.
+    ///
+    /// The check is one request, made only because you asked. A download is
+    /// verified against the release's `SHA256SUMS` before anything is
+    /// replaced; a failed download changes nothing. An install placed by a
+    /// package manager is not swapped — the package manager owns that file.
+    Upgrade {
+        /// Print the local and the latest version, and install nothing.
+        #[arg(long)]
+        check: bool,
+        /// Workspace to download into. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+    },
+
     /// Removes a lock left behind by a process that is gone.
     ///
     /// This build cannot tell a crashed process from a slow one, so clearing
@@ -605,6 +650,34 @@ enum Command {
         /// Rect shape layers: corner radius in document units.
         #[arg(long)]
         corner_radius: Option<f64>,
+        /// Path shape layers: new path data, in the engine's conservative
+        /// grammar — one leading moveto, straight and cubic segments and
+        /// arcs, closed. It replaces the whole geometry; fill and stroke
+        /// stay. A `d` that breaks the grammar is refused by the operation
+        /// layer, naming the command and the byte.
+        #[arg(long)]
+        path: Option<String>,
+        /// Shape layers: the dash pattern, as a comma list of document units,
+        /// alternating paint and gap. At most 8 entries, every one finite and
+        /// greater than 0. Needs a stroke: pass `--stroke` when the layer has
+        /// none.
+        #[arg(long, value_delimiter = ',')]
+        dash: Option<Vec<f64>>,
+        /// Shape layers: how the stroke ends — `butt`, `round`, or `square`.
+        #[arg(long)]
+        cap: Option<String>,
+        /// Shape layers: how two segments meet — `miter`, `round`, or `bevel`.
+        #[arg(long)]
+        join: Option<String>,
+        /// Line layers: what sits at the start of the segment — `none`,
+        /// `arrow`, or `circle`. A marker on a shape that is not a line is
+        /// refused by the operation layer, naming the layer.
+        #[arg(long)]
+        marker_start: Option<String>,
+        /// Line layers: what sits at the end of the segment. See
+        /// `--marker-start`.
+        #[arg(long)]
+        marker_end: Option<String>,
         /// Text layers: horizontal alignment inside the box.
         #[arg(long, value_enum)]
         align: Option<Align>,
@@ -1283,6 +1356,12 @@ struct LayerChange {
     stroke: Option<String>,
     stroke_width: Option<f64>,
     corner_radius: Option<f64>,
+    path: Option<String>,
+    dash: Option<Vec<f64>>,
+    cap: Option<String>,
+    join: Option<String>,
+    marker_start: Option<String>,
+    marker_end: Option<String>,
     align: Option<Align>,
     line_height: Option<f64>,
     weight: Option<u16>,
@@ -1321,15 +1400,46 @@ impl LayerChange {
             .transpose()?;
         let transform = self.transform_for(document, &id);
         let stroke = self.stroke_update(document, &id)?;
+        let shape = self.path.clone().map(|d| ShapeKind::Path {
+            d,
+            extra: Extras::new(),
+        });
+        let marker_start = self
+            .marker_start
+            .clone()
+            .map(|value| line_marker("--marker-start", value))
+            .transpose()?;
+        let marker_end = self
+            .marker_end
+            .clone()
+            .map(|value| line_marker("--marker-end", value))
+            .transpose()?;
+        if let Some(value) = &self.cap {
+            if !matches!(value.as_str(), "butt" | "round" | "square") {
+                return Err(CliError::BadStrokeCap {
+                    value: value.clone(),
+                });
+            }
+        }
+        if let Some(value) = &self.join {
+            if !matches!(value.as_str(), "miter" | "round" | "bevel") {
+                return Err(CliError::BadStrokeJoin {
+                    value: value.clone(),
+                });
+            }
+        }
         let fill = self.fill.map(optional_color);
         let clip = if self.no_clip {
             Some(None)
         } else if self.clip_rect {
             Some(Some(Clip::Rect {
                 corner_radius: self.clip_radius.unwrap_or(0.0),
+                extra: Extras::new(),
             }))
         } else if self.clip_ellipse {
-            Some(Some(Clip::Ellipse))
+            Some(Some(Clip::Ellipse {
+                extra: Extras::new(),
+            }))
         } else {
             None
         };
@@ -1341,6 +1451,7 @@ impl LayerChange {
                     y: *y,
                     width: *width,
                     height: *height,
+                    extra: Extras::new(),
                 })),
                 _ => return Err(CliError::CropNeedsFourNumbers),
             },
@@ -1366,6 +1477,9 @@ impl LayerChange {
             fill,
             stroke,
             corner_radius: self.corner_radius,
+            shape,
+            marker_start,
+            marker_end,
             align: self.align.map(Into::into),
             line_height: self.line_height,
             font_weight: self.weight,
@@ -1384,54 +1498,75 @@ impl LayerChange {
 
     /// Builds the whole nullable stroke update from the flags and the layer's
     /// current stroke. A width has no useful meaning without a colour, so a
-    /// shape with no existing stroke must be given `--stroke` as well.
+    /// shape with no existing stroke must be given `--stroke` as well. The
+    /// dash and cap/join flags ride the same stroke: they change the stroke
+    /// the layer has, so a layer with no stroke is refused until one is
+    /// named.
     fn stroke_update(
         &self,
         document: &Document,
         id: &assemblash_core::LayerId,
     ) -> Result<Option<Option<Stroke>>, CliError> {
+        let styling = self.dash.is_some() || self.cap.is_some() || self.join.is_some();
+        let current = document.find_layer(id).and_then(|layer| match &layer.kind {
+            LayerKind::Shape(shape) => shape.stroke.clone(),
+            _ => None,
+        });
         match (self.stroke.as_deref(), self.stroke_width) {
-            (None, None) => Ok(None),
-            (Some("none"), _) => Ok(Some(None)),
+            (None, None) if !styling => Ok(None),
+            (Some("none"), _) => {
+                if styling {
+                    return Err(CliError::StrokeStyleNeedsStroke {
+                        what: "--dash, --cap, or --join",
+                    });
+                }
+                Ok(Some(None))
+            }
             (None, Some(width)) => {
-                let Some(layer) = document.find_layer(id) else {
-                    return Ok(Some(Some(Stroke {
-                        color: Color::new("#000000"),
-                        width,
-                    })));
-                };
-                match &layer.kind {
-                    LayerKind::Shape(shape) => {
-                        let Some(current) = &shape.stroke else {
-                            return Err(CliError::StrokeColorNeeded);
-                        };
-                        Ok(Some(Some(Stroke {
-                            color: current.color.clone(),
-                            width,
-                        })))
+                match current {
+                    Some(current) => {
+                        Ok(Some(Some(self.finish_stroke(current.color.clone(), width))))
                     }
+                    None if styling => Err(CliError::StrokeStyleNeedsStroke { what: "a stroke" }),
                     // Let the operation layer give the typed wrong-kind
                     // refusal for a non-shape rather than making the CLI
-                    // invent one.
-                    _ => Ok(Some(Some(Stroke {
-                        color: Color::new("#000000"),
-                        width,
-                    }))),
+                    // invent one; a shape with no stroke is refused by name.
+                    None => {
+                        if document.find_layer(id).is_some() {
+                            Err(CliError::StrokeColorNeeded)
+                        } else {
+                            Ok(Some(Some(plain_stroke(Color::new("#000000"), width))))
+                        }
+                    }
                 }
             }
             (Some(color), width) => {
-                let current = document.find_layer(id).and_then(|layer| match &layer.kind {
-                    LayerKind::Shape(shape) => shape.stroke.as_ref(),
-                    _ => None,
-                });
                 let width = width
-                    .or_else(|| current.map(|stroke| stroke.width))
+                    .or_else(|| current.as_ref().map(|stroke| stroke.width))
                     .unwrap_or(1.0);
-                Ok(Some(Some(Stroke {
-                    color: Color::new(color),
-                    width,
-                })))
+                Ok(Some(Some(self.finish_stroke(Color::new(color), width))))
             }
+            (None, None) => {
+                let Some(current) = current else {
+                    return Err(CliError::StrokeStyleNeedsStroke { what: "a stroke" });
+                };
+                Ok(Some(Some(self.finish_stroke(current.color, current.width))))
+            }
+        }
+    }
+
+    /// Applies the `--dash`, `--cap`, and `--join` flags to a stroke built
+    /// from a colour and width. Values outside the engine's limits are not
+    /// checked here: the operation layer refuses them in its own words, at
+    /// the moment the update is applied.
+    fn finish_stroke(&self, color: Color, width: f64) -> Stroke {
+        Stroke {
+            color,
+            width,
+            dash_array: self.dash.clone(),
+            line_cap: self.cap.as_deref().map(line_cap),
+            line_join: self.join.as_deref().map(line_join),
+            extra: Extras::new(),
         }
     }
 
@@ -1487,6 +1622,53 @@ fn optional_color(raw: String) -> Option<Color> {
         None
     } else {
         Some(Color::new(raw))
+    }
+}
+
+/// A stroke with only the paint set: no dash pattern, no cap or join, no
+/// captured keys.
+fn plain_stroke(color: Color, width: f64) -> Stroke {
+    Stroke {
+        color,
+        width,
+        dash_array: None,
+        line_cap: None,
+        line_join: None,
+        extra: assemblash_core::document::Extras::new(),
+    }
+}
+
+/// A `--cap` value, refusing a word the engine does not draw rather than
+/// storing it as a catch-all: a typo should be named at the command line,
+/// not ride the document until render time.
+fn line_cap(raw: &str) -> LineCap {
+    match raw {
+        "butt" => LineCap::Butt,
+        "round" => LineCap::Round,
+        "square" => LineCap::Square,
+        other => LineCap::Other(other.into()),
+    }
+}
+
+/// A `--join` value. See `line_cap`.
+fn line_join(raw: &str) -> LineJoin {
+    match raw {
+        "miter" => LineJoin::Miter,
+        "round" => LineJoin::Round,
+        "bevel" => LineJoin::Bevel,
+        other => LineJoin::Other(other.into()),
+    }
+}
+
+/// A `--marker-start`/`--marker-end` value. Unlike a cap or join there is no
+/// catch-all: `none` is a real word on the command line, so an unknown one is
+/// a typo and is named here rather than riding the document.
+fn line_marker(flag: &'static str, raw: String) -> Result<LineMarker, CliError> {
+    match raw.as_str() {
+        "none" => Ok(LineMarker::None),
+        "arrow" => Ok(LineMarker::Arrow),
+        "circle" => Ok(LineMarker::Circle),
+        _ => Err(CliError::BadMarker { flag, value: raw }),
     }
 }
 
@@ -1568,6 +1750,11 @@ fn run_set(
 }
 
 fn main() -> ExitCode {
+    // A previous self-update leaves the replaced binary behind as
+    // `<name>.old` (decision D28, U4); this start is the "next start" that
+    // deletes it. Best effort by design: a file that will not delete must
+    // never stop the program from starting.
+    assemblash_renderer::update::remove_old_binary();
     let cli = Cli::parse();
     let command = cli.command.unwrap_or(Command::Serve {
         workspace: None,
@@ -1630,6 +1817,8 @@ enum CliError {
     NoOutput,
     #[error("say which file to import: a path, or --file")]
     NoInput,
+    #[error("say which path to draw: the d string, or --d")]
+    NoPath,
     #[error("say what the preset sets: --properties, or --properties-file")]
     NoProperties,
     #[error("say where the font store is: --font-store")]
@@ -1640,6 +1829,14 @@ enum CliError {
         "a stroke colour is needed: pass --stroke COLOR when the layer has no existing stroke"
     )]
     StrokeColorNeeded,
+    #[error("{what} is needed: pass --stroke COLOR when the layer has no existing stroke")]
+    StrokeStyleNeedsStroke { what: &'static str },
+    #[error("unknown {flag} value {value:?}: expected none, arrow, or circle")]
+    BadMarker { flag: &'static str, value: String },
+    #[error("unknown --cap value {value:?}: expected butt, round, or square")]
+    BadStrokeCap { value: String },
+    #[error("unknown --join value {value:?}: expected miter, round, or bevel")]
+    BadStrokeJoin { value: String },
     #[error("{message} ({code})")]
     Rendering { code: &'static str, message: String },
     #[error("font family {family:?} is not in the font store at {store}; available: {available}")]
@@ -1656,6 +1853,71 @@ enum CliError {
     Mcp(#[from] assemblash_mcp::McpError),
     #[error("starting the server: {source}")]
     Runtime { source: std::io::Error },
+    #[error(transparent)]
+    Update(#[from] assemblash_renderer::update::UpdateError),
+    #[error(
+        "this install was placed by {manager}; upgrade it with that package manager instead \
+         (for example `winget upgrade assemblash` or `brew upgrade assemblash`)"
+    )]
+    ManagedInstall { manager: &'static str },
+    #[error("locating the running binary: {source}")]
+    Exe { source: std::io::Error },
+}
+
+/// The release feed endpoint, or the test override of it.
+///
+/// `ASSEMBLASH_UPDATE_FEED` exists so the exit tests can point this command
+/// at a local HTTP server: CI never reaches the network.
+fn feed_endpoint() -> String {
+    std::env::var("ASSEMBLASH_UPDATE_FEED")
+        .unwrap_or_else(|_| assemblash_renderer::update::RELEASES_ATOM.to_owned())
+}
+
+/// The release download base, or the test override of it.
+fn download_base() -> String {
+    std::env::var("ASSEMBLASH_UPDATE_DOWNLOAD")
+        .unwrap_or_else(|_| assemblash_renderer::update::RELEASES_DOWNLOAD.to_owned())
+}
+
+/// `assemblash upgrade` (decision D28, U3 + U4 + U6).
+///
+/// `--check` prints the local and the latest version and installs nothing.
+/// Without it, a swappable install is replaced in place after the download
+/// verifies; a managed install is refused with advice, never swapped.
+fn run_upgrade(check: bool, workspace: Option<PathBuf>) -> Result<(), CliError> {
+    use assemblash_renderer::update::{self, HttpReleaseFetcher, InstallKind};
+    let workspace = open_workspace(workspace)?;
+    let root = workspace.root().to_path_buf();
+    let local = env!("CARGO_PKG_VERSION");
+    let release = update::check(&feed_endpoint(), local, &HttpReleaseFetcher)?;
+    if check {
+        println!("local: {local}");
+        println!("latest: {}", release.version);
+        return Ok(());
+    }
+    let exe = std::env::current_exe().map_err(|source| CliError::Exe { source })?;
+    if let InstallKind::Managed { manager } = update::classify_install(&exe) {
+        return Err(CliError::ManagedInstall { manager });
+    }
+    if !update::is_newer(local, &release.version) {
+        println!(
+            "already up to date (local {local}, latest {})",
+            release.version
+        );
+        return Ok(());
+    }
+    let verified = update::download_verified(
+        &download_base(),
+        &update::tag_of(&release.version),
+        &root,
+        &HttpReleaseFetcher,
+    )?;
+    update::swap(&verified)?;
+    println!(
+        "updated to {}; restart Assemblash to run the new version",
+        release.version
+    );
+    Ok(())
 }
 
 fn run(command: Command) -> Result<(), CliError> {
@@ -1712,10 +1974,8 @@ fn run(command: Command) -> Result<(), CliError> {
                     font_weight: weight,
                     font_style: font_style.into(),
                     letter_spacing,
-                    stroke: stroke.map(|color| Stroke {
-                        color: Color::new(color),
-                        width: stroke_width.unwrap_or(1.0),
-                    }),
+                    stroke: stroke
+                        .map(|color| plain_stroke(Color::new(color), stroke_width.unwrap_or(1.0))),
                     vertical_align: vertical_align.into(),
                 },
                 &box_,
@@ -1738,12 +1998,14 @@ fn run(command: Command) -> Result<(), CliError> {
             let outcome = add_layer(
                 &mut session,
                 NewLayerKind::Shape {
-                    shape: ShapeKind::Rect { corner_radius },
+                    shape: ShapeKind::Rect {
+                        corner_radius,
+                        extra: Extras::new(),
+                    },
                     fill: optional_color(fill),
-                    stroke: stroke.and_then(optional_color).map(|color| Stroke {
-                        color,
-                        width: stroke_width,
-                    }),
+                    stroke: stroke
+                        .and_then(optional_color)
+                        .map(|color| plain_stroke(color, stroke_width)),
                 },
                 &box_,
                 &who,
@@ -1764,12 +2026,13 @@ fn run(command: Command) -> Result<(), CliError> {
             let outcome = add_layer(
                 &mut session,
                 NewLayerKind::Shape {
-                    shape: ShapeKind::Ellipse,
+                    shape: ShapeKind::Ellipse {
+                        extra: Extras::new(),
+                    },
                     fill: optional_color(fill),
-                    stroke: stroke.and_then(optional_color).map(|color| Stroke {
-                        color,
-                        width: stroke_width,
-                    }),
+                    stroke: stroke
+                        .and_then(optional_color)
+                        .map(|color| plain_stroke(color, stroke_width)),
                 },
                 &box_,
                 &who,
@@ -1789,12 +2052,44 @@ fn run(command: Command) -> Result<(), CliError> {
             let outcome = add_layer(
                 &mut session,
                 NewLayerKind::Shape {
-                    shape: ShapeKind::Line,
+                    shape: ShapeKind::Line {
+                        marker_start: None,
+                        marker_end: None,
+                        extra: Extras::new(),
+                    },
                     fill: None,
-                    stroke: optional_color(stroke).map(|color| Stroke {
-                        color,
-                        width: stroke_width,
-                    }),
+                    stroke: optional_color(stroke).map(|color| plain_stroke(color, stroke_width)),
+                },
+                &box_,
+                &who,
+            )?;
+            print_created(&outcome);
+            Ok(())
+        }
+
+        Command::AddPath {
+            project,
+            input,
+            d,
+            fill,
+            stroke,
+            stroke_width,
+            box_,
+            who,
+        } => {
+            let d = input.or(d).ok_or(CliError::NoPath)?;
+            let mut session = open_session(&project)?;
+            let outcome = add_layer(
+                &mut session,
+                NewLayerKind::Shape {
+                    shape: ShapeKind::Path {
+                        d,
+                        extra: Extras::new(),
+                    },
+                    fill: optional_color(fill),
+                    stroke: stroke
+                        .and_then(optional_color)
+                        .map(|color| plain_stroke(color, stroke_width)),
                 },
                 &box_,
                 &who,
@@ -2129,6 +2424,29 @@ fn run(command: Command) -> Result<(), CliError> {
             let workspace = open_workspace(workspace)?;
             let root = workspace.root().to_path_buf();
 
+            // The one passive check of the whole program (decision D28, U1 +
+            // U2): consented by `updateCheck = "notify"`, at most once every
+            // 24 hours, exactly one attempt. A failure is one typed line on
+            // standard error and serve continues; there is no retry loop.
+            match assemblash_server::update::startup_check(
+                &root,
+                &feed_endpoint(),
+                env!("CARGO_PKG_VERSION"),
+                &assemblash_renderer::update::HttpReleaseFetcher,
+                now_millis().unwrap_or(0),
+            ) {
+                Ok(Some(info)) if info.newer => eprintln!(
+                    "update available: version {} is out (you have {}). Release notes: {}",
+                    info.remote,
+                    info.local,
+                    info.notes_url
+                        .as_deref()
+                        .unwrap_or("the release page on GitHub")
+                ),
+                Ok(_) => {}
+                Err(error) => eprintln!("the update check failed: {error}"),
+            }
+
             // A second double-click must not start a rival server on another
             // port, leaving two windows editing the same projects. If one is
             // already running and answering, open that instead.
@@ -2210,6 +2528,10 @@ fn run(command: Command) -> Result<(), CliError> {
                     assemblash_mcp::http_service_with_sessions(server.state(), hosting);
                 let server = server
                     .with_service(assemblash_mcp::MCP_PATH, mcp)
+                    .map_err(|error| assemblash_server::ServeError::RouteConflict {
+                        path: assemblash_mcp::MCP_PATH.to_owned(),
+                        reason: error.message().to_owned(),
+                    })?
                     .with_agent_access(assemblash_mcp::MCP_PATH)
                     .with_agent_sessions(move || agents.count());
 
@@ -2296,6 +2618,8 @@ fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
 
+        Command::Upgrade { check, workspace } => run_upgrade(check, workspace),
+
         Command::Slot(command) => run_slot(command),
 
         Command::Canvas(CanvasCommand::Set {
@@ -2376,6 +2700,12 @@ fn run(command: Command) -> Result<(), CliError> {
             stroke,
             stroke_width,
             corner_radius,
+            path,
+            dash,
+            cap,
+            join,
+            marker_start,
+            marker_end,
             align,
             line_height,
             weight,
@@ -2415,6 +2745,12 @@ fn run(command: Command) -> Result<(), CliError> {
                 stroke,
                 stroke_width,
                 corner_radius,
+                path,
+                dash,
+                cap,
+                join,
+                marker_start,
+                marker_end,
                 align,
                 line_height,
                 weight,

@@ -151,15 +151,28 @@ fn blend_mode() -> impl Strategy<Value = BlendMode> {
 /// generated documents have to be valid.
 fn effect() -> impl Strategy<Value = Effect> {
     prop_oneof![
-        (0.0f64..4.0).prop_map(|amount| Effect::Brightness { amount }),
-        (0.0f64..4.0).prop_map(|amount| Effect::Contrast { amount }),
-        (0.0f64..4.0).prop_map(|amount| Effect::Saturation { amount }),
-        (0.0f64..50.0).prop_map(|radius| Effect::Blur { radius }),
+        (0.0f64..4.0).prop_map(|amount| Effect::Brightness {
+            amount,
+            extra: Extras::new(),
+        }),
+        (0.0f64..4.0).prop_map(|amount| Effect::Contrast {
+            amount,
+            extra: Extras::new(),
+        }),
+        (0.0f64..4.0).prop_map(|amount| Effect::Saturation {
+            amount,
+            extra: Extras::new(),
+        }),
+        (0.0f64..50.0).prop_map(|radius| Effect::Blur {
+            radius,
+            extra: Extras::new(),
+        }),
         (0.0f64..=1.0, any::<u32>(), 0.1f64..8.0).prop_map(|(amount, seed, scale)| {
             Effect::Grain {
                 amount,
                 seed,
                 scale,
+                extra: Extras::new(),
             }
         }),
         Just(Effect::Other(serde_json::json!({
@@ -183,7 +196,10 @@ fn presets() -> impl Strategy<Value = Vec<assemblash_core::Preset>> {
                 description,
                 properties: assemblash_core::PresetProperties {
                     opacity: Some(opacity),
-                    effects: Some(vec![Effect::Blur { radius: 2.0 }]),
+                    effects: Some(vec![Effect::Blur {
+                        radius: 2.0,
+                        extra: Extras::new(),
+                    }]),
                     extra: [(
                         "futureProperty".to_owned(),
                         serde_json::Value::from(index as i64),
@@ -489,6 +505,258 @@ fn a_document_from_before_1_8_0_re_serialises_to_the_same_bytes() {
         "re-serialising a pre-1.8.0 document must not change a byte"
     );
     for absent in ["clip", "crop", "flipHorizontal", "flipVertical"] {
+        assert!(
+            !written.contains(absent),
+            "{absent} must not appear in a document that sets none of them"
+        );
+    }
+}
+
+/// A document written by 1.9.x — every layer kind, a clip, an effect, a
+/// preset and a slot — re-serialised by this build, is the same bytes.
+///
+/// This is the 1.10.0 form of the promise above, and it is the test the D27
+/// capture-map change leans on most: every unit enum variant became a struct
+/// variant, every payload gained a flattened map, and none of it may move a
+/// byte of an older document. All float inputs carry decimal points (the
+/// serde_json float-formatting nuance the D27 spike measured), which a 1.9.x
+/// build also wrote.
+#[test]
+fn a_document_from_1_9_x_re_serialises_to_the_same_bytes() {
+    let json = r##"{
+  "schemaVersion": 1,
+  "id": "doc_01M2B2600ZF0GZZ00WKVZA0CC9",
+  "version": 4,
+  "name": "Flyer",
+  "canvas": {
+    "width": 400.0,
+    "height": 300.0,
+    "background": "#ffffff"
+  },
+  "assets": [
+    {
+      "id": "asset_01M2B260AABBCCDDEEFF009999",
+      "path": "images/photo.png",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "mediaType": "image/png",
+      "width": 64,
+      "height": 64
+    },
+    {
+      "id": "asset_01M2B260AABBCCDDEEFF007777",
+      "path": "art/banner.svg",
+      "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "mediaType": "image/svg+xml"
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer_01M2B26021TE4Q3CJJR1X3Z8QS",
+      "transform": {
+        "x": 10.0,
+        "y": 10.0,
+        "width": 60.0,
+        "height": 40.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [
+        {
+          "type": "dropShadow",
+          "dx": 0.0,
+          "dy": 6.0,
+          "blur": 12.0,
+          "color": "#00000055"
+        }
+      ],
+      "type": "shape",
+      "shape": {
+        "kind": "rect",
+        "cornerRadius": 8.0
+      },
+      "fill": "#3366cc",
+      "stroke": {
+        "color": "#112233",
+        "width": 2.0
+      }
+    },
+    {
+      "id": "layer_01M2B2606XQ374JGBSTHR4GTYF",
+      "transform": {
+        "x": 10.0,
+        "y": 60.0,
+        "width": 180.0,
+        "height": 40.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "text",
+      "text": "Legacy",
+      "fontFamily": "Noto Sans",
+      "fontSize": 48.0,
+      "color": "#000000",
+      "align": "left",
+      "lineHeight": 1.2,
+      "runs": []
+    },
+    {
+      "id": "layer_01M2B260AABBCCDDEEFF001122",
+      "transform": {
+        "x": 200.0,
+        "y": 60.0,
+        "width": 120.0,
+        "height": 120.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "image",
+      "asset": "asset_01M2B260AABBCCDDEEFF009999",
+      "fit": "cover"
+    },
+    {
+      "id": "layer_01M2B260AABBCCDDEEFF003333",
+      "transform": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 400.0,
+        "height": 300.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "svg",
+      "asset": "asset_01M2B260AABBCCDDEEFF007777",
+      "fit": "contain"
+    },
+    {
+      "id": "layer_01M2B260AABBCCDDEEFF005555",
+      "transform": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 100.0,
+        "height": 100.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "group",
+      "children": [
+        {
+          "id": "layer_01M2B260AABBCCDDEEFF006666",
+          "transform": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 40.0,
+            "height": 40.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "line"
+          }
+        }
+      ]
+    },
+    {
+      "id": "layer_01M2B260AABBCCDDEEFF008888",
+      "transform": {
+        "x": 10.0,
+        "y": 110.0,
+        "width": 60.0,
+        "height": 40.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "clip": {
+        "shape": "rect",
+        "cornerRadius": 4.0
+      },
+      "type": "shape",
+      "shape": {
+        "kind": "ellipse"
+      }
+    }
+  ],
+  "presets": [
+    {
+      "name": "heading",
+      "description": "The house headline",
+      "properties": {
+        "fontSize": 48.0,
+        "opacity": 0.9
+      }
+    }
+  ],
+  "slots": [
+    {
+      "name": "headline",
+      "layer": "layer_01M2B2606XQ374JGBSTHR4GTYF",
+      "kind": "text",
+      "required": true
+    }
+  ]
+}
+"##;
+
+    let document: Document = serde_json::from_str(json).expect("a 1.9.x document parses");
+    validate(&document).expect("and is still valid");
+
+    // The same bytes `storage::save` writes: pretty JSON plus a final newline.
+    let mut written = serde_json::to_string_pretty(&document).unwrap();
+    written.push('\n');
+    assert_eq!(
+        written, json,
+        "re-serialising a 1.9.x document must not change a byte"
+    );
+    for absent in [
+        "dashArray",
+        "lineCap",
+        "lineJoin",
+        "markerStart",
+        "markerEnd",
+        "\"kind\": \"path\"",
+        "\"shape\": \"path\"",
+    ] {
         assert!(
             !written.contains(absent),
             "{absent} must not appear in a document that sets none of them"

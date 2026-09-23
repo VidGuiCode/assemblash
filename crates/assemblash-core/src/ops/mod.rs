@@ -1002,7 +1002,10 @@ mod tests {
             crate::LayerId::new("layer_00000000000000000000000010"),
             Transform::new(0.0, 0.0, 40.0, 40.0),
             LayerKind::Shape(crate::document::ShapeLayer {
-                shape: crate::document::ShapeKind::Rect { corner_radius: 0.0 },
+                shape: crate::document::ShapeKind::Rect {
+                    corner_radius: 0.0,
+                    extra: Extras::new(),
+                },
                 fill: Some(Color::new("#3366cc")),
                 stroke: None,
                 extra: Extras::new(),
@@ -1025,11 +1028,15 @@ mod tests {
         for index in 0..doc.layers.len() {
             let id = doc.layers[index].id.clone();
             let mut request = UpdateLayer::new(id.clone());
-            request.clip = Some(Some(Clip::Ellipse));
+            request.clip = Some(Some(Clip::Ellipse {
+                extra: Extras::new(),
+            }));
             update(&mut doc, request).unwrap();
             assert_eq!(
                 doc.find_layer(&id).unwrap().clip,
-                Some(Clip::Ellipse),
+                Some(Clip::Ellipse {
+                    extra: Extras::new(),
+                }),
                 "the clip applies to layer {index}"
             );
 
@@ -1048,14 +1055,15 @@ mod tests {
             y: 0.0,
             width: 32.0,
             height: 32.0,
+            extra: Extras::new(),
         };
 
         let image = doc.layers[1].id.clone();
         let mut request = UpdateLayer::new(image.clone());
-        request.crop = Some(Some(crop));
+        request.crop = Some(Some(crop.clone()));
         update(&mut doc, request).unwrap();
         match &doc.find_layer(&image).unwrap().kind {
-            LayerKind::Image(image) => assert_eq!(image.crop, Some(crop)),
+            LayerKind::Image(image) => assert_eq!(image.crop, Some(crop.clone())),
             other => panic!("expected an image layer, got {other:?}"),
         }
 
@@ -1063,7 +1071,7 @@ mod tests {
         for index in [0, 2] {
             let id = doc.layers[index].id.clone();
             let mut request = UpdateLayer::new(id);
-            request.crop = Some(Some(crop));
+            request.crop = Some(Some(crop.clone()));
             assert!(
                 matches!(
                     update(&mut doc, request),
@@ -1092,6 +1100,7 @@ mod tests {
             y: 0.0,
             width: 32.0,
             height: 32.0,
+            extra: Extras::new(),
         }));
         assert!(matches!(
             update(&mut doc, request),
@@ -1155,7 +1164,10 @@ mod tests {
         // 1.7 must still leave a clip, a crop and both flips alone.
         let mut doc = document_with_every_kind();
         let id = doc.layers[1].id.clone();
-        doc.layers[1].clip = Some(Clip::Rect { corner_radius: 4.0 });
+        doc.layers[1].clip = Some(Clip::Rect {
+            corner_radius: 4.0,
+            extra: Extras::new(),
+        });
         doc.layers[1].transform.flip_vertical = true;
         let before = doc.find_layer(&id).unwrap().clone();
 

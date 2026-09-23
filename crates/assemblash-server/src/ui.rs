@@ -101,6 +101,105 @@ const ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
         body: include_bytes!("../../../ui/dist/token.js"),
     },
+    Asset {
+        name: "i18n.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/i18n.js"),
+    },
+    Asset {
+        name: "locale-en.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/locale-en.js"),
+    },
+    Asset {
+        name: "locale-fr.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/locale-fr.js"),
+    },
+    Asset {
+        name: "locale-de.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/locale-de.js"),
+    },
+    Asset {
+        name: "catalogue-specimens/manifest.json",
+        content_type: "application/json; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/manifest.json"),
+    },
+    Asset {
+        name: "catalogue-specimens/inter.svg",
+        content_type: "image/svg+xml",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/inter.svg"),
+    },
+    Asset {
+        name: "catalogue-specimens/open-sans.svg",
+        content_type: "image/svg+xml",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/open-sans.svg"),
+    },
+    Asset {
+        name: "catalogue-specimens/lora.svg",
+        content_type: "image/svg+xml",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/lora.svg"),
+    },
+    Asset {
+        name: "catalogue-specimens/playfair-display.svg",
+        content_type: "image/svg+xml",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/playfair-display.svg"),
+    },
+    Asset {
+        name: "catalogue-specimens/roboto.svg",
+        content_type: "image/svg+xml",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/roboto.svg"),
+    },
+    Asset {
+        name: "catalogue-specimens/montserrat.svg",
+        content_type: "image/svg+xml",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/montserrat.svg"),
+    },
+    Asset {
+        name: "catalogue-specimens/jetbrains-mono.svg",
+        content_type: "image/svg+xml",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/jetbrains-mono.svg"),
+    },
+    Asset {
+        name: "catalogue-specimens/licenses/inter-OFL.txt",
+        content_type: "text/plain; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/licenses/inter-OFL.txt"),
+    },
+    Asset {
+        name: "catalogue-specimens/licenses/open-sans-OFL.txt",
+        content_type: "text/plain; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/licenses/open-sans-OFL.txt"),
+    },
+    Asset {
+        name: "catalogue-specimens/licenses/lora-OFL.txt",
+        content_type: "text/plain; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/licenses/lora-OFL.txt"),
+    },
+    Asset {
+        name: "catalogue-specimens/licenses/playfair-display-OFL.txt",
+        content_type: "text/plain; charset=utf-8",
+        body: include_bytes!(
+            "../../../ui/dist/catalogue-specimens/licenses/playfair-display-OFL.txt"
+        ),
+    },
+    Asset {
+        name: "catalogue-specimens/licenses/roboto-OFL.txt",
+        content_type: "text/plain; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/licenses/roboto-OFL.txt"),
+    },
+    Asset {
+        name: "catalogue-specimens/licenses/montserrat-OFL.txt",
+        content_type: "text/plain; charset=utf-8",
+        body: include_bytes!("../../../ui/dist/catalogue-specimens/licenses/montserrat-OFL.txt"),
+    },
+    Asset {
+        name: "catalogue-specimens/licenses/jetbrains-mono-OFL.txt",
+        content_type: "text/plain; charset=utf-8",
+        body: include_bytes!(
+            "../../../ui/dist/catalogue-specimens/licenses/jetbrains-mono-OFL.txt"
+        ),
+    },
     // Reachable without a token: it is how somebody with one gets it into the
     // browser (see `api::require_access`).
     Asset {
@@ -192,8 +291,13 @@ mod tests {
 ",
             );
         for asset in ASSETS.iter().filter(|asset| asset.name != "index.html") {
+            let named_directly = everything.contains(asset.name);
+            let named_in_catalogue = asset
+                .name
+                .strip_prefix("catalogue-specimens/")
+                .is_some_and(|relative| everything.contains(&format!("\"./{relative}\"")));
             assert!(
-                everything.contains(asset.name),
+                named_directly || named_in_catalogue,
                 "{} is embedded but nothing references it",
                 asset.name
             );

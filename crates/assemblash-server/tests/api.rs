@@ -308,6 +308,10 @@ mod http {
         request("GET", url, None, None)
     }
 
+    pub fn delete(url: &str) -> Response {
+        request("DELETE", url, None, None)
+    }
+
     pub fn post_json(url: &str, body: &serde_json::Value) -> Response {
         request(
             "POST",
@@ -1832,4 +1836,274 @@ fn an_asset_over_the_body_limit_is_refused_in_the_usual_envelope() {
         &solid_png(),
     );
     assert_eq!(accepted.status, 201, "{}", accepted.json());
+}
+
+// --- 1.10.0: project delete/rename, and write warnings (DEF-28) ---------------
+
+#[test]
+fn a_project_can_be_renamed_and_deleted_over_http() {
+    let harness = Harness::start();
+    create_project(&harness, "goner");
+    create_project(&harness, "renamable");
+
+    // Delete: the response names what went, the summary is a 404 afterwards,
+    // and the directory is really gone.
+    let response = http::delete(&harness.url("/api/projects/goner"));
+    assert_eq!(response.status, 200, "{}", response.json());
+    assert_eq!(response.json()["project"], "goner");
+    assert_eq!(
+        http::get(&harness.url("/api/projects/goner/document")).status,
+        404
+    );
+    assert!(!harness.root().join(PROJECTS_DIR).join("goner").exists());
+
+    // Rename: the directory moves, the new name answers, the old one does
+    // not.
+    let response = http::post_json(
+        &harness.url("/api/projects/renamable/rename"),
+        &json!({ "name": "renamed" }),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    assert_eq!(response.json()["project"], "renamed");
+    assert_eq!(
+        http::get(&harness.url("/api/projects/renamed/document")).status,
+        200
+    );
+    assert_eq!(
+        http::get(&harness.url("/api/projects/renamable/document")).status,
+        404
+    );
+    assert!(harness.root().join(PROJECTS_DIR).join("renamed").exists());
+
+    // A name that is already taken is a conflict, not a clobber.
+    create_project(&harness, "taken");
+    let response = http::post_json(
+        &harness.url("/api/projects/renamed/rename"),
+        &json!({ "name": "taken" }),
+    );
+    assert_eq!(response.status, 409, "{}", response.json());
+    assert_eq!(error_code(&response), "projectExists");
+
+    // A name that cannot be a project id is refused before anything moves.
+    let response = http::post_json(
+        &harness.url("/api/projects/renamed/rename"),
+        &json!({ "name": "../escape" }),
+    );
+    assert_eq!(response.status, 400, "{}", response.json());
+}
+
+#[test]
+fn a_locked_project_is_never_deleted_and_never_renamed() {
+    let harness = Harness::start();
+
+    // A project some other process holds: the session here keeps the lock
+    // file alive, and the server has never opened this project at all.
+    let directory = harness.root().join(PROJECTS_DIR).join("locked");
+    std::fs::create_dir_all(&directory).unwrap();
+    let _session = assemblash_core::Session::create(
+        &directory,
+        assemblash_core::Document::new(&mut assemblash_core::ids::UlidIdSource, 100.0, 100.0),
+        None,
+    )
+    .unwrap();
+
+    let response = http::delete(&harness.url("/api/projects/locked"));
+    assert_eq!(response.status, 409, "{}", response.json());
+    assert_eq!(error_code(&response), "projectLocked");
+    assert!(directory.exists(), "the locked project was deleted");
+
+    let response = http::post_json(
+        &harness.url("/api/projects/locked/rename"),
+        &json!({ "name": "unlocked" }),
+    );
+    assert_eq!(response.status, 409, "{}", response.json());
+    assert_eq!(error_code(&response), "projectLocked");
+    assert!(directory.join("document.json").exists());
+
+    // Once the lock is genuinely gone, the same requests succeed.
+    drop(_session);
+    let response = http::delete(&harness.url("/api/projects/locked"));
+    assert_eq!(response.status, 200, "{}", response.json());
+    assert!(!directory.exists());
+}
+
+#[test]
+fn an_overflowing_text_write_reports_warnings_over_http() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+
+    // The font the text names must be in the store, or the write has
+    // nothing to measure with and nothing to warn about.
+    let mut store =
+        assemblash_renderer::store::FontStore::open(harness.root().join(FONTS_DIR)).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../assemblash-renderer/tests/fonts/NotoSans-Subset.ttf");
+    store
+        .import_file(&fixture, None, Some("OFL-1.1".into()))
+        .unwrap();
+
+    // DEF-28: the response to a plain HTTP write carries the same warnings
+    // the MCP write tools report. A 32px text in a 20px box overflows.
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({
+            "operation": {
+                "op": "create",
+                "position": { "at": "root" },
+                "transform": { "x": 10.0, "y": 10.0, "width": 380.0, "height": 20.0 },
+                "type": "text",
+                "text": "this text is far taller than its box",
+                "fontFamily": "Noto Sans",
+                "fontSize": 32.0
+            },
+            "actor": { "kind": "agent", "name": "the test" }
+        }),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    let warnings = response.json()["warnings"].as_array().cloned().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning["code"] == "textOverflowsBox"),
+        "{warnings:#?}"
+    );
+    assert!(!warnings[0]["layerId"].is_null(), "{warnings:#?}");
+
+    // A write with nothing to say omits the field entirely.
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({
+            "operation": {
+                "op": "create",
+                "position": { "at": "root" },
+                "transform": { "x": 0.0, "y": 0.0, "width": 50.0, "height": 50.0 },
+                "type": "shape",
+                "shape": { "kind": "rect" },
+                "fill": "#3366cc"
+            },
+            "actor": { "kind": "agent", "name": "the test" }
+        }),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    assert!(
+        response.json().get("warnings").is_none(),
+        "{}",
+        response.json()
+    );
+}
+#[test]
+fn font_specimen_uses_the_exact_stored_face_without_writing_the_workspace() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    install_test_font(&harness);
+    let listed = http::get(&harness.url("/api/fonts"));
+    assert_eq!(listed.status, 200);
+    let face = &listed.json()["faces"][0];
+    let hash = face["hash"].as_str().unwrap();
+    let before = workspace_files(harness.root());
+
+    let url = harness.url(&format!(
+        "/api/fonts/specimen.png?family=Noto%20Sans&weight=400&style=normal&hash={hash}&sample=Aa%20Bb%200123"
+    ));
+    let first = http::get(&url);
+    assert_eq!(
+        first.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    assert!(first.body.starts_with(b"\x89PNG\r\n\x1a\n"));
+    let second = http::get(&url);
+    assert_eq!(second.status, 200);
+    assert_eq!(
+        second.body, first.body,
+        "the same face and sample must render identically"
+    );
+    assert_eq!(
+        workspace_files(harness.root()),
+        before,
+        "a specimen request wrote workspace files"
+    );
+}
+
+#[test]
+fn font_specimen_refuses_missing_faces_stale_hashes_and_invalid_input() {
+    let harness = Harness::start();
+    install_test_font(&harness);
+    let hash = http::get(&harness.url("/api/fonts")).json()["faces"][0]["hash"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base =
+        format!("/api/fonts/specimen.png?family=Noto%20Sans&weight=400&style=normal&hash={hash}");
+    let before = workspace_files(harness.root());
+
+    for (path, status, code) in [
+        (
+            base.replace("Noto%20Sans", "Missing%20Face"),
+            404,
+            "missingFontFace",
+        ),
+        (
+            base.replace("weight=400", "weight=700"),
+            404,
+            "missingFontFace",
+        ),
+        (
+            base.replace("style=normal", "style=italic"),
+            404,
+            "missingFontFace",
+        ),
+        (
+            base.replace(&hash, "sha256%3Astale"),
+            409,
+            "fontFaceChanged",
+        ),
+    ] {
+        let response = http::get(&harness.url(&path));
+        assert_eq!(response.status, status, "{path}");
+        assert_eq!(error_code(&response), code, "{path}");
+    }
+
+    for path in [
+        format!("{base}&sample="),
+        format!("{base}&sample={}", "x".repeat(65)),
+        format!("{base}&sample=hello%0Aworld"),
+        base.replace("weight=400", "weight=99"),
+        base.replace("style=normal", "style=invalid"),
+        base.replace("Noto%20Sans", "..%2F..%2Fsecret"),
+    ] {
+        let response = http::get(&harness.url(&path));
+        assert!(!response.body.starts_with(b"\x89PNG"), "{path}");
+        assert!(
+            response.status == 400 || response.status == 404,
+            "{path}: {}",
+            response.status
+        );
+    }
+    assert_eq!(
+        workspace_files(harness.root()),
+        before,
+        "refused specimens wrote workspace files"
+    );
+}
+
+fn workspace_files(root: &Path) -> Vec<(PathBuf, String)> {
+    fn visit(root: &Path, directory: &Path, files: &mut Vec<(PathBuf, String)>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.push((
+                    path.strip_prefix(root).unwrap().to_path_buf(),
+                    assemblash_core::storage::hash_bytes(&std::fs::read(&path).unwrap()),
+                ));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    visit(root, root, &mut files);
+    files.sort();
+    files
 }

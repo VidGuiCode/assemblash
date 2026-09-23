@@ -164,6 +164,29 @@ pub enum ValidationError {
         /// The offending hash.
         hash: String,
     },
+
+    /// A path's `d` string fails the conservative grammar.
+    ///
+    /// The reason carries the underlying [`crate::path::PathError`] message,
+    /// which names the offending command or number and its byte position.
+    #[error("layer {layer}: invalid path data — {reason}")]
+    InvalidPath {
+        /// The layer at fault.
+        layer: LayerId,
+        /// What exactly is wrong with the `d` string.
+        reason: String,
+    },
+
+    /// A stroke's dash pattern breaks one of the stroke limits: empty, more
+    /// than [`crate::document::MAX_DASH_ENTRIES`] entries, or a value that is
+    /// not a finite number greater than 0.
+    #[error("layer {layer}: invalid dashArray — {reason}")]
+    InvalidDashArray {
+        /// The layer at fault.
+        layer: LayerId,
+        /// What exactly is wrong with the pattern.
+        reason: String,
+    },
 }
 
 /// Every problem found in one validation pass.

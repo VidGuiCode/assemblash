@@ -459,11 +459,18 @@ mod tests {
             LayerId::new("layer_badge"),
             Transform::new(0.0, 0.0, 60.0, 24.0),
             LayerKind::Shape(ShapeLayer {
-                shape: ShapeKind::Rect { corner_radius: 6.0 },
+                shape: ShapeKind::Rect {
+                    corner_radius: 6.0,
+                    extra: Extras::new(),
+                },
                 fill: Some(Color::new("#3366cc")),
                 stroke: Some(Stroke {
                     color: Color::new("#112233"),
                     width: 1.0,
+                    dash_array: None,
+                    line_cap: None,
+                    line_join: None,
+                    extra: Extras::new(),
                 }),
                 extra: Extras::new(),
             }),

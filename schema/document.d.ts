@@ -130,6 +130,10 @@ export type BlendMode = "normal" | "multiply" | "screen" | "overlay" | "darken" 
 /// The amounts are multipliers where 1 means "unchanged", which is what
 /// `filter: brightness(1.2)` means everywhere else, so a number copied from a
 /// CSS example does what it looks like it does.
+///
+/// Every known variant also carries a `#[serde(flatten)]` capture map
+/// (D27): a key this build does not know rides along verbatim instead of
+/// being dropped on the next save.
 export type Effect = {
   /** The multiplier. */
   amount: number;
@@ -175,11 +179,15 @@ export type Effect = {
 /// The mask shape of a layer's [`Layer::clip`], tagged by `"shape"` in JSON.
 ///
 /// The geometry always is the layer's transform box, so the variants carry no
-/// coordinates — only what the box alone does not say. [`Clip::Other`] is an
-/// untagged catch-all (D21): a clip written by a newer build is preserved as
-/// written, refused when an update touches it, and refused at render time —
-/// the same bargain as [`ShapeKind::Other`] (and, like it, never flattened
-/// into its parent, so the catch-all's reach stays with the clip).
+/// coordinates — only what the box alone does not say (a path's `d` sits in
+/// the box, scaled by it, once the renderer draws it). Every known variant
+/// also carries a `#[serde(flatten)]` capture map (D27): a key this build
+/// does not know rides along verbatim instead of being dropped.
+/// [`Clip::Other`] is an untagged catch-all (D21): a clip written by a newer
+/// build is preserved as written, refused when an update touches it, and
+/// refused at render time — the same bargain as [`ShapeKind::Other`] (and,
+/// like it, never flattened into its parent, so the catch-all's reach stays
+/// with the clip).
 export type Clip = {
   /** Corner radius in document units; 0 is a square corner. */
   cornerRadius?: number;
@@ -187,6 +195,11 @@ export type Clip = {
   [key: string]: unknown;
 } | {
   shape: "ellipse";
+  [key: string]: unknown;
+} | {
+  /** The path data, as written in an SVG `d` attribute. Validated */
+  d: string;
+  shape: "path";
   [key: string]: unknown;
 } | unknown;
 
@@ -197,13 +210,35 @@ export type TextAlign = "left" | "center" | "right";
 export type FontStyle = "normal" | "italic";
 
 /// A shape's edge paint.
+///
+/// Like every payload in the document, a stroke also carries a
+/// `#[serde(flatten)]` capture map (D27): a key this build does not know
+/// rides along verbatim instead of being dropped on the next save.
 export type Stroke = {
   /** Edge colour. */
   color: Color;
   /** Width in document units; must be finite and 0 or more. */
   width: number;
+  /** The dash pattern, alternating paint and gap in document units, */
+  dashArray?: number[] | null;
+  /** How the stroke ends, when the stroke is set. `None` means the */
+  lineCap?: LineCap | null;
+  /** How two segments of the stroke meet, when the stroke is set. `None` */
+  lineJoin?: LineJoin | null;
   [key: string]: unknown;
 };
+
+/// How a stroke ends.
+///
+/// A fixed, named set, with an untagged [`LineCap::Other`] catch-all (D21):
+/// a value written by a newer build round-trips verbatim and is refused when
+/// something tries to draw it — never guessed at and never lost.
+export type LineCap = "butt" | "round" | "square" | unknown;
+
+/// How two segments of a stroke meet at a corner.
+///
+/// The same fixed set and catch-all bargain as [`LineCap`].
+export type LineJoin = "miter" | "round" | "bevel" | unknown;
 
 /// Where the text block sits vertically in the layer box.
 export type VerticalAlign = "top" | "middle" | "bottom";
@@ -290,6 +325,12 @@ export type SvgLayer = {
 };
 
 /// The geometry of a [`ShapeLayer`], tagged by `"kind"` in JSON.
+///
+/// Every known variant also carries a `#[serde(flatten)]` capture map (D27):
+/// a key this build does not know rides along verbatim instead of being
+/// dropped. The unit variants became struct variants holding only the map,
+/// which leaves their serialized form byte-identical (the D27 spike measured
+/// it: `{"kind":"ellipse"}` stays `{"kind":"ellipse"}`).
 export type ShapeKind = {
   /** Corner radius in document units; 0 is a square corner. */
   cornerRadius?: number;
@@ -299,9 +340,26 @@ export type ShapeKind = {
   kind: "ellipse";
   [key: string]: unknown;
 } | {
+  /** What sits at the start of the segment, or `None`. */
+  markerStart?: LineMarker | null;
+  /** What sits at the end of the segment, or `None`. See */
+  markerEnd?: LineMarker | null;
   kind: "line";
   [key: string]: unknown;
+} | {
+  /** The path data, as written in an SVG `d` attribute. Validated */
+  d: string;
+  kind: "path";
+  [key: string]: unknown;
 } | unknown;
+
+/// What sits at an end of a [`ShapeKind::Line`].
+///
+/// A fixed, named set — never arbitrary marker markup: a marker's geometry
+/// is part of the engine, deterministic on every target, not part of the
+/// document. A name written by a newer build round-trips verbatim in
+/// [`LineMarker::Other`] and is refused when something tries to draw it.
+export type LineMarker = "none" | "arrow" | "circle" | unknown;
 
 /// A primitive drawn from the document rather than from an imported file.
 ///

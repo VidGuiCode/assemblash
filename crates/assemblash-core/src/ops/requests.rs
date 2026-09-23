@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{
     BlendMode, Clip, Color, Crop, Document, Effect, Extras, FontStyle, GroupLayer, ImageFit,
-    ImageLayer, Layer, LayerKind, ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer, Transform,
-    VerticalAlign,
+    ImageLayer, Layer, LayerKind, LineMarker, ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer,
+    Transform, VerticalAlign,
 };
 use crate::ids::{AssetId, IdSource, LayerId};
 use crate::ops::error::OpError;
@@ -276,6 +276,18 @@ impl CreateLayer {
                         kind: shape.kind_name().to_owned(),
                     });
                 }
+                // Refused here rather than left to validation, for the same
+                // reason `UnsupportedShape` is: the caller should hear the
+                // grammar's own complaint — which command, which byte — not
+                // a generic "the shape is wrong".
+                if let ShapeKind::Path { d, .. } = shape {
+                    if let Err(error) = crate::path::validate(d) {
+                        return Err(OpError::InvalidPath {
+                            id: None,
+                            reason: error.to_string(),
+                        });
+                    }
+                }
                 LayerKind::Shape(ShapeLayer {
                     shape: shape.clone(),
                     fill: fill.clone(),
@@ -416,6 +428,30 @@ pub struct UpdateLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f64>,
 
+    /// Shape layers: replace the whole geometry.
+    ///
+    /// The whole [`ShapeKind`] rather than one knob of it: a rect's corner
+    /// radius, a line's markers, and a path's `d` do not intersect, so a
+    /// partial geometry would mean inventing defaults nobody asked for. The
+    /// paint is left alone, like `transform` leaves the flips alone. A
+    /// geometry this build does not draw is refused here, and a path `d`
+    /// runs the grammar — the same bargain [`OpError::UnsupportedShape`]
+    /// and [`OpError::InvalidPath`] strike at `create`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<ShapeKind>,
+    /// Line layers: what sits at the start of the segment.
+    ///
+    /// Markers are part of the Line payload, never preset-carried. On a
+    /// shape that is not a line — including one this update has just
+    /// replaced with a non-line — the update is refused naming the layer
+    /// and the property.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker_start: Option<LineMarker>,
+    /// Line layers: what sits at the end of the segment. See
+    /// [`Self::marker_start`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker_end: Option<LineMarker>,
+
     /// Any layer: the whole clip. Absent leaves it, `null` clears it.
     ///
     /// Doubly optional like `color` and the shape `fill`: "no clip" is a real
@@ -487,6 +523,9 @@ impl UpdateLayer {
             fill: None,
             stroke: None,
             corner_radius: None,
+            shape: None,
+            marker_start: None,
+            marker_end: None,
             clip: None,
             crop: None,
             flip_horizontal: None,
@@ -541,7 +580,9 @@ impl UpdateLayer {
         // like opacity. A clip this build cannot draw is refused on the way in
         // — both when one is being set and when the layer already carries one
         // and this update would replace or clear it: an unknown mask is
-        // preserved as written, never edited into something else.
+        // preserved as written, never edited into something else. A known
+        // path clip has its `d` checked against the grammar here, so the
+        // refusal names the command and the byte, not "the shape is wrong".
         if let Some(clip) = &self.clip {
             if let Some(existing) = &layer.clip {
                 if !existing.is_rendered() {
@@ -552,6 +593,14 @@ impl UpdateLayer {
                 }
             }
             if let Some(new_clip) = clip {
+                if let Clip::Path { d, .. } = new_clip {
+                    if let Err(error) = crate::path::validate(d) {
+                        return Err(OpError::InvalidPath {
+                            id: Some(layer.id.clone()),
+                            reason: error.to_string(),
+                        });
+                    }
+                }
                 if !new_clip.is_rendered() {
                     return Err(OpError::UnsupportedClip {
                         id: Some(layer.id.clone()),
@@ -587,6 +636,19 @@ impl UpdateLayer {
                 }
                 if self.corner_radius.is_some() {
                     return Err(wrong_kind(&layer.id, kind_name, "cornerRadius"));
+                }
+                if self.shape.is_some() {
+                    return Err(wrong_kind(&layer.id, kind_name, "shape"));
+                }
+                if let Some(property) = [
+                    self.marker_start.is_some().then_some("markerStart"),
+                    self.marker_end.is_some().then_some("markerEnd"),
+                ]
+                .into_iter()
+                .flatten()
+                .next()
+                {
+                    return Err(wrong_kind(&layer.id, kind_name, property));
                 }
                 if let Some(value) = &self.text {
                     text.text = value.clone();
@@ -636,7 +698,7 @@ impl UpdateLayer {
                     image.asset = asset.clone();
                 }
                 if let Some(value) = &self.crop {
-                    image.crop = *value;
+                    image.crop = value.clone();
                 }
             }
             LayerKind::Svg(svg) => {
@@ -675,8 +737,13 @@ impl UpdateLayer {
                 // edited: repainting a shape whose outline nothing here can
                 // draw would produce a layer that looks edited and is not.
                 // Refused by kind rather than by property, because the kind
-                // is the thing that is wrong.
-                if !shape.shape.is_rendered() && self.first_shape_property().is_some() {
+                // is the thing that is wrong. An update that replaces the
+                // geometry outright is the one way through: the unknown kind
+                // is not being edited, it is being named goodbye to.
+                if !shape.shape.is_rendered()
+                    && self.shape.is_none()
+                    && self.first_shape_property().is_some()
+                {
                     return Err(OpError::UnsupportedShape {
                         id: Some(layer.id.clone()),
                         kind: shape.shape.kind_name().to_owned(),
@@ -688,8 +755,28 @@ impl UpdateLayer {
                 if let Some(value) = &self.stroke {
                     shape.stroke = value.clone();
                 }
+                // The whole geometry is replaced, exactly like `transform`
+                // replaces the whole box. Validation comes before anything is
+                // written, so a refusal leaves the layer as it stood.
+                if let Some(new_shape) = &self.shape {
+                    if !new_shape.is_rendered() {
+                        return Err(OpError::UnsupportedShape {
+                            id: Some(layer.id.clone()),
+                            kind: new_shape.kind_name().to_owned(),
+                        });
+                    }
+                    if let ShapeKind::Path { d, .. } = new_shape {
+                        if let Err(error) = crate::path::validate(d) {
+                            return Err(OpError::InvalidPath {
+                                id: Some(layer.id.clone()),
+                                reason: error.to_string(),
+                            });
+                        }
+                    }
+                    shape.shape = new_shape.clone();
+                }
                 if let Some(value) = self.corner_radius {
-                    if let ShapeKind::Rect { corner_radius } = &mut shape.shape {
+                    if let ShapeKind::Rect { corner_radius, .. } = &mut shape.shape {
                         *corner_radius = value;
                     } else {
                         return Err(wrong_kind(
@@ -697,6 +784,36 @@ impl UpdateLayer {
                             shape_kind_name(&shape.shape),
                             "cornerRadius",
                         ));
+                    }
+                }
+                // Markers are part of the Line payload, never preset-carried
+                // and never carried by another geometry: a marker sent to a
+                // shape that is not a line — including one this update has
+                // just replaced with a non-line — is refused naming the layer
+                // and the property, the same wrong-kind shape a rect-only
+                // corner radius uses.
+                if let Some(value) = self.marker_start.clone() {
+                    if !matches!(shape.shape, ShapeKind::Line { .. }) {
+                        return Err(wrong_kind(
+                            &layer.id,
+                            shape_kind_name(&shape.shape),
+                            "markerStart",
+                        ));
+                    }
+                    if let ShapeKind::Line { marker_start, .. } = &mut shape.shape {
+                        *marker_start = Some(value);
+                    }
+                }
+                if let Some(value) = self.marker_end.clone() {
+                    if !matches!(shape.shape, ShapeKind::Line { .. }) {
+                        return Err(wrong_kind(
+                            &layer.id,
+                            shape_kind_name(&shape.shape),
+                            "markerEnd",
+                        ));
+                    }
+                    if let ShapeKind::Line { marker_end, .. } = &mut shape.shape {
+                        *marker_end = Some(value);
                     }
                 }
             }
@@ -749,6 +866,9 @@ impl UpdateLayer {
             self.fill.is_some().then_some("fill"),
             self.stroke.is_some().then_some("stroke"),
             self.corner_radius.is_some().then_some("cornerRadius"),
+            self.shape.is_some().then_some("shape"),
+            self.marker_start.is_some().then_some("markerStart"),
+            self.marker_end.is_some().then_some("markerEnd"),
         ]
         .into_iter()
         .flatten()
@@ -776,8 +896,9 @@ fn kind_name(kind: &LayerKind) -> &'static str {
 fn shape_kind_name(kind: &ShapeKind) -> &'static str {
     match kind {
         ShapeKind::Rect { .. } => "rect",
-        ShapeKind::Ellipse => "ellipse",
-        ShapeKind::Line => "line",
+        ShapeKind::Ellipse { .. } => "ellipse",
+        ShapeKind::Line { .. } => "line",
+        ShapeKind::Path { .. } => "path",
         ShapeKind::Other(_) => "shape",
     }
 }

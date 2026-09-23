@@ -1,12 +1,8 @@
-// The one-time token hand-off.
-//
-// A server bound to a network address needs a token on every request. Rather
-// than making a person paste it into a header by hand, this page takes it
-// once, checks it against the server, and keeps it in this browser.
-//
-// `sessionStorage`, not `localStorage`: the token disappears when the tab
-// closes, which is the right default for a credential someone typed once.
-import { TOKEN_KEY } from "./token.js";
+// The one-time token hand-off. The server sets a session cookie after it
+// checks the token. The token is not stored in browser JavaScript.
+import { bindTranslations, t } from "./i18n.js";
+import "./token.js";
+bindTranslations();
 const form = document.getElementById("login-form");
 const input = document.getElementById("token");
 const status = document.getElementById("login-status");
@@ -19,21 +15,21 @@ form.addEventListener("submit", (event) => {
     const token = input.value.trim();
     if (!token)
         return;
-    say("Checking…", "info");
-    // Checked before it is stored, so a typo is a message here rather than an
-    // interface that loads and then fails everything it tries.
-    void fetch("/api/version", { headers: { authorization: `Bearer ${token}` } })
+    say(t("login.checking"), "info");
+    void fetch("/api/browser-session", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+    })
         .then((response) => {
         if (response.ok) {
-            sessionStorage.setItem(TOKEN_KEY, token);
             window.location.replace("/");
             return;
         }
         if (response.status === 401) {
-            say("That token was not accepted.", "error");
+            say(t("login.rejected"), "error");
             return;
         }
-        say(`The server answered ${response.status}.`, "error");
+        say(t("login.serverStatus", { status: response.status }), "error");
     })
         .catch((error) => say(String(error), "error"));
 });

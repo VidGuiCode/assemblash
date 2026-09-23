@@ -3,33 +3,32 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Assemblash — access token</title>
-    <link rel="stylesheet" href="style.css" />
+    <title data-i18n="login.pageTitle">Assemblash — access token</title>
+    <link rel="stylesheet" href="style.css?v=20260923-l10n" />
   </head>
   <body class="login">
     <main class="login-panel">
       <h1>Assemblash</h1>
       <p>
-        This server is bound to a network address, so it asks for its access
-        token once. Find it with <code>assemblash token show</code> on the
-        machine running the server, or in that workspace's
+        <span data-i18n="login.introBeforeCommand">This server is bound to a network address, so it asks for its access token once. Find it with</span>
+        <code>assemblash token show</code>
+        <span data-i18n="login.introBetweenCommands">on the machine running the server, or in that workspace's</span>
         <code>config.toml</code>.
       </p>
       <form id="login-form">
         <label class="field">
-          Access token
+          <span data-i18n="login.accessToken">Access token</span>
           <input id="token" type="password" autocomplete="off" spellcheck="false" required />
         </label>
-        <button type="submit">Continue</button>
+        <button type="submit" data-i18n="login.continue">Continue</button>
       </form>
       <p id="login-status" data-kind="info"></p>
       <p class="hint">
-        The token is kept in this browser only, and sent as an
-        <code>Authorization</code> header — never in a URL. It authenticates;
-        it does not encrypt. Put a reverse proxy with TLS in front of anything
-        reachable beyond a trusted network.
+        <span data-i18n="login.hintBeforeAuthorization">The server checks the token in an</span>
+        <code>Authorization</code>
+        <span data-i18n="login.hintAfterAuthorization">header. It then uses an HttpOnly session cookie. Neither encrypts traffic. Use TLS beyond a trusted network.</span>
       </p>
     </main>
-    <script type="module" src="login.js"></script>
+    <script type="module" src="login.js?v=20260923-l10n"></script>
   </body>
 </html>

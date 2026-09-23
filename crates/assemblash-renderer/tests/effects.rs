@@ -137,26 +137,41 @@ fn each_effect_does_what_its_name_says() {
     assert_eq!(middle(&render(vec![])), [64, 128, 192], "unchanged");
 
     assert_eq!(
-        middle(&render(vec![Effect::Brightness { amount: 1.5 }])),
+        middle(&render(vec![Effect::Brightness {
+            amount: 1.5,
+            extra: Extras::new()
+        }])),
         [96, 192, 255],
         "brightness scales each channel, clamping at white"
     );
     assert_eq!(
-        middle(&render(vec![Effect::Brightness { amount: 0.5 }])),
+        middle(&render(vec![Effect::Brightness {
+            amount: 0.5,
+            extra: Extras::new()
+        }])),
         [32, 64, 96],
         "and downwards"
     );
     assert_eq!(
-        middle(&render(vec![Effect::Contrast { amount: 2.0 }])),
+        middle(&render(vec![Effect::Contrast {
+            amount: 2.0,
+            extra: Extras::new()
+        }])),
         [0, 128, 255],
         "contrast pushes away from mid grey"
     );
     assert_eq!(
-        middle(&render(vec![Effect::Contrast { amount: 0.0 }])),
+        middle(&render(vec![Effect::Contrast {
+            amount: 0.0,
+            extra: Extras::new()
+        }])),
         [127, 127, 127],
         "contrast 0 is flat mid grey, not black"
     );
-    let grey = middle(&render(vec![Effect::Saturation { amount: 0.0 }]));
+    let grey = middle(&render(vec![Effect::Saturation {
+        amount: 0.0,
+        extra: Extras::new(),
+    }]));
     assert!(
         grey[0] == grey[1] && grey[1] == grey[2],
         "saturation 0 is grey, got {grey:?}"
@@ -169,14 +184,27 @@ fn the_neutral_value_of_every_effect_changes_nothing() {
     // to nothing must be the same as not having it. An effect whose "off" is
     // slightly wrong is one that silently degrades every document it touches.
     for neutral in [
-        Effect::Brightness { amount: 1.0 },
-        Effect::Contrast { amount: 1.0 },
-        Effect::Saturation { amount: 1.0 },
-        Effect::Blur { radius: 0.0 },
+        Effect::Brightness {
+            amount: 1.0,
+            extra: Extras::new(),
+        },
+        Effect::Contrast {
+            amount: 1.0,
+            extra: Extras::new(),
+        },
+        Effect::Saturation {
+            amount: 1.0,
+            extra: Extras::new(),
+        },
+        Effect::Blur {
+            radius: 0.0,
+            extra: Extras::new(),
+        },
         Effect::Grain {
             amount: 0.0,
             seed: 3,
             scale: 1.0,
+            extra: Extras::new(),
         },
     ] {
         assert_eq!(
@@ -193,12 +221,24 @@ fn effects_apply_in_order() {
     // then brightening, and the stack is a list precisely so a caller can say
     // which they meant.
     let brighten_then_grey = middle(&render(vec![
-        Effect::Brightness { amount: 1.5 },
-        Effect::Saturation { amount: 0.0 },
+        Effect::Brightness {
+            amount: 1.5,
+            extra: Extras::new(),
+        },
+        Effect::Saturation {
+            amount: 0.0,
+            extra: Extras::new(),
+        },
     ]));
     let grey_then_brighten = middle(&render(vec![
-        Effect::Saturation { amount: 0.0 },
-        Effect::Brightness { amount: 1.5 },
+        Effect::Saturation {
+            amount: 0.0,
+            extra: Extras::new(),
+        },
+        Effect::Brightness {
+            amount: 1.5,
+            extra: Extras::new(),
+        },
     ]));
     assert_ne!(brighten_then_grey, grey_then_brighten);
 }
@@ -206,7 +246,10 @@ fn effects_apply_in_order() {
 #[test]
 fn a_blur_softens_the_edge_without_moving_the_middle() {
     let sharp = render(vec![]);
-    let blurred = render(vec![Effect::Blur { radius: 4.0 }]);
+    let blurred = render(vec![Effect::Blur {
+        radius: 4.0,
+        extra: Extras::new(),
+    }]);
 
     // Deep inside the layer a blur of a flat colour changes nothing...
     assert_eq!(middle(&blurred), middle(&sharp));
@@ -234,16 +277,19 @@ fn grain_is_seeded_and_repeatable() {
         amount: 0.4,
         seed: 11,
         scale: 1.0,
+        extra: Extras::new(),
     }]);
     let again = render(vec![Effect::Grain {
         amount: 0.4,
         seed: 11,
         scale: 1.0,
+        extra: Extras::new(),
     }]);
     let other_seed = render(vec![Effect::Grain {
         amount: 0.4,
         seed: 12,
         scale: 1.0,
+        extra: Extras::new(),
     }]);
 
     // The whole reason grain is allowed to exist in a renderer that promises
@@ -279,6 +325,7 @@ fn grain_stays_inside_the_layer_it_grains() {
         amount: 0.8,
         seed: 5,
         scale: 1.0,
+        extra: Extras::new(),
     }]);
     doc.layers[0].transform = Transform::new(0.0, 0.0, 20.0, 20.0);
 
@@ -331,12 +378,19 @@ fn an_effect_this_build_cannot_draw_is_refused() {
 #[test]
 fn rendering_an_effect_twice_gives_identical_bytes() {
     let (doc, hrefs) = document(vec![
-        Effect::Brightness { amount: 1.2 },
-        Effect::Blur { radius: 1.5 },
+        Effect::Brightness {
+            amount: 1.2,
+            extra: Extras::new(),
+        },
+        Effect::Blur {
+            radius: 1.5,
+            extra: Extras::new(),
+        },
         Effect::Grain {
             amount: 0.2,
             seed: 42,
             scale: 2.0,
+            extra: Extras::new(),
         },
     ]);
     let metadata = PngMetadata::for_document(&doc);

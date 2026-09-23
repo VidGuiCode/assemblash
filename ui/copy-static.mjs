@@ -2,7 +2,7 @@
 //
 // `tsc` only emits JavaScript, and the interface is three files plus markup.
 // A bundler would be a dependency and a build graph for no gain at this size.
-import { copyFileSync } from "node:fs";
+import { copyFileSync, cpSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,3 +19,5 @@ copyFileSync(
   join(here, "dist", "Phosphor.woff2"),
 );
 console.log("copied interface styles and the pinned Phosphor regular icon font");
+
+cpSync(join(here, "src", "catalogue-specimens"), join(here, "dist", "catalogue-specimens"), { recursive: true });

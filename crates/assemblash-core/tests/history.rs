@@ -172,11 +172,18 @@ fn shape_edits_undo_to_a_byte_identical_document() {
         transform: Transform::new(10.0, 10.0, 60.0, 40.0),
         name: Some("badge".to_owned()),
         kind: NewLayerKind::Shape {
-            shape: ShapeKind::Rect { corner_radius: 6.0 },
+            shape: ShapeKind::Rect {
+                corner_radius: 6.0,
+                extra: Default::default(),
+            },
             fill: Some(Color::new("#3366cc")),
             stroke: Some(Stroke {
                 color: Color::new("#112233"),
                 width: 2.0,
+                dash_array: None,
+                line_cap: None,
+                line_join: None,
+                extra: Default::default(),
             }),
         },
     }));

@@ -10,6 +10,102 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-09-24
+
+No 1.9.1 was released: no defect was outstanding after 1.9.0. The sweep ran
+on a local release build of the 1.9.0 tree on 2026-09-21. Every 1.9.0
+capability probed clean on all three transports.
+
+**Paths, dashes and markers, the in-app update path, and a calmer
+interface.**
+
+`schemaVersion` stays 1. The `Operation` union does not grow. Every change
+is additive inside existing payloads.
+
+**A shape can be any silhouette.** A new path shape takes an SVG path
+string. The accepted commands are `M L H V C S A Z`, in upper or lower
+case, with one leading `M` and a closing `Z`. A path holds at most 30
+commands and 2048 bytes. A path that breaks these rules is refused with a
+message that names the command and its position. The same string can clip
+any layer. A stroke can carry a dash pattern, a line cap and a line join.
+A line can carry a start and end marker from a fixed set: `arrow`,
+`circle` or `none`.
+
+- Presets carry the dash, cap and join fields. Markers belong to the line
+  payload, so presets never carry them.
+- The oldest build that opens a document with a path shape or clip is
+  1.6.0. Builds 1.6.0 to 1.9.x keep the path as written, refuse to draw
+  it, and refuse an update that touches it.
+
+**Unknown keys survive one level deeper.** A value this build does not
+know inside `clip`, `crop`, `stroke`, `shape` or an effect is now kept as
+written. An older build that edits the layer can no longer drop a field a
+newer build added there.
+
+**The tool tells you when a new version exists, and can install it.**
+
+- The first `serve` asks once whether to check for updates. The answer is
+  stored in `config.toml` as `updateCheck = "off"` or `"notify"`.
+- A check sends one request to the release feed of this repository. It
+  sends no identifiers and no document data. It runs at most once every 24
+  hours, and the result is cached in the workspace.
+- `assemblash upgrade --check` prints the local and the latest version.
+  `assemblash upgrade` downloads the new version, checks it against the
+  release `SHA256SUMS` file, replaces the binary, keeps the old one as
+  `.old` until the next start, and restarts `serve`. A failed or
+  interrupted download changes nothing and leaves no partial file. An
+  install from a package manager gets advice instead of a swap.
+- The editor shows the answer switch in Settings, and a banner that never
+  blocks work. MCP mode never checks for updates.
+
+**The interface has room to breathe.**
+
+- A Settings dialog collects the canvas setup, the follow toggle, the font
+  tools and the update switch. It opens from the toolbar.
+- The properties panel collapses into sections with clear headers. Spacing
+  comes from one documented scale. Transitions run in 140 to 180 ms.
+- The layout fits a 13-inch screen. At 1280 by 800 no horizontal scrollbar
+  appears, and panels collapse instead of squeezing.
+- The font selector lists installed families only. It searches, refuses a
+  family that is not installed at the control, and offers the recorded
+  weights of the chosen family. The empty state explains the install: one
+  download, from the manifest built into the program, only on your click,
+  into the workspace font store.
+- A project can be renamed and deleted from the editor. A project another
+  process holds is never renamed or deleted.
+
+**The reference interface has three languages and clearer content entry.**
+
+- The interface supports English, French, and German. Language choice stays
+  after reload. Document values and protocol text keep their original form.
+- The compact rail opens Text, Elements, Uploads, and Templates. Elements
+  groups shapes, lines, and paths. Uploads accepts image and SVG files.
+- Selecting text opens Properties and shows its current font and sample.
+  The font picker and Fonts panel show samples from installed font files.
+- A protected browser receives an HttpOnly session cookie after login.
+  The cookie opens protected pages and API routes. Cross-origin writes fail.
+- Seven optional font families show bundled samples before installation.
+  Viewing these samples starts no download. The Fonts panel accepts a short
+  custom sample.
+
+**Every capability is reachable from both surfaces.**
+
+- Six new MCP tools: `insert_layer_tree`, `install_font_pack`,
+  `remove_font_family`, `list_fonts`, `delete_project`, `rename_project`.
+  The tool surface grows from 47 to 53 tools.
+- A write over plain HTTP returns `warnings` as the MCP tools do. The
+  field is omitted when there is nothing to report.
+- The CLI gains `add-path` and `set --path --dash --cap --join
+  --marker-start --marker-end`.
+
+**Under the hood.**
+
+- The relay cancels local work in flight when it switches to a running
+  editor. The old bounded wait stays as a backstop.
+- A route conflict at server startup is a typed error, not a panic.
+- `scripts/agents_smoke.py` joins the release checklist. It speaks MCP
+  over stdio and runs a two-writer stress test.
+
 ## [1.9.0] — 2026-09-18
 
 **Interaction responsiveness, and MCP hosted by the editor.**

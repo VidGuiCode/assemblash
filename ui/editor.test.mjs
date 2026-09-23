@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { basename, dirname, extname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -91,12 +91,23 @@ const protectedText = {
 const FONT_FORMATS = ["ttf", "otf", "ttc", "otc", "woff", "woff2"];
 
 const FONT_CATALOGUE = {
-  packs: { default: ["Noto Sans", "Noto Serif", "Noto Sans Mono"] },
+  packs: {
+    default: ["Noto Sans", "Noto Serif", "Noto Sans Mono"],
+    display: ["Montserrat", "Playfair Display"],
+    mono: ["JetBrains Mono"],
+    text: ["Inter", "Roboto", "Open Sans", "Lora"],
+  },
   families: [
     { family: "Noto Sans", license: "OFL-1.1", bytes: 5 * 1024 * 1024, packs: ["default"] },
     { family: "Noto Serif", license: "OFL-1.1", bytes: 4 * 1024 * 1024, packs: ["default"] },
     { family: "Noto Sans Mono", license: "OFL-1.1", bytes: 3 * 1024 * 1024, packs: ["default"] },
-    { family: "Inter", license: "OFL-1.1", bytes: 2 * 1024 * 1024, packs: ["ui"] },
+    { family: "Inter", license: "OFL-1.1", bytes: 2 * 1024 * 1024, packs: ["text"] },
+    { family: "Roboto", license: "OFL-1.1", bytes: 512 * 1024, packs: ["text"] },
+    { family: "Open Sans", license: "OFL-1.1", bytes: 512 * 1024, packs: ["text"] },
+    { family: "Lora", license: "OFL-1.1", bytes: 256 * 1024, packs: ["text"] },
+    { family: "Montserrat", license: "OFL-1.1", bytes: 768 * 1024, packs: ["display"] },
+    { family: "Playfair Display", license: "OFL-1.1", bytes: 320 * 1024, packs: ["display"] },
+    { family: "JetBrains Mono", license: "OFL-1.1", bytes: 192 * 1024, packs: ["mono"] },
   ],
 };
 
@@ -121,7 +132,9 @@ function freshDocument() {
     assets: [],
     layers: [structuredClone(editableText), structuredClone(protectedText)],
     presets: [],
-    slots: [],
+    slots: [
+      { name: "headline", layer: "layer_text", kind: "text", required: true },
+    ],
   };
 }
 
@@ -161,13 +174,17 @@ function applyMockOperation(document, operation, created) {
   }
   const layer = operation.id ? findLayer(document, operation.id) : null;
   if (operation.op === "update" && layer) {
-    const { op, id, cornerRadius, ...rest } = operation;
+    const { op, id, cornerRadius, markerStart, markerEnd, ...rest } = operation;
     Object.assign(layer, rest);
     // A corner radius belongs to the rect geometry, not to the layer: the
     // engine writes it inside `shape`, and the inspector reads it back from
     // there, so the mock has to put it in the same place.
     if (cornerRadius !== undefined && layer.shape) layer.shape.cornerRadius = cornerRadius;
+    // Markers belong to the Line payload for the same reason.
+    if (markerStart !== undefined && layer.shape) layer.shape.markerStart = markerStart;
+    if (markerEnd !== undefined && layer.shape) layer.shape.markerEnd = markerEnd;
   }
+  if (operation.op === "rename" && layer) layer.name = operation.name;
   if (operation.op === "move" && layer) {
     layer.transform.x += operation.dx;
     layer.transform.y += operation.dy;
@@ -177,6 +194,10 @@ function applyMockOperation(document, operation, created) {
     layer.transform.height = operation.height;
   }
   if (operation.op === "rotate" && layer) layer.transform.rotation = operation.degrees;
+  if (operation.op === "updateSlot") {
+    const index = (document.slots ?? []).findIndex((one) => one.name === operation.name);
+    if (index >= 0) document.slots[index] = structuredClone(operation.slot);
+  }
 }
 
 function json(response, status, body) {
@@ -201,6 +222,24 @@ async function startFixtureServer() {
   let historyPosition = 0;
   let undoDelayMs = 0;
   const undos = [];
+  // The demo project's id IS its directory name, so a rename moves it; the
+  // routes below address it through this variable, the way the real engine
+  // addresses the directory it moved.
+  let demoId = "demo";
+  let demoName = "UI test project";
+  let demoDeleted = false;
+  let projectLocked = false;
+  // Rename and delete requests, recorded like the font calls are.
+  const projectCalls = [];
+  // The update check (D28): the consent recorded in the "workspace config",
+  // the latest version the "feed" named, and the consent POSTs the page sent.
+  let updateConsent = null;
+  let updateLatest = null;
+  const consentCalls = [];
+  // Documents as they were before each write, so one undo restores one write.
+  const undoStack = [];
+  // A typed engine refusal for the next write, in the engine's own words.
+  let failWrite = null;
   const fontFamilies = () => [...new Set(fontFaces.map((face) => face.family))].sort();
   const writes = [];
   const reads = [];
@@ -209,13 +248,20 @@ async function startFixtureServer() {
     const url = new URL(request.url ?? "/", "http://localhost");
     const send = (status, body) => json(response, status, body);
     if (request.method === "GET" && url.pathname.startsWith("/api/")) reads.push(url.pathname);
+    // Which project a /api/projects/... request addresses, and whether it is
+    // the demo project under its current (possibly renamed) id.
+    const segments = url.pathname.split("/").filter(Boolean);
+    const projectId = segments[0] === "api" && segments[1] === "projects" && segments[2]
+      ? decodeURIComponent(segments[2])
+      : null;
+    const isDemo = projectId !== null && projectId === demoId && !demoDeleted;
 
     if (request.method === "GET" && url.pathname === "/api/version") {
       return send(200, { name: "assemblash", version: "ui-test", schemaVersion: 1, canShutdown: false });
     }
     if (request.method === "GET" && url.pathname === "/api/projects") {
       return send(200, { projects: [
-        { id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length },
+        ...(demoDeleted ? [] : [{ id: demoId, name: demoName, documentId: document.id, version: document.version, layers: document.layers.length }]),
         ...(secondProject ? [{ id: "second", name: "Second project", documentId: "doc_second", version: 1, layers: 0 }] : []),
         ...otherProjects,
       ] });
@@ -231,24 +277,53 @@ async function startFixtureServer() {
         tokenRequired: false,
       });
     }
+    if (request.method === "GET" && url.pathname === "/api/update-status") {
+      const newer = updateLatest !== null && updateLatest !== "ui-test";
+      return send(200, {
+        current: "ui-test",
+        latest: updateLatest,
+        newer,
+        notesUrl: updateLatest ? `https://example.com/tag/v${updateLatest}` : null,
+        consent: updateConsent,
+      });
+    }
+    if (request.method === "POST" && url.pathname === "/api/update-consent") {
+      let raw = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { raw += chunk; });
+      request.on("end", () => {
+        const body = JSON.parse(raw || "{}");
+        updateConsent = body.updateCheck ?? null;
+        consentCalls.push(updateConsent);
+        const newer = updateLatest !== null && updateLatest !== "ui-test";
+        send(200, {
+          current: "ui-test",
+          latest: updateLatest,
+          newer,
+          notesUrl: updateLatest ? `https://example.com/tag/v${updateLatest}` : null,
+          consent: updateConsent,
+        });
+      });
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/api/projects/recent") {
-      return send(200, { projects: [{ id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length }] });
+      return send(200, { projects: demoDeleted ? [] : [{ id: demoId, name: demoName, documentId: document.id, version: document.version, layers: document.layers.length }] });
     }
     // A stale lock the server reclaimed on its own is reported exactly once,
     // to the first summary fetched afterward, then drained — the same shape
     // as the real engine's read-and-clear behaviour.
-    if (request.method === "GET" && url.pathname === "/api/projects/demo") {
-      const summary = { id: "demo", name: document.name, documentId: document.id, version: document.version, layers: document.layers.length };
+    if (request.method === "GET" && isDemo && segments.length === 3) {
+      const summary = { id: demoId, name: demoName, documentId: document.id, version: document.version, layers: document.layers.length };
       if (pendingReclaimedLock) {
         summary.reclaimedLock = pendingReclaimedLock;
         pendingReclaimedLock = null;
       }
       return send(200, summary);
     }
-    if (request.method === "GET" && url.pathname === "/api/projects/demo/document") {
+    if (request.method === "GET" && isDemo && segments[3] === "document") {
       return send(200, structuredClone(document));
     }
-    if (request.method === "GET" && url.pathname === "/api/projects/demo/history") {
+    if (request.method === "GET" && isDemo && segments[3] === "history") {
       return send(200, { position: historyPosition, head: historyPosition, entries: [] });
     }
     if (request.method === "POST" && /^\/api\/projects\/[^/]+\/undo$/.test(url.pathname)) {
@@ -256,9 +331,62 @@ async function startFixtureServer() {
       request.resume();
       request.on("end", () => {
         undos.push(project);
-        setTimeout(() => send(200, { version: document.version, dryRun: false }), undoDelayMs);
+        setTimeout(() => {
+          // One undo restores one write, the way the journal does.
+          if (decodeURIComponent(project) === demoId && undoStack.length) {
+            document = undoStack.pop();
+          historyPosition = Math.max(0, historyPosition - 1);
+          }
+          send(200, { version: document.version, dryRun: false });
+        }, undoDelayMs);
       });
       return;
+    }
+    // Project rename (S4's route): the id is the directory name, so the
+    // project answers under the new name from now on. A name that is taken
+    // is `projectExists`; a project another process holds is `projectLocked`.
+    if (request.method === "POST" && projectId && segments[3] === "rename") {
+      let raw = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { raw += chunk; });
+      request.on("end", () => {
+        const body = JSON.parse(raw || "{}");
+        projectCalls.push({ kind: "rename", project: projectId, name: body.name });
+        if (projectLocked) {
+          projectLocked = false;
+          return send(409, { error: { code: "projectLocked", message: "another Assemblash process holds this project open" } });
+        }
+        if (!isDemo) {
+          return send(404, { error: { code: "notFound", message: `no project named "${projectId}"` } });
+        }
+        const name = String(body.name ?? "").trim();
+        if (!name || /[\\/]/.test(name)) {
+          return send(400, { error: { code: "invalidName", message: `"${body.name}" is not a name a project directory can carry` } });
+        }
+        if (name === "second" || otherProjects.some((one) => one.id === name)) {
+          return send(409, { error: { code: "projectExists", message: `a project named "${name}" is already in this workspace` } });
+        }
+        demoId = name;
+        demoName = name;
+        document.name = name;
+        send(200, { project: demoId });
+      });
+      return;
+    }
+    // Project delete (S4's route): the directory, document, history, and
+    // assets are gone. A project this server holds is closed on the way in;
+    // one another process holds is refused.
+    if (request.method === "DELETE" && projectId && segments.length === 3) {
+      projectCalls.push({ kind: "delete", project: projectId });
+      if (projectLocked) {
+        projectLocked = false;
+        return send(409, { error: { code: "projectLocked", message: "another Assemblash process holds this project open" } });
+      }
+      if (!isDemo) {
+        return send(404, { error: { code: "notFound", message: `no project named "${projectId}"` } });
+      }
+      demoDeleted = true;
+      return send(200, { project: demoId });
     }
     if (secondProject && request.method === "GET" && url.pathname.startsWith("/api/projects/second")) {
       const second = { ...freshDocument(), id: "doc_second", name: "Second project", layers: [] };
@@ -271,10 +399,10 @@ async function startFixtureServer() {
       if (rest === "/presets") return send(200, { presets: [] });
       if (rest === "/slots") return send(200, { isTemplate: false, slots: [] });
     }
-    if (request.method === "GET" && url.pathname === "/api/projects/demo/presets") {
+    if (request.method === "GET" && isDemo && segments[3] === "presets") {
       return send(200, { presets: [] });
     }
-    if (request.method === "GET" && url.pathname === "/api/projects/demo/slots") {
+    if (request.method === "GET" && isDemo && segments[3] === "slots") {
       return send(200, { isTemplate: false, slots: [] });
     }
     // Every call the font manager can make is recorded, because two of the
@@ -285,7 +413,19 @@ async function startFixtureServer() {
       fontCalls.push({ method: request.method, path: url.pathname, query: url.search });
     }
 
-    if (request.method === "GET" && url.pathname === "/api/fonts/catalogue") {
+    if (request.method === "GET" && url.pathname === "/api/fonts/specimen.png") {
+      const face = fontFaces.find((one) =>
+        one.family === url.searchParams.get("family")
+        && String(one.weight) === url.searchParams.get("weight")
+        && one.style === url.searchParams.get("style")
+      );
+      if (!face) return send(404, { error: { code: "missingFontFace", message: "face not installed" } });
+      if (face.hash !== url.searchParams.get("hash")) {
+        return send(409, { error: { code: "fontFaceChanged", message: "face hash changed" } });
+      }
+      response.writeHead(200, { "content-type": "image/png" });
+      return response.end(png);
+    }    if (request.method === "GET" && url.pathname === "/api/fonts/catalogue") {
       return send(200, structuredClone(FONT_CATALOGUE));
     }
     if (request.method === "POST" && url.pathname === "/api/fonts/install") {
@@ -301,15 +441,16 @@ async function startFixtureServer() {
           // it was — which is what the journey then checks the page says.
           return send(502, { error: { code: "fontInstallFailed", message } });
         }
-        if (body.pack !== "default") {
+        const pack = FONT_CATALOGUE.packs[body.pack];
+        if (!pack) {
           return send(404, { error: { code: "unknownFontPack", message: `no pack named "${body.pack}"` } });
         }
-        const installed = FONT_CATALOGUE.packs.default.map((family, index) => ({
+        const installed = pack.map((family, index) => ({
           family,
           style: "normal",
           weight: 400,
-          file: `pack${index}.ttf`,
-          hash: `sha256:pack${index}`,
+          file: `${body.pack}-pack${index}.ttf`,
+          hash: `sha256:${body.pack}-pack${index}`,
           faceIndex: 0,
           license: "OFL-1.1",
         }));
@@ -414,8 +555,25 @@ async function startFixtureServer() {
             return send(422, { error: { code: "operationRefused", message: "the layer is protected" } });
           }
         }
-        writes.push({ path: url.pathname, body });
+        if (failWrite) {
+          const refusal = failWrite;
+          failWrite = null;
+          return send(422, { error: { code: refusal.code, message: refusal.message } });
+        }
         const operations = body.commands ?? [body.operation];
+        const invalidPath = operations.find((operation) =>
+          operation.op === "create" &&
+          operation.type === "shape" &&
+          operation.shape?.kind === "path" &&
+          /\bQ\b/.test(operation.shape.d)
+        );
+        if (invalidPath) {
+          return send(422, { error: { code: "invalidPath", message: "unsupported path command 'Q' at byte 6" } });
+        }
+        // The document as it was, for the one undo that restores one write.
+        undoStack.push(structuredClone(document));
+        writes.push({ path: url.pathname, body });
+        historyPosition += 1;
         const created = [];
         for (const operation of operations) applyMockOperation(document, operation, created);
         document.version += 1;
@@ -426,10 +584,16 @@ async function startFixtureServer() {
       return;
     }
 
-    const requested = url.pathname === "/" ? "index.html" : basename(url.pathname);
+    const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
     const allowed = new Set([
-      "index.html", "agents.js", "app.js", "api.js", "export.js", "fonts.js", "geometry.js", "queue.js", "templates.js", "token.js",
+      "index.html", "agents.js", "app.js", "api.js", "export.js", "fonts.js", "geometry.js", "queue.js", "templates.js", "token.js", "i18n.js", "locale-en.js", "locale-fr.js", "locale-de.js",
       "studio.css", "style.css", "phosphor.css", "Phosphor.woff2",
+      "catalogue-specimens/manifest.json",
+      ...["inter", "roboto", "open-sans", "lora", "montserrat", "playfair-display", "jetbrains-mono"]
+        .flatMap((name) => [
+          "catalogue-specimens/" + name + ".svg",
+          "catalogue-specimens/licenses/" + name + "-OFL.txt",
+        ]),
     ]);
     if (!allowed.has(requested)) return send(404, { error: { code: "notFound", message: url.pathname } });
     const types = {
@@ -437,6 +601,9 @@ async function startFixtureServer() {
       ".js": "text/javascript; charset=utf-8",
       ".css": "text/css; charset=utf-8",
       ".woff2": "font/woff2",
+      ".json": "application/json",
+      ".svg": "image/svg+xml",
+      ".txt": "text/plain; charset=utf-8",
     };
     response.writeHead(200, { "content-type": types[extname(requested)] ?? "application/octet-stream" });
     response.end(readFileSync(join(dist, requested)));
@@ -489,6 +656,22 @@ async function startFixtureServer() {
     failPreviews(count) {
       failPreviews = count;
     },
+    // A typed refusal, in the engine's own words, for the next write.
+    armWriteRefusal(code, message) {
+      failWrite = { code, message };
+    },
+    // Another process holds the project: rename and delete are refused.
+    armProjectLock() {
+      projectLocked = true;
+    },
+    projectCalls: () => structuredClone(projectCalls),
+    setUpdate(consent, latest) {
+      updateConsent = consent;
+      updateLatest = latest;
+    },
+    consentCalls: () => structuredClone(consentCalls),
+    // The document as the engine holds it, for reading values back.
+    documentJson: () => JSON.stringify(document),
     version: () => document.version,
     createAsAgent(id) {
       otherProjects.push({ id, name: id, documentId: `doc_${id}`, version: 0, layers: 0 });
@@ -505,6 +688,16 @@ async function startFixtureServer() {
       agentCount = 0;
       historyPosition = 0;
       undoDelayMs = 0;
+      demoId = "demo";
+      demoName = "UI test project";
+      demoDeleted = false;
+      projectLocked = false;
+      failWrite = null;
+      updateConsent = null;
+      updateLatest = null;
+      consentCalls.length = 0;
+      undoStack.length = 0;
+      projectCalls.length = 0;
       undos.length = 0;
       writes.length = 0;
       reads.length = 0;
@@ -613,6 +806,8 @@ class CdpPage {
     return this.evaluate(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); if (!node) throw new Error(${JSON.stringify(`missing ${selector}`)}); node.click(); return true; })()`);
   }
 
+
+
   key(key, options = {}) {
     return this.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", ${JSON.stringify({ key, code: options.code ?? key, bubbles: true, ...options })}))`);
   }
@@ -708,7 +903,7 @@ async function startBrowser(url, width = 1400, height = 900) {
     await page.send("Page.enable");
     await page.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
     await page.send("Page.navigate", { url });
-    await page.waitFor(`document.readyState === "complete" && document.querySelector("#status")?.textContent?.includes("ready")`, "editor startup", STARTUP_MS);
+    await page.waitFor(`document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`, "editor startup", STARTUP_MS);
     return { page, child, profile, close: stop };
   } catch (error) {
     await stop();
@@ -719,6 +914,32 @@ async function startBrowser(url, width = 1400, height = 900) {
 async function openProject(page) {
   await page.evaluate(`(() => { const select = document.querySelector("#projects"); select.value = "demo"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   await page.waitFor(`!document.querySelector("#canvas").hidden && document.querySelector("#status")?.textContent?.includes("Opened")`, "project open");
+}
+
+async function openFontsPanel(page) {
+  await page.click("#settings");
+  await page.waitFor(`document.querySelector("#settings-dialog").open`, "Settings to open for Fonts");
+  await page.click("#settings-fonts-open");
+  await page.waitFor(`!document.querySelector("#settings-dialog").open && !document.querySelector("#add-fonts-section").hidden`, "Fonts panel to open");
+}
+async function openDocumentSettings(page) {
+  await page.click("#settings");
+  await page.waitFor(`document.querySelector("#settings-dialog").open`, "Settings to open");
+  if (!await page.evaluate(`document.querySelector("#settings-document").open`)) {
+    await page.click("#settings-document summary");
+  }
+}
+
+// Opens the inspector's font selector (focus is what opens the list) and
+// returns the families it is showing right now.
+async function selectorFamilies(page) {
+  await page.evaluate(`(() => {
+    const input = document.querySelector("#inspector .font-selector input");
+    input.dispatchEvent(new FocusEvent("focus"));
+    return true;
+  })()`);
+  await page.waitFor(`!document.querySelector("#inspector .font-selector-list").hidden`, "the font selector list");
+  return page.evaluate(`[...document.querySelectorAll("#inspector .font-selector-list li[data-family]")].map((one) => one.dataset.family)`);
 }
 
 async function selectLayer(page, id) {
@@ -772,11 +993,88 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
   });
   const { page } = browser;
 
-  await t.test("side tools expose one clear mode and Select closes creation", async () => {
+  await t.test("a language change keeps input, focus, and the open page", async () => {
+    const before = await page.evaluate(`(() => {
+      const input = document.querySelector("#project-search");
+      input.value = "draft";
+      input.focus();
+      return {
+        url: location.href,
+        text: document.querySelector('[data-i18n="settings.languageLabel"]').textContent,
+        writes: 0
+      };
+    })()`);
+    const writes = fixture.writes.length;
+    await page.evaluate(`(() => {
+      const select = document.querySelector("#setting-language");
+      select.value = "fr";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(`document.documentElement.lang === "fr"`, "French language selection");
+    assert.notEqual(
+      await page.evaluate(`document.querySelector('[data-i18n="settings.languageLabel"]').textContent`),
+      before.text,
+    );
+    assert.deepEqual(await page.evaluate(`({
+      value: document.querySelector("#project-search").value,
+      focused: document.activeElement?.id,
+      url: location.href,
+      locale: localStorage.getItem("assemblash.language")
+    })`), {
+      value: "draft",
+      focused: "project-search",
+      url: before.url,
+      locale: "fr",
+    });
+    assert.equal(fixture.writes.length, writes);
+    await page.evaluate(`(() => {
+      const select = document.querySelector("#setting-language");
+      select.value = "en";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector("#project-search").value = "";
+      return true;
+    })()`);
+    await page.waitFor(`document.documentElement.lang === "en"`, "English language reset");
+  });
+
+  await t.test("side tools keep the empty workspace stable and Select closes creation for a project", async () => {
+    assert.deepEqual(await page.evaluate(`({
+      title: document.querySelector("#add-panel-title").textContent,
+      textSection: !document.querySelector("#add-text-section").hidden,
+      shownSections: [...document.querySelectorAll(".add-section")].filter((one) => !one.hidden).length,
+      projectList: document.querySelector("#project-search").getAttribute("aria-controls"),
+      nativePickerHidden: getComputedStyle(document.querySelector("#projects")).display
+    })`), {
+      title: "Text",
+      textSection: true,
+      shownSections: 1,
+      projectList: "project-options",
+      nativePickerHidden: "none",
+    });
+    const emptyLayout = await page.evaluate(`(() => {
+      const editor = document.querySelector(".editor").getBoundingClientRect();
+      const structure = document.querySelector(".structure").getBoundingClientRect();
+      document.querySelector("#select-tool").click();
+      const nextEditor = document.querySelector(".editor").getBoundingClientRect();
+      const nextStructure = document.querySelector(".structure").getBoundingClientRect();
+      return {
+        addOpen: !document.querySelector("#add-panel").classList.contains("collapsed"),
+        selectPressed: document.querySelector("#select-tool").getAttribute("aria-pressed"),
+        sameEditor: editor.left === nextEditor.left && editor.width === nextEditor.width,
+        sameStructure: structure.left === nextStructure.left && structure.width === nextStructure.width,
+      };
+    })()`);
+    assert.deepEqual(emptyLayout, {
+      addOpen: true,
+      selectPressed: "false",
+      sameEditor: true,
+      sameStructure: true,
+    });
     for (const [tool, title, visible] of [
       ["#add-text", "Text", "#add-text-section"],
       ["#add-image", "Uploads", "#add-upload-section"],
-      ["#add-vector", "Vector", "#add-vector-section"],
+      ["#add-shape", "Elements", "#add-shape-section"],
       ["#templates-toggle", "Templates", "#add-template-section"],
     ]) {
       await page.click(tool);
@@ -788,6 +1086,18 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       }))()`);
       assert.deepEqual(state, { title, expanded: "true", visible: true, shownSections: 1 });
     }
+    await page.click("#project-picker-toggle");
+    assert.equal(await page.evaluate(`document.querySelector("#project-options").hidden`), false);
+    assert.equal(await page.evaluate(`document.querySelectorAll("#project-options [role='option']").length > 0`), true);
+    await page.evaluate(`document.querySelector("#project-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    assert.equal(await page.evaluate(`document.querySelector("#project-options").hidden`), true);
+    await page.evaluate(`(() => {
+      const input = document.querySelector("#project-search");
+      input.value = "UI test project";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(`!document.querySelector("#canvas").hidden`, "the project combobox to open a project");
     await page.click("#select-tool");
     assert.deepEqual(await page.evaluate(`({
       collapsed: document.querySelector("#add-panel").classList.contains("collapsed"),
@@ -795,30 +1105,29 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     })`), { collapsed: true, selectPressed: "true" });
   });
 
-  await openProject(page);
-
   await t.test("selection builds the contextual text toolbar", async () => {
     await selectLayer(page, "layer_text");
     const toolbar = await page.evaluate(`(() => ({
-      edit: [...document.querySelectorAll("#inspector button")].some((one) => one.textContent.trim() === "Edit text"),
+      edit: !!document.querySelector("#advanced-inspector .edit-text-button"),
       horizontal: [...document.querySelectorAll("#inspector button")].some((one) => one.textContent.trim() === "Centre horizontally"),
       vertical: [...document.querySelectorAll("#inspector button")].some((one) => one.textContent.trim() === "Centre vertically"),
       font: document.querySelector('[aria-label="Font family"]')?.value,
       size: document.querySelector('[aria-label="Font size"]')?.value
     }))()`);
     assert.deepEqual(toolbar, { edit: true, horizontal: true, vertical: true, font: "Noto Sans", size: "48" });
+
   });
 
   await t.test("inline editing cancels without a write and commits one update", async () => {
     fixture.writes.length = 0;
-    await page.click(".edit-text-button");
+    await page.click("#advanced-inspector .edit-text-button");
     await page.waitFor(`document.querySelector('.inline-text-editor')?.value === "Edit me"`, "inline editor");
     await page.evaluate(`document.querySelector('.inline-text-editor').value = "Cancelled"`);
     await page.evaluate(`document.querySelector('.inline-text-editor').dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     await page.waitFor(`!document.querySelector('.inline-text-editor')`, "inline cancel");
     assert.equal(fixture.writes.length, 0);
 
-    await page.click(".edit-text-button");
+    await page.click("#advanced-inspector .edit-text-button");
     await page.evaluate(`document.querySelector('.inline-text-editor').value = "Committed text"`);
     await page.evaluate(`document.querySelector('.inline-text-editor').dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }))`);
     await waitForWrites(fixture);
@@ -888,17 +1197,108 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.equal(fixture.writes[0].body.commands[0].dy, 500);
   });
 
-  await t.test("the font field offers the families the engine reported", async () => {
+  await t.test("the font selector lists the installed families with a visible heading", async () => {
     await selectLayer(page, "layer_text");
-    assert.deepEqual(await page.evaluate(`({
-      tag: document.querySelector('[aria-label="Font family"]').tagName,
-      list: document.querySelector('[aria-label="Font family"]').getAttribute("list"),
-      families: [...document.querySelector("#font-families").options].map((one) => one.value)
-    })`), { tag: "INPUT", list: "font-families", families: ["Noto Sans"] });
+    assert.deepEqual(await selectorFamilies(page), ["Noto Sans"]);
+    await page.evaluate("new Promise((resolve) => setTimeout(resolve, 200))");
+    const listBounds = await page.evaluate(`(() => {
+      const input = document.querySelector("#inspector .font-selector input").getBoundingClientRect();
+      const list = document.querySelector("#inspector .font-selector-list").getBoundingClientRect();
+      const hit = document.elementFromPoint(list.left + 10, list.top + 10);
+      return { below: list.top >= input.bottom, visible: !!hit?.closest(".font-selector-list") };
+    })()`);
+    assert.deepEqual(listBounds, { below: true, visible: true });
+    assert.equal(
+      await page.evaluate(`document.querySelector("#inspector .font-selector-heading").textContent`),
+      "Installed fonts",
+    );
+    // The Properties section uses the same component, not a second control.
+    assert.equal(
+      await page.evaluate(`document.querySelector("#advanced-inspector .font-selector input") !== null`),
+      true,
+    );
+  });
+
+  await t.test("installed and catalogue font samples render without a project write or pack install", async () => {
+    await selectLayer(page, "layer_text");
+    const writesBefore = fixture.writes.length;
+    const installsBefore = fixture.fontCalls.filter((call) => call.method === "POST").length;
+    await selectorFamilies(page);
+    await page.waitFor(`!!document.querySelector('#inspector .font-selector-list [data-family="Noto Sans"] img[data-font-specimen]')?.src?.startsWith("blob:")`, "installed picker specimen");
+    assert.ok(
+      fixture.fontCalls.some((call) => call.path === "/api/fonts/specimen.png"
+        && new URLSearchParams(call.query).get("family") === "Noto Sans"),
+      "the picker fetches the exact installed face from the specimen API",
+    );
+
+    await openFontsPanel(page);
+    await page.waitFor(`!!document.querySelector('#font-list [data-family="Noto Sans"] img[data-font-specimen]')?.src?.startsWith("blob:")`, "installed Fonts panel specimen");
+    await page.waitFor(`["Inter", "Roboto", "Open Sans", "Lora", "Montserrat", "Playfair Display", "JetBrains Mono"].every((family) => {
+      const row = [...document.querySelectorAll("#font-pack-options .font-pack-family")]
+        .find((one) => one.querySelector(".font-pack-family-name")?.textContent === family);
+      return row?.querySelector("img[data-font-specimen]")?.src?.startsWith("blob:");
+    })`, "seven bundled catalogue specimens");
+    assert.equal(fixture.fontCalls.filter((call) => call.method === "POST").length, installsBefore);
+    assert.equal(fixture.writes.length, writesBefore);
+
+    await page.evaluate(`(() => {
+      const input = document.querySelector(".font-sample-field input");
+      input.value = "Custom 123";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await page.waitFor(`!!document.querySelector('#font-list [data-family="Noto Sans"] img[data-font-specimen]')?.src?.startsWith("blob:")`, "custom installed specimen");
+    await waitFor(
+      () => fixture.fontCalls.some((call) => call.path === "/api/fonts/specimen.png"
+        && new URLSearchParams(call.query).get("sample") === "Custom 123"),
+      "custom sample API request",
+    );
+    assert.equal(fixture.writes.length, writesBefore);
+    await page.waitFor(
+      `[...document.querySelectorAll("#add-fonts-section img[data-font-specimen]")]
+        .filter((image) => image.getAttribute("src")?.startsWith("blob:")).length >= 8`,
+      "the installed face and seven catalogue samples to finish loading",
+    );
+    const previousSources = await page.evaluate(`(() => {
+      const sources = [...document.querySelectorAll("#add-fonts-section img[data-font-specimen]")]
+        .map((image) => image.getAttribute("src")).filter((src) => src?.startsWith("blob:"));
+      window.__fontOriginalRevoke = URL.revokeObjectURL;
+      window.__fontRevocations = [];
+      URL.revokeObjectURL = function (url) {
+        window.__fontRevocations.push(url);
+        return window.__fontOriginalRevoke.call(URL, url);
+      };
+      return sources;
+    })()`);
+    assert.ok(previousSources.length >= 8, "the installed face and seven catalogue samples have object URLs");
+    try {
+      await page.click("#add-shape");
+      const released = await page.evaluate(`({
+        hidden: document.querySelector("#add-fonts-section").hidden,
+        remaining: [...document.querySelectorAll("#add-fonts-section img[data-font-specimen]")]
+          .filter((image) => image.hasAttribute("src")).length,
+        revoked: window.__fontRevocations,
+      })`);
+      assert.equal(released.hidden, true);
+      assert.equal(released.remaining, 0, "hidden Fonts rows must release their image sources");
+      assert.ok(previousSources.every((src) => released.revoked.includes(src)), "every previous object URL is revoked");
+
+      await openFontsPanel(page);
+      await page.waitFor(`[...document.querySelectorAll("#add-fonts-section img[data-font-specimen]")].filter((image) => image.src.startsWith("blob:")).length >= 8`, "Fonts samples to reload");
+      const reloaded = await page.evaluate(`[...document.querySelectorAll("#add-fonts-section img[data-font-specimen]")]
+        .map((image) => image.getAttribute("src")).filter((src) => src?.startsWith("blob:"))`);
+      assert.ok(reloaded.length >= 8, "reopened Fonts reloads all installed and catalogue samples");
+      assert.ok(reloaded.every((src) => !previousSources.includes(src)), "reopened rows use fresh object URLs");
+      assert.equal(fixture.writes.length, writesBefore);
+    } finally {
+      await page.evaluate(`URL.revokeObjectURL = window.__fontOriginalRevoke`);
+    }
   });
 
   await t.test("effects reorder in place, carrying their numbers with them", async () => {
     await selectLayer(page, "layer_text");
+    assert.equal(await page.evaluate(`["Effects", "Presets", "Slots"].every((name) =>
+      [...document.querySelectorAll("#advanced-inspector > .dock-section")].some((section) =>
+        section.querySelector("summary")?.textContent?.includes(name)))`), true);
     fixture.writes.length = 0;
     for (const type of ["blur", "grain"]) {
       await page.evaluate(`(() => { document.querySelector(".effect-chooser").value = ${JSON.stringify(type)}; })()`);
@@ -910,7 +1310,6 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       { type: "blur", radius: 0 },
       { type: "grain", amount: 0, seed: 1, scale: 1 },
     ]);
-
     fixture.writes.length = 0;
     await page.click('.effect-row[data-effect="grain"] .effect-up');
     await waitForWrites(fixture);
@@ -1027,10 +1426,14 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     await page.click("#dock-toggle");
     assert.equal(await page.evaluate(`document.querySelector("#structure-panel").classList.contains("mobile-open")`), true);
   });
-  await t.test("canvas settings apply one resize and can clear the background", async () => {
+  await t.test("canvas settings in Properties apply one resize", async () => {
     fixture.reset();
     await openProject(page);
+    // Canvas data is in Properties when no layer is selected.
     await page.click("#edit-canvas");
+    assert.equal(await page.evaluate(`document.querySelector("#settings-dialog").open`), false);
+    assert.equal(await page.evaluate(`document.querySelector("#properties-panel").hidden`), false);
+    assert.equal(await page.evaluate(`document.querySelector("#properties-panel #canvas-settings") !== null`), true);
     assert.equal(await page.evaluate(`document.querySelector("#canvas-apply").disabled`), true);
     assert.equal(await page.evaluate(`document.querySelectorAll('[name="canvas-anchor"]').length`), 9);
     await page.evaluate(`(() => {
@@ -1064,28 +1467,335 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.deepEqual(fixture.writes[0].body.operation, { op: "updateCanvas", background: null });
     assert.equal(await page.evaluate(`document.querySelector("#canvas-background").disabled`), true);
     assert.equal(await page.evaluate(`document.querySelector("#canvas-transparent").checked`), true);
+    await page.evaluate(`document.querySelector("#settings-dialog").close("cancel")`);
+  });
+
+  await t.test("Settings opens from the toolbar and Escape commits nothing", async () => {
+    fixture.reset();
+    await openProject(page);
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "the settings modal");
+
+    assert.deepEqual(await page.evaluate(`({
+      canvasInSettings: document.querySelector("#settings-dialog #canvas-settings") !== null,
+      follow: document.querySelector("#setting-follow").checked,
+      agents: document.querySelector("#settings-dialog #agents") !== null,
+      fonts: document.querySelector("#settings-fonts-open") !== null,
+      updateToggle: document.querySelector("#setting-update-check") !== null,
+      projectActions: [...document.querySelectorAll("#settings-dialog #rename-project, #settings-dialog #reload, #settings-dialog #delete-project")].length,
+      openGroups: [...document.querySelectorAll("#settings-dialog .settings-section[open]")].map((one) => one.id)
+    })`), {
+      canvasInSettings: false,
+      follow: true,
+      agents: true,
+      fonts: true,
+      updateToggle: true,
+      projectActions: 3,
+      openGroups: ["settings-agents"],
+    });
+
+    assert.equal(await page.evaluate(`(() => {
+      const modal = document.querySelector("#settings-dialog");
+      const toggle = document.querySelector("#setting-follow");
+      const text = toggle.nextElementSibling;
+      return modal.scrollWidth <= modal.clientWidth &&
+        Math.abs(toggle.getBoundingClientRect().top - text.getBoundingClientRect().top) < 12;
+    })()`), true, "Settings fits and the toggle label stays beside its checkbox");
+
+    // Opening another Settings group sends no document operation.
+    fixture.writes.length = 0;
+    await page.click("#settings-document summary");
+    assert.equal(await page.evaluate(`document.querySelector("#settings-document").open`), true);
+    assert.equal(fixture.writes.length, 0);
+
+    await page.key("Escape", { code: "Escape" });
+    await page.waitFor(`!document.querySelector("#settings-dialog").open`, "Escape closes Settings");
+    assert.equal(fixture.writes.length, 0, "Escape committed nothing");
+
+  });
+
+  await t.test("the follow preference survives a reload and gates the follow poll", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    fixture.setAgentCount(0);
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "the settings modal");
+
+    await page.click("#setting-follow");
+    assert.equal(await page.evaluate(`localStorage.getItem("assemblash-follow-v1")`), "off");
+    await page.evaluate(`document.querySelector("#settings-dialog").close("cancel")`);
+
+    await page.evaluate(`location.reload()`);
+    await page.waitFor(
+      `document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`,
+      "editor startup after reload",
+      10000,
+    );
+    await openProject(page);
+    await waitForSaved(page);
+
+    // With following off, an agent's edit does not appear on its own.
+    const before = await page.evaluate(`document.querySelector("#version").textContent`);
+    fixture.editAsAgent(7);
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+    assert.equal(
+      await page.evaluate(`document.querySelector("#version").textContent`),
+      before,
+      "the page did not follow while the preference is off",
+    );
+
+    // Turning it back on resumes following, and the setting persists.
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "the settings modal");
+
+    assert.equal(await page.evaluate(`document.querySelector("#setting-follow").checked`), false);
+    await page.click("#setting-follow");
+    await page.evaluate(`document.querySelector("#settings-dialog").close("cancel")`);
+    const version = fixture.version();
+    await page.waitFor(
+      `document.querySelector("#version").textContent === ${JSON.stringify(String(version))}`,
+      "the page to follow once the preference is on",
+      10000,
+    );
+    assert.equal(await page.evaluate(`localStorage.getItem("assemblash-follow-v1")`), "on");
+  });
+
+  await t.test("the update consent is asked once, recorded, and the toggle survives a reload", async () => {
+    fixture.reset();
+    // No answer recorded: the question shows once, at start-up.
+    await page.evaluate(`location.reload()`);
+    await page.waitFor(
+      `document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`,
+      "editor startup after reload",
+      10000,
+    );
+    await page.waitFor(`!document.querySelector("#consent-bar").hidden`, "the consent question");
+    await page.click("#consent-notify");
+    await page.waitFor(`document.querySelector("#consent-bar").hidden`, "the question hides once answered");
+    assert.deepEqual(fixture.consentCalls(), ["notify"]);
+
+    // The answer is recorded, so a reload asks no second time, and the
+    // Settings toggle reads the same answer.
+    await page.evaluate(`location.reload()`);
+    await page.waitFor(
+      `document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`,
+      "editor startup after the second reload",
+      10000,
+    );
+    assert.equal(await page.evaluate(`document.querySelector("#consent-bar").hidden`), true);
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "the settings modal");
+
+    assert.equal(await page.evaluate(`document.querySelector("#setting-update-check").checked`), true);
+
+    // The toggle writes the same field. Off survives a reload too.
+    await page.click("#setting-update-check");
+    await waitFor(
+      () => Promise.resolve(fixture.consentCalls().length === 2),
+      "the toggle's consent POST to land",
+    );
+    await page.evaluate(`document.querySelector("#settings-dialog").close("cancel")`);
+    assert.deepEqual(fixture.consentCalls(), ["notify", "off"]);
+    await page.evaluate(`location.reload()`);
+    await page.waitFor(
+      `document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`,
+      "editor startup after the third reload",
+      10000,
+    );
+    assert.equal(await page.evaluate(`document.querySelector("#consent-bar").hidden`), true);
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "the settings modal again");
+    assert.equal(await page.evaluate(`document.querySelector("#setting-update-check").checked`), false);
+    await page.evaluate(`document.querySelector("#settings-dialog").close("cancel")`);
+  });
+
+  await t.test("a newer version shows a banner that never blocks work, and off shows none", async () => {
+    fixture.reset();
+    fixture.setUpdate("notify", "9.9.9");
+    await page.evaluate(`location.reload()`);
+    await page.waitFor(
+      `document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`,
+      "editor startup with a newer version armed",
+      10000,
+    );
+    await page.waitFor(`!document.querySelector("#update-banner").hidden`, "the update banner");
+    const banner = await page.evaluate(`({
+      text: document.querySelector("#update-banner-text").textContent,
+      link: document.querySelector("#update-banner-link").href,
+      consent: document.querySelector("#consent-bar").hidden
+    })`);
+    assert.match(banner.text, /9\.9\.9/);
+    assert.equal(banner.link, "https://example.com/tag/v9.9.9");
+    assert.equal(banner.consent, true, "an answered consent never asks again");
+
+    // The banner never blocks: a project opens and saves while it shows.
+    await openProject(page);
+    await waitForSaved(page);
+
+    await page.click("#update-banner-dismiss");
+    assert.equal(await page.evaluate(`document.querySelector("#update-banner").hidden`), true);
+    assert.equal(await page.evaluate(`localStorage.getItem("assemblash-update-banner-v1")`), "9.9.9");
+
+    // Check off, nothing cached: no banner and no question.
+    fixture.reset();
+    fixture.setUpdate("off", null);
+    await page.evaluate(`location.reload()`);
+    await page.waitFor(
+      `document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`,
+      "editor startup with the check off",
+      10000,
+    );
+    assert.equal(await page.evaluate(`document.querySelector("#update-banner").hidden`), true);
+    assert.equal(await page.evaluate(`document.querySelector("#consent-bar").hidden`), true);
+  });
+
+  await t.test("Settings surfaces the font tools without leaving the modal open", async () => {
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "the settings modal");
+
+    await page.click("#settings-fonts-open");
+    await page.waitFor(`!document.querySelector("#settings-dialog").open`, "the modal closed");
+    assert.deepEqual(await page.evaluate(`({
+      section: !document.querySelector("#add-fonts-section").hidden,
+      title: document.querySelector("#add-panel-title").textContent
+    })`), { section: true, title: "Fonts" });
+  });
+
+  await t.test("the canvas hint names panning, and Space prevents a marquee inside the canvas", async () => {
+    fixture.reset();
+    await openProject(page);
+    assert.equal(await page.evaluate(`document.querySelector("#canvas-hints").hidden`), false);
+    const hint = await page.evaluate(`document.querySelector("#canvas-hints").textContent`);
+    assert.match(hint, /Space/);
+    assert.doesNotMatch(hint, /Shift|Ctrl/);
+
+    await page.key(" ", { code: "Space" });
+    const panning = await page.evaluate(`(() => {
+      const overlay = document.querySelector("#overlay");
+      const box = overlay.getBoundingClientRect();
+      overlay.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        pointerId: 1,
+        clientX: box.left + box.width / 2,
+        clientY: box.top + box.height / 2,
+      }));
+      return {
+        panning: document.querySelector("#stage-viewport").classList.contains("panning"),
+        marquee: document.querySelector(".selection-marquee") !== null,
+      };
+    })()`);
+    assert.deepEqual(panning, { panning: true, marquee: false });
+    await page.evaluate(`(() => {
+      window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1 }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: " ", code: "Space", bubbles: true }));
+      return true;
+    })()`);
+
+    const bounded = await page.evaluate(`(() => {
+      const overlay = document.querySelector("#overlay");
+      const box = overlay.getBoundingClientRect();
+      overlay.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        pointerId: 2,
+        clientX: box.left + box.width / 2,
+        clientY: box.top + box.height / 2,
+      }));
+      window.dispatchEvent(new PointerEvent("pointermove", {
+        bubbles: true,
+        pointerId: 2,
+        clientX: box.right + box.width,
+        clientY: box.bottom + box.height,
+      }));
+      const marquee = document.querySelector(".selection-marquee");
+      const values = {
+        left: parseFloat(marquee.style.left),
+        top: parseFloat(marquee.style.top),
+        width: parseFloat(marquee.style.width),
+        height: parseFloat(marquee.style.height),
+      };
+      window.dispatchEvent(new PointerEvent("pointerup", {
+        bubbles: true,
+        pointerId: 2,
+        clientX: box.right + box.width,
+        clientY: box.bottom + box.height,
+      }));
+      return values;
+    })()`);
+    for (const value of Object.values(bounded)) {
+      assert.ok(value >= 0 && value <= 100, `marquee percentage ${value} stayed inside the canvas`);
+    }
+    await page.waitFor("document.querySelector('#canvas-hints').hidden", "the canvas hint to close", 6500);
+  });
+
+  await t.test("a slot is edited beside its row as one updateSlot operation", async () => {
+    fixture.reset();
+    await openProject(page);
+    await selectLayer(page, "layer_text");
+    await page.waitFor(
+      `document.querySelector('.slot-edit[data-slot="headline"]') !== null`,
+      "the slot edit control",
+    );
+    fixture.writes.length = 0;
+    await page.click('.slot-edit[data-slot="headline"]');
+    await page.waitFor(`document.querySelector(".slot-edit-name") !== null`, "the slot editor");
+    // Escape inside the editor cancels and writes nothing.
+    await page.evaluate(`(() => {
+      document.querySelector(".slot-edit-name").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(`document.querySelector(".slot-edit-name") === null`, "the editor closed");
+    await page.waitFor(`document.querySelector('.slot-edit[data-slot="headline"]') !== null`, "the slot row to return");
+    assert.equal(fixture.writes.length, 0);
+
+    await page.click('.slot-edit[data-slot="headline"]');
+    await page.evaluate(`(() => {
+      const name = document.querySelector(".slot-edit-name");
+      name.value = "title";
+      document.querySelector(".slot-edit-kind").value = "text";
+      return true;
+    })()`);
+    await page.click(".slot-edit-save");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "updateSlot",
+      name: "headline",
+      slot: { name: "title", layer: "layer_text", kind: "text", required: true },
+    });
+    assert.match(
+      await page.evaluate(`document.querySelector("#status").textContent`),
+      /Edit complete \(version 2\)/,
+    );
   });
 
   await t.test("an empty font store offers the pack it would download, and text needs no terminal", async () => {
     fixture.reset();
     fixture.setFonts([]);
     await openProject(page);
-    await page.click("#fonts-toggle");
+    await openFontsPanel(page);
     await page.waitFor(`!document.querySelector("#font-empty").hidden`, "the empty font state");
     await waitForSaved(page);
 
     const empty = await page.evaluate(`({
       detail: document.querySelector("#install-default-detail").textContent,
-      suggestions: [...document.querySelector("#font-families").options].length,
+      installCopy: document.querySelector(".font-install-copy")?.textContent ?? "",
       listed: document.querySelectorAll("#font-list li").length
     })`);
-    assert.equal(empty.suggestions, 0);
     assert.equal(empty.listed, 0);
     for (const family of FONT_CATALOGUE.packs.default) {
       assert.ok(empty.detail.includes(family), `${family} missing from "${empty.detail}"`);
     }
     assert.match(empty.detail, /12 MB/);
     assert.match(empty.detail, /when you click/);
+    // Contents E6: the empty state explains the install before it happens.
+    assert.match(empty.installCopy, /manifest built into this program/);
+    assert.match(empty.installCopy, /only when you click/);
+    assert.match(empty.installCopy, /workspace font store/);
     // Describing the pack reads the catalogue; nothing is fetched until the
     // button is pressed, so no install has been posted yet.
     assert.equal(fixture.fontCalls.filter((call) => call.method === "POST").length, 0);
@@ -1100,7 +1810,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       "the install button focused from a text preset",
     );
     const refusal = await page.evaluate(`document.querySelector("#status").textContent`);
-    assert.match(refusal, /no fonts are installed/);
+    assert.match(refusal, /no fonts are installed/i);
     assert.ok(!refusal.includes("assemblash font install"), refusal);
     assert.equal(fixture.writes.length, 0);
 
@@ -1122,26 +1832,24 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       disabled: false,
       label: "Install the default font pack",
       listed: 0,
-      status: "install fonts: the font mirror could not be reached (fontInstallFailed)",
+      status: "the font mirror could not be reached (fontInstallFailed)",
     });
 
     await page.click("#install-default");
     // The install is finished when it says so — the list is redrawn earlier,
     // in the middle of the same run, and acting on that would race it.
     await page.waitFor(
-      `document.querySelector("#status").textContent.includes("installed Noto Sans")`,
+      `document.querySelector("#status").textContent.includes("Noto Sans")`,
       "the default pack to be installed",
     );
     assert.deepEqual(await page.evaluate(`({
       empty: document.querySelector("#font-empty").hidden,
       listed: document.querySelectorAll("#font-list li").length,
-      faces: document.querySelector("#font-list li .font-faces").textContent,
-      families: [...document.querySelector("#font-families").options].map((one) => one.value)
+      faces: document.querySelector("#font-list li .font-faces").textContent
     })`), {
       empty: true,
       listed: 3,
-      faces: "1 face · normal 400",
-      families: ["Noto Sans", "Noto Sans Mono", "Noto Serif"],
+      faces: "1 face of Normal 400",
     });
 
     // And the thing that could not be done a moment ago now works.
@@ -1156,7 +1864,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
   });
 
   await t.test("a font file is imported, and a file that is not one says why", async () => {
-    await page.click("#fonts-toggle");
+    await openFontsPanel(page);
     await waitForSaved(page);
     assert.equal(await page.evaluate(`document.querySelectorAll("#font-list li").length`), 3);
 
@@ -1169,14 +1877,14 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       return true;
     })()`);
     await page.waitFor(
-      `document.querySelector("#status").textContent.includes("imported 1 font file")`,
+      `document.querySelector("#status").textContent.includes("Imported 1 font file")`,
       "the imported family",
     );
     assert.equal(await page.evaluate(`document.querySelectorAll("#font-list li").length`), 4);
-    assert.deepEqual(await page.evaluate(`({
-      feedback: document.querySelector("#font-feedback").textContent,
-      suggested: [...document.querySelector("#font-families").options].some((one) => one.value === "Brand Sans")
-    })`), { feedback: "Brand Sans.ttf → Brand Sans", suggested: true });
+    assert.equal(
+      await page.evaluate(`document.querySelector("#font-feedback").textContent`),
+      "Brand Sans.ttf → Brand Sans",
+    );
 
     await page.evaluate(`(() => {
       const transfer = new DataTransfer();
@@ -1187,7 +1895,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       return true;
     })()`);
     await page.waitFor(
-      `document.querySelector("#status").textContent.includes("no fonts imported")`,
+      `document.querySelector("#status").textContent.includes("No files imported")`,
       "the refusal for a file that is not a font",
     );
     const refused = await page.evaluate(`({
@@ -1198,7 +1906,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.match(refused.feedback, /notes\.txt/);
     assert.match(refused.feedback, /is not a font format this build can import/);
     assert.equal(refused.listed, 4);
-    assert.match(refused.status, /no fonts imported/);
+    assert.match(refused.status, /No files imported/);
   });
 
   await t.test("removing a family asks first, and sends nothing when dismissed", async () => {
@@ -1212,19 +1920,257 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     await page.evaluate(`(() => { window.confirm = () => true; return true; })()`);
     await page.click('#font-list [data-remove-family="Brand Sans"]');
     await page.waitFor(
-      `document.querySelector("#status").textContent.includes("Brand Sans removed")`,
+      `document.querySelector("#status").textContent.includes("Removed Brand Sans")`,
       "the removed family",
     );
     assert.equal(await page.evaluate(`document.querySelectorAll("#font-list li").length`), 3);
     assert.equal(deletes(), before + 1);
     assert.ok(fixture.fontCalls.some((call) => call.method === "DELETE" && call.path.endsWith("/Brand%20Sans")));
-    assert.equal(
-      await page.evaluate(`[...document.querySelector("#font-families").options].some((one) => one.value === "Brand Sans")`),
-      false,
-    );
-    assert.match(await page.evaluate(`document.querySelector("#status").textContent`), /Brand Sans removed/);
+    assert.match(await page.evaluate(`document.querySelector("#status").textContent`), /Removed Brand Sans/);
   });
 
+  await t.test("the font selector searches, refuses an unknown family at the control, and applies a listed one", async () => {
+    fixture.reset();
+    await openProject(page);
+    await selectLayer(page, "layer_text");
+
+    // Search: typing filters the list the page drew, not a browser datalist.
+    await page.evaluate(`(() => {
+      const input = document.querySelector("#inspector .font-selector input");
+      input.focus();
+      input.value = "serif";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    assert.deepEqual(await selectorFamilies(page), ["Noto Serif"]);
+
+    // Keyboard focus names the highlighted row, and Enter uses the same update path.
+    fixture.writes.length = 0;
+    const keyboardState = await page.evaluate(`(() => {
+      const input = document.querySelector("#inspector .font-selector input");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+      const active = document.getElementById(input.getAttribute("aria-activedescendant"));
+      return {
+        family: active?.dataset.family,
+        selected: active?.getAttribute("aria-selected"),
+        visible: active?.classList.contains("active"),
+        outline: active ? getComputedStyle(active).outlineStyle : null,
+      };
+    })()`);
+    assert.deepEqual(keyboardState, { family: "Noto Serif", selected: "true", visible: true, outline: "solid" });
+    await page.evaluate(`document.querySelector("#inspector .font-selector input")
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update", id: "layer_text", fontFamily: "Noto Serif",
+    });
+    // A value that matches nothing is refused at the control: a visible
+    // message, and no operation anywhere. The engine never substitutes.
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const input = document.querySelector("#inspector .font-selector input");
+      input.value = "Brand Sans";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new FocusEvent("blur"));
+      return true;
+    })()`);
+    assert.match(
+      await page.evaluate(`document.querySelector("#inspector .font-selector-message").textContent`),
+      /not installed/,
+    );
+    assert.equal(await page.evaluate(`document.querySelector("#inspector .font-selector-message").hidden`), false);
+    assert.equal(fixture.writes.length, 0);
+
+    // Choosing a listed family commits one ordinary update through the queue.
+    await page.evaluate(`(() => {
+      const input = document.querySelector("#inspector .font-selector input");
+      input.value = "";
+      input.dispatchEvent(new FocusEvent("focus"));
+      return true;
+    })()`);
+    await page.waitFor(`!document.querySelector("#inspector .font-selector-list").hidden`, "the family list again");
+    await page.evaluate(`(() => {
+      document.querySelector('#inspector .font-selector-list li[data-family="Noto Sans"]')
+        .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      return true;
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update",
+      id: "layer_text",
+      fontFamily: "Noto Sans",
+    });
+
+    // With the store recording this family's faces, weight is a select over
+    // those faces — not the bare number field a refused weight used to need.
+    assert.equal(
+      await page.evaluate(`document.querySelector('#advanced-inspector [aria-label="Font weight"]')?.tagName`),
+      "SELECT",
+    );
+    assert.deepEqual(
+      await page.evaluate(`[...document.querySelectorAll('#advanced-inspector [aria-label="Font weight"] option')].map((one) => one.textContent)`),
+      ["400"],
+    );
+  });
+
+  await t.test("the install is explained where it is offered", async () => {
+    fixture.reset();
+    fixture.setFonts([]);
+    await openProject(page);
+    await openFontsPanel(page);
+    await page.waitFor(`!document.querySelector("#font-empty").hidden`, "the empty font state");
+    await waitForSaved(page);
+    const copy = await page.evaluate(`document.querySelector(".font-install-copy").textContent`);
+    assert.match(copy, /installs the default font pack/);
+    assert.match(copy, /manifest built into this program/, "the pinned manifest is named");
+    assert.match(copy, /download starts only when you click/, "explicit download is named");
+    assert.match(copy, /only when you click/, "the silent-fetch refusal is named");
+    assert.match(copy, /workspace font store/, "where the files land is named");
+
+    // The Settings entry carries the same explanation.
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "the settings modal");
+
+    const settingsHint = await page.evaluate(
+      `document.querySelector("#settings-dialog .settings-section:nth-of-type(3) .hint").textContent`,
+    );
+    assert.match(settingsHint, /downloads fonts only when you click/);
+    assert.match(settingsHint, /manifest built into this program/);
+    assert.match(settingsHint, /only when you click/);
+    assert.match(settingsHint, /workspace font store/);
+    await page.evaluate(`document.querySelector("#settings-dialog").close("cancel")`);
+  });
+
+  await t.test("optional font packs name their files before one explicit install", async () => {
+    fixture.reset();
+    await openProject(page);
+    await openFontsPanel(page);
+    await page.waitFor(`!document.querySelector("#font-pack-section").hidden`, "optional font packs");
+    const before = fixture.fontCalls.filter((call) => call.method === "POST").length;
+    const packs = await page.evaluate(`[...document.querySelectorAll("#font-pack-options [data-pack]")].map((button) => ({
+      pack: button.dataset.pack,
+      detail: button.querySelector("span").textContent,
+    }))`);
+    assert.deepEqual(packs.map((one) => one.pack), ["text", "display", "mono"]);
+    assert.match(packs[0].detail, /Inter, Roboto, Open Sans,? and Lora/);
+    assert.match(packs[0].detail, /when you click/);
+    assert.equal(fixture.fontCalls.filter((call) => call.method === "POST").length, before);
+    await page.click("#font-pack-section summary");
+    await page.click('#font-pack-options [data-pack="text"]');
+    await page.waitFor(`[...document.querySelectorAll("#font-list [data-family]")].some((one) => one.dataset.family === "Inter")`, "Inter to be installed");
+    await page.waitFor(`document.querySelector("#status").textContent.includes("Installed font pack text")`, "font pack install to finish");
+    assert.equal(fixture.fontCalls.filter((call) => call.method === "POST").length, before + 1);
+    assert.equal(await page.evaluate(`document.querySelector('#font-pack-options [data-pack="text"]').disabled`), true);
+  });
+  await t.test("at 1280x800 the editor fits, the inspector stays usable, and panels collapse", async () => {
+    fixture.reset();
+    await openProject(page);
+    await selectLayer(page, "layer_text");
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor(`window.innerWidth === 1280`, "the 13-inch viewport");
+    await withTimeout(
+      page.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`),
+      "two animation frames after the viewport change",
+    );
+    await page.evaluate(`window.dispatchEvent(new Event("resize"))`);
+
+    // No horizontal scrollbar on the main screen.
+    const viewportLayout = await page.evaluate(`(() => ({
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      offenders: [...document.querySelectorAll("body *")]
+        .filter((one) => {
+          const box = one.getBoundingClientRect();
+          const style = getComputedStyle(one);
+          return style.display !== "none" && box.width > 0 && (box.right > window.innerWidth || box.left < 0);
+        })
+        .map((one) => {
+          const box = one.getBoundingClientRect();
+          return { tag: one.tagName, id: one.id, className: one.className, left: box.left, right: box.right, width: box.width };
+        })
+        .slice(0, 12)
+    }))()`);
+    assert.equal(viewportLayout.overflow, 0, JSON.stringify(viewportLayout.offenders));
+    // The inspector stays usable: its controls sit inside the viewport.
+    const inspector = await page.evaluate(`(() => {
+      const toolbar = document.querySelector("#inspector");
+      const box = toolbar.getBoundingClientRect();
+      const input = toolbar.querySelector('[aria-label="Font family"]');
+      const inputBox = input?.getBoundingClientRect();
+      return {
+        onScreen: box.right <= window.innerWidth && box.left >= 0,
+        inputUsable: !!inputBox && inputBox.width > 0 && inputBox.right <= window.innerWidth,
+      };
+    })()`);
+    assert.deepEqual(inspector, { onScreen: true, inputUsable: true });
+
+    // The content panel closes and reopens from its rail entry.
+    await page.click("#add-text");
+    await page.click("#add-panel-close");
+    assert.equal(
+      await page.evaluate(`document.querySelector("#add-panel").classList.contains("collapsed")`),
+      true,
+    );
+    await page.click("#add-text");
+    assert.equal(
+      await page.evaluate(`document.querySelector("#add-panel").classList.contains("collapsed")`),
+      false,
+    );
+    // …and a Properties section collapses with one click.
+    await page.click("#properties-tab");
+    assert.equal(
+      await page.evaluate(`document.querySelector("#properties-panel").scrollWidth - document.querySelector("#properties-panel").clientWidth`),
+      0,
+      "Properties has no horizontal scrollbar",
+    );
+
+    const sectionWasOpen = await page.evaluate(`document.querySelector("#advanced-inspector details").open`);
+    await page.evaluate(`document.querySelector("#advanced-inspector details summary").click()`);
+    assert.equal(await page.evaluate(`document.querySelector("#advanced-inspector details").open`), !sectionWasOpen);
+
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor(`window.innerWidth === 1400`, "the viewport restored");
+  });
+
+  await t.test("the Elements drawer and four shape actions stay on screen at 390px", async () => {
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 800, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor(`window.innerWidth === 390`, "the narrow viewport");
+    await withTimeout(
+      page.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`),
+      "two animation frames after the narrow viewport change",
+    );
+    await page.evaluate(`window.dispatchEvent(new Event("resize"))`);
+    await page.click("#add-shape");
+    const drawer = await page.evaluate(`(() => {
+      const panel = document.querySelector("#add-panel");
+      const panelBox = panel.getBoundingClientRect();
+      const actions = [...document.querySelectorAll("#add-shape-section [data-shape]")];
+      return {
+        open: !panel.classList.contains("collapsed") && !document.querySelector("#add-shape-section").hidden,
+        intersectsViewport: panelBox.width > 0 && panelBox.height > 0
+          && panelBox.left < innerWidth && panelBox.right > 0
+          && panelBox.top < innerHeight && panelBox.bottom > 0,
+        actions: actions.map((action) => {
+          const box = action.getBoundingClientRect();
+          return {
+            shape: action.dataset.shape,
+            visible: box.width > 0 && box.height > 0
+              && box.left >= 0 && box.right <= innerWidth
+              && box.top >= 0 && box.bottom <= innerHeight,
+          };
+        }),
+      };
+    })()`);
+    assert.equal(drawer.open, true);
+    assert.equal(drawer.intersectsViewport, true, "the Elements drawer must intersect the viewport");
+    assert.deepEqual(drawer.actions, ["rect", "ellipse", "line", "path"].map((shape) => ({ shape, visible: true })));
+    await page.click("#add-panel-close");
+    assert.equal(await page.evaluate(`document.querySelector("#add-panel").classList.contains("collapsed")`), true);
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor(`window.innerWidth === 1280`, "the 1280px viewport restored");
+  });
   await t.test("a lock the server reclaimed on its own is reported once, on the next open", async () => {
     fixture.reset();
     fixture.armReclaimedLock({ pid: 4242, host: "workstation-7", at: Date.now() });
@@ -1257,17 +2203,25 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     // still land, in order.
     await waitForSaved(page);
     await page.click("#add-shape");
+
     assert.deepEqual(await page.evaluate(`({
       title: document.querySelector("#add-panel-title").textContent,
       visible: !document.querySelector("#add-shape-section").hidden,
       shownSections: [...document.querySelectorAll(".add-section")].filter((one) => !one.hidden).length,
       offered: [...document.querySelectorAll("#add-shape-section [data-shape]")].map((one) => one.dataset.shape)
     })`), {
-      title: "Shapes",
+      title: "Elements",
       visible: true,
       shownSections: 1,
-      offered: ["rect", "ellipse", "line"],
+      offered: ["rect", "ellipse", "line", "path"],
     });
+    const shapeControls = await page.evaluate(`[...document.querySelectorAll("#add-shape-section [data-shape]")].map((button) => ({
+      height: button.getBoundingClientRect().height,
+      radius: parseFloat(getComputedStyle(button).borderTopLeftRadius),
+      icon: !!button.querySelector(".shape-preset-icon i"),
+    }))`);
+    assert.equal(shapeControls.length, 4);
+    assert.ok(shapeControls.every((control) => control.height >= 48 && control.radius >= 12 && control.icon));
 
     // Each button is one create: the geometry and the paint arrive together,
     // so there is never a moment when the document holds an unpainted shape.
@@ -1311,6 +2265,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
 
     // The tree says which primitive each layer is, rather than showing three
     // identical rows.
+
     assert.deepEqual(await page.evaluate(`({
       rect: document.querySelector('.layer[data-id="layer_made_3"] .layer-icon').className,
       ellipse: document.querySelector('.layer[data-id="layer_made_4"] .layer-icon').className,
@@ -1569,7 +2524,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     await selectLayer(page, "layer_text");
     await page.key("ArrowRight", { code: "ArrowRight" });
     await page.waitFor(
-      `document.querySelector("#status").textContent.includes("preview") && document.querySelector("#status").textContent.includes("missingFont")`,
+      `document.querySelector("#status").dataset.kind === "error" && document.querySelector("#status").textContent.includes("missingFont")`,
       "the refused preview to be reported",
     );
     fixture.failPreviews(0);
@@ -1635,17 +2590,20 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     await page.evaluate(`(() => {
       document.querySelector("#undo").click();
       document.querySelector("#undo").click();
+      import("/i18n.js").then((i18n) => i18n.setLocale("fr"));
       const select = document.querySelector("#projects");
       select.value = "second";
       select.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     })()`);
     await page.waitFor(
-      `document.querySelector("#status").textContent.includes("Opened Second project")`,
+      `document.querySelector("#status").textContent.includes("Second project")`,
       "the second project to open after the waiting undos",
       10000,
     );
+    assert.equal(await page.evaluate(`document.documentElement.lang`), "fr");
     assert.deepEqual(fixture.undos, ["demo", "demo"], "every undo ran on the project it was made for");
+    await page.evaluate(`import("/i18n.js").then((i18n) => i18n.setLocale("en"))`);
     fixture.useSecondProject(false);
   });
 
@@ -1680,9 +2638,13 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     );
   });
 
-  await t.test("the agent dialog shows copy-ready configuration with the real executable path", async () => {
+  await t.test("the agent dialog opens from Settings and shows copy-ready configuration", async () => {
+    assert.equal(await page.evaluate(`document.querySelector(".topbar #agents") === null`), true);
+    await page.click("#settings");
+    await page.waitFor(`document.querySelector("#settings-dialog").open`, "Settings to open");
     await page.click("#agents");
     await page.waitFor(`document.querySelector("#agents-dialog").open`, "the agent dialog to open");
+    assert.equal(await page.evaluate(`document.querySelector("#settings-dialog").open`), false);
     const blocks = await page.evaluate(`Object.fromEntries(
       [...document.querySelectorAll("#agents-blocks .agent-block")]
         .map((one) => [one.dataset.block, one.querySelector("code").textContent])
@@ -1742,6 +2704,382 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       10000,
     );
     assert.equal(await page.evaluate(`document.querySelector("#projects").value`), "demo");
+  });
+
+  await t.test("inline rename commits one rename with Enter, cancels with Escape, and shows in the tree", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+
+    // Enter commits exactly one rename operation.
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      document.querySelector('.layer[data-id="layer_text"] .name')
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(`document.querySelector(".layer-rename") !== null`, "the rename editor");
+    await page.evaluate(`(() => {
+      const input = document.querySelector(".layer-rename");
+      input.value = "Renamed layer";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      return true;
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "rename",
+      id: "layer_text",
+      name: "Renamed layer",
+    });
+    await page.waitFor(
+      `document.querySelector('.layer[data-id="layer_text"] .name')?.textContent === "Renamed layer"`,
+      "the tree to show the new name",
+    );
+
+    // Escape cancels: the editor closes, nothing is written, the name stays.
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      document.querySelector('.layer[data-id="layer_text"] .name')
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(`document.querySelector(".layer-rename") !== null`, "the rename editor again");
+    await page.evaluate(`(() => {
+      const input = document.querySelector(".layer-rename");
+      input.value = "Cancelled name";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(`document.querySelector(".layer-rename") === null`, "the editor to close");
+    assert.equal(fixture.writes.length, 0);
+    assert.equal(
+      await page.evaluate(`document.querySelector('.layer[data-id="layer_text"] .name')?.textContent`),
+      "Renamed layer",
+    );
+  });
+
+  await t.test("effect reorder is one update, and one undo returns the byte-identical document", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    await selectLayer(page, "layer_text");
+
+    // Two order-sensitive effects: blur written first, brightness second.
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => { document.querySelector(".effect-chooser").value = "blur"; })()`);
+    await page.click(".effect-add");
+    await waitForSaved(page);
+    await page.evaluate(`(() => { document.querySelector(".effect-chooser").value = "brightness"; })()`);
+    await page.click(".effect-add");
+    await waitForSaved(page);
+    await waitForWrites(fixture, 2);
+    assert.deepEqual(fixture.writes[1].body.operation.effects, [
+      { type: "blur", radius: 0 },
+      { type: "brightness", amount: 1 },
+    ]);
+
+    // Swapping is one update of the whole stack.
+    const beforeSwap = fixture.documentJson();
+    fixture.writes.length = 0;
+    await page.click('.effect-row[data-effect="brightness"] .effect-up');
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation.effects, [
+      { type: "brightness", amount: 1 },
+      { type: "blur", radius: 0 },
+    ]);
+    assert.deepEqual(JSON.parse(fixture.documentJson()).layers[0].effects, [
+      { type: "brightness", amount: 1 },
+      { type: "blur", radius: 0 },
+    ]);
+
+    // One undo: the document reads back byte-identical to before the swap.
+    await page.click("#undo");
+    await page.waitFor(
+      `document.querySelector("#status").textContent.toLowerCase().includes("undone")`,
+      "the undo to be reported",
+    );
+    assert.equal(fixture.documentJson(), beforeSwap);
+  });
+
+  await t.test("every parameter of one effect is set and read back from the document", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    await selectLayer(page, "layer_text");
+
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => { document.querySelector(".effect-chooser").value = "dropShadow"; })()`);
+    await page.click(".effect-add");
+    await waitForSaved(page);
+    await waitForWrites(fixture);
+
+    const setField = (field, value) => page.evaluate(`(() => {
+      const input = document.querySelector('.effect-row[data-effect="dropShadow"] [data-field="${field}"]');
+      input.value = ${JSON.stringify(value)};
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    for (const [field, value] of [["dx", "10"], ["dy", "20"], ["blur", "3"], ["color", "#10203040"]]) {
+      await setField(field, value);
+      await waitForSaved(page);
+    }
+    const stored = JSON.parse(fixture.documentJson()).layers[0].effects[0];
+    assert.deepEqual(stored, { type: "dropShadow", dx: 10, dy: 20, blur: 3, color: "#10203040" });
+  });
+
+  await t.test("a path layer is added by one create, and a bad d is refused writing nothing", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+
+    // An invalid d: the engine's typed refusal, nothing written, nothing created.
+    await page.click("#add-shape");
+
+    await page.click('[data-shape="path"]');
+    await page.waitFor(`document.querySelector("#name-dialog").open`, "the path dialog");
+    await page.evaluate(`(() => {
+      document.querySelector("#name-dialog-input").value = "M 0 0 Q 5 5 10 10 Z";
+      document.querySelector("#name-dialog-confirm").click();
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector("#status").dataset.kind === "error"`,
+      "the refusal of the invalid d",
+    );
+    const refusal = await page.evaluate(`document.querySelector("#status").textContent`);
+    assert.match(refusal, /invalidPath/);
+    assert.match(refusal, /Q/);
+    assert.equal(fixture.writes.length, 0);
+
+    // A valid d is one create carrying geometry and paint together.
+    await page.click('[data-shape="path"]');
+    await page.waitFor(`document.querySelector("#name-dialog").open`, "the path dialog again");
+    await page.evaluate(`(() => {
+      document.querySelector("#name-dialog-input").value = "M 0 0 L 100 0 L 100 100 Z";
+      document.querySelector("#name-dialog-confirm").click();
+      return true;
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "create",
+      position: { at: "root" },
+      transform: { x: 340, y: 230, width: 320, height: 240 },
+      type: "shape",
+      shape: { kind: "path", d: "M 0 0 L 100 0 L 100 100 Z" },
+      fill: "#3366cc",
+    });
+
+    // The Properties field shows the stored d. An invalid edit there is
+    // refused at the control, in the engine's words, and writes nothing.
+    await selectLayer(page, "layer_made_3");
+    assert.equal(
+      await page.evaluate(`document.querySelector(".shape-path-d")?.value`),
+      "M 0 0 L 100 0 L 100 100 Z",
+    );
+    fixture.armWriteRefusal("invalidPath", "unsupported path command 'Q' at byte 5");
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const input = document.querySelector(".shape-path-d");
+      input.value = "M 0 0 Q 5 5 10 10 Z";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector(".path-d-note") !== null`,
+      "the refusal at the path control",
+    );
+    assert.match(
+      await page.evaluate(`document.querySelector(".path-d-note").textContent`),
+      /unsupported path command 'Q' at byte 5/,
+    );
+    assert.equal(fixture.writes.length, 0, "a refused d writes nothing");
+  });
+
+  await t.test("a dash pattern is checked at the control, and both marker ends land on a line", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    await page.click("#add-shape");
+
+    await page.click('[data-shape="line"]');
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    await selectLayer(page, "layer_made_3");
+
+    // A zero entry is refused before anything is sent.
+    fixture.writes.length = 0;
+    const setDash = (value) => page.evaluate(`(() => {
+      const input = document.querySelector(".shape-dash");
+      input.value = ${JSON.stringify(value)};
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await setDash("4, 0");
+    await page.waitFor(`document.querySelector(".dash-note") !== null`, "the zero-entry refusal");
+    assert.equal(fixture.writes.length, 0);
+    // More than the engine's eight entries is refused too.
+    await setDash("1, 2, 3, 4, 5, 6, 7, 8, 9");
+    await page.waitFor(
+      `document.querySelector(".dash-note")?.textContent.includes("8")`,
+      "the entry-count refusal",
+    );
+    assert.equal(fixture.writes.length, 0);
+
+    // A valid pattern is one update carrying the whole stroke.
+    await setDash("4, 8");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update",
+      id: "layer_made_3",
+      stroke: { color: "#111111", width: 2, dashArray: [4, 8] },
+    });
+
+    // Both marker ends, one update each.
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const select = document.querySelector(".shape-marker-start");
+      select.value = "arrow";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update",
+      id: "layer_made_3",
+      markerStart: "arrow",
+    });
+    await page.evaluate(`(() => {
+      const select = document.querySelector(".shape-marker-end");
+      select.value = "circle";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[1].body.operation, {
+      op: "update",
+      id: "layer_made_3",
+      markerEnd: "circle",
+    });
+    assert.deepEqual(fixture.layers().find((one) => one.id === "layer_made_3").shape, {
+      kind: "line",
+      markerStart: "arrow",
+      markerEnd: "circle",
+    });
+  });
+
+  await t.test("rename asks for a name, refuses a taken one, and the picker reloads under the new id", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+
+    // A name that is taken is refused in the engine's words; the project
+    // keeps its id.
+    await openDocumentSettings(page);
+    await page.click("#rename-project");
+    await page.waitFor(`document.querySelector("#name-dialog").open`, "the rename dialog");
+    await page.evaluate(`(() => {
+      document.querySelector("#name-dialog-input").value = "second";
+      document.querySelector("#name-dialog-confirm").click();
+      return true;
+    })()`);
+    await page.waitFor(
+      `document.querySelector("#status").dataset.kind === "error"`,
+      "the taken-name refusal",
+    );
+    assert.match(
+      await page.evaluate(`document.querySelector("#status").textContent`),
+      /A project with this name exists\./,
+    );
+
+    // A free name: the id is the directory name, so the picker reloads and
+    // the project reopens under the new id.
+    await openDocumentSettings(page);
+    await page.click("#rename-project");
+    await page.waitFor(`document.querySelector("#name-dialog").open`, "the rename dialog again");
+    await page.evaluate(`(() => {
+      const input = document.querySelector("#name-dialog-input");
+      input.value = "Renamed project";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      return true;
+    })()`);
+    await page.waitFor(
+      `[...document.querySelector("#projects").options].some((one) => one.value === "Renamed project")`,
+      "the picker to list the renamed project",
+    );
+    await page.waitFor(
+      `document.querySelector("#projects").value === "Renamed project" && !document.querySelector("#canvas").hidden`,
+      "the project to reopen under the new id",
+    );
+    assert.ok(
+      fixture.projectCalls().some((call) => call.kind === "rename" && call.name === "Renamed project"),
+    );
+  });
+
+  await t.test("delete names the project, refuses a locked one, and closes before the files go", async () => {
+    fixture.reset();
+    fixture.useSecondProject(true);
+    await page.evaluate(`location.reload()`);
+    await page.waitFor(`document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`, "editor reload");
+    await openProject(page);
+    await waitForSaved(page);
+
+    // The confirmation names the project and says the files are gone; a
+    // dismissal sends nothing.
+    await page.evaluate(`(() => {
+      window.__deleteQuestion = null;
+      window.confirm = (message) => { window.__deleteQuestion = message; return false; };
+      return true;
+    })()`);
+    await openDocumentSettings(page);
+    await page.click("#delete-project");
+    const question = await page.evaluate(`window.__deleteQuestion`);
+    assert.match(question, /UI test project/);
+    assert.match(question, /project folder/);
+    assert.match(question, /cannot undo/i);
+    assert.equal(fixture.projectCalls().filter((call) => call.kind === "delete").length, 0);
+    assert.equal(await page.evaluate(`document.querySelector("#canvas").hidden`), false);
+
+    // A project another process holds is refused with projectLocked, and
+    // stays open here.
+    fixture.armProjectLock();
+    await page.evaluate(`(() => { window.confirm = () => true; return true; })()`);
+    await openDocumentSettings(page);
+    await page.click("#delete-project");
+    await page.waitFor(
+      `document.querySelector("#status").dataset.kind === "error"`,
+      "the locked-project refusal",
+    );
+    assert.match(
+      await page.evaluate(`document.querySelector("#status").textContent`),
+      /Another process has this project open\./,
+    );
+    assert.equal(await page.evaluate(`document.querySelector("#canvas").hidden`), false);
+
+    // The delete goes through: the project closes, then the picker reloads
+    // without it.
+    await openDocumentSettings(page);
+    await page.click("#delete-project");
+    await page.waitFor(`document.querySelector("#canvas").hidden`, "the project to close");
+    await page.waitFor(
+      `document.querySelector("#status").textContent.includes("Deleted project UI test project")`,
+      "the deletion to be reported",
+    );
+    await page.waitFor(
+      `![...document.querySelector("#projects").options].some((one) => one.value === "demo")`,
+      "the deleted project to leave the picker",
+    );
+    assert.equal(await page.evaluate(`document.querySelector("#canvas-empty").hidden`), false);
+    assert.ok(fixture.projectCalls().some((call) => call.kind === "delete" && call.project === "demo"));
+    fixture.useSecondProject(false);
   });
 
 });

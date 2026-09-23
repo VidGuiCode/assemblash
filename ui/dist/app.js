@@ -18,7 +18,8 @@ import * as api from "./api.js";
 import { mountAgents } from "./agents.js";
 import { mountExport } from "./export.js";
 import { placedAssetSize, resizeItemInSelection, resizedBounds, resizedRotatedBounds, rotatedRectBounds, selectionBounds, } from "./geometry.js";
-import { mountFonts } from "./fonts.js";
+import { appendInstalledFontSpecimen, facesOf, mountFontSelector, mountFonts, releaseFontSpecimens } from "./fonts.js";
+import { formatCount, formatNumber, getLocale, setLocale, t as translate } from "./i18n.js";
 import { ActionQueue } from "./queue.js";
 import { mountTemplates } from "./templates.js";
 const state = {
@@ -57,16 +58,23 @@ queue.onSettled = (settlement) => {
         perf.shift();
     drawPerfOverlay();
 };
+function setSaveState(iconName, key) {
+    const icon = document.createElement("i");
+    icon.className = `ph ${iconName}`;
+    icon.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.dataset["i18n"] = key;
+    label.textContent = translate(key);
+    dom.saveState.replaceChildren(icon, label);
+}
 queue.onActiveChange = (active) => {
     state.busy = active;
     if (active) {
         dom.status.dataset["kind"] = "info";
-        dom.saveState.innerHTML =
-            '<i class="ph ph-circle-notch" aria-hidden="true"></i><span>Working…</span>';
+        setSaveState("ph-circle-notch", "save.working");
     }
     else if (dom.status.dataset["kind"] !== "error") {
-        dom.saveState.innerHTML =
-            '<i class="ph ph-check-circle" aria-hidden="true"></i><span>All changes saved</span>';
+        setSaveState("ph-check-circle", "save.allChangesSaved");
     }
 };
 /** Stamps the preview arrival on the newest interaction still missing one. */
@@ -177,9 +185,19 @@ function el(id) {
         throw new Error(`missing element #${id}`);
     return found;
 }
+function localizedSpan(key) {
+    const span = document.createElement("span");
+    span.dataset["i18n"] = key;
+    span.textContent = translate(key);
+    return span;
+}
 const dom = {
     projects: el("projects"),
+    projectOptions: el("project-options"),
+    projectPickerToggle: el("project-picker-toggle"),
     newProject: el("new-project"),
+    renameProject: el("rename-project"),
+    deleteProject: el("delete-project"),
     reload: el("reload"),
     search: el("project-search"),
     recents: el("recents"),
@@ -205,7 +223,6 @@ const dom = {
     documentDimensions: el("document-dimensions"),
     version: el("version"),
     selectTool: el("select-tool"),
-    addToggle: el("add-toggle"),
     addPanel: el("add-panel"),
     addPanelTitle: el("add-panel-title"),
     addPanelClose: el("add-panel-close"),
@@ -213,22 +230,17 @@ const dom = {
     addText: el("add-text"),
     addShape: el("add-shape"),
     addImage: el("add-image"),
-    addVector: el("add-vector"),
     imageFile: el("image-file"),
-    vectorFile: el("vector-file"),
     uploadDropzone: el("upload-dropzone"),
     uploadFeedback: el("upload-feedback"),
-    browseVector: el("browse-vector"),
     openTemplates: el("open-templates"),
     deleteLayer: el("delete-layer"),
     groupLayers: el("group-layers"),
     undo: el("undo"),
     redo: el("redo"),
     exportButton: el("export"),
-    fontFamilies: el("font-families"),
     shutdown: el("shutdown"),
     emptyCreate: el("empty-create"),
-    emptyAgents: el("empty-agents"),
     agents: el("agents"),
     agentsConnected: el("agents-connected"),
     newProjectDialog: el("new-project-dialog"),
@@ -237,6 +249,7 @@ const dom = {
     newProjectWidth: el("new-project-width"),
     newProjectHeight: el("new-project-height"),
     newProjectBackground: el("new-project-background"),
+    createProjectConfirm: el("create-project-confirm"),
     canvasPresets: el("canvas-presets"),
     nameDialog: el("name-dialog"),
     nameDialogForm: el("name-dialog-form"),
@@ -255,19 +268,44 @@ const dom = {
     zoom100: el("zoom-100"),
     templatesPanel: el("templates"),
     templatesToggle: el("templates-toggle"),
-    fontsToggle: el("fonts-toggle"),
     templatesClose: el("templates-close"),
+    settings: el("settings"),
+    settingsDialog: el("settings-dialog"),
+    settingsForm: el("settings-form"),
+    settingsGroups: [...document.querySelectorAll(".settings-section")],
+    settingFollow: el("setting-follow"),
+    settingLanguage: el("setting-language"),
+    settingsFontsOpen: el("settings-fonts-open"),
+    settingUpdateCheck: el("setting-update-check"),
+    updateNote: el("update-note"),
+    consentBar: el("consent-bar"),
+    consentNotify: el("consent-notify"),
+    consentOff: el("consent-off"),
+    updateBanner: el("update-banner"),
+    updateBannerText: el("update-banner-text"),
+    updateBannerLink: el("update-banner-link"),
+    updateBannerDismiss: el("update-banner-dismiss"),
+    canvasHints: el("canvas-hints"),
 };
 let submitRequestedName = null;
-function requestName(title, label, confirmLabel, submit) {
+function requestName(titleKey, labelKey, confirmKey, submit) {
     submitRequestedName = submit;
-    dom.nameDialogTitle.textContent = title;
-    dom.nameDialogLabel.textContent = label;
-    dom.nameDialogConfirm.textContent = confirmLabel;
+    dom.nameDialogTitle.dataset["i18n"] = titleKey;
+    dom.nameDialogTitle.textContent = translate(titleKey);
+    dom.nameDialogLabel.dataset["i18n"] = labelKey;
+    dom.nameDialogLabel.textContent = translate(labelKey);
+    dom.nameDialogConfirm.dataset["i18n"] = confirmKey;
+    dom.nameDialogConfirm.textContent = translate(confirmKey);
     dom.nameDialogInput.value = "";
     dom.nameDialog.showModal();
     dom.nameDialogInput.focus();
 }
+dom.nameDialogInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter")
+        return;
+    event.preventDefault();
+    dom.nameDialogForm.requestSubmit(dom.nameDialogConfirm);
+});
 dom.nameDialogForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const submitter = event.submitter;
@@ -291,22 +329,23 @@ function say(message, kind = "info") {
     dom.status.dataset["kind"] = kind;
 }
 /**
- * Fills the font suggestion list from the engine's font store.
+ * The font store, as the Fonts panel last read it.
  *
- * Called whenever the store changes rather than only at startup: the Fonts
- * panel can now import, remove, and install families, and a suggestion list
- * that still named yesterday's store would be worse than none. A suggestion
- * list rather than a closed menu — a document may name a family this machine
- * does not have, and typing that name back in has to stay possible.
+ * This is the data behind the font selector (register DEF-27): families are
+ * the only values a selector may commit, and the faces are what the weight
+ * control offers. It is refilled by the Fonts panel's own reload, so an
+ * import, removal, or install updates every open selector.
  */
-function setFontFamilies(families) {
-    dom.fontFamilies.replaceChildren();
-    for (const family of families) {
-        const option = document.createElement("option");
-        option.value = family;
-        dom.fontFamilies.append(option);
-    }
-}
+const fontStore = { families: [], faces: [] };
+/**
+ * Refusals a Properties control shows beside itself, keyed by control.
+ *
+ * Filled when the engine refuses what a control sent; cleared when that
+ * control sends again and when the selection changes, so a message never
+ * outlives the edit it was about.
+ */
+const shapeControlErrors = new Map();
+let shapeControlErrorsSelection = "";
 /**
  * Runs something that talks to the engine, reporting whatever it refuses.
  *
@@ -318,16 +357,33 @@ function setFontFamilies(families) {
 async function guard(what, run) {
     await queue.enqueue({ label: what, coalesceKey: null, run, onError: (error) => report(what, error) });
 }
-/** Shows an engine refusal or a transport failure, and why it mattered. */
-function report(what, error) {
-    dom.saveState.innerHTML =
-        '<i class="ph ph-warning-circle" aria-hidden="true"></i><span>Needs attention</span>';
+const knownApiErrors = {
+    unauthorized: "errors.unauthorized",
+    noSuchProject: "errors.noSuchProject",
+    projectExists: "errors.projectExists",
+    versionConflict: "errors.versionConflict",
+    projectLocked: "errors.projectLocked",
+    invalidProjectId: "errors.invalidProjectId",
+    malformedRequest: "errors.malformedRequest",
+    payloadTooLarge: "errors.payloadTooLarge",
+    invalidFilename: "errors.invalidFilename",
+    unsupportedFontFormat: "errors.unsupportedFontFormat",
+    unknownFontFamily: "errors.unknownFontFamily",
+    layerNotFound: "errors.layerNotFound",
+    invalidExportName: "errors.invalidExportName",
+};
+function apiErrorMessage(error) {
+    const key = knownApiErrors[error.code];
+    return key ? translate(key) : `${error.message} (${error.code})`;
+}
+/** Shows a translated known refusal or the unchanged diagnostic for an unknown code. */
+function report(_what, error) {
+    setSaveState("ph-warning-circle", "save.needsAttention");
     if (error instanceof api.ApiError) {
-        // The engine's own words. A refusal is information, not a crash.
-        say(`${what}: ${error.message} (${error.code})`, "error");
+        say(apiErrorMessage(error), "error");
     }
     else {
-        say(`${what}: ${String(error)}`, "error");
+        say(translate("errors.unexpected", { message: String(error) }), "error");
     }
 }
 /**
@@ -358,7 +414,11 @@ const fontsPanel = mountFonts({
     say,
     guard,
     refresh: () => refresh(),
-    familiesChanged: setFontFamilies,
+    fontsChanged: (listing) => {
+        fontStore.families = [...listing.families];
+        fontStore.faces = [...listing.faces];
+        drawInspector();
+    },
 });
 const exporter = mountExport({
     project: () => state.project,
@@ -367,6 +427,156 @@ const exporter = mountExport({
     guard,
 });
 const agents = mountAgents({ say });
+// Settings hands control to the agent dialog. Only one modal stays open.
+dom.agents.addEventListener("click", () => {
+    if (dom.settingsDialog.open)
+        dom.settingsDialog.close("cancel");
+}, { capture: true });
+// --- settings -----------------------------------------------------------------
+//
+// One modal collects the preferences that are about this page, not about the
+// document. UI-only preferences persist in localStorage under named keys, in
+// the `assemblash-agent-hint-v1` pattern:
+//
+// - `assemblash-follow-v1` — "on" or "off"; whether the page follows other
+//   clients' edits. Absent means "on", the behaviour the page always had.
+//
+// Canvas settings are document data, not preferences: they are edited through
+// the form below and committed as one `updateCanvas` operation, and nothing
+// about them is stored here. The update-check toggle is the one preference
+// that is not page-local: it is recorded in the workspace config through
+// `POST /api/update-consent` (decision D28), like the consent question below.
+/** The localStorage key of the follow preference. */
+const FOLLOW_STORAGE_KEY = "assemblash-follow-v1";
+/** Whether the page follows other clients' edits. Default: yes. */
+function followEnabled() {
+    return window.localStorage.getItem(FOLLOW_STORAGE_KEY) !== "off";
+}
+/** Opens Settings at the requested configuration group. */
+function openSettings(group = "settings-agents") {
+    dom.settingFollow.checked = followEnabled();
+    dom.settingLanguage.value = getLocale();
+    for (const section of dom.settingsGroups)
+        section.open = section.id === group;
+    dom.settingsDialog.showModal();
+}
+dom.settings.addEventListener("click", () => openSettings());
+dom.settingLanguage.value = getLocale();
+dom.settingLanguage.addEventListener("change", () => {
+    setLocale(dom.settingLanguage.value);
+});
+// Update parameterized labels in place so an active input keeps its value and focus.
+window.addEventListener("assemblash:localechange", () => {
+    for (const element of document.querySelectorAll("[data-effect-action]")) {
+        const key = element.dataset["effectAction"];
+        const value = translate(key, { effect: element.dataset["effectType"] ?? "" });
+        element.title = value;
+        const name = element.querySelector(".sr-only");
+        if (name)
+            name.textContent = value;
+    }
+    for (const element of document.querySelectorAll("[data-paint-label-key]")) {
+        const label = translate(element.dataset["paintLabelKey"]).toLowerCase();
+        element.title = element instanceof HTMLInputElement
+            ? translate("canvas.noColor", { label })
+            : translate("canvas.removeColor", { label });
+    }
+    for (const element of document.querySelectorAll("[data-resize-handle]")) {
+        element.setAttribute("aria-label", translate("canvas.resizeHandle", { handle: element.dataset["resizeHandle"] ?? "" }));
+    }
+    for (const element of document.querySelectorAll("[data-slot-name]")) {
+        element.title = translate("slots.editHint", { name: element.dataset["slotName"] ?? "" });
+    }
+    const previewName = dom.canvasImage.dataset["previewName"];
+    if (previewName)
+        dom.canvasImage.alt = translate("canvas.previewAlt", { name: previewName });
+    if (state.document) {
+        dom.version.textContent = formatNumber(api.versionOf(state.document));
+        dom.documentDimensions.textContent =
+            `${formatNumber(Math.round(state.document.canvas.width))} × ${formatNumber(Math.round(state.document.canvas.height))}`;
+        applyZoom();
+    }
+});
+dom.settingFollow.addEventListener("change", () => {
+    window.localStorage.setItem(FOLLOW_STORAGE_KEY, dom.settingFollow.checked ? "on" : "off");
+});
+dom.settingsFontsOpen.addEventListener("click", () => {
+    dom.settingsDialog.close("cancel");
+    void guard("fonts", () => openFontManager(true));
+});
+// --- update notices (decision D28) ---------------------------------------------
+//
+// The server fetches only when the workspace config says `updateCheck =
+// "notify"`, at most once every 24 hours, once at serve start. This page only
+// reads the answer and records the consent:
+//
+// - `GET /api/update-status` — read-only; the server makes no request for it.
+// - `POST /api/update-consent` — the one-time answer, asked once.
+//
+// One localStorage key: `assemblash-update-banner-v1`, the version this
+// browser dismissed. A still-newer version shows the banner again.
+const BANNER_DISMISSED_KEY = "assemblash-update-banner-v1";
+/** Draws the consent bar, the Settings toggle, and the banner from the status. */
+async function loadUpdateStatus() {
+    let status;
+    try {
+        status = await api.updateStatus();
+    }
+    catch {
+        // A status this page cannot read must never block work: the notices
+        // stay hidden and nothing else changes.
+        return;
+    }
+    dom.settingUpdateCheck.checked = status.consent === "notify";
+    // The consent question shows while no answer is recorded. It is answered
+    // once; after that the config holds the answer and the bar stays hidden.
+    dom.consentBar.hidden = status.consent !== null;
+    const dismissed = window.localStorage.getItem(BANNER_DISMISSED_KEY);
+    const showBanner = status.newer && Boolean(status.latest) && dismissed !== status.latest;
+    dom.updateBanner.hidden = !showBanner;
+    if (showBanner && status.latest) {
+        dom.updateBannerText.textContent =
+            translate("updates.versionAvailable", { latest: status.latest, current: status.current });
+        dom.updateBannerText.dataset["version"] = status.latest;
+        dom.updateBannerLink.href = status.notesUrl ?? "";
+        dom.updateBannerLink.hidden = !status.notesUrl;
+    }
+}
+/** Records the consent, then reflects the answer everywhere it is shown. */
+async function recordConsent(consent) {
+    try {
+        const status = await api.setUpdateConsent(consent);
+        dom.consentBar.hidden = status.consent !== null;
+        dom.settingUpdateCheck.checked = status.consent === "notify";
+        say(status.consent === "notify"
+            ? translate("updates.checkOn")
+            : translate("updates.checkOff"));
+    }
+    catch (error) {
+        // A refused write changes nothing; the toggle goes back with the note.
+        report(translate("updates.saveChoiceFailed"), error);
+        void loadUpdateStatus();
+    }
+}
+dom.consentNotify.addEventListener("click", () => void recordConsent("notify"));
+dom.consentOff.addEventListener("click", () => void recordConsent("off"));
+dom.settingUpdateCheck.addEventListener("change", () => {
+    void recordConsent(dom.settingUpdateCheck.checked ? "notify" : "off");
+});
+dom.updateBannerDismiss.addEventListener("click", () => {
+    window.localStorage.setItem(BANNER_DISMISSED_KEY, dom.updateBannerText.dataset["version"] ?? "");
+    dom.updateBanner.hidden = true;
+});
+// The form's own Escape path closes it through the browser; this covers the
+// keydown that arrives while the keyboard focus sits elsewhere on the page.
+// Closing commits nothing: the canvas form applies only through its button,
+// and the follow toggle commits only through its own change event.
+dom.settingsForm.addEventListener("submit", (event) => {
+    const submitter = event.submitter;
+    if (submitter?.value === "cancel") {
+        dom.settingsDialog.close("cancel");
+    }
+});
 function selectedLayer() {
     if (!state.document || state.selection.length !== 1)
         return null;
@@ -407,6 +617,16 @@ function wireLongPressMenu(target, beforeOpen) {
     target.addEventListener("pointercancel", cancel);
 }
 // --- rendering ---------------------------------------------------------------
+let hintedProject = null;
+let canvasHintTimer;
+function showCanvasHint() {
+    if (!state.project || hintedProject === state.project)
+        return;
+    hintedProject = state.project;
+    dom.canvasHints.hidden = false;
+    window.clearTimeout(canvasHintTimer);
+    canvasHintTimer = window.setTimeout(() => { dom.canvasHints.hidden = true; }, 5000);
+}
 /** Refreshes issued later own the page state; a stale response steps aside. */
 let refreshSequence = 0;
 async function refresh() {
@@ -418,11 +638,12 @@ async function refresh() {
         return;
     state.document = doc;
     state.selection = state.selection.filter((id) => api.flatten(api.layersOf(doc)).some(({ layer }) => layer.id === id));
-    dom.version.textContent = String(api.versionOf(doc));
+    dom.version.textContent = formatNumber(api.versionOf(doc));
     dom.canvasEmpty.hidden = true;
     dom.canvas.hidden = false;
+    showCanvasHint();
     dom.documentDimensions.textContent =
-        `${Math.round(doc.canvas.width).toLocaleString()} × ${Math.round(doc.canvas.height).toLocaleString()}`;
+        `${formatNumber(Math.round(doc.canvas.width))} × ${formatNumber(Math.round(doc.canvas.height))}`;
     // Slots come with the document itself, so there is nothing extra to fetch:
     // a template is a document that names some of its own layers.
     state.slots = (doc.slots ?? []);
@@ -485,7 +706,8 @@ function requestPreview() {
                 if (previous.startsWith("blob:"))
                     URL.revokeObjectURL(previous);
                 clearDragPreviewCache();
-                dom.canvasImage.alt = `Preview of ${current.name ?? project}`;
+                dom.canvasImage.dataset["previewName"] = current.name ?? project;
+                dom.canvasImage.alt = translate("canvas.previewAlt", { name: current.name ?? project });
                 dom.canvas.style.aspectRatio = `${current.canvas.width} / ${current.canvas.height}`;
                 applyZoom();
                 markPreviewSettled();
@@ -508,11 +730,17 @@ function requestPreview() {
  * Export remains full resolution; rendering hidden pixels on every edit only
  * delays feedback and does not improve the fitted canvas.
  */
+/**
+ * The horizontal inset the stage keeps around the canvas. It mirrors the
+ * stage's own spacing (the `--space-12` scale step on each side) in the two
+ * places that must agree with it: the preview scale and the fit zoom.
+ */
+const STAGE_INSET_PX = 96;
 function interactivePreviewScale() {
     if (!state.document)
         return 1;
-    const availableWidth = Math.max(240, dom.stageViewport.clientWidth - 96);
-    const availableHeight = Math.max(180, dom.stageViewport.clientHeight - 96);
+    const availableWidth = Math.max(240, dom.stageViewport.clientWidth - STAGE_INSET_PX);
+    const availableHeight = Math.max(180, dom.stageViewport.clientHeight - STAGE_INSET_PX);
     const fit = Math.min(availableWidth / state.document.canvas.width, availableHeight / state.document.canvas.height, 1);
     const displayed = state.zoom ?? fit;
     const density = Math.max(1, window.devicePixelRatio || 1);
@@ -527,23 +755,27 @@ function drawLayers() {
     const query = dom.layerSearch.value.trim().toLowerCase();
     const flat = api.flatten(api.layersOf(state.document));
     dom.layerSearch.disabled = flat.length === 0;
-    dom.layerSearch.placeholder = flat.length === 0 ? "No layers to search" : "Search layers";
-    const appendEmptyState = (title, hint, compact = false) => {
+    const searchKey = flat.length === 0 ? "layers.noSearch" : "layers.searchPlaceholder";
+    dom.layerSearch.placeholder = translate(searchKey);
+    dom.layerSearch.dataset["i18nAttr"] = `placeholder:${searchKey}`;
+    const appendEmptyState = (titleKey, hintKey, compact = false) => {
         const item = document.createElement("li");
         item.className = `layers-empty${compact ? " compact" : ""}`;
         const icon = document.createElement("i");
         icon.className = `ph ${compact ? "ph-magnifying-glass" : "ph-stack-simple"}`;
         icon.setAttribute("aria-hidden", "true");
         const heading = document.createElement("strong");
-        heading.textContent = title;
+        heading.dataset["i18n"] = titleKey;
+        heading.textContent = translate(titleKey);
         const copy = document.createElement("span");
-        copy.textContent = hint;
+        copy.dataset["i18n"] = hintKey;
+        copy.textContent = translate(hintKey);
         item.append(icon, heading, copy);
         dom.layers.append(item);
     };
     if (flat.length === 0) {
         dom.layerSearch.value = "";
-        appendEmptyState("No layers yet", "Add text, upload an image, or drop an SVG to begin.");
+        appendEmptyState("layers.none", "layers.emptyHint");
         return;
     }
     const appendLayer = (layer, depth, parent) => {
@@ -567,9 +799,17 @@ function drawLayers() {
         const visibility = document.createElement("button");
         visibility.type = "button";
         visibility.className = "layer-control";
-        visibility.title = layer.visible ? "Hide layer" : "Show layer";
+        visibility.title = layer.visible ? translate("layers.hide") : translate("layers.show");
+        visibility.dataset["i18nAttr"] = `title:${layer.visible ? "layers.hide" : "layers.show"}`;
         visibility.disabled = !api.isEditable(layer);
-        visibility.innerHTML = `<i class="ph ${layer.visible ? "ph-eye" : "ph-eye-slash"}" aria-hidden="true"></i><span class="sr-only">${visibility.title}</span>`;
+        const visibilityIcon = document.createElement("i");
+        visibilityIcon.className = `ph ${layer.visible ? "ph-eye" : "ph-eye-slash"}`;
+        visibilityIcon.setAttribute("aria-hidden", "true");
+        const visibilityName = document.createElement("span");
+        visibilityName.className = "sr-only";
+        visibilityName.dataset["i18n"] = layer.visible ? "layers.hide" : "layers.show";
+        visibilityName.textContent = visibility.title;
+        visibility.append(visibilityIcon, visibilityName);
         visibility.addEventListener("click", (event) => {
             event.stopPropagation();
             void send(layer.visible ? "hide layer" : "show layer", {
@@ -601,13 +841,22 @@ function drawLayers() {
         const label = document.createElement("span");
         label.className = "name";
         label.textContent = visibleName;
-        label.title = "Double-click to rename";
+        label.title = translate("layers.renameHint");
+        label.dataset["i18nAttr"] = "title:layers.renameHint";
         const lock = document.createElement("button");
         lock.type = "button";
         lock.className = "layer-control";
-        lock.title = layer.locked ? "Unlock layer" : "Lock layer";
+        lock.title = layer.locked ? translate("layers.unlock") : translate("layers.lock");
+        lock.dataset["i18nAttr"] = `title:${layer.locked ? "layers.unlock" : "layers.lock"}`;
         lock.disabled = Boolean(layer.protected || layer.readOnly);
-        lock.innerHTML = `<i class="ph ${layer.locked ? "ph-lock" : "ph-lock-open"}" aria-hidden="true"></i><span class="sr-only">${lock.title}</span>`;
+        const lockIcon = document.createElement("i");
+        lockIcon.className = `ph ${layer.locked ? "ph-lock" : "ph-lock-open"}`;
+        lockIcon.setAttribute("aria-hidden", "true");
+        const lockName = document.createElement("span");
+        lockName.className = "sr-only";
+        lockName.dataset["i18n"] = layer.locked ? "layers.unlock" : "layers.lock";
+        lockName.textContent = lock.title;
+        lock.append(lockIcon, lockName);
         lock.addEventListener("click", (event) => {
             event.stopPropagation();
             void send(layer.locked ? "unlock layer" : "lock layer", {
@@ -637,7 +886,7 @@ function drawLayers() {
             drawLayers();
             drawOverlay();
             drawInspector();
-            if (window.matchMedia("(max-width: 720px)").matches) {
+            if (window.matchMedia("(max-width: 720px)").matches && selectedLayer()?.type !== "text") {
                 dom.structure.classList.remove("mobile-open");
                 dom.dockToggle.setAttribute("aria-expanded", "false");
             }
@@ -715,7 +964,7 @@ function drawLayers() {
         appendLayer(layer, 0, null);
     }
     if (dom.layers.childElementCount === 0) {
-        appendEmptyState("No matching layers", "Try a different search.", true);
+        appendEmptyState("layers.noMatching", "layers.trySearch", true);
     }
 }
 function beginLayerRename(layer, label) {
@@ -886,7 +1135,8 @@ function drawOverlay() {
             grip.type = "button";
             grip.className = `resize-handle handle-${handle}`;
             grip.dataset["handle"] = handle;
-            grip.setAttribute("aria-label", `Resize ${handle}`);
+            grip.dataset["resizeHandle"] = handle;
+            grip.setAttribute("aria-label", translate("canvas.resizeHandle", { handle }));
             grip.addEventListener("pointerdown", (event) => {
                 event.stopPropagation();
                 beginDrag(event, selected, bounds, "resize", handle);
@@ -896,7 +1146,8 @@ function drawOverlay() {
         const rotate = document.createElement("button");
         rotate.type = "button";
         rotate.className = "rotation-handle";
-        rotate.setAttribute("aria-label", "Rotate selection");
+        rotate.setAttribute("aria-label", translate("canvas.rotateSelection"));
+        rotate.dataset["i18nAttr"] = "aria-label:canvas.rotateSelection";
         rotate.innerHTML = '<i class="ph ph-arrow-clockwise" aria-hidden="true"></i>';
         rotate.addEventListener("pointerdown", (event) => {
             event.stopPropagation();
@@ -910,33 +1161,36 @@ function drawOverlay() {
     }
     dom.overlay.append(box);
 }
-/** Canvas edits stay in one operation, so dimensions and placement undo together. */
-function drawCanvasInspector() {
+/** Canvas edits stay in one operation, so dimensions and placement undo together.
+ *
+ * The form lives in the Settings modal (the approved inventory's home for
+ * document setup); `target` is the container inside it. */
+function drawCanvasInspector(target) {
     if (!state.document)
         return;
     const canvas = state.document.canvas;
     const form = document.createElement("form");
     form.id = "canvas-settings";
     form.className = "canvas-settings";
-    form.setAttribute("aria-label", "Canvas settings");
+    form.setAttribute("aria-label", translate("canvas.settingsLabel"));
     form.innerHTML = `
-    <h2>Canvas</h2>
+    <h2 data-i18n="common.canvas">Canvas</h2>
     <div class="property-grid">
-      <label class="field">Width (px)<input id="canvas-width" type="number" min="0" step="any" required></label>
-      <label class="field">Height (px)<input id="canvas-height" type="number" min="0" step="any" required></label>
+      <label class="field"><span data-i18n="canvas.widthPx">Width (px)</span><input id="canvas-width" type="number" min="0" step="any" required></label>
+      <label class="field"><span data-i18n="canvas.heightPx">Height (px)</span><input id="canvas-height" type="number" min="0" step="any" required></label>
     </div>
-    <label class="field canvas-background-field" for="canvas-background">Background</label>
+    <label class="field canvas-background-field" for="canvas-background" data-i18n="common.background">Background</label>
     <div class="canvas-background-row">
-      <input id="canvas-background-picker" type="color" aria-label="Choose canvas background colour">
-      <input id="canvas-background" type="text" spellcheck="false" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" required title="Use #RRGGBB or #RRGGBBAA">
+      <input id="canvas-background-picker" type="color" aria-label="Choose canvas background colour" data-i18n-attr="aria-label:canvas.chooseBackground">
+      <input id="canvas-background" type="text" spellcheck="false" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" required title="Use #RRGGBB or #RRGGBBAA" data-i18n-attr="title:canvas.hexHint">
     </div>
-    <label class="canvas-transparent"><input id="canvas-transparent" type="checkbox">Transparent background</label>
+    <label class="canvas-transparent"><input id="canvas-transparent" type="checkbox"> <span data-i18n="canvas.transparentBackground">Transparent background</span></label>
     <fieldset class="canvas-anchor-fieldset" aria-describedby="canvas-anchor-hint">
-      <legend>Anchor</legend>
+      <legend data-i18n="canvas.anchor">Anchor</legend>
       <div class="canvas-size-anchor-grid"></div>
-      <p id="canvas-anchor-hint" class="hint">Keep this point fixed when resizing. Layers keep their size.</p>
+      <p id="canvas-anchor-hint" class="hint" data-i18n="canvas.anchorHint">Keep this point fixed when resizing. Layers keep their size.</p>
     </fieldset>
-    <button id="canvas-apply" type="submit" class="primary" disabled>Apply canvas changes</button>
+    <button id="canvas-apply" type="submit" class="primary" disabled data-i18n="canvas.applyChanges">Apply canvas changes</button>
   `;
     const width = form.querySelector("#canvas-width");
     const height = form.querySelector("#canvas-height");
@@ -959,13 +1213,14 @@ function drawCanvasInspector() {
     for (const [value, name, glyph] of anchors) {
         const label = document.createElement("label");
         label.className = "canvas-anchor";
-        label.title = name;
+        const anchorKey = value === "center" ? "canvas.anchorCenter" : `position.${value === "top" || value === "bottom" || value === "left" || value === "right" ? value : value.replace(/-([a-z])/g, (_, part) => part.toUpperCase())}`;
+        label.title = translate(anchorKey);
         const radio = document.createElement("input");
         radio.type = "radio";
         radio.name = "canvas-anchor";
         radio.value = value;
         radio.checked = value === "top-left";
-        radio.setAttribute("aria-label", name);
+        radio.setAttribute("aria-label", label.title);
         const mark = document.createElement("span");
         mark.textContent = glyph;
         mark.setAttribute("aria-hidden", "true");
@@ -977,7 +1232,7 @@ function drawCanvasInspector() {
     const update = () => {
         for (const input of [width, height]) {
             input.setCustomValidity(Number.isFinite(input.valueAsNumber) && input.valueAsNumber > 0
-                ? "" : "Enter a positive canvas dimension.");
+                ? "" : translate("canvas.invalidDimension"));
         }
         background.disabled = transparent.checked;
         picker.disabled = transparent.checked;
@@ -1003,17 +1258,116 @@ function drawCanvasInspector() {
             ...(nextBackground() !== (canvas.background ?? null) ? { background: nextBackground() } : {}),
         };
         apply.disabled = true;
-        void send("update canvas", operation).finally(() => { if (form.isConnected)
-            update(); });
+        void send("update canvas", operation).finally(() => {
+            if (!form.isConnected || !state.document)
+                return;
+            Object.assign(canvas, state.document.canvas);
+            update();
+        });
     });
     update();
-    dom.advancedInspector.append(form);
+    target.append(form);
+}
+/** Opens one collapsible Properties section in `container` and returns its body. */
+function dockSection(container, title) {
+    const details = document.createElement("details");
+    details.className = "dock-section";
+    details.open = !["Clip and mirror", "Appearance", "Effects", "Presets", "Slots"].includes(title);
+    const summary = document.createElement("summary");
+    const icons = {
+        Canvas: "ph-frame-corners",
+        Transform: "ph-arrows-out-cardinal",
+        Typography: "ph-text-aa",
+        Image: "ph-image",
+        Shape: "ph-shapes",
+        "Clip and mirror": "ph-crop",
+        Appearance: "ph-palette",
+        Effects: "ph-magic-wand",
+        Presets: "ph-swatches",
+        Slots: "ph-brackets-curly",
+    };
+    const icon = document.createElement("i");
+    icon.className = `ph ${icons[title] ?? "ph-sliders-horizontal"} dock-section-icon`;
+    icon.setAttribute("aria-hidden", "true");
+    const heading = document.createElement("h2");
+    const sectionKeys = {
+        Canvas: "canvas.section",
+        Transform: "properties.transform",
+        Typography: "properties.typography",
+        Image: "properties.image",
+        Media: "properties.media",
+        Shape: "properties.shape",
+        "Clip and mirror": "properties.clipMirror",
+        Appearance: "properties.appearance",
+        Effects: "properties.effects",
+        Presets: "properties.presets",
+        Slots: "properties.slots",
+    };
+    const headingKey = sectionKeys[title];
+    if (headingKey) {
+        heading.dataset["i18n"] = headingKey;
+        heading.textContent = translate(headingKey);
+    }
+    else {
+        heading.textContent = title;
+    }
+    summary.append(icon, heading);
+    const body = document.createElement("div");
+    body.className = "dock-section-body";
+    details.append(summary, body);
+    container.append(details);
+    return body;
+}
+/**
+ * Builds one font selector bound to a text layer.
+ *
+ * Both homes — the contextual toolbar and the Typography section — use it, so
+ * a family is committed from either only when the store has it, and always as
+ * one ordinary `update` operation through the queue.
+ */
+function fontSelectorFor(layer, disabled) {
+    const selector = mountFontSelector({ store: () => fontStore }, (family) => {
+        void send("change font", { op: "update", id: layer.id, fontFamily: family });
+    });
+    selector.setFamily(layer.fontFamily);
+    selector.setDisabled(disabled);
+    return selector;
+}
+let lastPropertiesSelection = "";
+function syncSelectedTextProperties(layers) {
+    const key = layers.map((one) => one.id).join(",");
+    if (key !== lastPropertiesSelection && layers.length === 1 && layers[0]?.type === "text") {
+        showDock("properties");
+        if (window.matchMedia("(max-width: 720px)").matches) {
+            dom.structure.classList.add("mobile-open");
+            dom.dockToggle.setAttribute("aria-expanded", "true");
+        }
+    }
+    lastPropertiesSelection = key;
 }
 function drawInspector() {
+    releaseFontSpecimens(dom.inspector);
+    releaseFontSpecimens(dom.advancedInspector);
     dom.inspector.replaceChildren();
     dom.advancedInspector.replaceChildren();
+    // The Properties panel is a stack of collapsible sections (plan Step 6
+    // item 3): `pane` is the body of the section being drawn, and
+    // `beginSection` opens the next one. Everything appends to `pane`.
+    let pane = dom.advancedInspector;
+    const beginSection = (title) => {
+        pane = dockSection(dom.advancedInspector, title);
+        return pane;
+    };
     const layers = selectedLayers();
     const layer = layers.length === 1 ? layers[0] ?? null : null;
+    syncSelectedTextProperties(layers);
+    // A control-side refusal is about the edit that was refused, so it goes
+    // when a different selection is drawn.
+    const selectionKey = layers.map((one) => one.id).join(",");
+    if (selectionKey !== shapeControlErrorsSelection) {
+        shapeControlErrors.clear();
+        shapeControlErrorsSelection = selectionKey;
+    }
     dom.deleteLayer.disabled = layers.length === 0 || layers.some((one) => !api.isEditable(one));
     dom.groupLayers.disabled = layers.length < 2 || layers.some((one) => !api.isEditable(one));
     renderPositionFields(layers);
@@ -1022,9 +1376,10 @@ function drawInspector() {
         canvasButton.type = "button";
         canvasButton.id = "edit-canvas";
         canvasButton.className = "toolbar-action";
-        canvasButton.setAttribute("aria-label", "Canvas size and background");
-        canvasButton.innerHTML = '<i class="ph ph-frame-corners" aria-hidden="true"></i><span>Canvas</span>';
-        canvasButton.title = "Canvas size and background";
+        canvasButton.setAttribute("aria-label", translate("editor.canvasSizeBackground"));
+        canvasButton.dataset["i18nAttr"] = "aria-label:editor.canvasSizeBackground;title:editor.canvasSizeBackground";
+        canvasButton.innerHTML = '<i class="ph ph-frame-corners" aria-hidden="true"></i><span data-i18n="common.canvas">Canvas</span>';
+        canvasButton.title = translate("editor.canvasSizeBackground");
         canvasButton.addEventListener("click", () => {
             dom.contextMenu.hidden = true;
             state.selection = [];
@@ -1032,50 +1387,54 @@ function drawInspector() {
             drawOverlay();
             drawInspector();
             showDock("properties");
-            dom.structure.classList.add("mobile-open");
-            dom.dockToggle.setAttribute("aria-expanded", "true");
-            dom.advancedInspector.querySelector("#canvas-width")?.focus();
         });
         dom.inspector.append(canvasButton);
     }
     if (layers.length === 0) {
         const hint = document.createElement("div");
         hint.className = "inspector-empty";
-        hint.innerHTML = '<i class="ph ph-cursor-click" aria-hidden="true"></i><span>Select a layer to edit it</span>';
+        hint.innerHTML = '<i class="ph ph-cursor-click" aria-hidden="true"></i><span data-i18n="editor.selectLayerHint">Select a layer to edit it</span>';
         dom.inspector.append(hint);
-        drawCanvasInspector();
+        const note = document.createElement("p");
+        note.className = "empty-panel-copy";
+        note.dataset["i18n"] = state.document ? "editor.setCanvasHint" : "editor.openProjectHint";
+        note.textContent = translate(state.document ? "editor.setCanvasHint" : "editor.openProjectHint");
+        pane.append(note);
+        if (state.document) {
+            const canvasPane = dockSection(dom.advancedInspector, "Canvas");
+            drawCanvasInspector(canvasPane);
+        }
         return;
     }
     const guarded = layers.some((one) => !api.isEditable(one));
-    const action = (label, icon, run, disabled = guarded, className = "toolbar-action") => {
+    const action = (labelKey, icon, run, disabled = guarded, className = "toolbar-action") => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = className;
         button.disabled = disabled;
-        button.title = label;
-        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i><span>${label}</span>`;
+        button.title = translate(labelKey);
+        button.dataset["i18nAttr"] = `title:${labelKey}`;
+        const symbol = document.createElement("i");
+        symbol.className = `ph ${icon}`;
+        symbol.setAttribute("aria-hidden", "true");
+        const text = document.createElement("span");
+        text.dataset["i18n"] = labelKey;
+        text.textContent = translate(labelKey);
+        button.append(symbol, text);
         button.addEventListener("click", run);
         return button;
     };
     if (layer?.type === "text") {
-        dom.inspector.append(action("Edit text", "ph-pencil-simple", () => beginInlineTextEdit(layer), guarded, "toolbar-action edit-text-button"));
         const font = document.createElement("label");
         font.className = "toolbar-field toolbar-font";
-        font.innerHTML = '<span class="sr-only">Font family</span>';
-        const fontInput = document.createElement("input");
-        fontInput.value = layer.fontFamily;
-        fontInput.disabled = guarded;
-        // The families this machine has, offered rather than imposed: a typo used
-        // to become a render error several steps later, and a family the document
-        // names but this machine lacks must still be typeable.
-        fontInput.setAttribute("list", "font-families");
-        fontInput.setAttribute("aria-label", "Font family");
-        fontInput.addEventListener("change", () => {
-            if (fontInput.value !== layer.fontFamily) {
-                void send("change font", { op: "update", id: layer.id, fontFamily: fontInput.value });
-            }
-        });
-        font.append(fontInput);
+        font.append(localizedSpan("editor.fontFamily"));
+        font.firstElementChild?.classList.add("sr-only");
+        // One selector for both homes: installed families only, with the store's
+        // refusal shown at the control when what is typed matches none of them.
+        const selector = fontSelectorFor(layer, guarded);
+        selector.input.setAttribute("aria-label", translate("editor.fontFamily"));
+        selector.input.dataset["i18nAttr"] = "aria-label:editor.fontFamily";
+        font.append(selector.root);
         dom.inspector.append(font);
         const size = document.createElement("label");
         size.className = "toolbar-field toolbar-number";
@@ -1084,7 +1443,8 @@ function drawInspector() {
         sizeInput.min = "1";
         sizeInput.value = String(layer.fontSize);
         sizeInput.disabled = guarded;
-        sizeInput.setAttribute("aria-label", "Font size");
+        sizeInput.setAttribute("aria-label", translate("editor.fontSize"));
+        sizeInput.dataset["i18nAttr"] = "aria-label:editor.fontSize";
         sizeInput.addEventListener("change", () => void send("change font size", {
             op: "update",
             id: layer.id,
@@ -1097,7 +1457,8 @@ function drawInspector() {
         colour.className = "toolbar-colour";
         colour.value = layer.color ?? "#000000";
         colour.disabled = guarded;
-        colour.setAttribute("aria-label", "Text colour");
+        colour.setAttribute("aria-label", translate("editor.textColour"));
+        colour.dataset["i18nAttr"] = "aria-label:editor.textColour";
         colour.addEventListener("change", () => void send("change colour", { op: "update", id: layer.id, color: colour.value }));
         dom.inspector.append(colour);
         for (const [value, icon] of [
@@ -1105,10 +1466,15 @@ function drawInspector() {
             ["center", "ph-text-align-center"],
             ["right", "ph-text-align-right"],
         ]) {
-            const button = action(`Align ${value}`, icon, () => {
+            const alignKey = {
+                left: "editor.alignLeft",
+                center: "editor.alignCenter",
+                right: "editor.alignRight",
+            }[value];
+            const button = action(alignKey, icon, () => {
                 void send(`align text ${value}`, { op: "update", id: layer.id, align: value });
             }, guarded, "icon-button toolbar-icon");
-            button.title = `Align text ${value}`;
+            button.title = translate(alignKey);
             button.querySelector("span")?.classList.add("sr-only");
             button.classList.toggle("selected", (layer.align ?? "left") === value);
             dom.inspector.append(button);
@@ -1120,25 +1486,35 @@ function drawInspector() {
     else {
         const selectionLabel = document.createElement("span");
         selectionLabel.className = "selection-label";
-        selectionLabel.textContent = layers.length === 1 ? (layer?.type ?? "Layer") : `${layers.length} layers`;
+        if (layers.length === 1) {
+            selectionLabel.textContent = layer?.type ?? translate("editor.layerGeneric");
+        }
+        else {
+            selectionLabel.dataset["i18nCount"] = "editor.layerCount";
+            selectionLabel.dataset["count"] = String(layers.length);
+            selectionLabel.textContent = formatCount("editor.layerCount", layers.length);
+        }
         dom.inspector.append(selectionLabel);
     }
     const ids = layers.map((one) => one.id);
-    dom.inspector.append(action("Centre horizontally", "ph-align-center-horizontal", () => {
+    dom.inspector.append(action("editor.centreHorizontally", "ph-align-center-horizontal", () => {
         void send("centre horizontally", { op: "centerOnCanvas", ids, axis: "horizontal" });
-    }), action("Centre vertically", "ph-align-center-vertical", () => {
+    }), action("editor.centreVertically", "ph-align-center-vertical", () => {
         void send("centre vertically", { op: "centerOnCanvas", ids, axis: "vertical" });
-    }), action("Position", "ph-bounding-box", () => togglePositionPopover(), false, "toolbar-action position-button"), action("Group", "ph-stack", () => {
+    }), action("position.title", "ph-bounding-box", () => togglePositionPopover(), false, "toolbar-action position-button"), action("layers.groupButton", "ph-stack", () => {
         if (ids.length > 1)
             void send("group", { op: "group", ids });
-    }, guarded || ids.length < 2), action("Duplicate", "ph-copy", () => {
+    }, guarded || ids.length < 2), action("editor.duplicate", "ph-copy", () => {
         void sendBatch("duplicate", ids.map((id) => ({ op: "duplicate", id })));
     }));
     if (!layer) {
         const note = document.createElement("p");
         note.className = "empty-panel-copy";
-        note.textContent = `${layers.length} layers selected. Use Position for alignment, distribution, ordering, and exact transforms.`;
-        dom.advancedInspector.append(note);
+        const textLayers = layers.filter((one) => one.type === "text");
+        const mixedFamilies = textLayers.length > 1 && new Set(textLayers.map((one) => one.fontFamily)).size > 1;
+        note.dataset["i18n"] = mixedFamilies ? "properties.mixedFonts" : "editor.selectionCountHint";
+        note.textContent = mixedFamilies ? translate("properties.mixedFonts") : translate("editor.selectionCountHint", { count: layers.length });
+        pane.append(note);
         return;
     }
     const why = api.whyNotEditable(layer);
@@ -1146,12 +1522,15 @@ function drawInspector() {
         const note = document.createElement("p");
         note.className = "guarded-note";
         note.textContent = why;
-        dom.advancedInspector.append(note);
+        pane.append(note);
     }
-    const field = (label, value, apply, type = "number", list, className) => {
+    const field = (labelKey, value, apply, type = "number", list, className) => {
         const wrapper = document.createElement("label");
         wrapper.className = "field";
-        wrapper.append(document.createTextNode(label));
+        const caption = document.createElement("span");
+        caption.dataset["i18n"] = labelKey;
+        caption.textContent = translate(labelKey);
+        wrapper.append(caption);
         const input = document.createElement("input");
         input.type = type;
         input.value = value;
@@ -1165,57 +1544,122 @@ function drawInspector() {
                 return;
             const operation = apply(input.value);
             if (operation)
-                void send(`change ${label}`, operation);
+                void send(`change ${translate(labelKey)}`, operation);
         });
         wrapper.append(input);
-        dom.advancedInspector.append(wrapper);
+        pane.append(wrapper);
     };
-    const transformHeading = document.createElement("h2");
-    transformHeading.textContent = "Transform";
-    dom.advancedInspector.append(transformHeading);
-    const grid = document.createElement("div");
-    grid.className = "property-grid";
-    const previousTarget = dom.advancedInspector;
-    const appendFieldToGrid = (label, value, apply) => {
-        const wrapper = document.createElement("label");
-        wrapper.className = "field";
-        wrapper.append(document.createTextNode(label));
-        const input = document.createElement("input");
-        input.type = "number";
-        input.value = value;
-        input.disabled = why !== null;
-        input.addEventListener("change", () => {
-            const operation = apply(input.value);
-            if (operation)
-                void send(`change ${label}`, operation);
-        });
-        wrapper.append(input);
-        grid.append(wrapper);
-    };
-    const t = layer.transform;
-    appendFieldToGrid("X", String(t.x), (next) => moveTo(layer, Number(next), t.y));
-    appendFieldToGrid("Y", String(t.y), (next) => moveTo(layer, t.x, Number(next)));
-    appendFieldToGrid("Width", String(t.width), (next) => resizeTo(layer, Number(next), t.height));
-    appendFieldToGrid("Height", String(t.height), (next) => resizeTo(layer, t.width, Number(next)));
-    appendFieldToGrid("Rotation", String(t.rotation ?? 0), (next) => ({ op: "rotate", id: layer.id, degrees: Number(next) }));
-    appendFieldToGrid("Opacity", String(layer.opacity ?? 1), (next) => ({ op: "update", id: layer.id, opacity: Number(next) }));
-    previousTarget.append(grid);
     if (layer.type === "text") {
-        const heading = document.createElement("h2");
-        heading.textContent = "Typography";
-        dom.advancedInspector.append(heading);
-        field("Font", layer.fontFamily, (next) => ({ op: "update", id: layer.id, fontFamily: next }), "text", "font-families");
-        field("Font size", String(layer.fontSize), (next) => ({ op: "update", id: layer.id, fontSize: Number(next) }));
-        field("Line height", String(layer.lineHeight ?? 1.2), (next) => ({ op: "update", id: layer.id, lineHeight: Number(next) }));
-        field("Weight", String(layer.fontWeight ?? 400), (next) => ({ op: "update", id: layer.id, fontWeight: Number(next) }));
-        field("Letter spacing", String(layer.letterSpacing ?? 0), (next) => ({ op: "update", id: layer.id, letterSpacing: Number(next) }));
+        pane = beginSection("Typography");
+        const editText = document.createElement("button");
+        editText.type = "button";
+        editText.className = "wide-action edit-text-button";
+        editText.disabled = why !== null;
+        editText.innerHTML = '<i class="ph ph-pencil-simple" aria-hidden="true"></i>';
+        editText.append(localizedSpan("canvas.editText"));
+        editText.addEventListener("click", () => beginInlineTextEdit(layer));
+        pane.append(editText);
+        const familyAvailable = fontStore.families.includes(layer.fontFamily);
+        const summary = document.createElement("div");
+        summary.className = "current-font-summary";
+        const familyName = document.createElement("strong");
+        familyName.className = "current-font-family";
+        familyName.textContent = layer.fontFamily;
+        const faceName = document.createElement("span");
+        faceName.className = "current-font-face";
+        faceName.textContent = `${layer.fontWeight ?? 400} · ${layer.fontStyle ?? "normal"} · ${layer.fontSize} px`;
+        summary.append(familyName, faceName);
+        if (!familyAvailable) {
+            const status = document.createElement("p");
+            status.className = "current-font-status";
+            status.dataset["i18n"] = "properties.fontMissing";
+            status.textContent = translate("properties.fontMissing");
+            const install = document.createElement("button");
+            install.type = "button";
+            install.className = "small";
+            install.dataset["i18n"] = "fonts.installFonts";
+            install.textContent = translate("fonts.installFonts");
+            install.addEventListener("click", () => void guard("fonts", () => openFontManager(true)));
+            summary.append(status, install);
+        }
+        else {
+            const specimen = document.createElement("span");
+            specimen.className = "current-font-specimen";
+            const exactFace = fontStore.faces.find((face) => face.family === layer.fontFamily
+                && face.weight === (layer.fontWeight ?? 400)
+                && face.style === (layer.fontStyle ?? "normal"));
+            if (exactFace) {
+                appendInstalledFontSpecimen(specimen, exactFace);
+            }
+            else {
+                const status = document.createElement("span");
+                status.className = "font-specimen-status";
+                status.textContent = translate("fonts.previewUnavailable");
+                specimen.append(status);
+            }
+            summary.append(specimen);
+        }
+        pane.append(summary);
+        const fontField = document.createElement("label");
+        fontField.className = "field";
+        fontField.append(localizedSpan("properties.font"));
+        const fontSelector = fontSelectorFor(layer, why !== null);
+        fontSelector.input.setAttribute("aria-label", translate("editor.fontFamily"));
+        fontSelector.input.dataset["i18nAttr"] = "aria-label:editor.fontFamily";
+        fontField.append(fontSelector.root);
+        pane.append(fontField);
+        field("properties.fontSize", String(layer.fontSize), (next) => ({ op: "update", id: layer.id, fontSize: Number(next) }));
+        field("properties.lineHeight", String(layer.lineHeight ?? 1.2), (next) => ({ op: "update", id: layer.id, lineHeight: Number(next) }));
+        // Weight is offered as the faces the store actually holds for this family;
+        // a weight the files lack is refused at render, so it is not offered here.
+        // When the store records no faces for the family, the honest fallback is
+        // the number field the document carries.
+        const faces = facesOf(layer.fontFamily, fontStore.faces);
+        if (faces.length) {
+            const weightField = document.createElement("label");
+            weightField.className = "field";
+            weightField.append(localizedSpan("properties.weight"));
+            const weightSelect = document.createElement("select");
+            weightSelect.disabled = why !== null;
+            weightSelect.setAttribute("aria-label", translate("canvas.fontWeight"));
+            weightSelect.dataset["i18nAttr"] = "aria-label:canvas.fontWeight";
+            const currentWeight = layer.fontWeight ?? 400;
+            const currentStyle = layer.fontStyle ?? "normal";
+            const known = [...new Set([
+                    ...faces.filter((face) => face.style === currentStyle).map((face) => face.weight),
+                    currentWeight,
+                ])].sort((a, b) => a - b);
+            for (const weight of known) {
+                const option = document.createElement("option");
+                option.value = String(weight);
+                option.textContent = String(weight);
+                weightSelect.append(option);
+            }
+            weightSelect.value = String(currentWeight);
+            weightSelect.addEventListener("change", () => void send("change Weight", { op: "update", id: layer.id, fontWeight: Number(weightSelect.value) }));
+            weightField.append(weightSelect);
+            pane.append(weightField);
+        }
+        else {
+            field("properties.weight", String(layer.fontWeight ?? 400), (next) => ({ op: "update", id: layer.id, fontWeight: Number(next) }));
+        }
+        field("properties.letterSpacing", String(layer.letterSpacing ?? 0), (next) => ({ op: "update", id: layer.id, letterSpacing: Number(next) }));
         const fontStyle = document.createElement("label");
         fontStyle.className = "field";
-        fontStyle.append(document.createTextNode("Style"));
+        fontStyle.append(localizedSpan("properties.style"));
         const fontStyleSelect = document.createElement("select");
         fontStyleSelect.disabled = why !== null;
-        fontStyleSelect.setAttribute("aria-label", "Font style");
-        for (const style of ["normal", "italic"]) {
+        fontStyleSelect.setAttribute("aria-label", translate("canvas.fontStyle"));
+        fontStyleSelect.dataset["i18nAttr"] = "aria-label:canvas.fontStyle";
+        const currentStyle = layer.fontStyle ?? "normal";
+        const currentWeight = layer.fontWeight ?? 400;
+        const availableStyles = faces
+            .filter((face) => face.weight === currentWeight)
+            .map((face) => face.style === "oblique" ? "italic" : face.style);
+        const styles = faces.length
+            ? [...new Set([...availableStyles, currentStyle])]
+            : [currentStyle];
+        for (const style of styles) {
             const option = document.createElement("option");
             option.value = style;
             option.textContent = style;
@@ -1224,13 +1668,14 @@ function drawInspector() {
         fontStyleSelect.value = layer.fontStyle ?? "normal";
         fontStyleSelect.addEventListener("change", () => void send("change font style", { op: "update", id: layer.id, fontStyle: fontStyleSelect.value }));
         fontStyle.append(fontStyleSelect);
-        dom.advancedInspector.append(fontStyle);
+        pane.append(fontStyle);
         const valign = document.createElement("label");
         valign.className = "field";
-        valign.append(document.createTextNode("Vertical align"));
+        valign.append(localizedSpan("properties.verticalAlign"));
         const valignSelect = document.createElement("select");
         valignSelect.disabled = why !== null;
-        valignSelect.setAttribute("aria-label", "Vertical align");
+        valignSelect.setAttribute("aria-label", translate("canvas.verticalAlign"));
+        valignSelect.dataset["i18nAttr"] = "aria-label:canvas.verticalAlign";
         for (const mode of ["top", "middle", "bottom"]) {
             const option = document.createElement("option");
             option.value = mode;
@@ -1240,28 +1685,57 @@ function drawInspector() {
         valignSelect.value = layer.verticalAlign ?? "top";
         valignSelect.addEventListener("change", () => void send("change vertical align", { op: "update", id: layer.id, verticalAlign: valignSelect.value }));
         valign.append(valignSelect);
-        dom.advancedInspector.append(valign);
-        field("Colour", layer.color ?? "#000000", (next) => next === "none"
+        pane.append(valign);
+        field("properties.colour", layer.color ?? "#000000", (next) => next === "none"
             ? ({ op: "update", id: layer.id, color: null })
             : ({ op: "update", id: layer.id, color: next }), "color");
-        field("Stroke colour", layer.stroke?.color ?? "none", (next) => next === "none"
+        field("properties.strokeColour", layer.stroke?.color ?? "none", (next) => next === "none"
             ? ({ op: "update", id: layer.id, stroke: null })
             : ({ op: "update", id: layer.id, stroke: { color: next, width: layer.stroke?.width ?? 1 } }), "color");
-        field("Stroke width", String(layer.stroke?.width ?? 1), (next) => ({ op: "update", id: layer.id, stroke: { color: layer.stroke?.color ?? "#000000", width: Number(next) } }));
+        field("properties.strokeWidth", String(layer.stroke?.width ?? 1), (next) => ({ op: "update", id: layer.id, stroke: { color: layer.stroke?.color ?? "#000000", width: Number(next) } }));
     }
+    beginSection("Transform");
+    const grid = document.createElement("div");
+    grid.className = "property-grid";
+    const appendFieldToGrid = (labelKey, value, apply) => {
+        const wrapper = document.createElement("label");
+        wrapper.className = "field";
+        const caption = document.createElement("span");
+        caption.dataset["i18n"] = labelKey;
+        caption.textContent = translate(labelKey);
+        wrapper.append(caption);
+        const input = document.createElement("input");
+        input.type = "number";
+        input.value = value;
+        input.disabled = why !== null;
+        input.addEventListener("change", () => {
+            const operation = apply(input.value);
+            if (operation)
+                void send(`change ${translate(labelKey)}`, operation);
+        });
+        wrapper.append(input);
+        grid.append(wrapper);
+    };
+    const t = layer.transform;
+    appendFieldToGrid("properties.x", String(t.x), (next) => moveTo(layer, Number(next), t.y));
+    appendFieldToGrid("properties.y", String(t.y), (next) => moveTo(layer, t.x, Number(next)));
+    appendFieldToGrid("properties.width", String(t.width), (next) => resizeTo(layer, Number(next), t.height));
+    appendFieldToGrid("properties.height", String(t.height), (next) => resizeTo(layer, t.width, Number(next)));
+    appendFieldToGrid("properties.rotation", String(t.rotation ?? 0), (next) => ({ op: "rotate", id: layer.id, degrees: Number(next) }));
+    appendFieldToGrid("properties.opacity", String(layer.opacity ?? 1), (next) => ({ op: "update", id: layer.id, opacity: Number(next) }));
+    pane.append(grid);
     if (layer.type === "image" || layer.type === "svg") {
         // How the asset meets its box. The engine's default is `fill`, which
         // stretches; until now the only way to ask for anything else was to edit
         // the file, and an upload was silently given `contain` with no way back.
-        const heading = document.createElement("h2");
-        heading.textContent = "Media";
-        dom.advancedInspector.append(heading);
+        pane = beginSection("Media");
         const fit = document.createElement("label");
         fit.className = "field";
-        fit.append(document.createTextNode("Fit"));
+        fit.append(localizedSpan("properties.fit"));
         const fitSelect = document.createElement("select");
         fitSelect.disabled = why !== null;
-        fitSelect.setAttribute("aria-label", "Fit");
+        fitSelect.setAttribute("aria-label", translate("canvas.fit"));
+        fitSelect.dataset["i18nAttr"] = "aria-label:canvas.fit";
         for (const mode of api.IMAGE_FITS) {
             const option = document.createElement("option");
             option.value = mode;
@@ -1271,7 +1745,7 @@ function drawInspector() {
         fitSelect.value = layer.fit ?? "fill";
         fitSelect.addEventListener("change", () => void send("change fit", { op: "update", id: layer.id, fit: fitSelect.value }));
         fit.append(fitSelect);
-        dom.advancedInspector.append(fit);
+        pane.append(fit);
         if (layer.type === "image") {
             // A crop is a rectangle in the image's own pixels, not a fit mode. It
             // works with Fit: the engine places the crop in the box as if it were
@@ -1285,17 +1759,17 @@ function drawInspector() {
                 typeof sourceHeight === "number" && sourceHeight > 0;
             const hint = document.createElement("p");
             hint.className = "hint";
-            hint.textContent = sourceKnown
-                ? "Crop uses the image's own pixels. It works with Fit."
-                : "The engine recorded no pixel size for this image, so a crop is not available.";
-            dom.advancedInspector.append(hint);
+            const cropHintKey = sourceKnown ? "canvas.cropAvailableHint" : "canvas.cropUnavailableHint";
+            hint.dataset["i18n"] = cropHintKey;
+            hint.textContent = translate(cropHintKey);
+            pane.append(hint);
             // With no crop, the fields show the whole image, so the first change
             // starts from the truth rather than from four zeros.
             const shown = crop ?? { x: 0, y: 0, width: sourceWidth ?? 0, height: sourceHeight ?? 0 };
-            const cropRow = (label, name, value, change) => {
+            const cropRow = (labelKey, name, value, change) => {
                 const wrapper = document.createElement("label");
                 wrapper.className = "field";
-                wrapper.append(document.createTextNode(label));
+                wrapper.append(localizedSpan(labelKey));
                 const input = document.createElement("input");
                 input.type = "number";
                 input.className = name;
@@ -1306,10 +1780,10 @@ function drawInspector() {
                         return;
                     const operation = change(Number(input.value));
                     if (operation)
-                        void send(`change ${label}`, operation);
+                        void send(`change ${translate(labelKey)}`, operation);
                 });
                 wrapper.append(input);
-                dom.advancedInspector.append(wrapper);
+                pane.append(wrapper);
             };
             // One crop is four numbers, so every field sends the whole rectangle
             // with the one value the person changed. A crop that is not a positive
@@ -1321,24 +1795,26 @@ function drawInspector() {
                     return null;
                 return { op: "update", id: layer.id, crop: next };
             };
-            cropRow("Crop x", "crop-x", shown.x, (next) => setCrop({ ...shown, x: next }));
-            cropRow("Crop y", "crop-y", shown.y, (next) => setCrop({ ...shown, y: next }));
-            cropRow("Crop width", "crop-width", shown.width, (next) => setCrop({ ...shown, width: next }));
-            cropRow("Crop height", "crop-height", shown.height, (next) => setCrop({ ...shown, height: next }));
+            cropRow("canvas.cropX", "crop-x", shown.x, (next) => setCrop({ ...shown, x: next }));
+            cropRow("canvas.cropY", "crop-y", shown.y, (next) => setCrop({ ...shown, y: next }));
+            cropRow("canvas.cropWidth", "crop-width", shown.width, (next) => setCrop({ ...shown, width: next }));
+            cropRow("canvas.cropHeight", "crop-height", shown.height, (next) => setCrop({ ...shown, height: next }));
             const clearRow = document.createElement("div");
             clearRow.className = "field";
             const clear = document.createElement("button");
             clear.type = "button";
             clear.className = "small crop-clear";
-            clear.textContent = "Clear crop";
-            clear.title = "Use the whole image";
+            clear.dataset["i18n"] = "canvas.clearCrop";
+            clear.textContent = translate("canvas.clearCrop");
+            clear.dataset["i18nAttr"] = "title:canvas.wholeImage";
+            clear.title = translate("canvas.wholeImage");
             clear.disabled = why !== null || crop === null;
             clear.addEventListener("click", () => {
                 clear.disabled = true;
                 void send("clear crop", { op: "update", id: layer.id, crop: null });
             });
             clearRow.append(clear);
-            dom.advancedInspector.append(clearRow);
+            pane.append(clearRow);
         }
     }
     if (layer.type === "shape") {
@@ -1347,9 +1823,7 @@ function drawInspector() {
         // So each paint gets a colour and a control that removes it: `null`
         // clears it, an absent property leaves it alone, and every control here
         // sends exactly one update.
-        const heading = document.createElement("h2");
-        heading.textContent = "Shape";
-        dom.advancedInspector.append(heading);
+        pane = beginSection("Shape");
         const kind = api.shapeKindOf(layer);
         const strokeColour = layer.stroke?.color ?? SHAPE_STROKE_COLOUR;
         const strokeWidth = layer.stroke?.width ?? SHAPE_STROKE_WIDTH;
@@ -1358,11 +1832,12 @@ function drawInspector() {
         // closer to the truth than the black an invalid value falls back to. Only
         // the swatch is trimmed: the width row still sends the colour as stored.
         const swatch = (colour) => /^#[0-9a-fA-F]{8}$/.test(colour) ? colour.slice(0, 7) : colour;
-        const paint = (label, name, colour, present, set, clear) => {
+        const paint = (labelKey, name, colour, present, set, clear) => {
             const row = document.createElement("div");
             row.className = "field shape-field";
             const caption = document.createElement("span");
-            caption.textContent = label;
+            caption.dataset["i18n"] = labelKey;
+            caption.textContent = translate(labelKey);
             const controls = document.createElement("span");
             controls.className = "shape-paint";
             const input = document.createElement("input");
@@ -1370,30 +1845,34 @@ function drawInspector() {
             input.className = name;
             input.value = colour;
             input.disabled = why !== null;
-            input.setAttribute("aria-label", label);
+            input.setAttribute("aria-label", translate(labelKey));
+            input.dataset["i18nAttr"] = `aria-label:${labelKey}`;
             // Absent is shown as the colour this build would give it, so picking
             // one adds the paint that was described rather than a surprise.
-            if (!present)
-                input.title = `no ${label.toLowerCase()} — choose a colour to add one`;
-            input.addEventListener("change", () => void send(`change ${label}`, set(input.value)));
+            if (!present) {
+                input.dataset["paintLabelKey"] = labelKey;
+                input.title = translate("canvas.noColor", { label: translate(labelKey).toLowerCase() });
+            }
+            input.addEventListener("change", () => void send(`change ${translate(labelKey)}`, set(input.value)));
             const none = document.createElement("button");
             none.type = "button";
             none.className = `small ${name}-none`;
-            none.textContent = "None";
-            none.title = `Remove the ${label.toLowerCase()}`;
+            none.dataset["i18n"] = "canvas.none";
+            none.textContent = translate("canvas.none");
+            none.dataset["paintLabelKey"] = labelKey;
+            none.title = translate("canvas.removeColor", { label: translate(labelKey).toLowerCase() });
             none.disabled = why !== null || !present;
-            none.addEventListener("click", () => void send(`clear ${label}`, clear()));
+            none.addEventListener("click", () => void send(`clear ${translate(labelKey)}`, clear()));
             controls.append(input, none);
             row.append(caption, controls);
-            dom.advancedInspector.append(row);
+            pane.append(row);
         };
-        paint("Fill", "shape-fill", swatch(layer.fill ?? SHAPE_FILL_COLOUR), Boolean(layer.fill), (next) => ({ op: "update", id: layer.id, fill: next }), () => ({ op: "update", id: layer.id, fill: null }));
-        paint("Stroke", "shape-stroke", swatch(strokeColour), Boolean(layer.stroke), 
+        paint("properties.fill", "shape-fill", swatch(layer.fill ?? SHAPE_FILL_COLOUR), Boolean(layer.fill), (next) => ({ op: "update", id: layer.id, fill: next }), () => ({ op: "update", id: layer.id, fill: null }));
         // A stroke is one value, not two: the colour carries the width it is
         // already drawn with, and a shape that had no stroke gets this build's
         // default width rather than a zero-width one that would draw nothing.
-        (next) => ({ op: "update", id: layer.id, stroke: { color: next, width: strokeWidth } }), () => ({ op: "update", id: layer.id, stroke: null }));
-        field("Stroke width", String(strokeWidth), (next) => ({
+        paint("properties.stroke", "shape-stroke", swatch(strokeColour), Boolean(layer.stroke), (next) => ({ op: "update", id: layer.id, stroke: { color: next, width: strokeWidth } }), () => ({ op: "update", id: layer.id, stroke: null }));
+        field("properties.strokeWidth", String(strokeWidth), (next) => ({
             op: "update",
             id: layer.id,
             stroke: { color: strokeColour, width: Number(next) },
@@ -1401,22 +1880,186 @@ function drawInspector() {
         if (kind === "rect") {
             // Only a rect has corners. Sending this to an ellipse or a line is a
             // typed refusal from the engine, so the row is simply not offered.
-            field("Corner radius", String(api.cornerRadiusOf(layer)), (next) => ({ op: "update", id: layer.id, cornerRadius: Number(next) }), "number", undefined, "shape-corner-radius");
+            field("properties.cornerRadius", String(api.cornerRadiusOf(layer)), (next) => ({ op: "update", id: layer.id, cornerRadius: Number(next) }), "number", undefined, "shape-corner-radius");
+        }
+        // A typed refusal can be shown beside the control that caused it, not
+        // only in the status bar. The map is cleared when the selection changes
+        // and when the control sends again, so a message never outlives its
+        // attempt.
+        const drawControlError = (row, key) => {
+            const message = shapeControlErrors.get(key);
+            if (!message)
+                return;
+            const note = document.createElement("span");
+            note.className = `control-error ${key}-note`;
+            note.textContent = message;
+            row.append(note);
+        };
+        const refuseAtControl = (key) => (error) => {
+            shapeControlErrors.set(key, error instanceof api.ApiError ? apiErrorMessage(error) : String(error));
+            drawInspector();
+        };
+        // The path data field. Committing replaces the whole geometry with a path
+        // in one update — the same whole-shape replacement a transform edit does
+        // for the box. The grammar is the engine's business, so nothing is
+        // pre-checked here: the typed InvalidPath refusal (which command, which
+        // byte) is shown at this control, and a refused update writes nothing.
+        const pathRow = document.createElement("label");
+        pathRow.className = "field shape-field shape-path";
+        const pathCaption = document.createElement("span");
+        pathCaption.dataset["i18n"] = "canvas.pathData";
+        pathCaption.textContent = translate("canvas.pathData");
+        const pathInput = document.createElement("textarea");
+        pathInput.className = "shape-path-d";
+        pathInput.rows = 3;
+        pathInput.maxLength = 2048;
+        pathInput.disabled = why !== null;
+        pathInput.setAttribute("aria-label", translate("canvas.pathData"));
+        pathInput.dataset["i18nAttr"] = "aria-label:canvas.pathData";
+        const shapeRecord = layer.shape;
+        if (kind === "path" && typeof shapeRecord["d"] === "string") {
+            pathInput.value = shapeRecord["d"];
+        }
+        const committedD = pathInput.value;
+        pathInput.addEventListener("change", () => {
+            const d = pathInput.value.trim();
+            if (!d || d === committedD)
+                return;
+            shapeControlErrors.delete("path-d");
+            void send("set path data", {
+                op: "update",
+                id: layer.id,
+                shape: { kind: "path", d },
+            }, refuseAtControl("path-d"));
+        });
+        pathRow.append(pathCaption, pathInput);
+        drawControlError(pathRow, "path-d");
+        pane.append(pathRow);
+        // The dash pattern, as a comma list. Entry count and positivity are
+        // checked here, because a form that sends a refusal it could have caught
+        // buys a round trip that says nothing new; anything the engine still
+        // refuses arrives back in its own words, at this control.
+        const dashRow = document.createElement("label");
+        dashRow.className = "field shape-field shape-dash-row";
+        dashRow.append(localizedSpan("canvas.dashPattern"));
+        const dashInput = document.createElement("input");
+        dashInput.type = "text";
+        dashInput.className = "shape-dash";
+        dashInput.dataset["i18nAttr"] = "placeholder:canvas.dashExample;aria-label:canvas.dashPattern";
+        dashInput.placeholder = translate("canvas.dashExample");
+        dashInput.disabled = why !== null;
+        dashInput.setAttribute("aria-label", translate("canvas.dashPattern"));
+        dashInput.value = (layer.stroke?.dashArray ?? []).join(", ");
+        dashRow.append(dashInput);
+        drawControlError(dashRow, "dash");
+        pane.append(dashRow);
+        dashInput.addEventListener("change", () => {
+            const text = dashInput.value.trim();
+            shapeControlErrors.delete("dash");
+            const numbers = text ? text.split(",").map((part) => Number(part.trim())) : [];
+            if (numbers.some((value) => !Number.isFinite(value) || value <= 0)) {
+                shapeControlErrors.set("dash", translate("canvas.dashPositiveError"));
+                drawInspector();
+                return;
+            }
+            if (numbers.length > api.MAX_DASH_ENTRIES) {
+                shapeControlErrors.set("dash", translate("canvas.dashMaxError", { count: api.MAX_DASH_ENTRIES }));
+                drawInspector();
+                return;
+            }
+            const stroke = {
+                ...(layer.stroke ?? { color: strokeColour, width: strokeWidth }),
+                dashArray: numbers.length ? numbers : null,
+            };
+            void send("change dash pattern", { op: "update", id: layer.id, stroke }, refuseAtControl("dash"));
+        });
+        // Cap and join, from the sets the engine draws. A value written by a
+        // newer build is listed as itself, so it can be seen and kept but never
+        // silently retyped.
+        const strokeChoice = (labelKey, className, key, choices) => {
+            const row = document.createElement("label");
+            row.className = "field shape-field";
+            row.append(localizedSpan(labelKey));
+            const select = document.createElement("select");
+            select.className = className;
+            select.disabled = why !== null;
+            select.setAttribute("aria-label", translate(labelKey));
+            select.dataset["i18nAttr"] = `aria-label:${labelKey}`;
+            // A cap or join written by a newer build round-trips verbatim, so its
+            // runtime type is only ever checked here, at the control.
+            const raw = layer.stroke?.[key];
+            const current = typeof raw === "string" ? raw : null;
+            const offered = current && !choices.includes(current)
+                ? [...choices, current]
+                : [...choices];
+            for (const choice of offered) {
+                const option = document.createElement("option");
+                option.value = choice;
+                option.textContent = choice;
+                select.append(option);
+            }
+            select.value = current ?? choices[0] ?? "";
+            select.addEventListener("change", () => {
+                const stroke = {
+                    ...(layer.stroke ?? { color: strokeColour, width: strokeWidth }),
+                    [key]: select.value,
+                };
+                void send(`change ${translate(labelKey).toLowerCase()}`, { op: "update", id: layer.id, stroke });
+            });
+            row.append(select);
+            pane.append(row);
+        };
+        strokeChoice("properties.lineCap", "shape-stroke-cap", "lineCap", ["butt", "round", "square"]);
+        strokeChoice("properties.lineJoin", "shape-stroke-join", "lineJoin", ["miter", "round", "bevel"]);
+        // Markers live on the Line payload, so the two selects are offered only
+        // on a line; the engine refuses them on every other kind in its own
+        // words, so the form never invites that refusal.
+        if (kind === "line") {
+            const markerRow = (labelKey, className, key) => {
+                const row = document.createElement("label");
+                row.className = "field shape-field";
+                row.append(localizedSpan(labelKey));
+                const select = document.createElement("select");
+                select.className = className;
+                select.disabled = why !== null;
+                select.setAttribute("aria-label", translate(labelKey));
+                select.dataset["i18nAttr"] = `aria-label:${labelKey}`;
+                const current = shapeRecord[key];
+                const offered = typeof current === "string" && current !== "none" &&
+                    !["arrow", "circle"].includes(current)
+                    ? ["none", "arrow", "circle", current]
+                    : ["none", "arrow", "circle"];
+                for (const choice of offered) {
+                    const option = document.createElement("option");
+                    option.value = choice;
+                    option.textContent = choice;
+                    select.append(option);
+                }
+                select.value = typeof current === "string" ? current : "none";
+                select.addEventListener("change", () => void send(`change ${translate(labelKey).toLowerCase()}`, {
+                    op: "update",
+                    id: layer.id,
+                    [key]: select.value,
+                }));
+                row.append(select);
+                pane.append(row);
+            };
+            markerRow("properties.markerStart", "shape-marker-start", "markerStart");
+            markerRow("properties.markerEnd", "shape-marker-end", "markerEnd");
         }
     }
     // Clip and mirror apply to every kind: a clip masks whatever the layer
     // draws, and a flip mirrors it about the box centre.
-    const maskHeading = document.createElement("h2");
-    maskHeading.textContent = "Clip and mirror";
-    dom.advancedInspector.append(maskHeading);
+    pane = beginSection("Clip and mirror");
     const clipShape = clipShapeOf(layer);
     const clipRow = document.createElement("label");
     clipRow.className = "field";
-    clipRow.append(document.createTextNode("Clip"));
+    clipRow.append(localizedSpan("properties.clip"));
     const clipSelect = document.createElement("select");
     clipSelect.className = "clip-shape";
     clipSelect.disabled = why !== null;
-    clipSelect.setAttribute("aria-label", "Clip");
+    clipSelect.setAttribute("aria-label", translate("properties.clip"));
+    clipSelect.dataset["i18nAttr"] = "aria-label:properties.clip";
     // A clip shape this build does not know is listed as itself, so it can be
     // seen and replaced but never silently becomes something else.
     const clipChoices = [...CLIP_SHAPES];
@@ -1441,11 +2084,11 @@ function drawInspector() {
         void send("change clip", { op: "update", id: layer.id, clip });
     });
     clipRow.append(clipSelect);
-    dom.advancedInspector.append(clipRow);
+    pane.append(clipRow);
     if (clipShape === "rect") {
         // Only a rect clip has corners. The engine refuses this property on any
         // other shape, so the row is simply not offered.
-        field("Clip radius", String(clipRadiusOf(layer)), (next) => ({
+        field("properties.clipRadius", String(clipRadiusOf(layer)), (next) => ({
             op: "update",
             id: layer.id,
             clip: { shape: "rect", cornerRadius: Number(next) },
@@ -1453,7 +2096,7 @@ function drawInspector() {
     }
     const mirror = document.createElement("div");
     mirror.className = "property-flags";
-    const flip = (label, name, key, current) => {
+    const flip = (labelKey, name, key, current) => {
         const wrapper = document.createElement("label");
         wrapper.className = "field checkbox";
         const input = document.createElement("input");
@@ -1461,20 +2104,19 @@ function drawInspector() {
         input.className = name;
         input.checked = current;
         input.disabled = why !== null;
-        input.setAttribute("aria-label", label);
-        input.addEventListener("change", () => void send(label.toLowerCase(), { op: "update", id: layer.id, [key]: input.checked }));
-        wrapper.append(input, document.createTextNode(label));
+        input.setAttribute("aria-label", translate(labelKey));
+        input.dataset["i18nAttr"] = `aria-label:${labelKey}`;
+        input.addEventListener("change", () => void send(translate(labelKey).toLowerCase(), { op: "update", id: layer.id, [key]: input.checked }));
+        wrapper.append(input, localizedSpan(labelKey));
         mirror.append(wrapper);
     };
-    flip("Flip horizontal", "flip-horizontal", "flipHorizontal", layer.transform.flipHorizontal ?? false);
-    flip("Flip vertical", "flip-vertical", "flipVertical", layer.transform.flipVertical ?? false);
-    dom.advancedInspector.append(mirror);
-    const appearanceHeading = document.createElement("h2");
-    appearanceHeading.textContent = "Appearance";
-    dom.advancedInspector.append(appearanceHeading);
+    flip("properties.flipHorizontal", "flip-horizontal", "flipHorizontal", layer.transform.flipHorizontal ?? false);
+    flip("properties.flipVertical", "flip-vertical", "flipVertical", layer.transform.flipVertical ?? false);
+    pane.append(mirror);
+    pane = beginSection("Appearance");
     const blend = document.createElement("label");
     blend.className = "field";
-    blend.append(document.createTextNode("Blend mode"));
+    blend.append(localizedSpan("properties.blendMode"));
     const blendSelect = document.createElement("select");
     blendSelect.disabled = why !== null;
     for (const mode of api.BLEND_MODES) {
@@ -1486,7 +2128,7 @@ function drawInspector() {
     blendSelect.value = layer.blendMode ?? "normal";
     blendSelect.addEventListener("change", () => void send("change blend mode", { op: "update", id: layer.id, blendMode: blendSelect.value }));
     blend.append(blendSelect);
-    dom.advancedInspector.append(blend);
+    pane.append(blend);
     drawEffects(dom.advancedInspector, layer, why !== null);
     drawPresets(dom.advancedInspector, layer, why !== null);
     drawSlots(dom.advancedInspector, layer);
@@ -1499,7 +2141,7 @@ function drawInspector() {
     visibleInput.checked = layer.visible ?? true;
     visibleInput.disabled = why !== null;
     visibleInput.addEventListener("change", () => void send("show/hide", { op: "setVisible", id: layer.id, visible: visibleInput.checked }));
-    visible.append(visibleInput, document.createTextNode("Visible"));
+    visible.append(visibleInput, localizedSpan("properties.visible"));
     const locked = document.createElement("label");
     locked.className = "field checkbox";
     const lockedInput = document.createElement("input");
@@ -1507,9 +2149,9 @@ function drawInspector() {
     lockedInput.checked = layer.locked ?? false;
     lockedInput.disabled = Boolean(layer.protected || layer.readOnly);
     lockedInput.addEventListener("change", () => void send(lockedInput.checked ? "lock layer" : "unlock layer", { op: "setLocked", id: layer.id, locked: lockedInput.checked }));
-    locked.append(lockedInput, document.createTextNode("Locked"));
+    locked.append(lockedInput, localizedSpan("properties.locked"));
     flags.append(visible, locked);
-    dom.advancedInspector.append(flags);
+    pane.append(flags);
 }
 /**
  * The effect stack, as rows with one number each.
@@ -1521,9 +2163,7 @@ function drawInspector() {
  */
 function drawEffects(target, layer, guarded) {
     const effects = (layer.effects ?? []);
-    const heading = document.createElement("h2");
-    heading.textContent = "Effects";
-    target.append(heading);
+    const body = dockSection(target, "Effects");
     /** Sends the whole stack, because order is part of what it means. */
     const setStack = (next) => {
         void send("effects", { op: "update", id: layer.id, effects: next });
@@ -1534,7 +2174,7 @@ function drawEffects(target, layer, guarded) {
         row.dataset["effect"] = effect.type;
         const label = document.createElement("span");
         label.className = "effect-name";
-        label.textContent = effect.type;
+        label.textContent = effect.type.replace(/([A-Z])/g, " $1").replace(/^./, (one) => one.toUpperCase());
         row.append(label);
         // Most effects have one number worth editing; grain's seed is deliberately
         // not one of them, because changing it would change the picture for no
@@ -1594,48 +2234,61 @@ function drawEffects(target, layer, guarded) {
         const up = document.createElement("button");
         up.type = "button";
         up.className = "small effect-up";
-        up.textContent = "Up";
-        up.title = `Move ${effect.type} earlier in the stack`;
+        up.innerHTML = '<i class="ph ph-arrow-up" aria-hidden="true"></i>';
+        const upName = document.createElement("span");
+        upName.className = "sr-only";
+        up.dataset["effectAction"] = "effects.moveUp";
+        up.dataset["effectType"] = effect.type;
+        upName.textContent = translate("effects.moveUp", { effect: effect.type });
+        up.title = upName.textContent;
+        up.append(upName);
         up.disabled = guarded || index === 0;
         up.addEventListener("click", () => swap(index - 1));
         const down = document.createElement("button");
         down.type = "button";
         down.className = "small effect-down";
-        down.textContent = "Down";
-        down.title = `Move ${effect.type} later in the stack`;
+        down.innerHTML = '<i class="ph ph-arrow-down" aria-hidden="true"></i>';
+        const downName = document.createElement("span");
+        downName.className = "sr-only";
+        down.dataset["effectAction"] = "effects.moveDown";
+        down.dataset["effectType"] = effect.type;
+        downName.textContent = translate("effects.moveDown", { effect: effect.type });
+        down.title = downName.textContent;
+        down.append(downName);
         down.disabled = guarded || index === effects.length - 1;
         down.addEventListener("click", () => swap(index + 1));
         const remove = document.createElement("button");
         remove.type = "button";
-        remove.className = "small";
-        remove.textContent = "Remove";
+        remove.className = "small effect-remove";
+        remove.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i><span data-i18n="effects.remove" class="sr-only">Remove effect</span>';
         remove.disabled = guarded;
         remove.addEventListener("click", () => setStack(effects.filter((_, at) => at !== index)));
         row.append(up, down, remove);
-        target.append(row);
+        body.append(row);
     }
     const add = document.createElement("div");
-    add.className = "buttons";
+    add.className = "effect-add-row";
     const chooser = document.createElement("select");
     chooser.className = "effect-chooser";
-    chooser.setAttribute("aria-label", "Effect to add");
+    chooser.setAttribute("aria-label", translate("effects.choose"));
+    chooser.dataset["i18nAttr"] = "aria-label:effects.choose";
     chooser.disabled = guarded;
     for (const type of api.EFFECT_TYPES) {
         const option = document.createElement("option");
         option.value = type;
-        option.textContent = type;
+        option.textContent = type.replace(/([A-Z])/g, " $1").replace(/^./, (one) => one.toUpperCase());
         chooser.append(option);
     }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "effect-add";
-    button.textContent = "Add effect";
+    button.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i><span data-i18n="effects.add">Add effect</span>';
     button.disabled = guarded;
     button.addEventListener("click", () => {
         setStack([...effects, api.newEffect(chooser.value)]);
     });
     add.append(chooser, button);
-    target.append(add);
+    body.append(add);
 }
 /**
  * The document's named styles: apply one, or save this layer's as a new one.
@@ -1645,18 +2298,17 @@ function drawEffects(target, layer, guarded) {
  * same preset applied from the command line or by an agent.
  */
 function drawPresets(target, layer, guarded) {
-    const heading = document.createElement("h2");
-    heading.textContent = "Presets";
-    target.append(heading);
+    const body = dockSection(target, "Presets");
     if (state.presets.length === 0) {
         const hint = document.createElement("p");
         hint.className = "hint";
-        hint.textContent = "No presets in this document yet.";
-        target.append(hint);
+        hint.dataset["i18n"] = "presets.none";
+        hint.textContent = translate("presets.none");
+        body.append(hint);
     }
     for (const preset of state.presets) {
         const row = document.createElement("div");
-        row.className = "effect-row";
+        row.className = "preset-row";
         const label = document.createElement("span");
         label.className = "effect-name";
         label.textContent = preset.name;
@@ -1666,7 +2318,8 @@ function drawPresets(target, layer, guarded) {
         const apply = document.createElement("button");
         apply.type = "button";
         apply.className = "small";
-        apply.textContent = "Apply";
+        apply.dataset["i18n"] = "common.apply";
+        apply.textContent = translate("common.apply");
         apply.disabled = guarded;
         apply.addEventListener("click", () => void send(`apply ${preset.name}`, {
             op: "applyPreset",
@@ -1677,21 +2330,23 @@ function drawPresets(target, layer, guarded) {
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "small";
-        remove.textContent = "Delete";
+        remove.dataset["i18n"] = "common.delete";
+        remove.textContent = translate("common.delete");
         remove.addEventListener("click", () => void send(`delete ${preset.name}`, {
             op: "deletePreset",
             name: preset.name,
         }));
         row.append(remove);
-        target.append(row);
+        body.append(row);
     }
     const save = document.createElement("div");
-    save.className = "buttons";
+    save.className = "inspector-add-row";
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = "Save style as preset";
+    button.dataset["i18n"] = "presets.saveStyle";
+    button.textContent = translate("presets.saveStyle");
     button.addEventListener("click", () => {
-        requestName("Save style preset", "Preset name", "Save preset", (name) => {
+        requestName("presets.saveTitle", "presets.name", "presets.saveButton", (name) => {
             void send(`define ${name}`, {
                 op: "definePreset",
                 preset: { name, properties: api.styleOf(layer) },
@@ -1699,7 +2354,7 @@ function drawPresets(target, layer, guarded) {
         });
     });
     save.append(button);
-    target.append(save);
+    body.append(save);
 }
 /**
  * The document's named openings, and a way to offer the selected layer.
@@ -1709,12 +2364,10 @@ function drawPresets(target, layer, guarded) {
  * by the engine, in its own words, rather than by this form knowing the rule.
  */
 function drawSlots(target, layer) {
-    const heading = document.createElement("h2");
-    heading.textContent = "Slots";
-    target.append(heading);
+    const body = dockSection(target, "Slots");
     for (const slot of state.slots) {
         const row = document.createElement("div");
-        row.className = "effect-row";
+        row.className = "slot-row";
         const label = document.createElement("span");
         label.className = "effect-name";
         label.textContent = `${slot.name}${slot.required ? " *" : ""}`;
@@ -1722,19 +2375,32 @@ function drawSlots(target, layer) {
         if (slot.layer === layer.id)
             label.classList.add("slot-on-this-layer");
         row.append(label);
+        // A slot an agent can update (MCP `update_slot`) needs a home here too:
+        // rename it, retype it, or repoint it, in the same one operation.
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "small slot-edit";
+        edit.dataset["slot"] = slot.name;
+        edit.dataset["i18n"] = "common.edit";
+        edit.textContent = translate("common.edit");
+        edit.title = translate("slots.editHint", { name: slot.name });
+        edit.dataset["slotName"] = slot.name;
+        edit.addEventListener("click", () => beginSlotEdit(row, slot));
+        row.append(edit);
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "small";
-        remove.textContent = "Remove";
+        remove.dataset["i18n"] = "common.remove";
+        remove.textContent = translate("common.remove");
         remove.addEventListener("click", () => void send(`remove slot ${slot.name}`, {
             op: "removeSlot",
             name: slot.name,
         }));
         row.append(remove);
-        target.append(row);
+        body.append(row);
     }
     const buttons = document.createElement("div");
-    buttons.className = "buttons";
+    buttons.className = "inspector-add-row";
     const kind = document.createElement("select");
     for (const option of ["text", "image", "color"]) {
         const element = document.createElement("option");
@@ -1747,9 +2413,10 @@ function drawSlots(target, layer) {
     kind.value = layer.type === "image" ? "image" : "text";
     const offer = document.createElement("button");
     offer.type = "button";
-    offer.textContent = "Offer as slot";
+    offer.dataset["i18n"] = "slots.offer";
+    offer.textContent = translate("slots.offer");
     offer.addEventListener("click", () => {
-        requestName("Create template slot", "Slot name", "Create slot", (name) => {
+        requestName("slots.createTitle", "slots.name", "slots.createButton", (name) => {
             void send(`offer ${name}`, {
                 op: "defineSlot",
                 slot: { name, layer: layer.id, kind: kind.value },
@@ -1757,7 +2424,86 @@ function drawSlots(target, layer) {
         });
     });
     buttons.append(kind, offer);
-    target.append(buttons);
+    body.append(buttons);
+}
+/**
+ * Edits one slot in place: name, kind, and the layer it fills.
+ *
+ * The commit is the same single `updateSlot` operation the MCP tool sends, so
+ * the journal holds one entry and one undo restores the slot. Escape or
+ * Cancel redraws the panel and sends nothing.
+ */
+function beginSlotEdit(row, slot) {
+    row.replaceChildren();
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "slot-edit-name";
+    name.value = slot.name;
+    name.setAttribute("aria-label", translate("slots.name"));
+    name.dataset["i18nAttr"] = "aria-label:slots.name";
+    const kind = document.createElement("select");
+    kind.className = "slot-edit-kind";
+    kind.setAttribute("aria-label", translate("slots.kind"));
+    kind.dataset["i18nAttr"] = "aria-label:slots.kind";
+    for (const option of ["text", "image", "color"]) {
+        const element = document.createElement("option");
+        element.value = option;
+        element.textContent = option;
+        kind.append(element);
+    }
+    kind.value = slot.kind ?? "text";
+    const layerId = document.createElement("input");
+    layerId.type = "text";
+    layerId.className = "slot-edit-layer";
+    layerId.value = slot.layer;
+    layerId.setAttribute("aria-label", translate("slots.layerId"));
+    layerId.dataset["i18nAttr"] = "aria-label:slots.layerId;title:slots.layerIdHint";
+    layerId.title = translate("slots.layerIdHint");
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "small slot-edit-save";
+    save.dataset["i18n"] = "common.save";
+    save.textContent = translate("common.save");
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "small";
+    cancel.dataset["i18n"] = "common.cancel";
+    cancel.textContent = translate("common.cancel");
+    const finish = (commit) => {
+        if (!commit) {
+            drawInspector();
+            return;
+        }
+        const nextName = name.value.trim();
+        if (!nextName)
+            return;
+        void send(`update slot ${slot.name}`, {
+            op: "updateSlot",
+            name: slot.name,
+            slot: {
+                name: nextName,
+                layer: layerId.value.trim() || slot.layer,
+                kind: kind.value,
+                description: slot.description,
+                required: slot.required ?? false,
+            },
+        });
+    };
+    save.addEventListener("click", () => finish(true));
+    cancel.addEventListener("click", () => finish(false));
+    row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            finish(true);
+        }
+        if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            finish(false);
+        }
+    });
+    row.append(name, kind, layerId, save, cancel);
+    name.focus();
 }
 /** Draws the journal when it is still the newest one requested. */
 let historySequence = 0;
@@ -1881,7 +2627,14 @@ function snapshotForEcho() {
         void guard("reload", refresh);
     };
 }
-async function send(what, operation) {
+/**
+ * Sends one operation through the queue.
+ *
+ * `onRefusal` is where a control asks to be told about the engine's own
+ * refusal, so a typed error can be shown beside the field that caused it. It
+ * never replaces the status-bar report; it adds the control-side message.
+ */
+async function send(what, operation, onRefusal) {
     if (!state.project || !state.document)
         return;
     // The project the edit belongs to is read here, at intent time: dispatch
@@ -1897,12 +2650,12 @@ async function send(what, operation) {
         coalesceKey: coalesceKeyOf(operation),
         run: async () => {
             if (state.project !== project || !state.document) {
-                say(`${what}: not sent, because a different project is open now.`, "error");
+                say(translate("status.editNotSent"), "error");
                 return;
             }
             const result = await api.applyOperation(project, operation, api.versionOf(state.document));
             applied = true;
-            say(`${what}: done (version ${result.version})`);
+            say(translate("status.editDone", { version: result.version }));
             if (result.created?.length)
                 state.selection = result.created;
             await refresh();
@@ -1912,6 +2665,8 @@ async function send(what, operation) {
             // afterwards failed. Rolling the echo back would hide an accepted edit.
             if (!applied)
                 restore();
+            if (onRefusal)
+                onRefusal(error);
             report(what, error);
         },
         onSuperseded: restore,
@@ -1942,14 +2697,14 @@ async function sendBatch(what, operations) {
         coalesceKey: null,
         run: async () => {
             if (state.project !== project || !state.document) {
-                say(`${what}: not sent, because a different project is open now.`, "error");
+                say(translate("status.editNotSent"), "error");
                 return;
             }
             const result = await api.applyOperationBatch(project, what, operations, api.versionOf(state.document));
             applied = true;
             if (result.created?.length)
                 state.selection = result.created;
-            say(`${what}: done (version ${result.version})`);
+            say(translate("status.editDone", { version: result.version }));
             await refresh();
         },
         onError: (error) => {
@@ -2431,14 +3186,18 @@ function visualCollectiveBounds(geometry = selectionGeometry()) {
 function applyZoom() {
     if (!state.document)
         return;
-    const availableWidth = Math.max(240, dom.stageViewport.clientWidth - 96);
-    const availableHeight = Math.max(180, dom.stageViewport.clientHeight - 96);
+    const availableWidth = Math.max(240, dom.stageViewport.clientWidth - STAGE_INSET_PX);
+    const availableHeight = Math.max(180, dom.stageViewport.clientHeight - STAGE_INSET_PX);
     const fit = Math.min(availableWidth / state.document.canvas.width, availableHeight / state.document.canvas.height, 1);
     const scale = state.zoom ?? fit;
     dom.canvas.style.width = `${Math.max(1, Math.round(state.document.canvas.width * scale))}px`;
     dom.canvas.style.height = `${Math.max(1, Math.round(state.document.canvas.height * scale))}px`;
-    dom.zoomValue.textContent = state.zoom === null ? "Fit" : `${Math.round(scale * 100)}%`;
-    dom.zoomValue.title = state.zoom === null ? `Fit (${Math.round(fit * 100)}%)` : "Reset to Fit";
+    dom.zoomValue.textContent = state.zoom === null
+        ? translate("canvas.zoomFit")
+        : `${formatNumber(Math.round(scale * 100))}%`;
+    dom.zoomValue.title = state.zoom === null
+        ? translate("canvas.zoomFitPercent", { percent: formatNumber(Math.round(fit * 100)) })
+        : translate("canvas.zoomResetFit");
 }
 function setZoom(next) {
     state.zoom = next === null ? null : Math.min(4, Math.max(0.1, next));
@@ -2456,7 +3215,8 @@ function beginInlineTextEdit(layer) {
     const textarea = document.createElement("textarea");
     textarea.className = "inline-text-editor";
     textarea.value = layer.text;
-    textarea.setAttribute("aria-label", "Edit text on canvas");
+    textarea.setAttribute("aria-label", translate("canvas.editText"));
+    textarea.dataset["i18nAttr"] = "aria-label:canvas.editText";
     textarea.style.left = `${((layer.transform.x + offset.x) / state.document.canvas.width) * 100}%`;
     textarea.style.top = `${((layer.transform.y + offset.y) / state.document.canvas.height) * 100}%`;
     textarea.style.width = `${(layer.transform.width / state.document.canvas.width) * 100}%`;
@@ -2589,6 +3349,8 @@ function togglePositionPopover(force) {
     if (!open)
         return;
     renderPositionFields(selectedLayers());
+    // Spacing exception: these are placement numbers, measured from the trigger
+    // and the dock edge — not gaps from the spacing scale.
     const trigger = dom.inspector.querySelector(".position-button");
     const rect = trigger?.getBoundingClientRect();
     const editorLeft = dom.inspector.getBoundingClientRect().left + 8;
@@ -2608,7 +3370,7 @@ function copySelection() {
         .filter(({ layer, parent }) => selected.has(layer.id) && (!parent || !selected.has(parent)))
         .map(({ layer }) => structuredClone(layer));
     sessionStorage.setItem(clipboardKey, JSON.stringify({ project: state.project, layers: roots }));
-    say(`Copied ${roots.length} layer${roots.length === 1 ? "" : "s"}.`);
+    say(formatCount("editor.copiedLayers", roots.length));
     return roots.length > 0;
 }
 function clipboardLayers() {
@@ -2625,7 +3387,7 @@ function clipboardLayers() {
 function pasteClipboard() {
     const layers = clipboardLayers();
     if (!layers || !state.project) {
-        say("Nothing from this project is ready to paste.", "error");
+        say(translate("editor.nothingToPaste"), "error");
         return;
     }
     void sendBatch("paste layers", [{
@@ -2675,12 +3437,18 @@ function openContextMenu(x, y) {
     const layers = selectedLayers();
     const editable = layers.length > 0 && layers.every(api.isEditable);
     const one = layers.length === 1 ? layers[0] : null;
-    const add = (label, icon, run, disabled = false) => {
+    const add = (labelKey, icon, run, disabled = false) => {
         const button = document.createElement("button");
         button.type = "button";
         button.setAttribute("role", "menuitem");
         button.disabled = disabled;
-        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i><span>${label}</span>`;
+        const symbol = document.createElement("i");
+        symbol.className = `ph ${icon}`;
+        symbol.setAttribute("aria-hidden", "true");
+        const text = document.createElement("span");
+        text.dataset["i18n"] = labelKey;
+        text.textContent = translate(labelKey);
+        button.append(symbol, text);
         button.addEventListener("click", () => {
             dom.contextMenu.hidden = true;
             run();
@@ -2693,33 +3461,33 @@ function openContextMenu(x, y) {
         dom.contextMenu.append(rule);
     };
     if (one?.type === "text") {
-        add("Edit text", "ph-pencil-simple", () => beginInlineTextEdit(one), !editable);
+        add("context.editText", "ph-pencil-simple", () => beginInlineTextEdit(one), !editable);
         divider();
     }
-    add("Cut", "ph-scissors", () => { if (copySelection())
+    add("context.cut", "ph-scissors", () => { if (copySelection())
         deleteSelection("cut layers"); }, !editable);
-    add("Copy", "ph-copy", () => { copySelection(); }, layers.length === 0);
-    add("Paste", "ph-clipboard-text", pasteClipboard, !clipboardLayers());
-    add("Duplicate", "ph-copy-simple", () => void sendBatch("duplicate", layers.map((layer) => ({ op: "duplicate", id: layer.id }))), !editable);
-    add("Delete", "ph-trash", deleteSelection, !editable);
+    add("context.copy", "ph-copy", () => { copySelection(); }, layers.length === 0);
+    add("context.paste", "ph-clipboard-text", pasteClipboard, !clipboardLayers());
+    add("context.duplicate", "ph-copy-simple", () => void sendBatch("duplicate", layers.map((layer) => ({ op: "duplicate", id: layer.id }))), !editable);
+    add("context.delete", "ph-trash", deleteSelection, !editable);
     divider();
-    add("Bring to front", "ph-arrow-line-up", () => moveLayerOrder("front"), !one || !editable);
-    add("Bring forward", "ph-arrow-up", () => moveLayerOrder("forward"), !one || !editable);
-    add("Send backward", "ph-arrow-down", () => moveLayerOrder("backward"), !one || !editable);
-    add("Send to back", "ph-arrow-line-down", () => moveLayerOrder("back"), !one || !editable);
+    add("context.bringFront", "ph-arrow-line-up", () => moveLayerOrder("front"), !one || !editable);
+    add("context.bringForward", "ph-arrow-up", () => moveLayerOrder("forward"), !one || !editable);
+    add("context.sendBackward", "ph-arrow-down", () => moveLayerOrder("backward"), !one || !editable);
+    add("context.sendBack", "ph-arrow-line-down", () => moveLayerOrder("back"), !one || !editable);
     divider();
-    add("Group", "ph-stack", () => void send("group", { op: "group", ids: layers.map((layer) => layer.id) }), layers.length < 2 || !editable);
-    add("Ungroup", "ph-stack-minus", () => { if (one)
+    add("context.group", "ph-stack", () => void send("group", { op: "group", ids: layers.map((layer) => layer.id) }), layers.length < 2 || !editable);
+    add("context.ungroup", "ph-stack-minus", () => { if (one)
         void send("ungroup", { op: "ungroup", id: one.id }); }, one?.type !== "group" || !editable);
-    add(one?.locked ? "Unlock" : "Lock", one?.locked ? "ph-lock-open" : "ph-lock", () => {
+    add(one?.locked ? "context.unlock" : "context.lock", one?.locked ? "ph-lock-open" : "ph-lock", () => {
         if (one)
             void send(one.locked ? "unlock layer" : "lock layer", { op: "setLocked", id: one.id, locked: !one.locked });
     }, !one || Boolean(one.protected || one.readOnly));
-    add(one?.visible === false ? "Show" : "Hide", one?.visible === false ? "ph-eye" : "ph-eye-slash", () => {
+    add(one?.visible === false ? "context.show" : "context.hide", one?.visible === false ? "ph-eye" : "ph-eye-slash", () => {
         if (one)
             void send(one.visible === false ? "show layer" : "hide layer", { op: "setVisible", id: one.id, visible: one.visible === false });
     }, !one || !editable);
-    add("Rename in Layers", "ph-pencil-simple", () => {
+    add("context.rename", "ph-pencil-simple", () => {
         if (!one)
             return;
         showDock("layers");
@@ -2729,15 +3497,17 @@ function openContextMenu(x, y) {
             beginLayerRename(one, label);
     }, !one || Boolean(one.protected || one.readOnly));
     divider();
-    add("Align left", "ph-align-left-simple", () => alignFromContextMenu("left"), !editable);
-    add("Align horizontal centres", "ph-align-center-horizontal", () => alignFromContextMenu("centerHorizontal"), !editable);
-    add("Align right", "ph-align-right-simple", () => alignFromContextMenu("right"), !editable);
-    add("Align top", "ph-align-top-simple", () => alignFromContextMenu("top"), !editable);
-    add("Align vertical middles", "ph-align-center-vertical", () => alignFromContextMenu("centerVertical"), !editable);
-    add("Align bottom", "ph-align-bottom-simple", () => alignFromContextMenu("bottom"), !editable);
-    add("Distribute horizontally", "ph-columns", () => void send("distribute horizontally", { op: "distribute", ids: layers.map((layer) => layer.id), axis: "horizontal" }), !editable || layers.length < 3);
-    add("Distribute vertically", "ph-rows", () => void send("distribute vertically", { op: "distribute", ids: layers.map((layer) => layer.id), axis: "vertical" }), !editable || layers.length < 3);
+    add("context.alignLeft", "ph-align-left-simple", () => alignFromContextMenu("left"), !editable);
+    add("context.alignHorizontalCenters", "ph-align-center-horizontal", () => alignFromContextMenu("centerHorizontal"), !editable);
+    add("context.alignRight", "ph-align-right-simple", () => alignFromContextMenu("right"), !editable);
+    add("context.alignTop", "ph-align-top-simple", () => alignFromContextMenu("top"), !editable);
+    add("context.alignVerticalMiddles", "ph-align-center-vertical", () => alignFromContextMenu("centerVertical"), !editable);
+    add("context.alignBottom", "ph-align-bottom-simple", () => alignFromContextMenu("bottom"), !editable);
+    add("context.distributeHorizontally", "ph-columns", () => void send("distribute horizontally", { op: "distribute", ids: layers.map((layer) => layer.id), axis: "horizontal" }), !editable || layers.length < 3);
+    add("context.distributeVertically", "ph-rows", () => void send("distribute vertically", { op: "distribute", ids: layers.map((layer) => layer.id), axis: "vertical" }), !editable || layers.length < 3);
     dom.contextMenu.hidden = false;
+    // Spacing exception: clamping a floating menu to the window edge is
+    // placement, not spacing; 240 is roughly the menu's width plus a margin.
     dom.contextMenu.style.left = `${Math.min(window.innerWidth - 240, Math.max(8, x))}px`;
     dom.contextMenu.style.top = `${Math.min(window.innerHeight - dom.contextMenu.offsetHeight - 8, Math.max(8, y))}px`;
     dom.contextMenu.querySelector('button[role="menuitem"]:not(:disabled)')?.focus();
@@ -2799,7 +3569,67 @@ dom.contextMenu.addEventListener("keydown", (event) => {
     items[next]?.focus();
 });
 // --- wiring ------------------------------------------------------------------
+let projectChoices = [];
+let projectMenuIndex = -1;
+function projectChoice(value) {
+    const normalized = value.trim().toLocaleLowerCase();
+    return projectChoices.find((project) => project.id.toLocaleLowerCase() === normalized ||
+        (project.name ?? project.id).toLocaleLowerCase() === normalized) ?? null;
+}
+function projectRows() {
+    return [...dom.projectOptions.querySelectorAll("[data-project-id]")];
+}
+function setProjectMenuOpen(open) {
+    dom.projectOptions.hidden = !open;
+    dom.search.setAttribute("aria-expanded", String(open));
+    dom.projectPickerToggle.setAttribute("aria-expanded", String(open));
+    if (!open) {
+        projectMenuIndex = -1;
+        dom.search.removeAttribute("aria-activedescendant");
+    }
+}
+function markProjectRow(index) {
+    const rows = projectRows();
+    projectMenuIndex = Math.max(0, Math.min(index, rows.length - 1));
+    rows.forEach((row, at) => row.classList.toggle("active", at === projectMenuIndex));
+    const active = rows[projectMenuIndex];
+    if (active) {
+        dom.search.setAttribute("aria-activedescendant", active.id);
+        active.scrollIntoView({ block: "nearest" });
+    }
+}
+function openProjectChoice(projectId) {
+    const project = projectId
+        ? projectChoices.find((one) => one.id === projectId)
+        : projectChoice(dom.search.value);
+    if (!project)
+        return;
+    dom.search.value = "";
+    dom.projects.value = project.id;
+    setProjectMenuOpen(false);
+    openFromQueue(project.id);
+}
+dom.projectPickerToggle.addEventListener("click", () => {
+    const opening = dom.projectOptions.hidden;
+    setProjectMenuOpen(opening);
+    if (opening)
+        dom.search.focus();
+});
+dom.search.addEventListener("focus", () => setProjectMenuOpen(true));
+dom.projectOptions.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-project-id]");
+    if (row?.dataset["projectId"])
+        openProjectChoice(row.dataset["projectId"]);
+});
+document.addEventListener("pointerdown", (event) => {
+    if (!(event.target instanceof Node) || !dom.search.closest(".project-combobox")?.contains(event.target)) {
+        setProjectMenuOpen(false);
+    }
+});
 dom.projects.addEventListener("change", () => {
+    const project = projectChoices.find((one) => one.id === dom.projects.value);
+    if (project)
+        dom.search.placeholder = project.name ?? project.id;
     openFromQueue(dom.projects.value || null);
 });
 /**
@@ -2833,19 +3663,20 @@ async function openProject() {
             !state.project) {
             throw error;
         }
-        const confirmed = window.confirm(`This project was left locked by process ${pid}. ` +
-            "If that Assemblash process is still running, close it first. " +
-            "Recover this project now?");
+        const confirmed = window.confirm(translate("projects.recoverLockConfirm", { pid }));
         if (!confirmed)
             throw error;
         await api.recoverProjectLock(state.project, pid);
         await refresh();
-        say("Recovered the project after the previous process stopped.");
+        say(translate("projects.recovered"));
     }
     // After the document, because the panel's image fields are built from the
     // assets the document lists.
     await templates.projectChanged();
-    say(`Opened ${state.document?.name ?? state.project}.`);
+    dom.renameProject.disabled = !state.project;
+    dom.deleteProject.disabled = !state.project;
+    dom.reload.disabled = !state.project;
+    say(translate("projects.opened", { name: state.document?.name ?? state.project ?? "" }));
     // The server drains a reclaimed lock the first time it is read after
     // clearing it, so one fetch here either finds nothing (the ordinary case)
     // or explains, once, why a lock nobody here took out is already gone. A
@@ -2855,7 +3686,7 @@ async function openProject() {
             const summary = await api.projectSummary(state.project);
             if (summary.reclaimedLock) {
                 const { pid, host } = summary.reclaimedLock;
-                say(`Recovered this project automatically: the previous Assemblash process (pid ${pid} on ${host}) had stopped without releasing it.`);
+                say(translate("projects.reclaimedLock", { pid, host }));
             }
         }
         catch (error) {
@@ -2865,7 +3696,7 @@ async function openProject() {
 }
 dom.reload.addEventListener("click", () => void guard("reload", async () => {
     await refresh();
-    say("Project refreshed.");
+    say(translate("projects.refreshed"));
 }));
 // Searching re-asks the engine rather than filtering a list held here, so the
 // page never has to hold a whole workspace to look through it.
@@ -2876,14 +3707,41 @@ dom.search.addEventListener("input", () => {
         void guard("search", () => loadProjects());
     }, 150);
 });
+dom.search.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (dom.projectOptions.hidden)
+            setProjectMenuOpen(true);
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        markProjectRow(projectMenuIndex < 0 ? (direction > 0 ? 0 : projectRows().length - 1) : projectMenuIndex + direction);
+        return;
+    }
+    if (event.key === "Escape") {
+        setProjectMenuOpen(false);
+        return;
+    }
+    if (event.key !== "Enter")
+        return;
+    const highlighted = projectRows()[projectMenuIndex]?.dataset["projectId"];
+    const project = projectChoice(dom.search.value);
+    if (!project && !highlighted)
+        return;
+    event.preventDefault();
+    openProjectChoice(project?.id ?? highlighted);
+});
 dom.newProject.addEventListener("click", () => {
     dom.newProjectName.value = "";
     dom.newProjectDialog.showModal();
     window.setTimeout(() => dom.newProjectName.focus(), 0);
 });
+dom.newProjectName.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter")
+        return;
+    event.preventDefault();
+    dom.newProjectForm.requestSubmit(dom.createProjectConfirm);
+});
 dom.emptyCreate.addEventListener("click", () => dom.newProject.click());
 dom.agents.addEventListener("click", () => void agents.open());
-dom.emptyAgents.addEventListener("click", () => void agents.open());
 dom.canvasPresets.addEventListener("click", (event) => {
     const button = event.target.closest("[data-size]");
     if (!button)
@@ -2915,37 +3773,37 @@ dom.newProjectForm.addEventListener("submit", (event) => {
         await api.createProject(id, width, height, dom.newProjectBackground.value, id);
         dom.newProjectDialog.close();
         await loadProjects(id);
-        say(`Created ${id}. Add text or drop in an image to begin.`);
+        say(translate("projects.created", { id }));
     });
 });
 const addSections = [
-    ["add-text-section", "Text", dom.addText],
-    ["add-shape-section", "Shapes", dom.addShape],
-    ["add-upload-section", "Uploads", dom.addImage],
-    ["add-vector-section", "Vector", dom.addVector],
-    ["add-template-section", "Templates", dom.templatesToggle],
-    ["add-fonts-section", "Fonts", dom.fontsToggle],
+    ["add-text-section", "toolbar.textButton", dom.addText],
+    ["add-shape-section", "toolbar.elementsButton", dom.addShape],
+    ["add-upload-section", "toolbar.uploadsButton", dom.addImage],
+    ["add-template-section", "toolbar.templatesButton", dom.templatesToggle],
+    ["add-fonts-section", "toolbar.fontsButton", dom.selectTool],
 ];
 function activateEditorTool(active) {
-    for (const tool of [dom.addToggle, dom.selectTool, dom.addText, dom.addShape, dom.addImage, dom.addVector, dom.templatesToggle, dom.fontsToggle]) {
+    for (const tool of [dom.selectTool, dom.addText, dom.addShape, dom.addImage, dom.templatesToggle]) {
         const selected = tool === active;
         tool.classList.toggle("active", selected);
         tool.setAttribute("aria-pressed", String(selected));
     }
 }
-function showAddSection(id, active = dom.addToggle) {
+function showAddSection(id = "add-text-section", active = dom.addText) {
+    if (id !== "add-fonts-section")
+        fontsPanel.releaseSamples();
     dom.addPanel.classList.remove("collapsed");
-    dom.addToggle.setAttribute("aria-expanded", "true");
     dom.structure.classList.remove("mobile-open");
     dom.dockToggle.setAttribute("aria-expanded", "false");
     dom.templatesPanel.classList.remove("open");
-    dom.addPanelTitle.textContent = id
-        ? (addSections.find(([sectionId]) => sectionId === id)?.[1] ?? "Add")
-        : "Add";
+    const panelKey = addSections.find(([sectionId]) => sectionId === id)?.[1] ?? "toolbar.textButton";
+    dom.addPanelTitle.dataset["i18n"] = panelKey;
+    dom.addPanelTitle.textContent = translate(panelKey);
     for (const [sectionId] of addSections) {
         const section = document.getElementById(sectionId);
         if (section)
-            section.hidden = Boolean(id && sectionId !== id);
+            section.hidden = sectionId !== id;
     }
     const templateMode = id === "add-template-section";
     dom.templatesPanel.classList.toggle("open", templateMode && !dom.templatesPanel.hidden);
@@ -2954,23 +3812,15 @@ function showAddSection(id, active = dom.addToggle) {
     activateEditorTool(active);
 }
 function closeAddPanel() {
+    fontsPanel.releaseSamples();
     dom.addPanel.classList.add("collapsed");
-    dom.addToggle.setAttribute("aria-expanded", "false");
     activateEditorTool(dom.selectTool);
 }
-dom.addToggle.addEventListener("click", () => {
-    if (dom.addPanel.classList.contains("collapsed"))
-        showAddSection();
-    else
-        closeAddPanel();
-});
 dom.addPanelClose.addEventListener("click", closeAddPanel);
 dom.addText.addEventListener("click", () => showAddSection("add-text-section", dom.addText));
 dom.addShape.addEventListener("click", () => showAddSection("add-shape-section", dom.addShape));
 dom.addImage.addEventListener("click", () => showAddSection("add-upload-section", dom.addImage));
-dom.addVector.addEventListener("click", () => showAddSection("add-vector-section", dom.addVector));
 dom.templatesToggle.addEventListener("click", () => showAddSection("add-template-section", dom.templatesToggle));
-dom.fontsToggle.addEventListener("click", () => void guard("fonts", () => openFontManager()));
 /**
  * Shows the font manager, with the store as it is right now.
  *
@@ -2979,7 +3829,7 @@ dom.fontsToggle.addEventListener("click", () => void guard("fonts", () => openFo
  * keyboard, rather than a panel it has to go looking through.
  */
 async function openFontManager(focusInstall = false) {
-    showAddSection("add-fonts-section", dom.fontsToggle);
+    showAddSection("add-fonts-section", dom.selectTool);
     await fontsPanel.reload();
     if (focusInstall)
         fontsPanel.focusInstall();
@@ -2990,14 +3840,16 @@ async function createTextPreset(preset) {
     if (!family) {
         // Text needs a font, and this is a browser: sending somebody to a command
         // line for the one thing the page just refused to do is the defect, not
-        // the fix. The panel that installs fonts opens instead, on the button.
-        say("no fonts are installed yet — install a font pack to add text", "error");
+        // the fix. The panel that installs fonts opens instead, on the button,
+        // where the full explanation of the install is written.
+        say(translate("fonts.noneInstalled"), "error");
         await openFontManager(true);
         return;
     }
     if (!state.project || !state.document)
         return;
     const settings = {
+        plain: { text: "Add text", fontSize: 24, width: 460, height: 80 },
         heading: { text: "Add a heading", fontSize: 64, width: 600, height: 100 },
         subheading: { text: "Add a subheading", fontSize: 36, width: 520, height: 64 },
         body: { text: "Add body text", fontSize: 22, width: 460, height: 120 },
@@ -3022,7 +3874,8 @@ async function createTextPreset(preset) {
     const created = result.created?.[0];
     if (created)
         state.selection = [created];
-    say(`Added ${preset} text. Type directly on the canvas.`);
+    const presetKey = { plain: "text.plain", heading: "text.heading", subheading: "text.subheading", body: "text.body" }[preset];
+    say(translate("editor.addedText", { preset: translate(presetKey) }));
     await refresh();
     const layer = selectedLayer();
     if (layer?.type === "text")
@@ -3070,7 +3923,41 @@ async function createShape(kind) {
     const created = result.created?.[0];
     if (created)
         state.selection = [created];
-    say(`Added a ${kind === "rect" ? "rectangle" : kind}. Its fill and stroke are in Properties.`);
+    const shapeKey = { rect: "shapes.rectangle", ellipse: "shapes.ellipse", line: "shapes.line" }[kind];
+    say(translate("editor.addedShape", { kind: translate(shapeKey) }));
+    await refresh();
+}
+/**
+ * Adds one path layer, in one create.
+ *
+ * The `d` is validated by the engine at operation time, so a refusal here is
+ * the grammar's own message — which command, which byte — reported through
+ * the queue, and nothing is created when it fires. The box is the same fixed,
+ * centred box the primitives use: the path sits in its box, scaled by it.
+ */
+async function createPath(d) {
+    if (!state.project || !state.document)
+        return;
+    const width = 320;
+    const height = 240;
+    const transform = {
+        x: Math.round((state.document.canvas.width - width) / 2),
+        y: Math.round((state.document.canvas.height - height) / 2),
+        width,
+        height,
+    };
+    const result = await api.applyOperation(state.project, {
+        op: "create",
+        position: { at: "root" },
+        transform,
+        type: "shape",
+        shape: { kind: "path", d },
+        fill: SHAPE_FILL_COLOUR,
+    }, api.versionOf(state.document));
+    const created = result.created?.[0];
+    if (created)
+        state.selection = [created];
+    say(translate("editor.addedPath"));
     await refresh();
 }
 dom.addPanel.addEventListener("click", (event) => {
@@ -3082,6 +3969,13 @@ dom.addPanel.addEventListener("click", (event) => {
     const shape = target.closest("[data-shape]")?.dataset["shape"];
     if (shape === "rect" || shape === "ellipse" || shape === "line") {
         void guard(`add ${shape}`, () => createShape(shape));
+    }
+    // A path needs its `d` from the person, so a small form asks for it; the
+    // engine validates it when the create is applied.
+    if (shape === "path") {
+        requestName("editor.addPathTitle", "editor.pathDataLabel", "editor.addPathButton", (d) => {
+            void guard("add path", () => createPath(d));
+        });
     }
 });
 dom.deleteLayer.addEventListener("click", () => deleteSelection());
@@ -3095,7 +3989,7 @@ dom.undo.addEventListener("click", () => {
         if (!state.project)
             return;
         const result = await api.undo(state.project);
-        say(`undone (version ${result.version})`);
+        say(translate("status.undoDone", { version: result.version }));
         await refresh();
     });
 });
@@ -3104,13 +3998,12 @@ dom.redo.addEventListener("click", () => {
         if (!state.project)
             return;
         const result = await api.redo(state.project);
-        say(`redone (version ${result.version})`);
+        say(translate("status.redoDone", { version: result.version }));
         await refresh();
     });
 });
 dom.exportButton.addEventListener("click", () => exporter.open());
 dom.uploadDropzone.addEventListener("click", () => dom.imageFile.click());
-dom.browseVector.addEventListener("click", () => dom.vectorFile.click());
 function addAssetFile(file, preferredType, point) {
     if (!file)
         return;
@@ -3120,7 +4013,7 @@ function addAssetFile(file, preferredType, point) {
         // Two steps, because importing a file and adding a layer are different
         // things: the import copies bytes into the project and is not undoable,
         // and the layer that draws them is an ordinary operation that is.
-        dom.uploadFeedback.textContent = `Uploading ${file.name}…`;
+        dom.uploadFeedback.textContent = translate("uploads.uploading", { name: file.name });
         try {
             const uploaded = await api.uploadAsset(state.project, file);
             const isSvg = uploaded.asset.mediaType === "image/svg+xml" || preferredType === "svg";
@@ -3148,12 +4041,12 @@ function addAssetFile(file, preferredType, point) {
             const result = await api.applyOperation(state.project, create, uploaded.version);
             if (result.created?.length)
                 state.selection = result.created;
-            say(`added ${file.name} (version ${result.version})`);
-            dom.uploadFeedback.textContent = `${file.name} added`;
+            say(translate("uploads.addedVersion", { name: file.name, version: result.version }));
+            dom.uploadFeedback.textContent = translate("uploads.added", { name: file.name });
             await refresh();
         }
         catch (error) {
-            dom.uploadFeedback.textContent = `${file.name} could not be added. Try again.`;
+            dom.uploadFeedback.textContent = translate("uploads.failed", { name: file.name });
             throw error;
         }
     });
@@ -3195,13 +4088,7 @@ dom.imageFile.addEventListener("change", () => {
     const file = dom.imageFile.files?.[0];
     dom.imageFile.value = "";
     if (file)
-        addAssetFile(file, "image");
-});
-dom.vectorFile.addEventListener("change", () => {
-    const file = dom.vectorFile.files?.[0];
-    dom.vectorFile.value = "";
-    if (file)
-        addAssetFile(file, "svg");
+        addAssetFile(file, file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg") ? "svg" : "image");
 });
 function showDock(view) {
     dom.propertiesTab.setAttribute("aria-selected", String(view === "properties"));
@@ -3225,6 +4112,8 @@ dom.dockToggle.addEventListener("click", () => {
     }
 });
 dom.selectTool.addEventListener("click", () => {
+    if (!state.document)
+        return;
     closeAddPanel();
     dom.templatesPanel.classList.remove("open");
     dom.structure.classList.remove("mobile-open");
@@ -3324,7 +4213,7 @@ document.addEventListener("pointerdown", (event) => {
 });
 dom.openTemplates.addEventListener("click", () => {
     if (dom.templatesPanel.hidden) {
-        say("This project has no template slots. Select a layer and define a slot in Properties.");
+        say(translate("editor.noSlotsHint"));
         closeAddPanel();
         showDock("properties");
         if (window.matchMedia("(max-width: 1024px)").matches) {
@@ -3357,8 +4246,8 @@ function syncResponsivePanels() {
     if (compact) {
         dom.structure.classList.remove("mobile-open");
         dom.dockToggle.setAttribute("aria-expanded", "false");
+        fontsPanel.releaseSamples();
         dom.addPanel.classList.add("collapsed");
-        dom.addToggle.setAttribute("aria-expanded", "false");
     }
     else {
         dom.structure.classList.remove("mobile-open");
@@ -3382,6 +4271,7 @@ dom.stageViewport.addEventListener("pointerdown", (event) => {
     if (!spacePressed || event.button !== 0)
         return;
     event.preventDefault();
+    event.stopPropagation();
     const start = { x: event.clientX, y: event.clientY };
     const scroll = { x: dom.stageViewport.scrollLeft, y: dom.stageViewport.scrollTop };
     dom.stageViewport.classList.add("panning");
@@ -3396,21 +4286,25 @@ dom.stageViewport.addEventListener("pointerdown", (event) => {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish);
-});
+}, { capture: true });
 dom.overlay.addEventListener("pointerdown", (event) => {
-    if (event.target !== dom.overlay || event.button !== 0 || !state.document)
+    if (spacePressed || event.target !== dom.overlay || event.button !== 0 || !state.document)
         return;
     event.preventDefault();
     const canvasRect = dom.canvas.getBoundingClientRect();
-    const start = { x: event.clientX, y: event.clientY };
+    const clampX = (value) => Math.min(canvasRect.right, Math.max(canvasRect.left, value));
+    const clampY = (value) => Math.min(canvasRect.bottom, Math.max(canvasRect.top, value));
+    const start = { x: clampX(event.clientX), y: clampY(event.clientY) };
     const marquee = document.createElement("div");
     marquee.className = "selection-marquee";
     dom.overlay.append(marquee);
     const move = (next) => {
-        const left = Math.min(start.x, next.clientX);
-        const top = Math.min(start.y, next.clientY);
-        const right = Math.max(start.x, next.clientX);
-        const bottom = Math.max(start.y, next.clientY);
+        const x = clampX(next.clientX);
+        const y = clampY(next.clientY);
+        const left = Math.min(start.x, x);
+        const top = Math.min(start.y, y);
+        const right = Math.max(start.x, x);
+        const bottom = Math.max(start.y, y);
         marquee.style.left = `${((left - canvasRect.left) / canvasRect.width) * 100}%`;
         marquee.style.top = `${((top - canvasRect.top) / canvasRect.height) * 100}%`;
         marquee.style.width = `${((right - left) / canvasRect.width) * 100}%`;
@@ -3419,11 +4313,13 @@ dom.overlay.addEventListener("pointerdown", (event) => {
     const finish = (next) => {
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", finish);
+        const x = clampX(next.clientX);
+        const y = clampY(next.clientY);
         const selectionRect = {
-            left: Math.min(start.x, next.clientX),
-            top: Math.min(start.y, next.clientY),
-            right: Math.max(start.x, next.clientX),
-            bottom: Math.max(start.y, next.clientY),
+            left: Math.min(start.x, x),
+            top: Math.min(start.y, y),
+            right: Math.max(start.x, x),
+            bottom: Math.max(start.y, y),
         };
         const hits = [...dom.overlay.querySelectorAll(".layer-hitbox")]
             .filter((hit) => {
@@ -3511,6 +4407,17 @@ window.addEventListener("keydown", (event) => {
         return;
     }
     if (event.key === "Escape") {
+        // A open Settings modal closes first and alone: clearing the selection or
+        // a popover behind it is not something closing a dialog should do.
+        if (dom.settingsDialog.open) {
+            dom.settingsDialog.close("cancel");
+            return;
+        }
+        if (!dom.addPanel.classList.contains("collapsed")) {
+            event.preventDefault();
+            closeAddPanel();
+            return;
+        }
         state.selection = [];
         dom.contextMenu.hidden = true;
         togglePositionPopover(false);
@@ -3553,7 +4460,86 @@ window.addEventListener("keydown", (event) => {
         })));
     }
 });
+/**
+ * Closes the open project without opening another: the empty canvas shows,
+ * and the picker keeps listing what the workspace still holds.
+ */
+function closeProject() {
+    state.project = null;
+    state.document = null;
+    state.selection = [];
+    dom.canvas.hidden = true;
+    dom.canvasHints.hidden = true;
+    dom.canvasImage.removeAttribute("src");
+    dom.canvasEmpty.hidden = false;
+    dom.renameProject.disabled = true;
+    dom.deleteProject.disabled = true;
+    dom.reload.disabled = true;
+    drawLayers();
+    drawOverlay();
+    drawInspector();
+}
+/**
+ * Offers rename for one project.
+ *
+ * The name dialog is the small form, and its `required` field is the check.
+ * The id is the directory name, so the project comes back under a new id; the
+ * picker reload answers it, and a project this page held open is reopened
+ * under the new id. A refusal — `projectExists` for a name that is taken,
+ * `projectLocked` for one another process holds — is reported in the
+ * engine's own words.
+ */
+function renameProjectFlow(id, currentName) {
+    requestName("projects.renameTitle", "common.name", "projects.rename", (name) => {
+        void guard("rename project", async () => {
+            const result = await api.renameProject(id, name);
+            say(translate("projects.renamed", { oldName: currentName ?? id, newName: name }));
+            if (state.project === id)
+                state.project = null;
+            await loadProjects(result.project);
+        });
+    });
+}
+/**
+ * Offers delete for one project.
+ *
+ * The confirmation names the project and says the files are gone. The server
+ * closes a project this process holds open on the way in; the page also
+ * closes its view of it, so nothing keeps drawing a document that is no
+ * longer on disk.
+ */
+function deleteProjectFlow(id, name) {
+    const label = name ?? id;
+    const question = translate("projects.deleteConfirm", { name: label });
+    if (!window.confirm(question))
+        return;
+    void guard("delete project", async () => {
+        await api.deleteProject(id);
+        if (state.project === id)
+            closeProject();
+        say(translate("projects.deleted", { name: label }));
+        await loadProjects();
+    });
+}
+dom.renameProject.addEventListener("click", () => {
+    const current = state.project;
+    if (!current)
+        return;
+    if (dom.settingsDialog.open)
+        dom.settingsDialog.close("cancel");
+    renameProjectFlow(current, state.document?.name ?? null);
+});
+dom.deleteProject.addEventListener("click", () => {
+    const current = state.project;
+    if (!current)
+        return;
+    if (dom.settingsDialog.open)
+        dom.settingsDialog.close("cancel");
+    deleteProjectFlow(current, state.document?.name ?? null);
+});
 async function loadProjects(select) {
+    if (select)
+        dom.search.value = "";
     const query = dom.search.value.trim();
     // Filtered by the engine against its cache: a workspace of two hundred
     // projects should not be sent here in full for this page to look through it.
@@ -3566,26 +4552,53 @@ async function loadProjects(select) {
     }
     await drawRecents();
 }
-/** The project picker's options, keeping the open project selected. */
+/** Updates the internal select and the visible project list. */
 function fillProjectOptions(projects, query) {
     listedProjects = projectListKey(projects);
+    projectChoices = projects;
     dom.projects.replaceChildren();
+    dom.projectOptions.replaceChildren();
+    projectMenuIndex = -1;
+    dom.search.removeAttribute("aria-activedescendant");
     const placeholder = document.createElement("option");
     placeholder.value = "";
-    placeholder.textContent = projects.length
-        ? "Choose a project…"
-        : query
-            ? "Nothing matches"
-            : "No projects yet";
+    placeholder.textContent = projects.length ? translate("projects.choose") : query ? translate("projects.nothingMatches") : translate("projects.none");
     dom.projects.append(placeholder);
-    for (const project of projects) {
+    for (const [index, project] of projects.entries()) {
         const option = document.createElement("option");
         option.value = project.id;
-        option.textContent = `${project.name ?? project.id} — ${project.layers} layers`;
+        option.textContent = project.name ?? project.id;
         dom.projects.append(option);
+        const row = document.createElement("button");
+        row.type = "button";
+        row.id = `project-option-${index}`;
+        row.className = "project-option";
+        row.dataset["projectId"] = project.id;
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", String(project.id === state.project));
+        const name = document.createElement("strong");
+        name.textContent = project.name ?? project.id;
+        const count = document.createElement("span");
+        count.dataset["i18nCount"] = "projects.layerCount";
+        count.dataset["count"] = String(project.layers);
+        count.textContent = formatCount("projects.layerCount", project.layers);
+        row.append(name, count);
+        dom.projectOptions.append(row);
     }
-    if (state.project && projects.some((project) => project.id === state.project)) {
-        dom.projects.value = state.project;
+    if (projects.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "project-options-empty";
+        empty.textContent = query ? translate("projects.noMatching") : translate("projects.none");
+        dom.projectOptions.append(empty);
+    }
+    const current = state.project ? projects.find((project) => project.id === state.project) : null;
+    if (current) {
+        dom.projects.value = current.id;
+        if (!query)
+            dom.search.placeholder = current.name ?? current.id;
+    }
+    else if (!query) {
+        dom.search.placeholder = projects.length ? translate("projects.searchPlaceholder") : translate("projects.none");
     }
 }
 // --- following other clients ----------------------------------------------------
@@ -3626,7 +4639,9 @@ async function drawAgentsConnected() {
             '<i class="ph ph-robot" aria-hidden="true"></i><span></span>';
         const label = dom.agentsConnected.querySelector("span");
         if (label) {
-            label.textContent = count === 1 ? "1 AI agent connected" : `${count} AI agents connected`;
+            label.dataset["i18nCount"] = "agents.connected";
+            label.dataset["count"] = String(count);
+            label.textContent = formatCount("agents.connected", count);
         }
     }
     catch (error) {
@@ -3684,6 +4699,13 @@ let following = false;
 async function followOtherClients() {
     if (following || !followIsQuiet())
         return;
+    // The person turned following off in Settings: the poll stays off. The
+    // agent count is status about the server, not a document read, so it still
+    // refreshes.
+    if (!followEnabled()) {
+        void drawAgentsConnected();
+        return;
+    }
     following = true;
     try {
         const query = dom.search.value.trim();
@@ -3770,11 +4792,39 @@ async function drawRecents() {
             dom.projects.value = project.id;
             openFromQueue(project.id);
         });
-        dom.recents.append(button);
+        // The same per-project rename and delete the picker offers. A button
+        // cannot sit in a button, so each card is a wrapper around the opener
+        // and its two controls.
+        const card = document.createElement("div");
+        card.className = "recent-card";
+        const controls = document.createElement("span");
+        controls.className = "recent-controls";
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.className = "small recent-rename";
+        rename.textContent = translate("projects.rename");
+        rename.title = translate("projects.renameNamed", { name: project.name ?? project.id });
+        rename.addEventListener("click", (event) => {
+            event.stopPropagation();
+            renameProjectFlow(project.id, project.name ?? null);
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "small recent-delete";
+        remove.dataset["i18n"] = "common.delete";
+        remove.textContent = translate("common.delete");
+        remove.title = translate("projects.deleteNamed", { name: project.name ?? project.id });
+        remove.addEventListener("click", (event) => {
+            event.stopPropagation();
+            deleteProjectFlow(project.id, project.name ?? null);
+        });
+        controls.append(rename, remove);
+        card.append(button, controls);
+        dom.recents.append(card);
     }
 }
 dom.shutdown.addEventListener("click", () => {
-    if (!window.confirm("Stop Assemblash? Any unsaved work is already on disk."))
+    if (!window.confirm(translate("projects.stopConfirm")))
         return;
     void guard("stop", async () => {
         await api.shutdown();
@@ -3783,7 +4833,7 @@ dom.shutdown.addEventListener("click", () => {
         // alive and answers nothing.
         dom.shutdown.disabled = true;
         document.body.classList.add("stopped");
-        say("Assemblash has stopped. You can close this window.");
+        say(translate("app.stopped"));
     });
 });
 void guard("start", async () => {
@@ -3801,7 +4851,10 @@ void guard("start", async () => {
     }
     await loadProjects();
     void drawAgentsConnected();
-    say(`ready — Assemblash ${info.version}`);
+    // The update notices load beside the rest of the start-up, not in front
+    // of it: they never block the first paint of the project list.
+    void loadUpdateStatus();
+    say(translate("status.ready", { version: info.version }));
     // The moment both first users were lost: a new workspace, and nothing that
     // said an agent could connect.
     if (!listedProjects && !dom.search.value.trim())

@@ -221,6 +221,34 @@ command exits 1 and names `shape` as an unknown layer kind, and nothing in the
 file is repairable — open it with 1.6.0 or newer. A `dropShadow` is milder:
 1.3.0 and newer keep it and refuse only the render.
 
+## Paths, dashes, and markers (1.10.0 and newer)
+
+Check the running binary first. A shape can be a path, a stroke can be
+dashed, and a line can end in markers.
+
+- A path shape is `{"kind":"path","d":"M0 0 L100 0 Z"}`. The `d` string
+  accepts `M L H V C S A Z` in either case, starts with one `M`, ends with
+  `Z`, holds at most 30 commands and 2048 bytes, and every number must be
+  finite. A rule break is refused with the command and its byte position —
+  build `d` strings that obey the grammar, and treat a refusal message as
+  data, not as a retry loop.
+- A clip can be a path too: `{"shape":"path","d":"..."}` with the same
+  grammar. The clip geometry is the transform box.
+- `stroke` carries `dashArray` (an array of at most 8 numbers, each greater
+  than zero), `lineCap` (`butt`, `round`, `square`) and `lineJoin`
+  (`miter`, `round`, `bevel`). All three are optional; unset means the SVG
+  default.
+- A line carries `markerStart` and `markerEnd` from `arrow`, `circle`,
+  `none`. Markers are payload, not paint: presets never carry them.
+- MCP: `add_shape_layer` takes `shape:"path"` with `d`, and
+  `markerStart`/`markerEnd` on a line. `update_layer` takes `shape` with
+  `path`, and both marker fields. Markers on a non-line shape refuse by
+  name. CLI: `add-path` and `set --path --dash --cap --join
+  --marker-start --marker-end`.
+- A preset carries the dash, cap and join fields with the whole stroke.
+- 1.6.0 through 1.9.x keep a path shape or clip as written, refuse to draw
+  it, and refuse an update that touches it.
+
 ## Clipping, cropping, and flips (1.8.0 and newer)
 
 Check the running binary first. Three update-only properties arrived in 1.8.0.
@@ -312,6 +340,13 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   `assemblash styles --json` serve.
 - `export_document` returns `warnings` beside `path`, `bytes`, `width`, and
   `height`.
+- Six parity tools (1.10.0): `insert_layer_tree` pastes a copied layer tree
+  (the same expansion the HTTP batch runs), `list_fonts` reads the font
+  store's families and faces, `install_font_pack` fetches the pinned
+  default pack (a network action only on this call), `remove_font_family`
+  removes one family, and `delete_project` / `rename_project` manage
+  projects — a project another process holds is refused `projectLocked`,
+  never deleted or renamed past. The tool surface holds 53 tools.
 
 ## HTTP notes
 

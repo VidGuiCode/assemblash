@@ -466,6 +466,15 @@ async fn every_new_tool_is_advertised_and_callable() {
         "render_document",
         "find_overlaps",
         "create_project",
+        // 1.10.0 parity tools: the maintainer approved closing the gaps the
+        // interface had and MCP had not — paste, fonts, and project
+        // management.
+        "insert_layer_tree",
+        "install_font_pack",
+        "remove_font_family",
+        "list_fonts",
+        "delete_project",
+        "rename_project",
     ] {
         assert!(names.contains(&expected), "no {expected} in {names:?}");
     }
@@ -473,9 +482,12 @@ async fn every_new_tool_is_advertised_and_callable() {
     // the same one the CLI's `styles --json` and `GET /api/capabilities`
     // serve — so the count moved from 45 to 46. 1.9.0 added `set_layer_box`,
     // which places a layer's whole box in one journalled change: 47.
+    // 1.10.0 added six parity tools by maintainer ruling — `insert_layer_tree`,
+    // `install_font_pack`, `remove_font_family`, `list_fonts`,
+    // `delete_project`, and `rename_project`: 53.
     assert_eq!(
         tools.len(),
-        47,
+        53,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 
@@ -547,6 +559,162 @@ async fn every_new_tool_is_advertised_and_callable() {
     assert!(text.contains("operationRefused"), "{text}");
     assert!(text.contains("no asset"), "{text}");
 
+    client.cancel().await.unwrap();
+}
+
+/// The 1.10.0 parity surface: paths in `add_shape_layer`, and the six tools
+/// the maintainer ruled in — paste, fonts, and project management.
+#[tokio::test]
+async fn the_parity_tools_behave_like_their_http_siblings() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    // list_fonts: the fixture family the workspace was built with.
+    let fonts = structured(
+        &client
+            .call_tool(call(
+                "list_fonts",
+                arguments(json!({ "project": "poster" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let families = fonts["families"].as_array().cloned().expect("families");
+    assert!(families.iter().any(|f| f == "Noto Sans"), "{families:#?}");
+
+    // add_shape_layer with `path`: a good d string creates a journalled
+    // layer, exactly like a rect does.
+    let made = structured(
+        &client
+            .call_tool(call(
+                "add_shape_layer",
+                arguments(json!({
+                    "project": "poster", "expectedVersion": 0,
+                    "shape": "path", "path": "M10 10 L90 10 L90 90 Z",
+                    "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(made["created"].as_array().unwrap().len(), 1, "{made:#?}");
+    let version = made["version"].as_u64().unwrap();
+
+    // A d string that breaks the grammar is refused with the grammar's own
+    // words: which command, which byte. The same refusal the HTTP surface
+    // gets from the operation layer.
+    let refused = client
+        .call_tool(call(
+            "add_shape_layer",
+            arguments(json!({
+                "project": "poster", "expectedVersion": version,
+                "shape": "path", "path": "M10 10 Q50 50 90 10 Z",
+                "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0
+            })),
+        ))
+        .await
+        .expect_err("a quadratic must be refused");
+    let text = format!("{refused:?}");
+    assert!(text.contains("unsupported path command"), "{text}");
+    assert!(text.contains('Q'), "{text}");
+
+    // insert_layer_tree: a pasted line lands as one journalled change.
+    let pasted = structured(
+        &client
+            .call_tool(call(
+                "insert_layer_tree",
+                arguments(json!({
+                    "project": "poster", "expectedVersion": version,
+                    "offsetX": 10.0, "offsetY": 10.0,
+                    "layers": [{
+                        "id": "layer_00000000000000000000000001",
+                        "transform": { "x": 0.0, "y": 0.0, "width": 80.0, "height": 10.0 },
+                        "type": "shape",
+                        "shape": { "kind": "line" }
+                    }]
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        pasted["created"].as_array().unwrap().len(),
+        1,
+        "{pasted:#?}"
+    );
+
+    // rename_project: the directory moves, and the new name is the name.
+    let created = structured(
+        &client
+            .call_tool(call(
+                "create_project",
+                arguments(json!({ "project": "rename_me", "width": 100.0, "height": 100.0 })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(created["id"], "rename_me");
+    let renamed = structured(
+        &client
+            .call_tool(call(
+                "rename_project",
+                arguments(json!({ "project": "rename_me", "name": "renamed" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(renamed["project"], "renamed");
+    let projects = structured(&client.call_tool(call("list_projects", None)).await.unwrap());
+    let ids: Vec<&str> = projects["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"renamed"), "{ids:?}");
+    assert!(!ids.contains(&"rename_me"), "{ids:?}");
+
+    // delete_project: gone, and not listed any more. Renaming the server's
+    // current project must also stop the server assuming it.
+    let deleted = structured(
+        &client
+            .call_tool(call(
+                "delete_project",
+                arguments(json!({ "project": "renamed" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(deleted["project"], "renamed");
+    let projects = structured(&client.call_tool(call("list_projects", None)).await.unwrap());
+    let ids: Vec<&str> = projects["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&"renamed"), "{ids:?}");
+
+    // remove_font_family: the store answers with what it took.
+    let removed = structured(
+        &client
+            .call_tool(call(
+                "remove_font_family",
+                arguments(json!({ "family": "Noto Sans" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert!(removed["removed"].as_u64().unwrap() >= 1, "{removed:#?}");
+
+    // install_font_pack is the one tool that reaches the network; its
+    // success path is exercised by the server tests with a fixture fetcher,
+    // not here — a test that downloads megabytes is a test nobody runs.
     client.cancel().await.unwrap();
 }
 
@@ -751,5 +919,153 @@ async fn canvas_tool_preserves_omitted_background_and_clears_null_with_undo() {
         .await
         .unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    client.cancel().await.unwrap();
+}
+
+/// DEF-29: markers and whole-geometry replacement over MCP.
+///
+/// Before the repair, `update_layer {markerStart, markerEnd}` answered ok and
+/// stored nothing — a false success — `add_shape_layer` could not create a
+/// line with markers, and no tool could replace a shape's geometry. Every
+/// read-back here goes to `document.json` on disk, so a silent drop cannot
+/// pass: the exit test's measured failure mode was exactly "call ok, document
+/// unchanged".
+#[tokio::test]
+async fn markers_and_geometry_replacement_reach_the_document_over_mcp() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let path = root.join("projects/poster/document.json");
+
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    // A line created with markers, read back from the document.
+    let made = structured(
+        &client
+            .call_tool(call(
+                "add_shape_layer",
+                arguments(json!({
+                    "project": "poster",
+                    "shape": "line", "markerStart": "circle", "markerEnd": "arrow",
+                    "x": 10.0, "y": 50.0, "width": 200.0, "height": 4.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let line_id = made["created"].as_array().unwrap()[0]
+        .as_str()
+        .expect("the created id")
+        .to_owned();
+    let document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let line = document["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == line_id.as_str())
+        .expect("the line is in the document");
+    assert_eq!(line["shape"]["markerStart"], "circle", "{line:#?}");
+    assert_eq!(line["shape"]["markerEnd"], "arrow");
+    let version = made["version"].as_u64().unwrap();
+
+    // The exit test's silent-drop case, again as an update: setting both
+    // markers on the line must reach the document, not answer ok unchanged.
+    client
+        .call_tool(call(
+            "update_layer",
+            arguments(json!({
+                "project": "poster", "layerId": line_id,
+                "markerStart": "arrow", "markerEnd": "circle",
+                "expectedVersion": version
+            })),
+        ))
+        .await
+        .unwrap();
+    let document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let line = document["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == line_id.as_str())
+        .unwrap();
+    assert_eq!(line["shape"]["markerStart"], "arrow");
+    assert_eq!(line["shape"]["markerEnd"], "circle");
+    let version = version + 1;
+
+    // Markers on a rect refuse typed, naming the layer.
+    let rect = structured(
+        &client
+            .call_tool(call(
+                "add_shape_layer",
+                arguments(json!({
+                    "project": "poster", "shape": "rect",
+                    "x": 0.0, "y": 0.0, "width": 40.0, "height": 40.0,
+                    "expectedVersion": version
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let rect_id = rect["created"].as_array().unwrap()[0]
+        .as_str()
+        .expect("the created id")
+        .to_owned();
+    let refused = client
+        .call_tool(call(
+            "update_layer",
+            arguments(json!({
+                "project": "poster", "layerId": rect_id,
+                "markerStart": "arrow", "expectedVersion": version + 1
+            })),
+        ))
+        .await
+        .expect_err("a marker on a rect must be refused");
+    let text = format!("{refused:?}");
+    assert!(text.contains("markerStart"), "{text}");
+    assert!(text.contains(&rect_id), "{text}");
+
+    // A bad d on a geometry replacement refuses with the grammar's words.
+    let refused = client
+        .call_tool(call(
+            "update_layer",
+            arguments(json!({
+                "project": "poster", "layerId": rect_id,
+                "shape": "path", "path": "M10 10 Q50 50 90 10 Z",
+                "expectedVersion": version + 1
+            })),
+        ))
+        .await
+        .expect_err("a quadratic must be refused");
+    let text = format!("{refused:?}");
+    assert!(
+        text.contains("unsupported path command 'Q' at byte"),
+        "{text}"
+    );
+
+    // Replacing the rect's geometry with a valid path: the paint stays, the
+    // document carries the d string, and one undo restores the rect.
+    client
+        .call_tool(call(
+            "update_layer",
+            arguments(json!({
+                "project": "poster", "layerId": rect_id,
+                "shape": "path", "path": "M0 0 L40 0 L40 40 L0 40 Z",
+                "expectedVersion": version + 1
+            })),
+        ))
+        .await
+        .unwrap();
+    let document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let replaced = document["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == rect_id.as_str())
+        .unwrap();
+    assert_eq!(replaced["shape"]["kind"], "path", "{replaced:#?}");
+    assert_eq!(replaced["shape"]["d"], "M0 0 L40 0 L40 40 L0 40 Z");
+
     client.cancel().await.unwrap();
 }

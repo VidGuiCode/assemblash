@@ -513,7 +513,7 @@ pub struct ImageLayer {
 /// A document type of its own, not [`crate::layout::Rect`]: that one is an
 /// internal `Copy` type in absolute canvas space, and a crop is none of
 /// those things — it serialises, and it is relative to the asset.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Crop {
     /// Left edge in source pixels.
@@ -524,16 +524,23 @@ pub struct Crop {
     pub width: f64,
     /// Height in source pixels; must be positive and finite.
     pub height: f64,
+    /// Keys this build does not know about, preserved verbatim (D27).
+    #[serde(flatten)]
+    pub extra: Extras,
 }
 
 /// The mask shape of a layer's [`Layer::clip`], tagged by `"shape"` in JSON.
 ///
 /// The geometry always is the layer's transform box, so the variants carry no
-/// coordinates — only what the box alone does not say. [`Clip::Other`] is an
-/// untagged catch-all (D21): a clip written by a newer build is preserved as
-/// written, refused when an update touches it, and refused at render time —
-/// the same bargain as [`ShapeKind::Other`] (and, like it, never flattened
-/// into its parent, so the catch-all's reach stays with the clip).
+/// coordinates — only what the box alone does not say (a path's `d` sits in
+/// the box, scaled by it, once the renderer draws it). Every known variant
+/// also carries a `#[serde(flatten)]` capture map (D27): a key this build
+/// does not know rides along verbatim instead of being dropped.
+/// [`Clip::Other`] is an untagged catch-all (D21): a clip written by a newer
+/// build is preserved as written, refused when an update touches it, and
+/// refused at render time — the same bargain as [`ShapeKind::Other`] (and,
+/// like it, never flattened into its parent, so the catch-all's reach stays
+/// with the clip).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "shape",
@@ -550,9 +557,27 @@ pub enum Clip {
         /// error.
         #[serde(default)]
         corner_radius: f64,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// An ellipse inscribed in the transform box — the circle avatar.
-    Ellipse,
+    Ellipse {
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
+    },
+    /// A path filling the transform box, closed, in the conservative grammar
+    /// of [`crate::path`]. The `d` string is validated at operation time; a
+    /// `d` that fails the grammar cannot be stored through this build.
+    Path {
+        /// The path data, as written in an SVG `d` attribute. Validated
+        /// against [`crate::path`] at operation time.
+        d: String,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
+    },
     /// A clip this build does not know, preserved as written, refused when an
     /// update touches it, and refused when something tries to draw it (D21).
     #[serde(untagged)]
@@ -564,7 +589,8 @@ impl Clip {
     pub fn kind_name(&self) -> &str {
         match self {
             Self::Rect { .. } => "rect",
-            Self::Ellipse => "ellipse",
+            Self::Ellipse { .. } => "ellipse",
+            Self::Path { .. } => "path",
             Self::Other(raw) => raw
                 .get("shape")
                 .and_then(serde_json::Value::as_str)
@@ -648,6 +674,12 @@ pub struct ShapeLayer {
 }
 
 /// The geometry of a [`ShapeLayer`], tagged by `"kind"` in JSON.
+///
+/// Every known variant also carries a `#[serde(flatten)]` capture map (D27):
+/// a key this build does not know rides along verbatim instead of being
+/// dropped. The unit variants became struct variants holding only the map,
+/// which leaves their serialized form byte-identical (the D27 spike measured
+/// it: `{"kind":"ellipse"}` stays `{"kind":"ellipse"}`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "kind",
@@ -663,9 +695,16 @@ pub enum ShapeKind {
         /// larger than the box makes a stadium rather than a refusal.
         #[serde(default)]
         corner_radius: f64,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// An ellipse inscribed in the transform box.
-    Ellipse,
+    Ellipse {
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
+    },
     /// A straight segment across the middle of the transform box, from the
     /// left edge to the right.
     ///
@@ -675,7 +714,36 @@ pub enum ShapeKind {
     /// saying where a layer is, and `move`, `resize` and `rotate` would then
     /// have to mean something different for this layer kind than for the
     /// other four (maintainer's decision, 2026-09-09).
-    Line,
+    Line {
+        /// What sits at the start of the segment, or `None`.
+        ///
+        /// **Markers are part of the Line payload, never preset-carried**:
+        /// they describe this segment's ends, not a style, and a preset that
+        /// carried them would move another line's arrows (Contents A6).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marker_start: Option<LineMarker>,
+        /// What sits at the end of the segment, or `None`. See
+        /// `marker_start`: part of the payload, never preset-carried.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marker_end: Option<LineMarker>,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
+    },
+    /// A closed silhouette drawn from path data, filling the transform box.
+    ///
+    /// The `d` string follows the conservative grammar of [`crate::path`] —
+    /// no quadratics, one leading moveto, closed, bounded length and command
+    /// count — and is validated at **operation time**, so a `d` that fails
+    /// the grammar cannot enter a document through this build.
+    Path {
+        /// The path data, as written in an SVG `d` attribute. Validated
+        /// against [`crate::path`] at operation time.
+        d: String,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
+    },
     /// A geometry this build does not know, preserved as written and refused
     /// when something tries to change or draw it — the same bargain as
     /// [`Effect::Other`] and [`BlendMode::Other`] (D21).
@@ -688,8 +756,9 @@ impl ShapeKind {
     pub fn kind_name(&self) -> &str {
         match self {
             Self::Rect { .. } => "rect",
-            Self::Ellipse => "ellipse",
-            Self::Line => "line",
+            Self::Ellipse { .. } => "ellipse",
+            Self::Line { .. } => "line",
+            Self::Path { .. } => "path",
             Self::Other(raw) => raw
                 .get("kind")
                 .and_then(serde_json::Value::as_str)
@@ -703,7 +772,19 @@ impl ShapeKind {
     }
 }
 
+/// Largest [`Stroke::dash_array`] accepted, in entries.
+///
+/// Real dashed styles need two to four numbers; eight is room for a
+/// dash-dot-dot pattern twice over and still too small for anything a
+/// renderer would rather refuse than sort. Enforced at operation time, like
+/// every other stroke limit.
+pub const MAX_DASH_ENTRIES: usize = 8;
+
 /// A shape's edge paint.
+///
+/// Like every payload in the document, a stroke also carries a
+/// `#[serde(flatten)]` capture map (D27): a key this build does not know
+/// rides along verbatim instead of being dropped on the next save.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Stroke {
@@ -725,6 +806,82 @@ pub struct Stroke {
     /// rather than refused — but at that width the box is not quite the
     /// visual box.
     pub width: f64,
+    /// The dash pattern, alternating paint and gap in document units,
+    /// starting with paint. `None` is a solid line.
+    ///
+    /// When present: non-empty, at most [`MAX_DASH_ENTRIES`] entries, every
+    /// value finite and greater than 0 — validated at operation time, where
+    /// every stroke limit lives. A pattern this build cannot draw is a
+    /// refusal at the moment it is set, not a surprise at render time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dash_array: Option<Vec<f64>>,
+    /// How the stroke ends, when the stroke is set. `None` means the
+    /// renderer's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_cap: Option<LineCap>,
+    /// How two segments of the stroke meet, when the stroke is set. `None`
+    /// means the renderer's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_join: Option<LineJoin>,
+    /// Keys this build does not know about, preserved verbatim (D27).
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// How a stroke ends.
+///
+/// A fixed, named set, with an untagged [`LineCap::Other`] catch-all (D21):
+/// a value written by a newer build round-trips verbatim and is refused when
+/// something tries to draw it — never guessed at and never lost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LineCap {
+    /// Flat, cut off at the endpoint.
+    Butt,
+    /// A half-disc past the endpoint.
+    Round,
+    /// A square half a width past the endpoint.
+    Square,
+    /// A cap this build does not know, preserved verbatim (D21).
+    #[serde(untagged)]
+    Other(serde_json::Value),
+}
+
+/// How two segments of a stroke meet at a corner.
+///
+/// The same fixed set and catch-all bargain as [`LineCap`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LineJoin {
+    /// Sharp corner, extended to the stroke width.
+    Miter,
+    /// Rounded corner.
+    Round,
+    /// Bevelled corner, cut across.
+    Bevel,
+    /// A join this build does not know, preserved verbatim (D21).
+    #[serde(untagged)]
+    Other(serde_json::Value),
+}
+
+/// What sits at an end of a [`ShapeKind::Line`].
+///
+/// A fixed, named set — never arbitrary marker markup: a marker's geometry
+/// is part of the engine, deterministic on every target, not part of the
+/// document. A name written by a newer build round-trips verbatim in
+/// [`LineMarker::Other`] and is refused when something tries to draw it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LineMarker {
+    /// No marker: the line just ends.
+    None,
+    /// An open arrowhead pointing along the line.
+    Arrow,
+    /// A small disc centred on the endpoint.
+    Circle,
+    /// A marker name this build does not know, preserved verbatim (D21).
+    #[serde(untagged)]
+    Other(serde_json::Value),
 }
 
 /// One adjustment in a layer's effect stack.
@@ -736,6 +893,10 @@ pub struct Stroke {
 /// The amounts are multipliers where 1 means "unchanged", which is what
 /// `filter: brightness(1.2)` means everywhere else, so a number copied from a
 /// CSS example does what it looks like it does.
+///
+/// Every known variant also carries a `#[serde(flatten)]` capture map
+/// (D27): a key this build does not know rides along verbatim instead of
+/// being dropped on the next save.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Effect {
@@ -743,21 +904,33 @@ pub enum Effect {
     Brightness {
         /// The multiplier.
         amount: f64,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// Pushes each channel away from mid grey. 1 is unchanged, 0 is flat grey.
     Contrast {
         /// The multiplier.
         amount: f64,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// Scales colourfulness. 1 is unchanged, 0 is greyscale.
     Saturation {
         /// The multiplier.
         amount: f64,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// A Gaussian blur.
     Blur {
         /// Standard deviation, in document units. 0 does nothing.
         radius: f64,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// Seeded monochrome noise, multiplied over the layer.
     ///
@@ -773,6 +946,9 @@ pub enum Effect {
         /// Size of the noise features; 1 is fine grain, larger is coarser.
         #[serde(default = "default_grain_scale")]
         scale: f64,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// A soft offset copy of the layer's alpha, drawn beneath it.
     ///
@@ -794,6 +970,9 @@ pub enum Effect {
         /// Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so
         /// a shadow's strength is written where every other colour writes it.
         color: Color,
+        /// Keys this build does not know about, preserved verbatim (D27).
+        #[serde(flatten)]
+        extra: Extras,
     },
     /// An effect this build does not know, preserved as written and refused
     /// when something tries to draw it.
@@ -900,20 +1079,34 @@ impl Effect {
     /// rendered but was never advertised.
     pub fn rendered_examples() -> Vec<Self> {
         vec![
-            Self::Brightness { amount: 1.2 },
-            Self::Contrast { amount: 1.4 },
-            Self::Saturation { amount: 0.0 },
-            Self::Blur { radius: 3.0 },
+            Self::Brightness {
+                amount: 1.2,
+                extra: Extras::new(),
+            },
+            Self::Contrast {
+                amount: 1.4,
+                extra: Extras::new(),
+            },
+            Self::Saturation {
+                amount: 0.0,
+                extra: Extras::new(),
+            },
+            Self::Blur {
+                radius: 3.0,
+                extra: Extras::new(),
+            },
             Self::Grain {
                 amount: 0.2,
                 seed: 7,
                 scale: 1.0,
+                extra: Extras::new(),
             },
             Self::DropShadow {
                 dx: 0.0,
                 dy: 6.0,
                 blur: 12.0,
                 color: Color::new("#00000055"),
+                extra: Extras::new(),
             },
         ]
     }
@@ -1215,11 +1408,18 @@ mod tests {
             LayerId::new("layer_shape"),
             Transform::new(1.5, 2.5, 60.0, 40.0),
             LayerKind::Shape(ShapeLayer {
-                shape: ShapeKind::Rect { corner_radius: 8.0 },
+                shape: ShapeKind::Rect {
+                    corner_radius: 8.0,
+                    extra: Extras::new(),
+                },
                 fill: Some(Color::new("#3366cc")),
                 stroke: Some(Stroke {
                     color: Color::new("#112233"),
                     width: 3.0,
+                    dash_array: None,
+                    line_cap: None,
+                    line_join: None,
+                    extra: Extras::new(),
                 }),
                 extra: Extras::new(),
             }),
@@ -1229,6 +1429,7 @@ mod tests {
             dy: 4.0,
             blur: 1.5,
             color: Color::new("#00000080"),
+            extra: Extras::new(),
         }];
 
         let json = serde_json::to_value(&layer).unwrap();
@@ -1250,7 +1451,9 @@ mod tests {
             LayerId::new("layer_shape"),
             Transform::new(0.0, 0.0, 10.0, 10.0),
             LayerKind::Shape(ShapeLayer {
-                shape: ShapeKind::Ellipse,
+                shape: ShapeKind::Ellipse {
+                    extra: Extras::new(),
+                },
                 fill: None,
                 stroke: None,
                 extra: Extras::new(),
@@ -1300,10 +1503,33 @@ mod tests {
 
     #[test]
     fn shape_kinds_and_the_shadow_name_themselves() {
-        assert_eq!(ShapeKind::Rect { corner_radius: 0.0 }.kind_name(), "rect");
-        assert_eq!(ShapeKind::Ellipse.kind_name(), "ellipse");
-        assert_eq!(ShapeKind::Line.kind_name(), "line");
-        assert!(ShapeKind::Line.is_rendered());
+        assert_eq!(
+            ShapeKind::Rect {
+                corner_radius: 0.0,
+                extra: Extras::new(),
+            }
+            .kind_name(),
+            "rect"
+        );
+        assert_eq!(
+            ShapeKind::Ellipse {
+                extra: Extras::new()
+            }
+            .kind_name(),
+            "ellipse"
+        );
+        let line = ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        };
+        assert_eq!(line.kind_name(), "line");
+        assert!(line.is_rendered());
+        assert!(ShapeKind::Path {
+            d: "M0 0Z".to_owned(),
+            extra: Extras::new(),
+        }
+        .is_rendered());
         assert_eq!(
             ShapeKind::Other(serde_json::json!({ "notKind": 1 })).kind_name(),
             "(untyped)"
@@ -1314,9 +1540,142 @@ mod tests {
                 dy: 0.0,
                 blur: 4.0,
                 color: Color::default(),
+                extra: Extras::new(),
             }
             .type_name(),
             "dropShadow"
+        );
+    }
+
+    #[test]
+    fn an_unknown_key_inside_a_stroke_survives_a_round_trip() {
+        // D27: the capture map sits inside the stroke, so a key a future
+        // build adds to *its* strokes comes back untouched.
+        let json = serde_json::json!({
+            "color": "#112233",
+            "width": 2.0,
+            "dashArray": [4.0, 2.0],
+            "lineCap": "round",
+            "futureStrokeKey": { "a": [1, 2, null] }
+        });
+        let stroke: Stroke = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(stroke.dash_array, Some(vec![4.0, 2.0]));
+        assert_eq!(stroke.line_cap, Some(LineCap::Round));
+        assert_eq!(stroke.extra["futureStrokeKey"]["a"][1], 2);
+        assert_eq!(serde_json::to_value(&stroke).unwrap(), json);
+    }
+
+    #[test]
+    fn an_unknown_key_inside_a_clip_variant_survives_a_round_trip() {
+        for (clip_json, _tag, name) in [
+            (
+                serde_json::json!({ "shape": "ellipse", "future": 1 }),
+                "shape",
+                "ellipse",
+            ),
+            (
+                serde_json::json!({ "shape": "rect", "cornerRadius": 8.0, "future": true }),
+                "shape",
+                "rect",
+            ),
+        ] {
+            let clip: Clip = serde_json::from_value(clip_json.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&clip).unwrap(), clip_json, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_unit_clip_and_shape_variant_stay_byte_identical() {
+        // The D27 spike's ellipse case, kept as a test: a unit variant turned
+        // into a struct variant holding only the capture map serializes
+        // exactly as before.
+        let clip: Clip = serde_json::from_value(serde_json::json!({ "shape": "ellipse" })).unwrap();
+        assert_eq!(
+            serde_json::to_value(&clip).unwrap(),
+            serde_json::json!({ "shape": "ellipse" })
+        );
+        let shape: ShapeKind =
+            serde_json::from_value(serde_json::json!({ "kind": "ellipse" })).unwrap();
+        assert_eq!(
+            serde_json::to_value(&shape).unwrap(),
+            serde_json::json!({ "kind": "ellipse" })
+        );
+    }
+
+    #[test]
+    fn an_unknown_key_inside_a_crop_and_an_effect_survive_a_round_trip() {
+        let crop_json = serde_json::json!({
+            "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0,
+            "futureCropKey": "keep"
+        });
+        let crop: Crop = serde_json::from_value(crop_json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&crop).unwrap(), crop_json);
+
+        let effect_json = serde_json::json!({
+            "type": "blur", "radius": 3.0, "futureEffectKey": [true]
+        });
+        let effect: Effect = serde_json::from_value(effect_json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&effect).unwrap(), effect_json);
+    }
+
+    #[test]
+    fn a_path_shape_and_a_path_clip_round_trip() {
+        let shape_json = serde_json::json!({ "kind": "path", "d": "M0 0L10 10Z" });
+        let shape: ShapeKind = serde_json::from_value(shape_json.clone()).unwrap();
+        assert_eq!(shape.kind_name(), "path");
+        assert!(shape.is_rendered());
+        assert_eq!(serde_json::to_value(&shape).unwrap(), shape_json);
+
+        let clip_json = serde_json::json!({ "shape": "path", "d": "M0 0L10 10Z" });
+        let clip: Clip = serde_json::from_value(clip_json.clone()).unwrap();
+        assert_eq!(clip.kind_name(), "path");
+        assert!(clip.is_rendered());
+        assert_eq!(serde_json::to_value(&clip).unwrap(), clip_json);
+    }
+
+    #[test]
+    fn line_markers_round_trip_and_stay_off_the_wire_when_absent() {
+        let line_json = serde_json::json!({
+            "kind": "line", "markerStart": "arrow", "markerEnd": "circle"
+        });
+        let line: ShapeKind = serde_json::from_value(line_json.clone()).unwrap();
+        let ShapeKind::Line {
+            marker_start,
+            marker_end,
+            ..
+        } = &line
+        else {
+            panic!("expected a line, got {line:?}");
+        };
+        assert_eq!(marker_start, &Some(LineMarker::Arrow));
+        assert_eq!(marker_end, &Some(LineMarker::Circle));
+        assert_eq!(serde_json::to_value(&line).unwrap(), line_json);
+
+        // Absent markers write nothing: a 1.9.x line stays byte-identical.
+        let plain: ShapeKind =
+            serde_json::from_value(serde_json::json!({ "kind": "line" })).unwrap();
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::json!({ "kind": "line" })
+        );
+    }
+
+    #[test]
+    fn unknown_cap_join_and_marker_names_round_trip_as_written() {
+        // The D21 catch-all bargain, at the new enums too: never lost, and
+        // never guessed at.
+        let cap: LineCap = serde_json::from_value(serde_json::json!("spiral")).unwrap();
+        assert_eq!(
+            serde_json::to_value(&cap).unwrap(),
+            serde_json::json!("spiral")
+        );
+        let join: LineJoin = serde_json::from_value(serde_json::json!(42)).unwrap();
+        assert_eq!(serde_json::to_value(&join).unwrap(), serde_json::json!(42));
+        let marker: LineMarker =
+            serde_json::from_value(serde_json::json!({ "fancy": true })).unwrap();
+        assert_eq!(
+            serde_json::to_value(&marker).unwrap(),
+            serde_json::json!({ "fancy": true })
         );
     }
 

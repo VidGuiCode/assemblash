@@ -72,6 +72,7 @@ impl Editor {
                     assemblash_mcp::http_service_with_sessions(server.state(), hosting);
                 let server = server
                     .with_service(MCP_PATH, mcp)
+                    .expect("the MCP endpoint mounts")
                     .with_agent_access(MCP_PATH)
                     .with_agent_sessions(move || agents.count());
                 send.send(server.url()).unwrap();

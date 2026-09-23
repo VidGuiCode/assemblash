@@ -39,6 +39,40 @@ pub enum Root {
     },
 }
 
+/// A flag that asks work in flight to give up.
+///
+/// The stdio relay sets it when the local target must make way for the
+/// editor: a render that is running keeps going, but the request waiting for
+/// it is answered with a typed refusal instead of holding the switch back.
+/// One request = one transaction still holds — the flag is checked between
+/// phases, never inside a write, so a cancelled request applies nothing.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CancelToken(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelToken {
+    pub(crate) fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn reset(&self) {
+        self.0.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// The error a cancelled request is answered with.
+pub(crate) fn cancelled() -> ApiError {
+    ApiError::new(
+        assemblash_server::StatusCode::CONFLICT,
+        "requestCancelled",
+        "the request was cancelled: the MCP target changed while it was in progress; \
+         send it again",
+    )
+}
+
 /// The read-only engine behind the MCP tools.
 #[derive(Debug, Clone)]
 pub struct Backend {
@@ -72,6 +106,8 @@ pub struct Backend {
     /// close every project the person has open the moment one agent
     /// disconnected.
     hosted: bool,
+    /// Set when the caller needs in-flight work to stop; see [`CancelToken`].
+    cancel: CancelToken,
 }
 
 /// Milliseconds since the Unix epoch, for the audit trail.
@@ -83,6 +119,83 @@ pub(crate) fn now_millis() -> Option<u64> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|elapsed| elapsed.as_millis() as u64)
+}
+
+/// The shape of a [`FontRecord`](assemblash_renderer::store::FontRecord), for
+/// the tool output schema.
+///
+/// The store's record derives `Serialize` but not `JsonSchema`; this exists
+/// for the schema the way `ExportWarningShape` does for warnings.
+#[derive(Debug, Clone, JsonSchema)]
+#[schemars(rename_all = "camelCase")]
+pub struct FontRecordShape {
+    /// Family name, as the document must spell it.
+    pub family: String,
+    /// `normal`, `italic`, or `oblique`.
+    pub style: String,
+    /// CSS weight, 100-900.
+    pub weight: u16,
+    /// File name inside the store.
+    pub file: String,
+    /// Content hash of that file, `sha256:<hex>`.
+    pub hash: String,
+    /// Which face inside the file this record describes.
+    pub face_index: u32,
+    /// Where the file came from, when it is known.
+    pub source: Option<String>,
+    /// Licence the file is distributed under, when it is known.
+    pub license: Option<String>,
+}
+
+/// The font store as it stands: the families, and the faces behind them.
+///
+/// The same listing `GET /api/fonts` serves and the interface's font panel
+/// draws.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FontStoreListing {
+    /// Family names a text layer may name, sorted.
+    pub families: Vec<String>,
+    /// Every face the store holds.
+    #[schemars(with = "Vec<FontRecordShape>")]
+    pub faces: Vec<assemblash_renderer::store::FontRecord>,
+}
+
+/// What installing a pack installed.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FontInstallReport {
+    /// The faces the pack added, or the ones already there.
+    #[schemars(with = "Vec<FontRecordShape>")]
+    pub installed: Vec<assemblash_renderer::store::FontRecord>,
+    /// Every family the store holds now.
+    pub families: Vec<String>,
+}
+
+/// What removing a family removed.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FontRemovalReport {
+    /// How many stored files the removal took.
+    pub removed: usize,
+    /// Every family the store holds now.
+    pub families: Vec<String>,
+}
+
+/// What a successful delete says.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDeleted {
+    /// The project that was deleted.
+    pub project: String,
+}
+
+/// What a successful rename says.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRenamed {
+    /// The name every later call passes as `project`.
+    pub project: String,
 }
 
 /// One project in a listing.
@@ -282,17 +395,43 @@ pub(crate) struct Loaded {
 
 impl Loaded {
     /// The canvas as a PNG.
-    pub(crate) fn preview(&self, scale: f32) -> Result<Preview, ApiError> {
+    ///
+    /// The render runs on its own thread, and `cancel` is watched while it
+    /// runs: when the flag goes up, the caller is refused at once and the
+    /// render is left to finish on its own into a result nobody reads. This
+    /// is what keeps a target switch from waiting out a long export.
+    pub(crate) fn preview(&self, scale: f32, cancel: &CancelToken) -> Result<Preview, ApiError> {
         let hrefs = assemblash_renderer::data_uris(&self.document, &self.directory)?;
-        let png = document_to_png(
-            &self.document,
-            &self.fonts,
-            &hrefs,
-            scale,
-            // No timestamp: two previews of an unchanged document are
-            // identical, which is what makes a client's cache trustworthy.
-            &PngMetadata::for_document(&self.document),
-        )?;
+        let render = {
+            let document = self.document.clone();
+            let fonts = self.fonts.clone();
+            let hrefs = hrefs.clone();
+            std::thread::spawn(move || {
+                document_to_png(
+                    &document,
+                    &fonts,
+                    &hrefs,
+                    scale,
+                    // No timestamp: two previews of an unchanged document are
+                    // identical, which is what makes a client's cache
+                    // trustworthy.
+                    &PngMetadata::for_document(&document),
+                )
+            })
+        };
+        while !render.is_finished() {
+            if cancel.is_cancelled() {
+                return Err(cancelled());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let png = render.join().map_err(|_| {
+            ApiError::new(
+                assemblash_server::StatusCode::INTERNAL_SERVER_ERROR,
+                "renderFailed",
+                "the renderer stopped while it was drawing the canvas",
+            )
+        })??;
         let width = (f64::from(scale) * self.document.canvas.width).round() as u32;
         let height = (f64::from(scale) * self.document.canvas.height).round() as u32;
         Ok(Preview { png, width, height })
@@ -329,6 +468,7 @@ impl Backend {
             reclaim_stale_locks,
             single_reclaimed: Default::default(),
             hosted: false,
+            cancel: Default::default(),
         }
     }
 
@@ -346,6 +486,7 @@ impl Backend {
             reclaim_stale_locks,
             single_reclaimed: Default::default(),
             hosted: true,
+            cancel: Default::default(),
         }
     }
 
@@ -353,6 +494,25 @@ impl Backend {
     /// projects.
     pub fn is_hosted(&self) -> bool {
         self.hosted
+    }
+
+    /// The flag that asks in-flight work to give up; see [`CancelToken`].
+    pub(crate) fn cancel_token(&self) -> &CancelToken {
+        &self.cancel
+    }
+
+    /// Asks every request in flight to stop where it safely can.
+    ///
+    /// The relay calls this when the local target must make way for the
+    /// editor. [`Backend::reset_cancel`] arms the flag again for the next
+    /// local server.
+    pub(crate) fn cancel_pending(&self) {
+        self.cancel.cancel();
+    }
+
+    /// Clears the flag, for a fresh local server over the same backend.
+    pub(crate) fn reset_cancel(&self) {
+        self.cancel.reset();
     }
 
     /// Serves a single project directory.
@@ -373,6 +533,7 @@ impl Backend {
             reclaim_stale_locks,
             single_reclaimed: Default::default(),
             hosted: false,
+            cancel: Default::default(),
         }
     }
 
@@ -545,7 +706,7 @@ impl Backend {
     /// Fonts are resolved by [`Backend::loaded`], which is where the promise
     /// that a missing family is an error rather than a substitution lives.
     pub fn preview(&self, project: Option<&str>, scale: f32) -> Result<Preview, ApiError> {
-        self.loaded(project)?.preview(scale)
+        self.loaded(project)?.preview(scale, &self.cancel)
     }
 
     /// The canvas as SVG source.
@@ -651,6 +812,103 @@ impl Backend {
     /// The font store this server renders with.
     pub(crate) fn font_store(&self) -> Result<assemblash_renderer::FontStore, ApiError> {
         self.fonts()
+    }
+
+    /// Every family and face the font store holds.
+    ///
+    /// What `GET /api/fonts` serves, and what the interface's font panel
+    /// draws — the families a text layer may name, and the faces behind
+    /// them.
+    pub fn list_fonts(&self) -> Result<FontStoreListing, ApiError> {
+        let store = self.fonts()?;
+        Ok(FontStoreListing {
+            families: store.families(),
+            faces: store.records().to_vec(),
+        })
+    }
+
+    /// Installs a pack from the compiled-in manifest.
+    ///
+    /// What `POST /api/fonts/install` does. This is the one operation here
+    /// that reaches the network, and it reaches it only when this call is
+    /// made; a failed download leaves the store exactly as it was.
+    pub fn install_font_pack(&self, pack: &str) -> Result<FontInstallReport, ApiError> {
+        let state = self.workspace_state("install_font_pack")?;
+        let manifest = state.font_manifest()?;
+        let _writing = state.lock_font_writes()?;
+        let mut store = state.font_store()?;
+        let installed = assemblash_renderer::install::install_pack_atomically(
+            &mut store,
+            &manifest,
+            pack,
+            state.font_fetcher(),
+        )?;
+        state.clear_font_cache();
+        Ok(FontInstallReport {
+            installed,
+            families: store.families(),
+        })
+    }
+
+    /// Removes every face a family provides.
+    ///
+    /// What `DELETE /api/fonts/{family}` does. A family the store does not
+    /// have is a typed `unknownFontFamily` refusal, not a silent success.
+    pub fn remove_font_family(&self, family: &str) -> Result<FontRemovalReport, ApiError> {
+        let state = self.workspace_state("remove_font_family")?;
+        let _writing = state.lock_font_writes()?;
+        let mut store = state.font_store()?;
+        let removed = store.remove_family(family)?;
+        if removed == 0 {
+            return Err(ApiError::new(
+                assemblash_server::StatusCode::NOT_FOUND,
+                "unknownFontFamily",
+                format!("no font family named {family:?} is in the font store"),
+            )
+            .with_details(serde_json::json!({ "family": family })));
+        }
+        state.clear_font_cache();
+        Ok(FontRemovalReport {
+            removed,
+            families: store.families(),
+        })
+    }
+
+    /// Deletes a project: directory and all. See `AppState::delete_project`.
+    pub fn delete_project(&self, project: &str) -> Result<ProjectDeleted, ApiError> {
+        let state = self.workspace_state("delete_project")?;
+        let id = ProjectId::new(project)?;
+        state.delete_project(&id)?;
+        Ok(ProjectDeleted {
+            project: id.as_str().to_owned(),
+        })
+    }
+
+    /// Renames a project. See `AppState::rename_project`.
+    pub fn rename_project(&self, project: &str, to: &str) -> Result<ProjectRenamed, ApiError> {
+        let state = self.workspace_state("rename_project")?;
+        let id = ProjectId::new(project)?;
+        let new = ProjectId::new(to)?;
+        state.rename_project(&id, &new)?;
+        Ok(ProjectRenamed {
+            project: new.as_str().to_owned(),
+        })
+    }
+
+    /// The workspace state, or the typed refusal a tool gives when this
+    /// server holds a single project and there is no workspace to act on.
+    fn workspace_state(&self, what: &str) -> Result<&AppState, ApiError> {
+        match &self.root {
+            Root::Workspace(state) => Ok(state),
+            Root::SingleProject { name, .. } => Err(ApiError::new(
+                assemblash_server::StatusCode::BAD_REQUEST,
+                "noWorkspace",
+                format!(
+                    "{what} needs a workspace, and this server holds only {name:?}: \
+                     start it with --workspace"
+                ),
+            )),
+        }
     }
 
     /// Exactly the fonts a document names, through the editor's cache when

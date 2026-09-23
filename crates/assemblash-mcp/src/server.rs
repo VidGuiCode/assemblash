@@ -21,8 +21,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::backend::{
-    Backend, DocumentState, HistoryReport, LayerList, LayerSummary, OverlapReport, ProjectList,
-    SvgRender, ValidationReport,
+    Backend, DocumentState, FontStoreListing, HistoryReport, LayerList, LayerSummary,
+    OverlapReport, ProjectList, SvgRender, ValidationReport,
 };
 
 /// Which project a tool is about.
@@ -111,6 +111,19 @@ impl AssemblashMcp {
     pub(crate) fn set_current_project(&self, project: &str) {
         if let Ok(mut current) = self.current.lock() {
             *current = Some(project.to_owned());
+        }
+    }
+
+    /// Forgets the project in use, when it is the one named.
+    ///
+    /// A deleted or renamed project must not stay the assumed target: the
+    /// next tool call without a `project` argument would name something that
+    /// is no longer there.
+    pub(crate) fn forget_current_project(&self, project: &str) {
+        if let Ok(mut current) = self.current.lock() {
+            if current.as_deref() == Some(project) {
+                *current = None;
+            }
         }
     }
 
@@ -362,6 +375,20 @@ impl AssemblashMcp {
             )
             .map(Json)
             .map_err(to_error)
+    }
+
+    /// The font store.
+    #[tool(
+        description = "List the font store: every installed family, and the faces (weight and \
+                       style) behind each one. These are the only family names a text layer may \
+                       take - the engine never substitutes a font - so check here before \
+                       add_text_layer or update_layer names one."
+    )]
+    async fn list_fonts(
+        &self,
+        Parameters(_args): Parameters<ProjectArgs>,
+    ) -> Result<Json<FontStoreListing>, ErrorData> {
+        self.backend.list_fonts().map(Json).map_err(to_error)
     }
 }
 

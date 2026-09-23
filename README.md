@@ -25,8 +25,8 @@ command-line interface, a local HTTP API, and an MCP server for AI agents.
 You and an AI agent can work on the same document at the same time. No cloud
 service and no account are necessary.
 
-**Current release: 1.9.0.** The document schema and the operation API are
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.9.0)
+**Current release: 1.10.0.** The document schema and the operation API are
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.10.0)
 or the [changelog](CHANGELOG.md).
 
 <p align="center">
@@ -44,8 +44,8 @@ You do not need a terminal for these steps.
 Go to [GitHub Releases](https://github.com/VidGuiCode/assemblash/releases/latest)
 and download the file for your computer:
 
-For example, the Windows file of release 1.9.0 is
-`assemblash-v1.9.0-windows-x86_64.exe`.
+For example, the Windows file of release 1.10.0 is
+`assemblash-v1.10.0-windows-x86_64.exe`.
 
 | Your computer | Download this file |
 | --- | --- |
@@ -207,7 +207,7 @@ files it installs. The formula is in `packaging/homebrew/`, but the tap is
 Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.9.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.10.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -272,6 +272,27 @@ without hashing the file itself:
 assemblash export ./poster poster.png --font-store ./assemblash-fonts
 ```
 
+### Update Assemblash (1.10.0)
+
+Assemblash can tell you that a new version exists, and can install it.
+
+- The first `serve` asks once whether to check for updates. The answer is
+  kept in `config.toml` as `updateCheck = "off"` or `"notify"`. You can
+  change it later in Settings.
+- A check sends one request to the release feed of this repository. It
+  sends no identifiers and no document data. It runs at most once every 24
+  hours, and the result is kept in the workspace.
+- When a newer stable version exists, the editor shows a banner. The banner
+  links to the release notes and never blocks your work.
+- `assemblash upgrade --check` prints the installed version and the latest
+  version. `assemblash upgrade` downloads the new version, checks it
+  against the `SHA256SUMS` file of the release, replaces the program, and
+  starts `serve` again. The old program is kept as `.old` until the next
+  start. A failed or interrupted download changes nothing.
+- An installation that a package manager owns gets advice to use that
+  package manager instead of a swap.
+- MCP mode never checks for updates.
+
 ## Platform compatibility
 
 The same six platforms are built, tested, and included in every release:
@@ -296,7 +317,9 @@ editor runs in a modern browser and is served by the executable itself.
 
 - Canvas dimensions and background settings
 - Text, raster image, SVG, shape, and nested group layers
-- Rectangle, ellipse, and line shapes with fill, stroke, and corner radius
+- Rectangle, ellipse, line, and path shapes with fill, stroke, corner
+  radius, dash pattern, line cap, and line join
+- Arrow and circle markers on the ends of a line
 - Position, size, rotation, scale, opacity, visibility, and ordering
 - Stable IDs, metadata, locking, duplication, grouping, and ungrouping
 - Alignment, centering, distribution, snapping, bounds, and overlap queries
@@ -345,6 +368,32 @@ Set these on the CLI with `set --clip-rect`, `--clip-radius`, `--clip-ellipse`,
 `--no-clip`, `--crop X,Y,W,H`, `--no-crop`, `--flip-h`, and `--flip-v`; in the
 interface with the inspector rows; and over MCP with the `clip`, `crop`,
 `flipHorizontal`, and `flipVertical` arguments of `update_layer`.
+
+### Paths, dashes, and markers (1.10.0)
+
+A shape can be any silhouette. A path shape carries an SVG path string, and
+so can a clip. A stroke can be dashed, and a line can end in an arrow or a
+circle.
+
+- **The path grammar.** The accepted commands are `M`, `L`, `H`, `V`, `C`,
+  `S`, `A`, and `Z`, in upper or lower case. The path starts with one `M`
+  and ends with `Z`. It holds at most 30 commands and 2048 bytes. Every
+  number must be finite. A path that breaks a rule is refused with a
+  message that names the command and its position.
+- **Stroke style.** A stroke carries `dashArray` (at most 8 entries, each
+  greater than zero), `lineCap` (`butt`, `round`, or `square`), and
+  `lineJoin` (`miter`, `round`, or `bevel`).
+- **Markers.** A line carries `markerStart` and `markerEnd` from a fixed
+  set: `arrow`, `circle`, or `none`. The marker size follows the stroke
+  width, so a marker never appears at a size the document did not ask for.
+- **Presets** carry the dash, cap, and join fields. Markers belong to the
+  line, so presets do not carry them.
+
+Set these on the CLI with `add-path` and `set --path --dash --cap --join
+--marker-start --marker-end`; in the interface with the shape rows of the
+properties panel; and over MCP with the `path` argument of
+`add_shape_layer` and the `shape`, `path`, and marker arguments of
+`update_layer`.
 
 ### Rendering and export
 
@@ -503,9 +552,16 @@ protection check, and an undo transaction ID. Other tools:
 - `find_overlaps` returns the overlapping layers, in the same pairs and order
   as the CLI and the HTTP API.
 - `update_layer` sets `lineHeight` and the other text properties.
+- `add_shape_layer` takes `path` for a path shape, and `markerStart` and
+  `markerEnd` for a line. `update_layer` replaces the geometry with `shape`
+  and `path`, and sets the markers of a line.
 - `export_document` returns the same `warnings` array as the other
   interfaces. It refuses to replace a file of the same name unless the call
   passes `overwrite`.
+- Six more tools cover the whole surface: `insert_layer_tree` pastes a
+  copied layer tree, `list_fonts` reads the font store, `install_font_pack`
+  and `remove_font_family` manage it, and `delete_project` and
+  `rename_project` manage projects. The tool surface holds 53 tools.
 
 A change to a text layer reports the same warnings immediately, in the
 `warnings` field of the result. An agent cannot see its own render, so it
@@ -649,6 +705,11 @@ The important limits:
   refused because they are not bit-identical across every target.
 - A document with a shape layer needs 1.6.0 or newer. Releases 1.0 to 1.5
   refuse the whole document and name `shape` as an unknown layer kind.
+- A path shape or a path clip is preserved by releases 1.6.0 to 1.9.x, but
+  those releases refuse to draw it and refuse an update that touches it.
+- Unknown fields survive load and save at every level of the document,
+  including inside `clip`, `crop`, `stroke`, `shape`, and the effect stack
+  (1.10.0).
 - The stroke of a shape is painted inside its box, so the box is the visible
   size. A stroke narrower than 1 is the exception: it is a hairline on the
   edge and can extend half a pixel outside the box.

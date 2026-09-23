@@ -12,21 +12,23 @@
 //! id live.
 
 use assemblash_core::document::{
-    BlendMode, Clip, Crop, Effect, FontStyle, ImageFit, ShapeKind, Stroke, TextAlign, Transform,
-    VerticalAlign,
+    BlendMode, Clip, Crop, Effect, FontStyle, ImageFit, LineCap, LineJoin, ShapeKind, Stroke,
+    TextAlign, Transform, VerticalAlign,
 };
 use assemblash_core::ops::{
     AlignEdge, Axis, CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, SnapTarget,
     UpdateCanvas, UpdateLayer,
 };
-use assemblash_core::{AssetId, Color, LayerId, Operation};
+use assemblash_core::{AssetId, Color, LayerId, LineMarker, Operation};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::ErrorData;
 use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer};
 
-use crate::backend::ProjectSummary;
+use crate::backend::{
+    FontInstallReport, FontRemovalReport, ProjectDeleted, ProjectRenamed, ProjectSummary,
+};
 use crate::server::{to_error, AssemblashMcp};
 use crate::writes::{ExportResult, OpenedProject, WriteEnvelope, WriteOutcome};
 
@@ -130,7 +132,7 @@ pub struct AddTextArgs {
 }
 
 /// The primitive geometry a shape layer draws.
-#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ShapeArg {
     /// A rectangle filling its box.
@@ -139,6 +141,10 @@ pub enum ShapeArg {
     Ellipse,
     /// A horizontal segment across the middle of its box.
     Line,
+    /// A closed silhouette drawn from path data, in the engine's conservative
+    /// grammar. The `path` argument carries the `d` string, and a `d` that
+    /// breaks the grammar is refused with the grammar's own words.
+    Path,
 }
 
 /// The edge paint for a shape layer.
@@ -150,6 +156,17 @@ pub struct StrokeArgs {
     /// Stroke width in document units. Defaults to 1 when omitted.
     #[serde(default)]
     pub width: Option<f64>,
+    /// Dash pattern, alternating paint and gap in document units. At most 8
+    /// entries, every one finite and greater than 0; a value outside those
+    /// limits is refused when the change is applied.
+    #[serde(default)]
+    pub dash_array: Option<Vec<f64>>,
+    /// How the stroke ends: `butt`, `round`, or `square`.
+    #[serde(default)]
+    pub line_cap: Option<LineCap>,
+    /// How two segments meet: `miter`, `round`, or `bevel`.
+    #[serde(default)]
+    pub line_join: Option<LineJoin>,
 }
 
 impl StrokeArgs {
@@ -157,6 +174,10 @@ impl StrokeArgs {
         Stroke {
             color: Color::new(self.color.clone()),
             width: self.width.unwrap_or(1.0),
+            dash_array: self.dash_array.clone(),
+            line_cap: self.line_cap.clone(),
+            line_join: self.line_join.clone(),
+            extra: assemblash_core::document::Extras::new(),
         }
     }
 }
@@ -170,8 +191,13 @@ pub struct AddShapeArgs {
     pub placement: PlacementArgs,
     #[serde(flatten)]
     pub box_: BoxArgs,
-    /// Geometry to create: `rect`, `ellipse`, or `line`.
+    /// Geometry to create: `rect`, `ellipse`, `line`, or `path`.
     pub shape: ShapeArg,
+    /// Path data for `shape: "path"`, as written in an SVG `d` attribute:
+    /// one leading moveto, straight and cubic segments and arcs only, closed.
+    /// Required for a path, refused otherwise.
+    #[serde(default)]
+    pub path: Option<String>,
     /// Corner radius for a rectangle, in document units. Defaults to 0;
     /// other geometries do not have corners.
     #[serde(default)]
@@ -184,6 +210,14 @@ pub struct AddShapeArgs {
     /// to `#000000` at width 1. A supplied width defaults to 1.
     #[serde(default)]
     pub stroke: Option<StrokeArgs>,
+    /// What sits at the start of a line segment: `none`, `arrow`, or
+    /// `circle`. Lines only; a marker on another geometry is refused.
+    #[serde(default)]
+    pub marker_start: Option<LineMarker>,
+    /// What sits at the end of a line segment: `none`, `arrow`, or `circle`.
+    /// See `markerStart`.
+    #[serde(default)]
+    pub marker_end: Option<LineMarker>,
     /// Human-facing layer name.
     #[serde(default)]
     pub name: Option<String>,
@@ -288,6 +322,27 @@ pub struct UpdateArgs {
     /// New corner radius for a rectangular shape, in document units.
     #[serde(default)]
     pub corner_radius: Option<f64>,
+    /// Replace the whole geometry of a shape layer: `rect`, `ellipse`,
+    /// `line`, or `path`. The paint stays. A `path` needs path data in
+    /// `path`; a `d` that breaks the grammar is refused with the grammar's
+    /// own words. Text, image, SVG, and group layers refuse it, naming the
+    /// layer.
+    #[serde(default)]
+    pub shape: Option<ShapeArg>,
+    /// Path data for `shape: "path"`, as written in an SVG `d` attribute:
+    /// one leading moveto, straight and cubic segments and arcs only, closed.
+    /// Required for a path, refused otherwise.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// What sits at the start of a line segment: `none`, `arrow`, or
+    /// `circle`. Line layers only; a marker on another geometry is refused,
+    /// naming the layer.
+    #[serde(default)]
+    pub marker_start: Option<LineMarker>,
+    /// What sits at the end of a line segment: `none`, `arrow`, or `circle`.
+    /// See `markerStart`.
+    #[serde(default)]
+    pub marker_end: Option<LineMarker>,
     /// Set true to remove the fill; cannot be combined with `fill`.
     #[serde(default)]
     pub clear_fill: Option<bool>,
@@ -564,6 +619,60 @@ pub struct NewProjectArgs {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InsertLayerTreeArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// The layers to insert, as document layer objects — a pasted subtree.
+    /// Ids in them are replaced; assets they name must already be in the
+    /// document.
+    pub layers: Vec<assemblash_core::Layer>,
+    /// Group to put the top-level layers in. Omit for the document root.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// Index among the siblings there. Omit to put them on top.
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Distance to move the whole tree along x, in document units.
+    #[serde(default)]
+    pub offset_x: Option<f64>,
+    /// Distance to move the whole tree along y, in document units.
+    #[serde(default)]
+    pub offset_y: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallFontPackArgs {
+    /// A pack from the compiled-in manifest, e.g. `default`.
+    pub pack: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveFontFamilyArgs {
+    /// The family to remove, spelled as `list_fonts` reports it.
+    pub family: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteProjectArgs {
+    /// Project to delete, as `list_projects` reports it.
+    pub project: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameProjectArgs {
+    /// Project to rename, as `list_projects` reports it.
+    pub project: String,
+    /// The new name. Letters, digits, hyphens, and underscores; a name that
+    /// is really a path is refused, and so is one already taken.
+    pub name: String,
+}
+
 #[tool_router(router = write_tool_router, vis = "pub(crate)")]
 impl AssemblashMcp {
     /// Adds a text layer.
@@ -602,9 +711,18 @@ impl AssemblashMcp {
         self.write(&args.write, operation)
     }
 
-    /// Adds a rectangle, ellipse, or line shape layer.
+    /// Adds a rectangle, ellipse, line, or path shape layer.
     #[tool(
-        description = "Add a rectangle, ellipse, or horizontal line shape layer to a project. Rectangles and ellipses default to a #000000 fill and no stroke; lines default to no fill and a #000000 stroke of width 1. A supplied stroke width defaults to 1, and cornerRadius defaults to 0 for rectangles. The operation is journalled, supports dryRun and expectedVersion, and refuses invalid paint, boxes, parents, protected targets, or unsupported values; it never imports files or writes outside the project."
+        description = "Add a rectangle, ellipse, horizontal line, or closed-path shape layer to a \
+                       project. Rectangles and ellipses default to a #000000 fill and no stroke; \
+                       lines default to no fill and a #000000 stroke of width 1; a path takes \
+                       path data in `path` (one leading moveto, straight/cubic segments and arcs \
+                       only, closed - a bad d string is refused naming the command and byte). A \
+                       supplied stroke width defaults to 1, and cornerRadius defaults to 0 for \
+                       rectangles. The operation is journalled, supports dryRun and \
+                       expectedVersion, and refuses invalid paint, boxes, parents, protected \
+                       targets, or unsupported values; it never imports files or writes outside \
+                       the project."
     )]
     async fn add_shape_layer(
         &self,
@@ -615,28 +733,59 @@ impl AssemblashMcp {
                 ShapeArg::Rect => "rect",
                 ShapeArg::Ellipse => "ellipse",
                 ShapeArg::Line => "line",
+                ShapeArg::Path => "path",
             };
             return Err(ErrorData::invalid_request(
                 format!("cornerRadius is only valid for rect shapes; got {kind}"),
                 None,
             ));
         }
+        if args.shape == ShapeArg::Path && args.path.is_none() {
+            return Err(ErrorData::invalid_request(
+                "shape \"path\" needs path data in the `path` argument",
+                None,
+            ));
+        }
         let shape = match args.shape {
             ShapeArg::Rect => ShapeKind::Rect {
                 corner_radius: args.corner_radius.unwrap_or(0.0),
+                extra: assemblash_core::document::Extras::new(),
             },
-            ShapeArg::Ellipse => ShapeKind::Ellipse,
-            ShapeArg::Line => ShapeKind::Line,
+            ShapeArg::Ellipse => ShapeKind::Ellipse {
+                extra: assemblash_core::document::Extras::new(),
+            },
+            ShapeArg::Line => ShapeKind::Line {
+                marker_start: args.marker_start.clone(),
+                marker_end: args.marker_end.clone(),
+                extra: assemblash_core::document::Extras::new(),
+            },
+            ShapeArg::Path => {
+                // Refused above when absent; spelled as a `let else` so no
+                // call can panic on a caller's behalf.
+                let Some(d) = args.path.clone() else {
+                    return Err(ErrorData::invalid_request(
+                        "shape \"path\" needs path data in the `path` argument",
+                        None,
+                    ));
+                };
+                ShapeKind::Path {
+                    d,
+                    extra: assemblash_core::document::Extras::new(),
+                }
+            }
         };
-        let fill = args
-            .fill
-            .clone()
-            .map(Color::new)
-            .or_else(|| (!matches!(&shape, ShapeKind::Line)).then(|| Color::new("#000000")));
+        let fill =
+            args.fill.clone().map(Color::new).or_else(|| {
+                (!matches!(&shape, ShapeKind::Line { .. })).then(|| Color::new("#000000"))
+            });
         let stroke = args.stroke.as_ref().map(StrokeArgs::to_stroke).or_else(|| {
-            matches!(&shape, ShapeKind::Line).then(|| Stroke {
+            matches!(&shape, ShapeKind::Line { .. }).then(|| Stroke {
                 color: Color::new("#000000"),
                 width: 1.0,
+                dash_array: None,
+                line_cap: None,
+                line_join: None,
+                extra: assemblash_core::document::Extras::new(),
             })
         });
         let operation = Operation::Create(CreateLayer {
@@ -699,7 +848,11 @@ impl AssemblashMcp {
     /// Changes a layer's properties.
     #[tool(
         description = "Change properties of an existing layer. Only the fields you pass are \
-                       touched; omitting one leaves it alone."
+                       touched; omitting one leaves it alone. On a shape layer you may also \
+                       replace the whole geometry with `shape` (rect, ellipse, line, or path; \
+                       a path needs `path` data, and a bad d string is refused naming the \
+                       command and byte), or set line markers with markerStart/markerEnd \
+                       (none, arrow, or circle - line layers only)."
     )]
     async fn update_layer(
         &self,
@@ -737,6 +890,33 @@ impl AssemblashMcp {
                 None,
             ));
         }
+        let shape = match args.shape {
+            None => None,
+            Some(ShapeArg::Rect) => Some(ShapeKind::Rect {
+                corner_radius: args.corner_radius.unwrap_or(0.0),
+                extra: assemblash_core::document::Extras::new(),
+            }),
+            Some(ShapeArg::Ellipse) => Some(ShapeKind::Ellipse {
+                extra: assemblash_core::document::Extras::new(),
+            }),
+            Some(ShapeArg::Line) => Some(ShapeKind::Line {
+                marker_start: args.marker_start.clone(),
+                marker_end: args.marker_end.clone(),
+                extra: assemblash_core::document::Extras::new(),
+            }),
+            Some(ShapeArg::Path) => {
+                let Some(d) = args.path.clone() else {
+                    return Err(ErrorData::invalid_request(
+                        "shape \"path\" needs path data in the `path` argument",
+                        None,
+                    ));
+                };
+                Some(ShapeKind::Path {
+                    d,
+                    extra: assemblash_core::document::Extras::new(),
+                })
+            }
+        };
         let clip = if args.clear_clip.unwrap_or(false) {
             Some(None)
         } else {
@@ -777,6 +957,9 @@ impl AssemblashMcp {
             fill,
             stroke,
             corner_radius: args.corner_radius,
+            shape,
+            marker_start: args.marker_start.clone(),
+            marker_end: args.marker_end.clone(),
             clip,
             crop,
             flip_horizontal: args.flip_horizontal,
@@ -1201,6 +1384,111 @@ impl AssemblashMcp {
             .map_err(to_error)?;
         self.set_current_project(&args.project);
         Ok(Json(summary))
+    }
+
+    /// Inserts a layer tree, as the interface's paste does.
+    #[tool(
+        description = "Insert whole layers - groups included, children under their parents - into \
+                       a project, as the editor's paste does. The layers arrive as document layer \
+                       objects; ids are regenerated, assets must already be in the document, and \
+                       everything lands as one transaction, so one undo restores the document. \
+                       Siblings land at the position you give, shifted per layer; offsetX/offsetY \
+                       move the whole tree in document units."
+    )]
+    async fn insert_layer_tree(
+        &self,
+        Parameters(args): Parameters<InsertLayerTreeArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        let position = match &args.parent {
+            Some(parent) => LayerPosition::In {
+                parent: LayerId::new(parent.clone()),
+                index: args.index,
+            },
+            None => LayerPosition::Root { index: args.index },
+        };
+        self.backend()
+            .insert_layer_tree(
+                &self.resolved(&args.write),
+                &args.layers,
+                &position,
+                args.offset_x.unwrap_or(0.0),
+                args.offset_y.unwrap_or(0.0),
+            )
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// Installs a font pack from the compiled-in manifest.
+    #[tool(
+        description = "Install a named pack of fonts (the manifest's `default` pack is the usual \
+                       one) into the workspace font store, downloading from the pinned manifest. \
+                       This is the one tool that reaches the network, and only when it is called; \
+                       a failed download leaves the store exactly as it was. Needs a server that \
+                       holds a workspace."
+    )]
+    async fn install_font_pack(
+        &self,
+        Parameters(args): Parameters<InstallFontPackArgs>,
+    ) -> Result<Json<FontInstallReport>, ErrorData> {
+        self.backend()
+            .install_font_pack(&args.pack)
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// Removes a font family from the workspace store.
+    #[tool(
+        description = "Remove a font family - every face of it - from the workspace font store. \
+                       Documents that name the family stop rendering until it is installed or \
+                       imported again, so check list_layers for text layers using it first. A \
+                       family the store does not have is refused by name. Needs a server that \
+                       holds a workspace."
+    )]
+    async fn remove_font_family(
+        &self,
+        Parameters(args): Parameters<RemoveFontFamilyArgs>,
+    ) -> Result<Json<FontRemovalReport>, ErrorData> {
+        self.backend()
+            .remove_font_family(&args.family)
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// Deletes a project.
+    #[tool(
+        description = "Delete a project from the workspace: directory, document, history, and \
+                       assets. There is no undo. A project locked by another process is refused, \
+                       never forced; one this server holds is closed on the way in."
+    )]
+    async fn delete_project(
+        &self,
+        Parameters(args): Parameters<DeleteProjectArgs>,
+    ) -> Result<Json<ProjectDeleted>, ErrorData> {
+        let deleted = self
+            .backend()
+            .delete_project(&args.project)
+            .map_err(to_error)?;
+        self.forget_current_project(&args.project);
+        Ok(Json(deleted))
+    }
+
+    /// Renames a project.
+    #[tool(
+        description = "Rename a project by renaming its directory. The new name follows the same \
+                       rules as create_project (letters, digits, hyphens, underscores) and must \
+                       not be taken. Every later call passes the new name as `project`. A project \
+                       locked by another process is refused, never forced."
+    )]
+    async fn rename_project(
+        &self,
+        Parameters(args): Parameters<RenameProjectArgs>,
+    ) -> Result<Json<ProjectRenamed>, ErrorData> {
+        let renamed = self
+            .backend()
+            .rename_project(&args.project, &args.name)
+            .map_err(to_error)?;
+        self.forget_current_project(&args.project);
+        Ok(Json(renamed))
     }
 }
 

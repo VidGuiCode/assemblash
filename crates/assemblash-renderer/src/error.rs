@@ -150,6 +150,50 @@ pub enum RenderError {
         asset: AssetId,
     },
 
+    /// A path `d` string that fails the grammar reached the renderer.
+    ///
+    /// Operation time validates every `d` it stores, but a document is a
+    /// file: a hand edit can carry a bad one past that gate. The render
+    /// refuses, names the fault the grammar named, and never invents a
+    /// repair — a silently "fixed" path would not be the document's path.
+    #[error("layer {layer}: the path d string is not one this build draws: {reason}")]
+    InvalidPathData {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The grammar's own message, naming the command and its byte.
+        reason: String,
+    },
+
+    /// A stroke asks for a line cap this build does not draw.
+    ///
+    /// Same bargain as an unknown blend mode: preserved on the way through,
+    /// refused when something tries to draw it.
+    #[error("layer {layer}: line cap {value} is not one this build draws")]
+    UnsupportedLineCap {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The verbatim value it asked for.
+        value: String,
+    },
+
+    /// A stroke asks for a line join this build does not draw.
+    #[error("layer {layer}: line join {value} is not one this build draws")]
+    UnsupportedLineJoin {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The verbatim value it asked for.
+        value: String,
+    },
+
+    /// A line asks for an end marker this build does not draw.
+    #[error("layer {layer}: line marker {value} is not one this build draws")]
+    UnsupportedLineMarker {
+        /// The layer at fault.
+        layer: LayerId,
+        /// The verbatim value it asked for.
+        value: String,
+    },
+
     /// A colour that validation would have rejected reached the renderer.
     #[error("invalid color {0}")]
     InvalidColor(String),

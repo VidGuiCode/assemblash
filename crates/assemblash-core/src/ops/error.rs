@@ -123,6 +123,21 @@ pub enum OpError {
         asset: AssetId,
     },
 
+    /// A path's `d` string fails the conservative grammar of
+    /// [`crate::path`].
+    ///
+    /// Refused at operation time — like [`OpError::UnsupportedShape`], whose
+    /// bargain this shares — so a `d` this build cannot draw never reaches
+    /// the renderer. The reason names the offending command or number and
+    /// its byte position.
+    #[error("{}invalid path data — {reason}", layer_prefix(id))]
+    InvalidPath {
+        /// The layer in question, when there is one.
+        id: Option<LayerId>,
+        /// What exactly is wrong with the `d` string.
+        reason: String,
+    },
+
     /// No slot of that name is in the document.
     #[error("no slot named {name:?}; this document has: {available}")]
     NoSuchSlot {

@@ -253,6 +253,105 @@ impl Backend {
         })
     }
 
+    /// Inserts a layer tree — the `insertLayerTree` capability the batch
+    /// endpoint offers the interface — as one transaction.
+    ///
+    /// The expansion is the server crate's own (`assemblash_server::batch`),
+    /// so this transport and the HTTP batch endpoint cannot disagree about
+    /// what the macro compiles to. The compiled operations are what get
+    /// journalled, so undo restores the document exactly.
+    pub fn insert_layer_tree(
+        &self,
+        envelope: &WriteEnvelope,
+        layers: &[assemblash_core::Layer],
+        position: &assemblash_core::ops::LayerPosition,
+        offset_x: f64,
+        offset_y: f64,
+    ) -> Result<WriteOutcome, ApiError> {
+        use assemblash_server::batch::{
+            insert_layer_tree as compile, RecordingIds, ReplayThenUlid,
+        };
+
+        if layers.is_empty() {
+            return Err(ApiError::bad_request(
+                "insertLayerTree needs at least one layer",
+            ));
+        }
+        let opened = self.open(envelope.project.as_deref())?;
+        let mut session = lock_project(&opened)?;
+
+        if envelope.dry_run {
+            // Compiled against the candidate, then each compiled operation is
+            // dry-run against the live document — the same answer a refusal
+            // would be about anyway.
+            let mut candidate = session.document().clone();
+            let mut compiled = Vec::new();
+            compile(
+                &mut candidate,
+                layers,
+                position,
+                offset_x,
+                offset_y,
+                &mut compiled,
+                &mut RecordingIds::default(),
+            )?;
+            let mut created = Vec::new();
+            let mut changed = Vec::new();
+            let mut removed = Vec::new();
+            for operation in &compiled {
+                let outcome =
+                    session.dry_run(operation, envelope.expected_version, &mut UlidIdSource)?;
+                created.extend(ids(&outcome.created));
+                changed.extend(ids(&outcome.changed));
+                removed.extend(ids(&outcome.removed));
+            }
+            return Ok(WriteOutcome {
+                version: session.version(),
+                dry_run: true,
+                transaction: None,
+                created,
+                changed,
+                removed,
+                warnings: Vec::new(),
+            });
+        }
+
+        let mut candidate = session.document().clone();
+        let mut compiled = Vec::new();
+        let mut generated = RecordingIds::default();
+        compile(
+            &mut candidate,
+            layers,
+            position,
+            offset_x,
+            offset_y,
+            &mut compiled,
+            &mut generated,
+        )?;
+        let mut replay = ReplayThenUlid::new(generated.raws);
+        let (outcome, transaction) = session.apply_batch(
+            "insert layer tree",
+            &compiled,
+            &actor_of(envelope),
+            now_millis(),
+            envelope.expected_version,
+            &mut replay,
+        )?;
+        let touched = [outcome.created.clone(), outcome.changed.clone()].concat();
+        let document = session.document().clone();
+        let directory = session.project_dir().to_path_buf();
+        drop(session);
+        Ok(WriteOutcome {
+            version: version_of_document(&document),
+            dry_run: false,
+            transaction: Some(transaction.to_string()),
+            created: ids(&outcome.created),
+            changed: ids(&outcome.changed),
+            removed: ids(&outcome.removed),
+            warnings: self.warnings_for(&document, &directory, &touched),
+        })
+    }
+
     /// Steps history back one transaction.
     pub fn undo(&self, envelope: &WriteEnvelope) -> Result<WriteOutcome, ApiError> {
         self.history_step(envelope, true)
@@ -318,8 +417,16 @@ impl Backend {
             Some(name) => safe_stem(name)?,
             None => "export".to_owned(),
         };
+        // A cancelled request stops before it opens the project, so a switch
+        // away from the local target never has to wait for the lock either.
+        if self.cancel_token().is_cancelled() {
+            return Err(crate::backend::cancelled());
+        }
         let loaded = self.loaded(project)?;
-        let preview = loaded.preview(scale)?;
+        let preview = loaded.preview(scale, self.cancel_token())?;
+        if self.cancel_token().is_cancelled() {
+            return Err(crate::backend::cancelled());
+        }
         let directory = loaded.directory.join(EXPORTS_DIR);
 
         let file = format!("{stem}.png");

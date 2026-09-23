@@ -481,6 +481,99 @@ impl AppState {
         Ok(session)
     }
 
+    /// Removes a project from the workspace, directory and all.
+    ///
+    /// A project this server holds is closed on the way in (see
+    /// [`AppState::closed_project_dir`]), and a project some other process
+    /// holds the lock file for is refused: a lock that may be live is never
+    /// deleted past. There is no undo for this route, which is why both
+    /// checks happen before any bytes are touched.
+    pub fn delete_project(&self, id: &ProjectId) -> Result<(), ApiError> {
+        let directory = self.closed_project_dir(id)?;
+        std::fs::remove_dir_all(&directory).map_err(|source| {
+            assemblash_core::storage::StorageError::Io {
+                operation: "removing",
+                path: directory.clone(),
+                source,
+            }
+        })?;
+        self.refresh_index();
+        Ok(())
+    }
+
+    /// Renames a project by renaming its directory.
+    ///
+    /// The same closing and lock refusals as [`AppState::delete_project`] —
+    /// a live lock is never moved past — plus the rename itself being refused
+    /// when the target name is taken. The id *is* the directory name, so a
+    /// rename is atomic on the same volume and no document bytes change.
+    pub fn rename_project(&self, id: &ProjectId, to: &ProjectId) -> Result<(), ApiError> {
+        let directory = self.closed_project_dir(id)?;
+        let target = self.inner.workspace.project_dir(to);
+        if target.exists() {
+            return Err(ApiError::new(
+                axum::http::StatusCode::CONFLICT,
+                "projectExists",
+                format!("a project named {} is already there", to.as_str()),
+            )
+            .with_details(serde_json::json!({ "id": to.as_str() })));
+        }
+        std::fs::rename(&directory, &target).map_err(|source| {
+            assemblash_core::storage::StorageError::Io {
+                operation: "renaming",
+                path: directory.clone(),
+                source,
+            }
+        })?;
+        self.refresh_index();
+        Ok(())
+    }
+
+    /// The directory of an existing project that is neither open here nor
+    /// locked elsewhere — the precondition both project-management routes
+    /// share.
+    ///
+    /// A project this server holds is closed first: dropping the session is
+    /// what releases its lock file, and a rename or delete cannot happen
+    /// while one exists. A request still mid-flight keeps its own handle, so
+    /// the wait below refuses instead of racing it.
+    fn closed_project_dir(&self, id: &ProjectId) -> Result<std::path::PathBuf, ApiError> {
+        let directory = self.inner.workspace.existing_project_dir(id)?;
+        let open = self.lock_registry()?.remove(id.as_str());
+        if let Some(session) = open {
+            // Downgraded *before* the strong handle is dropped: the local
+            // binding would keep the strong count above zero and the wait
+            // below would always run out.
+            let handle = std::sync::Arc::downgrade(&session);
+            drop(session);
+            let wait = wait_until_dropped(&[handle], std::time::Duration::from_secs(5));
+            if !wait || directory.join(assemblash_core::session::LOCK_FILE).exists() {
+                return Err(ApiError::new(
+                    axum::http::StatusCode::CONFLICT,
+                    "projectOpen",
+                    format!(
+                        "project {} is being used by a request in this server; try again \
+                         when it has finished",
+                        id.as_str()
+                    ),
+                )
+                .with_details(serde_json::json!({ "id": id.as_str() })));
+            }
+        }
+        if directory.join(assemblash_core::session::LOCK_FILE).exists() {
+            return Err(ApiError::new(
+                axum::http::StatusCode::CONFLICT,
+                "projectLocked",
+                format!(
+                    "project {} is locked by another process; recover or remove the lock first",
+                    id.as_str()
+                ),
+            )
+            .with_details(serde_json::json!({ "id": id.as_str() })));
+        }
+        Ok(directory)
+    }
+
     fn lock_registry(
         &self,
     ) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, OpenProject>>, ApiError> {

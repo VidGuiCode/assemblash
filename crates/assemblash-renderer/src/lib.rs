@@ -11,6 +11,7 @@ pub mod install;
 pub mod raster;
 pub mod store;
 pub mod svg;
+pub mod update;
 pub mod warnings;
 
 pub use assets::data_uris;

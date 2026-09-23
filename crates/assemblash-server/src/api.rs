@@ -8,13 +8,17 @@
 //! transport that reached around it would quietly lose every one of them.
 
 use assemblash_core::history::{Actor, ActorKind};
-use assemblash_core::ids::{IdSource, UlidIdSource};
-use assemblash_core::ops::{CreateLayer, LayerPosition, NewLayerKind, OpOutcome, UpdateLayer};
+use assemblash_core::ids::UlidIdSource;
+use assemblash_core::ops::{LayerPosition, OpOutcome};
 use assemblash_core::storage;
 use assemblash_core::workspace::ProjectId;
-use assemblash_core::{Color, Document, Layer, LayerKind, Operation, SessionError};
+use assemblash_core::{
+    Color, Document, Extras, FontStyle, Layer, LayerId, LayerKind, Operation, SequentialIdSource,
+    SessionError, TextAlign, TextLayer, Transform, VerticalAlign,
+};
 use assemblash_renderer::install;
 use assemblash_renderer::store::{FontRecord, FontStore};
+use assemblash_renderer::ExportWarning;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::{DefaultBodyLimit, Extension, Path, Query, State};
 use axum::http::{header, StatusCode};
@@ -23,6 +27,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use crate::batch::{apply_compiled, insert_layer_tree, RecordingIds, ReplayThenUlid};
 use crate::error::{ApiError, ApiJson};
 use crate::render;
 use crate::state::{lock_project, AppState};
@@ -72,6 +77,7 @@ pub fn router_with_limits(
         .route("/{*path}", get(serve_ui))
         .route("/api/shutdown", post(shutdown_server))
         .route("/api/version", get(version))
+        .route("/api/browser-session", post(browser_session))
         .route("/api/schema/document", get(document_schema))
         .route("/api/schema/operation", get(operation_schema))
         // A font file is megabytes, well past axum's default 2 MB ceiling, so
@@ -97,11 +103,21 @@ pub fn router_with_limits(
             "/api/fonts/install",
             post(install_fonts).delete(remove_install_family),
         )
+        .route("/api/fonts/specimen.png", get(font_specimen))
         .route("/api/fonts/{family}", delete(remove_font_family))
         .route("/api/capabilities", get(get_capabilities))
+        .route("/api/update-status", get(crate::update::get_update_status))
+        .route(
+            "/api/update-consent",
+            post(crate::update::post_update_consent),
+        )
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/recent", get(recent_projects))
-        .route("/api/projects/{id}", get(project_summary))
+        .route(
+            "/api/projects/{id}",
+            get(project_summary).delete(delete_project),
+        )
+        .route("/api/projects/{id}/rename", post(rename_project))
         .route("/api/projects/{id}/document", get(get_document))
         .route(
             "/api/projects/{id}/recover-lock",
@@ -195,15 +211,47 @@ pub(crate) async fn require_access(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    // The login page is the one thing reachable without a token: it is how
-    // somebody with a token gets it into the browser, and it says nothing a
+    // The login entry page and its exact import graph are reachable without a token: it is how
+    // somebody with a token gets it into the browser, and they say nothing a
     // stranger does not already know from the 401.
-    if request.uri().path() == "/login.html" || request.uri().path() == "/login.js" {
+    if matches!(
+        request.uri().path(),
+        "/login.html"
+            | "/login.js"
+            | "/style.css"
+            | "/token.js"
+            | "/i18n.js"
+            | "/locale-en.js"
+            | "/locale-fr.js"
+            | "/locale-de.js"
+    ) {
         return next.run(request).await;
     }
     match access.check(request.headers()) {
         Ok(()) => next.run(request).await,
+        Err(_) if access.check_browser_cookie(request.headers(), request.method()) => {
+            next.run(request).await
+        }
         Err(error) => error.into_response(),
+    }
+}
+
+/// Creates a browser session after the access middleware checks the bearer token.
+/// The login page calls this with an Authorization header, then navigates to /.
+async fn browser_session(
+    Extension(access): Extension<crate::Access>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    match access.browser_cookie(&headers) {
+        Some(cookie) => (
+            StatusCode::NO_CONTENT,
+            [
+                (header::SET_COOKIE, cookie),
+                (header::CACHE_CONTROL, "no-store".to_owned()),
+            ],
+        )
+            .into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
     }
 }
 
@@ -419,6 +467,103 @@ async fn fonts(State(state): State<AppState>) -> Result<Json<FontsResponse>, Api
         families: store.families(),
         faces: faces_of(&store),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FontSpecimenQuery {
+    family: String,
+    weight: u16,
+    style: String,
+    hash: String,
+    #[serde(default)]
+    sample: Option<String>,
+}
+
+/// Draws a short sample from one exact face in the workspace font store.
+///
+/// The hash makes the URL change when the stored face changes. The browser
+/// can cache the image without serving pixels from an earlier font file.
+/// This route does not open or write a project, and it never loads a system
+/// font or accepts a path from the client.
+async fn font_specimen(
+    State(state): State<AppState>,
+    Query(query): Query<FontSpecimenQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let sample = query.sample.as_deref().unwrap_or("Aa Bb 0123").trim();
+    if query.family.is_empty() || query.family.chars().count() > 128 {
+        return Err(ApiError::bad_request(
+            "font family must contain 1 to 128 characters",
+        ));
+    }
+    if sample.is_empty() || sample.chars().count() > 64 || sample.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(
+            "font sample must contain 1 to 64 printable characters",
+        ));
+    }
+    if !(100..=900).contains(&query.weight) {
+        return Err(ApiError::bad_request(
+            "font weight must be between 100 and 900",
+        ));
+    }
+    let style = match query.style.as_str() {
+        "normal" => FontStyle::Normal,
+        "italic" | "oblique" => FontStyle::Italic,
+        _ => {
+            return Err(ApiError::bad_request(
+                "font style must be normal, italic, or oblique",
+            ))
+        }
+    };
+    let store = state.font_store()?;
+    let face = store.records().iter().find(|face| {
+        face.family == query.family && face.weight == query.weight && face.style == query.style
+    });
+    let Some(face) = face else {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "missingFontFace",
+            "the requested font face is not installed",
+        ));
+    };
+    if face.hash != query.hash {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "fontFaceChanged",
+            "the requested font face has changed",
+        ));
+    }
+
+    let mut ids = SequentialIdSource::new();
+    let mut document = Document::new(&mut ids, 480.0, 56.0);
+    document.layers.push(Layer::new(
+        LayerId::generate(&mut ids),
+        Transform::new(8.0, 4.0, 464.0, 48.0),
+        LayerKind::Text(TextLayer {
+            text: sample.to_owned(),
+            font_family: query.family,
+            font_size: 28.0,
+            color: Some(Color::new("#171717")),
+            align: TextAlign::Left,
+            line_height: 1.2,
+            font_weight: query.weight,
+            font_style: style,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: VerticalAlign::Top,
+            runs: Vec::new(),
+            extra: Extras::new(),
+        }),
+    ));
+    let fonts = state.fonts_for(&document)?;
+    let rendered = render::png_for_loaded(&document, std::path::Path::new("."), &fonts, 1.0)?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        rendered.bytes,
+    ))
 }
 
 /// The store's faces, ordered family, then weight, then style.
@@ -982,6 +1127,62 @@ async fn project_summary(
     Ok(Json(summary))
 }
 
+/// What a successful delete says. Nothing else is sayable: the project is
+/// gone.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectDeleted {
+    project: String,
+}
+
+/// What a successful rename says: the id every later call must pass.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectRenamed {
+    project: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RenameProjectRequest {
+    /// The new project name, spelled like `POST /api/projects` spells one.
+    name: String,
+}
+
+/// Deletes a project: `DELETE /api/projects/{id}`.
+///
+/// A project open in this server is closed on the way in; one locked by
+/// another process is refused — a lock that may be live is never deleted
+/// past, and this route has no undo.
+async fn delete_project(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProjectDeleted>, ApiError> {
+    let id = ProjectId::new(id)?;
+    state.delete_project(&id)?;
+    Ok(Json(ProjectDeleted {
+        project: id.as_str().to_owned(),
+    }))
+}
+
+/// Renames a project: `POST /api/projects/{id}/rename`.
+///
+/// The id *is* the directory name, so this renames the directory and every
+/// later call uses the new name. The same closing and lock rules as the
+/// delete route, and refused when the new name is taken.
+async fn rename_project(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(request): ApiJson<RenameProjectRequest>,
+) -> Result<Json<ProjectRenamed>, ApiError> {
+    let id = ProjectId::new(id)?;
+    let to = ProjectId::new(request.name)?;
+    state.rename_project(&id, &to)?;
+    Ok(Json(ProjectRenamed {
+        project: to.as_str().to_owned(),
+    }))
+}
+
 async fn get_document(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1120,6 +1321,14 @@ struct OperationResponse {
     transaction: Option<String>,
     #[serde(flatten)]
     outcome: OpOutcome,
+    /// What the change made worse, for the layers it touched (DEF-28).
+    ///
+    /// The same warnings the MCP write tools report and an export would
+    /// give (`textOverflowsBox`, `wordBrokenMidWord`), measured when the
+    /// write lands rather than only at export. Omitted when there is
+    /// nothing to say, and never present for a dry run.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<ExportWarning>,
 }
 
 async fn apply_operation(
@@ -1140,6 +1349,7 @@ async fn apply_operation(
             dry_run: true,
             transaction: None,
             outcome,
+            warnings: Vec::new(),
         }));
     }
 
@@ -1150,12 +1360,56 @@ async fn apply_operation(
         request.expected_version,
         &mut UlidIdSource,
     )?;
+    let touched = [outcome.created.clone(), outcome.changed.clone()].concat();
+    let document = session.document().clone();
+    let warnings = write_warnings(&state, &document, &touched);
     Ok(Json(OperationResponse {
         version: session.version(),
         dry_run: false,
         transaction: Some(transaction.to_string()),
         outcome,
+        warnings,
     }))
+}
+
+/// What a write made worse, for the layers it touched (DEF-28).
+///
+/// Only text layers can produce these, so a change that touched none loads
+/// no fonts and measures nothing. The check is the export's own, so the HTTP
+/// write response and the MCP write response cannot disagree. The warnings
+/// carry layer ids, never paths; the project directory the renderer takes is
+/// only read for the SVG-asset check, and an unreadable asset produces no
+/// warning rather than a wrong one, so the document as served is measured
+/// with the directory it came from.
+fn write_warnings(
+    state: &AppState,
+    document: &Document,
+    touched: &[assemblash_core::LayerId],
+) -> Vec<ExportWarning> {
+    if touched.is_empty() {
+        return Vec::new();
+    }
+    let mut has_text = false;
+    document.walk_layers(&mut |layer| {
+        if touched.contains(&layer.id) && matches!(layer.kind, LayerKind::Text(_)) {
+            has_text = true;
+        }
+    });
+    if !has_text {
+        return Vec::new();
+    }
+    let Ok(fonts) = state.fonts_for(document) else {
+        return Vec::new();
+    };
+    assemblash_renderer::export_warnings(document, fonts.font_set(), std::path::Path::new(""))
+        .into_iter()
+        .filter(|warning| {
+            warning
+                .layer_id
+                .as_ref()
+                .is_some_and(|id| touched.contains(id))
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1307,182 +1561,6 @@ async fn apply_operation_batch(
         transaction_id: transaction.to_string(),
         outcome,
     }))
-}
-
-#[derive(Debug, Default)]
-struct RecordingIds {
-    raws: Vec<String>,
-}
-
-impl IdSource for RecordingIds {
-    fn next_raw(&mut self) -> String {
-        let raw = UlidIdSource.next_raw();
-        self.raws.push(raw.clone());
-        raw
-    }
-}
-
-#[derive(Debug)]
-struct ReplayThenUlid {
-    raws: std::collections::VecDeque<String>,
-}
-
-impl ReplayThenUlid {
-    fn new(raws: Vec<String>) -> Self {
-        Self { raws: raws.into() }
-    }
-}
-
-impl IdSource for ReplayThenUlid {
-    fn next_raw(&mut self) -> String {
-        self.raws
-            .pop_front()
-            .unwrap_or_else(|| UlidIdSource.next_raw())
-    }
-}
-
-fn apply_compiled(
-    document: &mut Document,
-    operation: Operation,
-    compiled: &mut Vec<Operation>,
-    ids: &mut dyn IdSource,
-) -> Result<OpOutcome, ApiError> {
-    let outcome = assemblash_core::apply(document, &operation, ids)
-        .map_err(|error| ApiError::from(SessionError::Operation(error)))?;
-    compiled.push(operation);
-    Ok(outcome)
-}
-
-fn insert_layer_tree(
-    document: &mut Document,
-    layers: &[Layer],
-    position: &LayerPosition,
-    offset_x: f64,
-    offset_y: f64,
-    compiled: &mut Vec<Operation>,
-    ids: &mut dyn IdSource,
-) -> Result<(), ApiError> {
-    for (index, layer) in layers.iter().enumerate() {
-        let position = indexed_position(position, index);
-        insert_layer(document, layer, position, offset_x, offset_y, compiled, ids)?;
-    }
-    Ok(())
-}
-
-fn indexed_position(position: &LayerPosition, offset: usize) -> LayerPosition {
-    match position {
-        LayerPosition::Root { index } => LayerPosition::Root {
-            index: index.map(|index| index + offset),
-        },
-        LayerPosition::In { parent, index } => LayerPosition::In {
-            parent: parent.clone(),
-            index: index.map(|index| index + offset),
-        },
-    }
-}
-
-fn insert_layer(
-    document: &mut Document,
-    layer: &Layer,
-    position: LayerPosition,
-    offset_x: f64,
-    offset_y: f64,
-    compiled: &mut Vec<Operation>,
-    ids: &mut dyn IdSource,
-) -> Result<(), ApiError> {
-    let mut transform = layer.transform.clone();
-    transform.x += offset_x;
-    transform.y += offset_y;
-    let kind = match &layer.kind {
-        LayerKind::Text(text) => NewLayerKind::Text {
-            text: text.text.clone(),
-            font_family: text.font_family.clone(),
-            font_size: text.font_size,
-            color: text.color.clone(),
-            align: text.align,
-            line_height: text.line_height,
-            font_weight: text.font_weight,
-            font_style: text.font_style,
-            letter_spacing: text.letter_spacing,
-            stroke: text.stroke.clone(),
-            vertical_align: text.vertical_align,
-        },
-        LayerKind::Image(image) => NewLayerKind::Image {
-            asset: image.asset.clone(),
-            fit: image.fit,
-        },
-        LayerKind::Svg(svg) => NewLayerKind::Svg {
-            asset: svg.asset.clone(),
-            fit: svg.fit,
-        },
-        LayerKind::Shape(shape) => NewLayerKind::Shape {
-            shape: shape.shape.clone(),
-            fill: shape.fill.clone(),
-            stroke: shape.stroke.clone(),
-        },
-        LayerKind::Group(_) => NewLayerKind::Group,
-    };
-    let created = apply_compiled(
-        document,
-        Operation::Create(CreateLayer {
-            position,
-            transform,
-            name: layer.name.clone(),
-            kind,
-        }),
-        compiled,
-        ids,
-    )?;
-    let id = created
-        .created
-        .first()
-        .cloned()
-        .ok_or_else(|| ApiError::bad_request("insertLayerTree failed to create a layer"))?;
-
-    if let LayerKind::Group(group) = &layer.kind {
-        for (index, child) in group.children.iter().enumerate() {
-            insert_layer(
-                document,
-                child,
-                LayerPosition::In {
-                    parent: id.clone(),
-                    index: Some(index),
-                },
-                0.0,
-                0.0,
-                compiled,
-                ids,
-            )?;
-        }
-    }
-
-    let mut update = UpdateLayer::new(id.clone());
-    update.opacity = (layer.opacity != 1.0).then_some(layer.opacity);
-    update.blend_mode = (layer.blend_mode != Default::default()).then(|| layer.blend_mode.clone());
-    update.effects = (!layer.effects.is_empty()).then(|| layer.effects.clone());
-    if update.opacity.is_some() || update.blend_mode.is_some() || update.effects.is_some() {
-        apply_compiled(document, Operation::Update(update), compiled, ids)?;
-    }
-    if !layer.visible {
-        apply_compiled(
-            document,
-            Operation::SetVisible {
-                id: id.clone(),
-                visible: false,
-            },
-            compiled,
-            ids,
-        )?;
-    }
-    if layer.locked {
-        apply_compiled(
-            document,
-            Operation::SetLocked { id, locked: true },
-            compiled,
-            ids,
-        )?;
-    }
-    Ok(())
 }
 
 #[derive(Debug, Default, Deserialize)]

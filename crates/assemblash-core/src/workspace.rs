@@ -229,12 +229,34 @@ pub struct Config {
     /// request is how a DNS-rebinding web page reaches a local server.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_hosts: Vec<String>,
+    /// Whether the program may check the release feed for a newer version
+    /// (decision D28, U1).
+    ///
+    /// `None` is "never asked": the first `serve` shows the one-time question,
+    /// and nothing is fetched before it is answered. The answer is one click,
+    /// which is an asked action under the one-network-action rule (D22).
+    #[serde(
+        default,
+        rename = "updateCheck",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub update_check: Option<UpdateCheck>,
     /// Keys this build does not know about, preserved verbatim.
     ///
     /// The same promise the document model makes: a settings file written by a
     /// newer build does not come back damaged.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
+}
+
+/// The update-check consent (decision D28, U1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateCheck {
+    /// Never check. No network request is made anywhere.
+    Off,
+    /// Check the release feed at most once every 24 hours.
+    Notify,
 }
 
 fn default_port() -> u16 {
@@ -257,6 +279,7 @@ impl Default for Config {
             bind: default_bind(),
             token: None,
             allowed_hosts: Vec::new(),
+            update_check: None,
             extra: BTreeMap::new(),
         }
     }

@@ -194,7 +194,10 @@ mod tests {
                 font_size: Some(48.0),
                 color: Some(Color::new("#101820")),
                 blend_mode: Some(BlendMode::Multiply),
-                effects: Some(vec![Effect::Blur { radius: 1.0 }]),
+                effects: Some(vec![Effect::Blur {
+                    radius: 1.0,
+                    extra: crate::document::Extras::new(),
+                }]),
                 ..PresetProperties::default()
             },
             extra: crate::document::Extras::new(),
@@ -212,7 +215,13 @@ mod tests {
         assert_eq!(update.font_size, Some(48.0));
         assert_eq!(update.color, Some(Some(Color::new("#101820"))));
         assert_eq!(update.blend_mode, Some(BlendMode::Multiply));
-        assert_eq!(update.effects, Some(vec![Effect::Blur { radius: 1.0 }]));
+        assert_eq!(
+            update.effects,
+            Some(vec![Effect::Blur {
+                radius: 1.0,
+                extra: crate::document::Extras::new(),
+            }])
+        );
         // Untouched by a style: a preset never moves anything.
         assert_eq!(update.transform, None);
         assert_eq!(update.name, None);
@@ -264,6 +273,10 @@ mod tests {
                 stroke: Some(Stroke {
                     color: Color::new("#112233"),
                     width: 2.0,
+                    dash_array: None,
+                    line_cap: None,
+                    line_join: None,
+                    extra: crate::document::Extras::new(),
                 }),
                 ..PresetProperties::default()
             },
@@ -276,7 +289,10 @@ mod tests {
                 LayerId::new("layer_1"),
                 Transform::new(0.0, 0.0, 40.0, 20.0),
                 LayerKind::Shape(ShapeLayer {
-                    shape: ShapeKind::Rect { corner_radius: 4.0 },
+                    shape: ShapeKind::Rect {
+                        corner_radius: 4.0,
+                        extra: Extras::new(),
+                    },
                     fill: Some(Color::new("#ffffff")),
                     stroke: None,
                     extra: Extras::new(),
@@ -306,6 +322,10 @@ mod tests {
                 stroke: Some(Some(Stroke {
                     color: Color::new("#112233"),
                     width: 2.0,
+                    dash_array: None,
+                    line_cap: None,
+                    line_join: None,
+                    extra: crate::document::Extras::new(),
                 })),
                 ..UpdateLayer::new(LayerId::new("layer_1"))
             }),

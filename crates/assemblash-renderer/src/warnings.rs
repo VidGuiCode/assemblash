@@ -324,7 +324,9 @@ mod covered_tests {
             LayerId::new(id),
             transform,
             LayerKind::Shape(ShapeLayer {
-                shape: ShapeKind::Ellipse,
+                shape: ShapeKind::Ellipse {
+                    extra: Extras::new(),
+                },
                 fill,
                 stroke: None,
                 extra: Extras::new(),

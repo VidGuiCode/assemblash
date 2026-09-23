@@ -287,22 +287,42 @@ fn effects_document() -> (Document, AssetHrefs) {
     });
 
     let stacks = [
-        vec![Effect::Brightness { amount: 1.4 }],
-        vec![Effect::Contrast { amount: 1.8 }],
-        vec![Effect::Saturation { amount: 0.0 }],
-        vec![Effect::Blur { radius: 3.0 }],
+        vec![Effect::Brightness {
+            amount: 1.4,
+            extra: Extras::new(),
+        }],
+        vec![Effect::Contrast {
+            amount: 1.8,
+            extra: Extras::new(),
+        }],
+        vec![Effect::Saturation {
+            amount: 0.0,
+            extra: Extras::new(),
+        }],
+        vec![Effect::Blur {
+            radius: 3.0,
+            extra: Extras::new(),
+        }],
         vec![Effect::Grain {
             amount: 0.35,
             seed: 7,
             scale: 1.0,
+            extra: Extras::new(),
         }],
         vec![
-            Effect::Brightness { amount: 1.2 },
-            Effect::Saturation { amount: 0.4 },
+            Effect::Brightness {
+                amount: 1.2,
+                extra: Extras::new(),
+            },
+            Effect::Saturation {
+                amount: 0.4,
+                extra: Extras::new(),
+            },
             Effect::Grain {
                 amount: 0.2,
                 seed: 99,
                 scale: 2.5,
+                extra: Extras::new(),
             },
         ],
     ];
@@ -334,7 +354,10 @@ fn effects_document() -> (Document, AssetHrefs) {
         36.0,
         TextAlign::Left,
     );
-    text.effects = vec![Effect::Blur { radius: 1.2 }];
+    text.effects = vec![Effect::Blur {
+        radius: 1.2,
+        extra: Extras::new(),
+    }];
     document.layers.push(text);
 
     let hrefs = AssetHrefs::from([(
@@ -360,6 +383,10 @@ fn shape_layer(
             stroke: stroke.map(|(color, width)| Stroke {
                 color: Color::new(color),
                 width,
+                dash_array: None,
+                line_cap: None,
+                line_join: None,
+                extra: Extras::new(),
             }),
             extra: Extras::new(),
         }),
@@ -400,6 +427,7 @@ fn shapes_document() -> (Document, AssetHrefs) {
         Transform::new(20.5, 20.25, 760.75, 750.5),
         ShapeKind::Rect {
             corner_radius: 366.9,
+            extra: Extras::new(),
         },
         Some("#3366cc40"),
         None,
@@ -409,7 +437,10 @@ fn shapes_document() -> (Document, AssetHrefs) {
     document.layers.push(shape_layer(
         2,
         Transform::new(800.25, 20.75, 180.5, 90.25),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         Some(("#112233", 3.0)),
     ));
@@ -420,6 +451,7 @@ fn shapes_document() -> (Document, AssetHrefs) {
         Transform::new(800.25, 130.5, 180.5, 90.25),
         ShapeKind::Rect {
             corner_radius: 18.75,
+            extra: Extras::new(),
         },
         Some("#cc6633aa"),
         Some(("#112233", 3.0)),
@@ -429,7 +461,9 @@ fn shapes_document() -> (Document, AssetHrefs) {
     document.layers.push(shape_layer(
         4,
         Transform::new(800.25, 240.5, 180.5, 90.25),
-        ShapeKind::Ellipse,
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        },
         None,
         Some(("#204060", 0.5)),
     ));
@@ -441,7 +475,11 @@ fn shapes_document() -> (Document, AssetHrefs) {
             rotation: 17.5,
             ..Transform::new(800.25, 350.5, 180.5, 40.25)
         },
-        ShapeKind::Line,
+        ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        },
         None,
         Some(("#8b1a1a", 4.0)),
     ));
@@ -451,7 +489,10 @@ fn shapes_document() -> (Document, AssetHrefs) {
             rotation: 30.0,
             ..Transform::new(820.5, 430.75, 140.25, 100.5)
         },
-        ShapeKind::Rect { corner_radius: 8.5 },
+        ShapeKind::Rect {
+            corner_radius: 8.5,
+            extra: Extras::new(),
+        },
         Some("#2e8b57"),
         // Alpha in a stroke.
         Some(("#11223380", 5.0)),
@@ -462,7 +503,10 @@ fn shapes_document() -> (Document, AssetHrefs) {
     document.layers.push(shape_layer(
         7,
         Transform::new(820.5, 580.5, 120.25, 60.5),
-        ShapeKind::Rect { corner_radius: 4.0 },
+        ShapeKind::Rect {
+            corner_radius: 4.0,
+            extra: Extras::new(),
+        },
         Some("#000000"),
         Some(("#d2691e", 90.0)),
     ));
@@ -483,7 +527,10 @@ fn shadow_document() -> (Document, AssetHrefs) {
     let mut small_sigma = shape_layer(
         1,
         Transform::new(40.5, 30.5, 120.25, 80.5),
-        ShapeKind::Rect { corner_radius: 6.0 },
+        ShapeKind::Rect {
+            corner_radius: 6.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         None,
     );
@@ -492,6 +539,7 @@ fn shadow_document() -> (Document, AssetHrefs) {
         dy: 4.0,
         blur: 1.5,
         color: Color::new("#000000"),
+        extra: Extras::new(),
     }];
     document.layers.push(small_sigma);
 
@@ -499,7 +547,10 @@ fn shadow_document() -> (Document, AssetHrefs) {
     let mut large_sigma = shape_layer(
         2,
         Transform::new(240.5, 30.5, 120.25, 80.5),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#cc3366"),
         None,
     );
@@ -508,6 +559,7 @@ fn shadow_document() -> (Document, AssetHrefs) {
         dy: 10.0,
         blur: 8.0,
         color: Color::new("#20406080"),
+        extra: Extras::new(),
     }];
     document.layers.push(large_sigma);
 
@@ -515,7 +567,9 @@ fn shadow_document() -> (Document, AssetHrefs) {
     let mut glow = shape_layer(
         3,
         Transform::new(440.5, 30.5, 120.25, 80.5),
-        ShapeKind::Ellipse,
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        },
         Some("#2e8b57"),
         None,
     );
@@ -524,6 +578,7 @@ fn shadow_document() -> (Document, AssetHrefs) {
         dy: 0.0,
         blur: 6.0,
         color: Color::new("#ff8000"),
+        extra: Extras::new(),
     }];
     document.layers.push(glow);
 
@@ -532,17 +587,24 @@ fn shadow_document() -> (Document, AssetHrefs) {
     let mut stacked = shape_layer(
         4,
         Transform::new(40.5, 180.5, 200.5, 90.25),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#204060"),
         None,
     );
     stacked.effects = vec![
-        Effect::Blur { radius: 2.0 },
+        Effect::Blur {
+            radius: 2.0,
+            extra: Extras::new(),
+        },
         Effect::DropShadow {
             dx: 8.0,
             dy: 8.0,
             blur: 4.0,
             color: Color::new("#000000"),
+            extra: Extras::new(),
         },
     ];
     document.layers.push(stacked);
@@ -562,6 +624,7 @@ fn shadow_document() -> (Document, AssetHrefs) {
         dy: 3.5,
         blur: 2.5,
         color: Color::new("#00000099"),
+        extra: Extras::new(),
     }];
     document.layers.push(text);
 
@@ -658,6 +721,10 @@ fn text_stroke_document() -> (Document, AssetHrefs) {
         Some(Stroke {
             color: Color::new("#cc3344"),
             width: 2.5,
+            dash_array: None,
+            line_cap: None,
+            line_join: None,
+            extra: Extras::new(),
         }),
         assemblash_core::VerticalAlign::Top,
     ));
@@ -674,6 +741,10 @@ fn text_stroke_document() -> (Document, AssetHrefs) {
         Some(Stroke {
             color: Color::new("#101820"),
             width: 1.5,
+            dash_array: None,
+            line_cap: None,
+            line_join: None,
+            extra: Extras::new(),
         }),
         assemblash_core::VerticalAlign::Top,
     );
@@ -796,19 +867,24 @@ fn clip_rounded_document() -> (Document, AssetHrefs) {
     );
     photo.clip = Some(Clip::Rect {
         corner_radius: 28.0,
+        extra: Extras::new(),
     });
     document.layers.push(photo);
 
     let mut stadium = shape_layer(
         2,
         Transform::new(200.0, 24.0, 150.0, 90.0),
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#2f6f4f"),
         None,
     );
     // A radius larger than half the box clamps to a stadium, not a refusal.
     stadium.clip = Some(Clip::Rect {
         corner_radius: 400.0,
+        extra: Extras::new(),
     });
     document.layers.push(stadium);
 
@@ -823,24 +899,30 @@ fn clip_rounded_document() -> (Document, AssetHrefs) {
     );
     rotated.clip = Some(Clip::Rect {
         corner_radius: 16.0,
+        extra: Extras::new(),
     });
     document.layers.push(rotated);
 
     let mut shadowed = shape_layer(
         4,
         Transform::new(240.0, 195.0, 180.0, 90.0),
-        ShapeKind::Rect { corner_radius: 8.0 },
+        ShapeKind::Rect {
+            corner_radius: 8.0,
+            extra: Extras::new(),
+        },
         Some("#3366cc"),
         None,
     );
     shadowed.clip = Some(Clip::Rect {
         corner_radius: 20.0,
+        extra: Extras::new(),
     });
     shadowed.effects = vec![Effect::DropShadow {
         dx: 8.0,
         dy: 12.0,
         blur: 5.0,
         color: Color::new("#00000099"),
+        extra: Extras::new(),
     }];
     document.layers.push(shadowed);
 
@@ -855,14 +937,19 @@ fn clip_rounded_document() -> (Document, AssetHrefs) {
                 shape_layer(
                     7,
                     Transform::new(0.0, 0.0, 200.0, 110.0),
-                    ShapeKind::Rect { corner_radius: 0.0 },
+                    ShapeKind::Rect {
+                        corner_radius: 0.0,
+                        extra: Extras::new(),
+                    },
                     Some("#2f6f4f"),
                     None,
                 ),
                 shape_layer(
                     8,
                     Transform::new(40.0, 20.0, 120.0, 70.0),
-                    ShapeKind::Ellipse,
+                    ShapeKind::Ellipse {
+                        extra: Extras::new(),
+                    },
                     Some("#e0b23c"),
                     None,
                 ),
@@ -872,6 +959,7 @@ fn clip_rounded_document() -> (Document, AssetHrefs) {
     );
     group.clip = Some(Clip::Rect {
         corner_radius: 24.0,
+        extra: Extras::new(),
     });
     document.layers.push(group);
 
@@ -892,7 +980,9 @@ fn clip_rounded_document() -> (Document, AssetHrefs) {
                 shape_layer(
                     10,
                     Transform::new(20.0, 20.0, 70.0, 70.0),
-                    ShapeKind::Ellipse,
+                    ShapeKind::Ellipse {
+                        extra: Extras::new(),
+                    },
                     Some("#cc3366"),
                     None,
                 ),
@@ -900,7 +990,9 @@ fn clip_rounded_document() -> (Document, AssetHrefs) {
             extra: Extras::new(),
         }),
     );
-    rotated_group.clip = Some(Clip::Ellipse);
+    rotated_group.clip = Some(Clip::Ellipse {
+        extra: Extras::new(),
+    });
     document.layers.push(rotated_group);
 
     (document, hrefs)
@@ -918,17 +1010,23 @@ fn clip_ellipse_document() -> (Document, AssetHrefs) {
         &asset,
         ImageFit::Cover,
     );
-    avatar.clip = Some(Clip::Ellipse);
+    avatar.clip = Some(Clip::Ellipse {
+        extra: Extras::new(),
+    });
     document.layers.push(avatar);
 
     let mut disc = shape_layer(
         2,
         Transform::new(260.0, 30.0, 180.0, 180.0),
-        ShapeKind::Ellipse,
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        },
         Some("#cc3366"),
         None,
     );
-    disc.clip = Some(Clip::Ellipse);
+    disc.clip = Some(Clip::Ellipse {
+        extra: Extras::new(),
+    });
     document.layers.push(disc);
 
     (document, hrefs)
@@ -954,6 +1052,7 @@ fn crop_document() -> (Document, AssetHrefs) {
             y: 0.0,
             width: 2.0,
             height: 2.0,
+            extra: Extras::new(),
         });
     }
     document.layers.push(square);
@@ -971,6 +1070,7 @@ fn crop_document() -> (Document, AssetHrefs) {
             y: 0.0,
             width: 2.0,
             height: 4.0,
+            extra: Extras::new(),
         });
     }
     document.layers.push(letterbox);
@@ -988,6 +1088,7 @@ fn crop_document() -> (Document, AssetHrefs) {
             y: 2.0,
             width: 6.0,
             height: 6.0,
+            extra: Extras::new(),
         });
     }
     document.layers.push(clamped);
@@ -1039,7 +1140,10 @@ fn flip_document() -> (Document, AssetHrefs) {
             flip_vertical: true,
             ..Transform::new(336.0, 24.0, 120.0, 120.0)
         },
-        ShapeKind::Rect { corner_radius: 0.0 },
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: Extras::new(),
+        },
         Some("#2f6f4f"),
         Some(("#101820", 6.0)),
     );
@@ -1063,6 +1167,219 @@ fn flip_document() -> (Document, AssetHrefs) {
     (document, hrefs)
 }
 
+/// A shape layer carrying a full stroke — dash, cap and join included — for
+/// the 1.10.0 paint documents.
+fn stroked_shape(
+    index: usize,
+    transform: Transform,
+    kind: ShapeKind,
+    fill: Option<&str>,
+    stroke: Stroke,
+) -> Layer {
+    Layer::new(
+        LayerId::new(format!("layer_{index:026}")),
+        transform,
+        LayerKind::Shape(ShapeLayer {
+            shape: kind,
+            fill: fill.map(Color::new),
+            stroke: Some(stroke),
+            extra: Extras::new(),
+        }),
+    )
+}
+
+/// A plain stroke, for documents that ask for no dash, cap or join.
+fn plain_stroke(color: &str, width: f64) -> Stroke {
+    Stroke {
+        color: Color::new(color),
+        width,
+        dash_array: None,
+        line_cap: None,
+        line_join: None,
+        extra: Extras::new(),
+    }
+}
+
+/// The 1.10.0 path paint: a filled path shape, a stroked and rotated one, and
+/// a path clip over a photo. Every `d` is written in the layer's own box
+/// space, closed, in the conservative grammar.
+fn path_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 260.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+
+    // A filled silhouette: a pentagon-ish outline in a 180x150 box.
+    document.layers.push(stroked_shape(
+        1,
+        Transform::new(24.0, 24.0, 180.0, 150.0),
+        ShapeKind::Path {
+            d: "M 90 0 L 180 55 L 145 150 L 35 150 L 0 55 Z".to_owned(),
+            extra: Extras::new(),
+        },
+        Some("#3366cc"),
+        plain_stroke("#112233", 3.0),
+    ));
+
+    // The same path, rotated: the box's rotation must turn the path with it.
+    document.layers.push(stroked_shape(
+        2,
+        Transform {
+            rotation: 20.0,
+            ..Transform::new(240.0, 24.0, 180.0, 150.0)
+        },
+        ShapeKind::Path {
+            d: "M 90 0 L 180 55 L 145 150 L 35 150 L 0 55 Z".to_owned(),
+            extra: Extras::new(),
+        },
+        Some("#cc6633aa"),
+        plain_stroke("#112233", 3.0),
+    ));
+
+    // A path clip over the swatch: the mask must cut to the silhouette.
+    let (asset, hrefs) = add_swatch(&mut document);
+    let mut clipped = image_layer(
+        3,
+        Transform::new(60.0, 20.0, 120.0, 120.0),
+        &asset,
+        ImageFit::Cover,
+    );
+    clipped.clip = Some(Clip::Path {
+        d: "M 60 0 L 120 30 L 120 90 L 60 120 L 0 90 L 0 30 Z".to_owned(),
+        extra: Extras::new(),
+    });
+    document.layers.push(clipped);
+
+    (document, hrefs)
+}
+
+/// The 1.10.0 dash, cap and join paint: a dashed arc, a dashed rect with an
+/// odd-count pattern, and a dashed line rotated off the axes with a square
+/// cap and a bevel join.
+///
+/// The arc and the rotated line are the spike's two riskiest documents: arcs
+/// exercise the dash phase along a curve, and the rotated line dashes across
+/// a diagonal raster walk.
+fn dash_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 260.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    let hrefs = AssetHrefs::new();
+
+    // A dashed arc: the ellipse's four cubic quadrants, stroked, dashes
+    // riding the inset geometry (D5).
+    document.layers.push(stroked_shape(
+        1,
+        Transform::new(30.0, 30.0, 180.0, 180.0),
+        ShapeKind::Ellipse {
+            extra: Extras::new(),
+        },
+        None,
+        Stroke {
+            color: Color::new("#204060"),
+            width: 4.0,
+            dash_array: Some(vec![6.0, 4.0]),
+            line_cap: Some(assemblash_core::LineCap::Round),
+            line_join: None,
+            extra: Extras::new(),
+        },
+    ));
+
+    // An odd-count pattern: resvg repeats it to an even count, and the gate
+    // re-checks that on every target.
+    document.layers.push(stroked_shape(
+        2,
+        Transform::new(250.0, 40.0, 190.0, 140.0),
+        ShapeKind::Rect {
+            corner_radius: 12.0,
+            extra: Extras::new(),
+        },
+        None,
+        Stroke {
+            color: Color::new("#8b1a1a"),
+            width: 3.0,
+            dash_array: Some(vec![6.0, 4.0, 2.0]),
+            line_cap: Some(assemblash_core::LineCap::Butt),
+            line_join: Some(assemblash_core::LineJoin::Round),
+            extra: Extras::new(),
+        },
+    ));
+
+    // A dashed line off the axes, square cap: a diagonal dash walk.
+    document.layers.push(stroked_shape(
+        3,
+        Transform {
+            rotation: 17.0,
+            ..Transform::new(40.0, 220.0, 400.0, 0.0)
+        },
+        ShapeKind::Line {
+            marker_start: None,
+            marker_end: None,
+            extra: Extras::new(),
+        },
+        None,
+        Stroke {
+            color: Color::new("#2e8b57"),
+            width: 5.0,
+            dash_array: Some(vec![8.0, 5.0]),
+            line_cap: Some(assemblash_core::LineCap::Square),
+            line_join: Some(assemblash_core::LineJoin::Bevel),
+            extra: Extras::new(),
+        },
+    ));
+
+    (document, hrefs)
+}
+
+/// The 1.10.0 marker paint: both marker ends on one line, the same line
+/// rotated, and an explicit `none` control that must emit no definition.
+fn marker_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 480.0, 220.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    let hrefs = AssetHrefs::new();
+
+    // Arrow at the start, circle at the end, on the same line.
+    document.layers.push(stroked_shape(
+        1,
+        Transform::new(40.0, 40.0, 400.0, 0.0),
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::Arrow),
+            marker_end: Some(assemblash_core::LineMarker::Circle),
+            extra: Extras::new(),
+        },
+        None,
+        plain_stroke("#101820", 4.0),
+    ));
+
+    // Both ends marked, rotated: the markers must turn with the line.
+    document.layers.push(stroked_shape(
+        2,
+        Transform {
+            rotation: 25.0,
+            ..Transform::new(60.0, 80.0, 360.0, 0.0)
+        },
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::Circle),
+            marker_end: Some(assemblash_core::LineMarker::Arrow),
+            extra: Extras::new(),
+        },
+        None,
+        plain_stroke("#8b1a1a", 3.0),
+    ));
+
+    // An explicit `none`: a real marker value, and it emits nothing.
+    document.layers.push(stroked_shape(
+        3,
+        Transform::new(40.0, 170.0, 400.0, 0.0),
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::None),
+            marker_end: Some(assemblash_core::LineMarker::None),
+            extra: Extras::new(),
+        },
+        None,
+        plain_stroke("#204060", 4.0),
+    ));
+
+    (document, hrefs)
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -1081,6 +1398,9 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("clip-ellipse", clip_ellipse_document()),
         ("crop", crop_document()),
         ("flip", flip_document()),
+        ("path", path_document()),
+        ("dash", dash_document()),
+        ("marker", marker_document()),
     ] {
         out.push((name, document, hrefs));
     }
@@ -1532,7 +1852,8 @@ fn goldens_cover_every_reference_document() {
     }
     let goldens = read_goldens();
     for name in [
-        "mixed", "latin", "arabic", "japanese", "blend", "blur", "shapes", "shadow",
+        "mixed", "latin", "arabic", "japanese", "blend", "blur", "shapes", "shadow", "path",
+        "dash", "marker",
     ] {
         assert!(
             goldens.contains_key(&format!("{name}.pixels")),

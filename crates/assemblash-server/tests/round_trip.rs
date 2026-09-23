@@ -29,6 +29,7 @@ mod http {
         pub status: u16,
         pub body: Vec<u8>,
         pub content_type: String,
+        pub set_cookie: Option<String>,
     }
 
     impl Response {
@@ -94,6 +95,11 @@ mod http {
             .map(|line| line[13..].trim().to_owned())
             .unwrap_or_default();
 
+        let set_cookie = headers
+            .lines()
+            .find(|line| line.to_ascii_lowercase().starts_with("set-cookie:"))
+            .map(|line| line[11..].trim().to_owned());
+
         let mut body = raw[split + 4..].to_vec();
         if headers
             .to_ascii_lowercase()
@@ -105,6 +111,7 @@ mod http {
             status,
             body,
             content_type,
+            set_cookie,
         }
     }
 
@@ -669,6 +676,60 @@ fn a_wide_bind_needs_a_token_and_then_enforces_it() {
     );
     assert_eq!(authorized.json()["name"], "assemblash");
 
+    // A browser receives an HttpOnly session cookie after a valid bearer token.
+    let session = http::request_with(
+        "POST",
+        &format!("{base}/api/browser-session"),
+        None,
+        &[("authorization", header.as_str())],
+    );
+    assert_eq!(session.status, 204);
+    let set_cookie = session.set_cookie.expect("session cookie");
+    assert!(set_cookie.contains("HttpOnly"));
+    assert!(set_cookie.contains("SameSite=Strict"));
+    let cookie = set_cookie.split(';').next().unwrap();
+    assert!(cookie.starts_with("assemblash_session_"));
+    assert!(
+        !cookie.contains(&token),
+        "cookie must not contain the raw token"
+    );
+    assert_eq!(
+        http::request_with("GET", &format!("{base}/"), None, &[("cookie", cookie)]).status,
+        200
+    );
+    assert_eq!(
+        http::request_with(
+            "GET",
+            &format!("{base}/api/version"),
+            None,
+            &[("cookie", cookie)]
+        )
+        .status,
+        200
+    );
+    let origin = base.as_str();
+    assert_eq!(
+        http::request_with(
+            "POST",
+            &format!("{base}/api/projects"),
+            Some(br#"{"id":"cookie-project","width":10,"height":10}"#),
+            &[("cookie", cookie), ("origin", origin)]
+        )
+        .status,
+        201
+    );
+    assert_eq!(
+        http::request_with(
+            "POST",
+            &format!("{base}/api/projects"),
+            Some(br#"{"id":"cross-site","width":10,"height":10}"#),
+            &[("cookie", cookie), ("origin", "http://attacker.example")]
+        )
+        .status,
+        401
+    );
+    assert!(!root.join("projects/cross-site").exists());
+
     // The interface's own files are behind it too: a page that loaded and
     // then failed everything would be a worse way to learn a token is needed.
     assert_eq!(
@@ -689,6 +750,29 @@ fn a_wide_bind_needs_a_token_and_then_enforces_it() {
         http::request_with("GET", &format!("{base}/login.js"), None, &[]).status,
         200
     );
+    // Every module imported by login must load before a token exists.
+    for path in [
+        "style.css",
+        "token.js",
+        "i18n.js",
+        "locale-en.js",
+        "locale-fr.js",
+        "locale-de.js",
+    ] {
+        assert_eq!(
+            http::request_with("GET", &format!("{base}/{path}"), None, &[]).status,
+            200,
+            "{path} must load on the login page"
+        );
+    }
+    // The exception does not expose editor modules or API routes.
+    for path in ["app.js", "api.js", "templates.js", "api/projects"] {
+        assert_eq!(
+            http::request_with("GET", &format!("{base}/{path}"), None, &[]).status,
+            401,
+            "{path} must stay protected"
+        );
+    }
 
     // And a write is refused just as firmly as a read.
     let write = http::request_with(

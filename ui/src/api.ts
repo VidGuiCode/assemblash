@@ -7,7 +7,7 @@
 
 import type { Asset, Document, ImageFit, Slot } from "../../schema/document.js";
 import type { Operation } from "../../schema/operation.js";
-import { goToLogin, withToken } from "./token.js";
+import { goToLogin } from "./token.js";
 
 export type { Asset, Document, ImageFit, Operation, Slot };
 
@@ -90,13 +90,9 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: withToken(init?.headers),
-  });
+  const response = await fetch(path, init);
   if (response.status === 401) {
-    // The token is missing, wrong, or the server was restarted with a new
-    // one. Asking again is the only thing that helps, and continuing would
+    // The session cookie is missing or the server token changed. Asking again is the only thing that helps, and continuing would
     // leave every control broken with no explanation.
     goToLogin();
     throw new ApiError("unauthorized", "this server needs an access token", null);
@@ -171,6 +167,36 @@ export async function createProject(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id, width, height, background, name }),
+  });
+}
+
+/**
+ * Renames a project.
+ *
+ * The project id is the directory name, so this renames the directory: the
+ * project comes back under a new id, and anything that held it open addresses
+ * it by the new id from now on.
+ */
+export async function renameProject(project: string, name: string): Promise<{ project: string }> {
+  return request<{ project: string }>(
+    `/api/projects/${encodeURIComponent(project)}/rename`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  );
+}
+
+/**
+ * Deletes a project, with its directory, document, history, and assets.
+ *
+ * The server closes a project this process holds open on the way in, and
+ * refuses one another process still holds with `projectLocked`.
+ */
+export async function deleteProject(project: string): Promise<{ project: string }> {
+  return request<{ project: string }>(`/api/projects/${encodeURIComponent(project)}`, {
+    method: "DELETE",
   });
 }
 
@@ -327,6 +353,37 @@ export async function agentSessions(): Promise<{ count: number }> {
   return request<{ count: number }>("/api/agent-sessions");
 }
 
+/** The recorded update-check consent. `null` means the question is unanswered. */
+export type UpdateConsent = "off" | "notify";
+
+/** What `GET /api/update-status` answers. The server fetches nothing for it. */
+export interface UpdateStatus {
+  /** The version of the running program. */
+  current: string;
+  /** The version the last check named, when a check has run. */
+  latest?: string | null;
+  /** Whether `latest` is newer than `current`. */
+  newer: boolean;
+  /** The release-notes page of `latest`, when known. */
+  notesUrl?: string | null;
+  /** The consent recorded in the workspace config. */
+  consent: UpdateConsent | null;
+}
+
+/** Reads the update status. Read-only: the server makes no request for this. */
+export async function updateStatus(): Promise<UpdateStatus> {
+  return request<UpdateStatus>("/api/update-status");
+}
+
+/** Records the one-time update-check answer in the workspace config. */
+export async function setUpdateConsent(consent: UpdateConsent): Promise<UpdateStatus> {
+  return request<UpdateStatus>("/api/update-consent", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ updateCheck: consent }),
+  });
+}
+
 /**
  * Uploads a file into a project's assets.
  *
@@ -341,7 +398,7 @@ export async function uploadAsset(
     `/api/projects/${encodeURIComponent(project)}/assets?filename=${encodeURIComponent(file.name)}`,
     {
       method: "POST",
-      headers: withToken({ "content-type": file.type || "application/octet-stream" }),
+      headers: { "content-type": file.type || "application/octet-stream" },
       body: file,
     },
   );
@@ -368,7 +425,10 @@ export async function uploadAsset(
 export const IMAGE_FITS = ["fill", "contain", "cover"] as const;
 
 /** The shape kinds this build draws, and what each is called in the panel. */
-export const SHAPE_KINDS = ["rect", "ellipse", "line"] as const;
+export const SHAPE_KINDS = ["rect", "ellipse", "line", "path"] as const;
+
+/** The most entries a stroke's dash pattern may hold. The engine refuses more. */
+export const MAX_DASH_ENTRIES = 8;
 
 /**
  * The `kind` of a shape layer's geometry, or `null` if there is not one.
@@ -684,6 +744,36 @@ export async function fonts(): Promise<string[]> {
   return body.families;
 }
 
+/** The exact stored face that a specimen must use. */
+export function fontSpecimenUrl(face: FontRecord, sample = "Aa Bb 0123"): string {
+  const query = new URLSearchParams({
+    family: face.family,
+    weight: String(face.weight),
+    style: face.style,
+    hash: face.hash,
+    sample,
+  });
+  return `/api/fonts/specimen.png?${query.toString()}`;
+}
+
+/** A bundled specimen for a catalogue family that is not installed yet. */
+export interface CatalogueSpecimen {
+  src: string;
+  sourceSha256: string;
+  assetSha256: string;
+  face: { weight: number; style: string };
+  sample: string;
+  license: string;
+}
+
+/** These assets are generated from the pinned manifest, with no page download. */
+export async function catalogueSpecimens(): Promise<Record<string, CatalogueSpecimen>> {
+  const manifest = await request<{ version: number; families: Record<string, CatalogueSpecimen> }>(
+    "/catalogue-specimens/manifest.json",
+  );
+  return manifest.families;
+}
+
 /** The store as the font manager shows it: families, and the faces of each. */
 export async function fontFaces(): Promise<FontStoreListing> {
   const body = await request<{ families?: string[]; faces?: FontRecord[] }>("/api/fonts");
@@ -763,26 +853,23 @@ export function svgUrl(project: string, version: number): string {
 }
 
 /**
- * Fetches an image as a blob URL, carrying the token.
+ * Fetches an image as a blob URL with the browser session cookie.
  *
- * An `<img src>` cannot send a header, and putting the token in the query
- * string is exactly what "never in a URL" rules out — it would land in
- * history, in referrers, and in any proxy log on the way. So the bytes are
- * fetched properly and handed to the element as a blob.
+ * The bytes are fetched and handed to the element as a blob.
  */
 export async function imageObjectUrl(url: string): Promise<string> {
   return URL.createObjectURL(await fetchBlob(url));
 }
 
 /**
- * The bytes behind a rendered file, carrying the token.
+ * The bytes behind a rendered file.
  *
  * Separate from `imageObjectUrl` because a download wants to say how big the
  * file is, and a blob URL has thrown that away by the time it is handed to an
  * anchor.
  */
 export async function fetchBlob(url: string): Promise<Blob> {
-  const response = await fetch(url, { headers: withToken() });
+  const response = await fetch(url);
   if (response.status === 401) {
     goToLogin();
     throw new ApiError("unauthorized", "this server needs an access token", null);

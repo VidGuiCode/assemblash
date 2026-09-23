@@ -12,14 +12,15 @@
 //!
 //! # What this is and is not
 //!
-//! A token is authentication, not transport security. It is sent in a header,
-//! so anyone who can read the traffic can read the token. Exposing this beyond
+//! A token is authentication, not transport security. The browser first sends
+//! it in a header, then uses an HttpOnly session cookie. Anyone who can read
+//! the traffic can read either credential. Exposing this beyond
 //! a trusted network wants a reverse proxy terminating TLS — which is also
 //! where identity providers belong. There are deliberately no accounts here.
 
 use std::net::IpAddr;
 
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, Method, StatusCode};
 
 use crate::error::ApiError;
 
@@ -152,10 +153,95 @@ impl Access {
         }
     }
 
+    /// A host-only browser cookie issued after a successful bearer request.
+    /// The token is hex encoded so configured tokens cannot change cookie syntax.
+    pub(crate) fn browser_cookie(&self, headers: &HeaderMap) -> Option<String> {
+        let Self::Token(token) = self else {
+            return None;
+        };
+        let mut encoded = String::with_capacity(token.len() * 2);
+        for byte in token.as_bytes() {
+            use std::fmt::Write as _;
+            let _ = write!(encoded, "{byte:02x}");
+        }
+        let name = browser_cookie_name(headers);
+        let secure = headers
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+            .zip(
+                headers
+                    .get(header::HOST)
+                    .and_then(|value| value.to_str().ok()),
+            )
+            .is_some_and(|(origin, host)| origin.eq_ignore_ascii_case(&format!("https://{host}")));
+        let secure_attribute = if secure { "; Secure" } else { "" };
+        Some(format!(
+            "{name}={encoded}; Path=/; HttpOnly; SameSite=Strict{secure_attribute}"
+        ))
+    }
+
+    /// Checks the browser cookie. Writes also need a same-origin request.
+    pub(crate) fn check_browser_cookie(&self, headers: &HeaderMap, method: &Method) -> bool {
+        let Self::Token(_) = self else {
+            return false;
+        };
+        let Some(expected) = self.browser_cookie(headers) else {
+            return false;
+        };
+        let Some(expected) = expected.split(';').next() else {
+            return false;
+        };
+        let name = browser_cookie_name(headers);
+        let presented = headers
+            .get(header::COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|cookies| {
+                cookies
+                    .split(';')
+                    .map(str::trim)
+                    .find(|cookie| cookie.split('=').next() == Some(name.as_str()))
+            })
+            .unwrap_or_default();
+        if !constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
+            return false;
+        }
+        if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
+            return true;
+        }
+        let Some(host) = headers
+            .get(header::HOST)
+            .and_then(|value| value.to_str().ok())
+        else {
+            return false;
+        };
+        let Some(origin) = headers
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+        else {
+            return false;
+        };
+        origin.eq_ignore_ascii_case(&format!("http://{host}"))
+            || origin.eq_ignore_ascii_case(&format!("https://{host}"))
+    }
+
     /// Whether a token is required at all, for the interface to know whether
     /// to ask for one.
     pub fn needs_token(&self) -> bool {
         matches!(self, Self::Token(_))
+    }
+}
+
+/// Cookies ignore ports, so include the requested port in the cookie name.
+/// This lets two local workspaces on different ports keep separate sessions.
+fn browser_cookie_name(headers: &HeaderMap) -> String {
+    let port = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|host| host.rsplit_once(':').map(|(_, port)| port))
+        .filter(|port| !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()));
+    match port {
+        Some(port) => format!("assemblash_session_{port}"),
+        None => "assemblash_session".to_owned(),
     }
 }
 
@@ -228,6 +314,38 @@ mod tests {
         assert!(matches!(policy, Access::Open));
         assert!(policy.check(&HeaderMap::new()).is_ok());
         assert!(policy_for("::1".parse().unwrap(), None).is_ok());
+    }
+
+    #[test]
+    fn browser_cookies_are_port_scoped_and_require_origin_for_writes() {
+        let policy = Access::Token("test token".to_owned());
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "127.0.0.1:8797".parse().unwrap());
+        headers.insert(header::ORIGIN, "http://127.0.0.1:8797".parse().unwrap());
+        let set_cookie = policy.browser_cookie(&headers).unwrap();
+        assert!(set_cookie.starts_with("assemblash_session_8797="));
+        assert!(set_cookie.contains("HttpOnly; SameSite=Strict"));
+        assert!(!set_cookie.contains("; Secure"));
+        headers.insert(
+            header::COOKIE,
+            set_cookie.split(';').next().unwrap().parse().unwrap(),
+        );
+        assert!(policy.check_browser_cookie(&headers, &Method::GET));
+        assert!(policy.check_browser_cookie(&headers, &Method::POST));
+
+        headers.insert(header::ORIGIN, "http://elsewhere.test".parse().unwrap());
+        assert!(!policy.check_browser_cookie(&headers, &Method::POST));
+        headers.remove(header::ORIGIN);
+        assert!(!policy.check_browser_cookie(&headers, &Method::POST));
+        headers.insert(header::HOST, "127.0.0.1:8798".parse().unwrap());
+        assert!(!policy.check_browser_cookie(&headers, &Method::GET));
+
+        headers.insert(header::HOST, "example.test".parse().unwrap());
+        headers.insert(header::ORIGIN, "https://example.test".parse().unwrap());
+        assert!(policy
+            .browser_cookie(&headers)
+            .unwrap()
+            .ends_with("; Secure"));
     }
 
     #[test]

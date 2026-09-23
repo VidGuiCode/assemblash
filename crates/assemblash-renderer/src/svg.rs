@@ -8,10 +8,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use assemblash_core::document::{
-    Clip, Effect, GroupLayer, ImageFit, Layer, LayerKind, ShapeKind, ShapeLayer, TextAlign,
-    Transform, VerticalAlign,
+    Clip, Effect, GroupLayer, ImageFit, Layer, LayerKind, LineCap, LineJoin, LineMarker, ShapeKind,
+    ShapeLayer, Stroke, TextAlign, Transform, VerticalAlign,
 };
-use assemblash_core::ids::AssetId;
+use assemblash_core::ids::{AssetId, LayerId};
 use assemblash_core::{svg_import, validate, Color, Document};
 
 use crate::error::RenderError;
@@ -65,6 +65,16 @@ pub fn doc_to_svg(
         if layer.clip.is_some() {
             match clip_def(layer) {
                 Ok(clip) => defs.push_str(&clip),
+                Err(error) => failure = Some(error),
+            }
+        }
+        // Marker definitions join the same pass: a definition has to exist
+        // before the `<line>` that references it, and a line nested three
+        // groups deep must still find its own. Only lines that actually ask
+        // for an end emit definitions, and `none` asks for none.
+        if let LayerKind::Shape(shape) = &layer.kind {
+            match marker_defs(layer, shape) {
+                Ok(markers) => defs.push_str(&markers),
                 Err(error) => failure = Some(error),
             }
         }
@@ -319,7 +329,7 @@ fn write_layer(
             // Measured: with the viewport left as the whole box, a crop wider
             // than its window spilled to the box edges.
             let crop = match &layer.kind {
-                LayerKind::Image(image) => image.crop,
+                LayerKind::Image(image) => image.crop.clone(),
                 _ => None,
             };
 
@@ -602,8 +612,8 @@ fn write_shape(
     let common = attributes.to_owned();
 
     match &shape.shape {
-        ShapeKind::Rect { corner_radius } => {
-            let (fill, stroke, inset) = shape_paint(shape, w.min(h))?;
+        ShapeKind::Rect { corner_radius, .. } => {
+            let (fill, stroke, inset) = shape_paint(shape, w.min(h), &layer.id)?;
             // Clamped against the box first, so a radius larger than the shape
             // is a stadium rather than a refusal, and only then pulled in by
             // the inset — the inner edge of a stroked corner has the smaller
@@ -634,13 +644,54 @@ fn write_shape(
             }
         }
 
-        ShapeKind::Ellipse => {
-            let (fill, stroke, inset) = shape_paint(shape, w.min(h))?;
+        ShapeKind::Ellipse { .. } => {
+            let (fill, stroke, inset) = shape_paint(shape, w.min(h), &layer.id)?;
             let _ = writeln!(
                 out,
                 "{pad}<path d=\"{d}\" fill=\"{fill}\"{stroke}{common}/>",
                 d = ellipse_path(x + w / 2.0, y + h / 2.0, w / 2.0 - inset, h / 2.0 - inset),
                 common = common,
+            );
+        }
+
+        // A path layer draws the `d` it carries, verbatim, in the layer's own
+        // box space: the transform box positions and turns it (see
+        // [`path_transform_attribute`]), and the `d` fills the box. The
+        // string was validated against the grammar at operation time; a hand
+        // edit can still carry a bad one past that gate, so it is checked
+        // again here — refused, never repaired.
+        ShapeKind::Path { d, .. } => {
+            let d = checked_path_d(&layer.id, d)?;
+            let fill = match &shape.fill {
+                Some(color_value) => color(color_value)?,
+                None => "none".to_owned(),
+            };
+            let stroke = match &shape.stroke {
+                None => String::new(),
+                // A path's outline cannot be inset the way a rect's or an
+                // ellipse's can — insetting means offsetting the silhouette,
+                // and inventing that geometry here is exactly what this
+                // engine does not do. The stroke sits centred on the path
+                // edge, which is SVG's own default.
+                Some(_) => stroke_paint(shape, &layer.id)?,
+            };
+            // The path carries its own transform, composed in box space, so
+            // the standard trailing attributes are rebuilt here *without*
+            // their transform — emitting both would be two transform
+            // attributes on one element.
+            let paint_attributes = format!(
+                "{opacity}{filter}{blend}",
+                opacity = opacity_attribute(layer.opacity),
+                filter = filter_attribute(layer),
+                blend = blend_attribute(layer)?,
+            );
+            let _ = writeln!(
+                out,
+                "{pad}<path d=\"{d}\" fill=\"{fill}\"{stroke}{transform}{paint_attributes}/>",
+                d = attribute(&d),
+                stroke = stroke,
+                transform = path_transform_attribute(t),
+                paint_attributes = paint_attributes,
             );
         }
 
@@ -650,24 +701,49 @@ fn write_shape(
         // zero, there is nothing to draw at all — and an empty element that
         // draws nothing is worse than no element, because it still costs the
         // rasterizer a pass.
-        ShapeKind::Line => {
+        ShapeKind::Line {
+            marker_start,
+            marker_end,
+            ..
+        } => {
             let Some(stroke) = &shape.stroke else {
                 return Ok(());
             };
             if stroke.width <= 0.0 {
                 return Ok(());
             }
+            // The butt cap is what this element has always emitted, so it
+            // stays on the element when the layer asks for no cap: SVG's
+            // default and this output must not drift apart. An asked-for cap
+            // replaces it. Dash and join are emitted only when set, for the
+            // same reason.
+            let cap = match &stroke.line_cap {
+                None => "butt".to_owned(),
+                Some(cap) => line_cap_value(&layer.id, cap)?,
+            };
+            let dash = dash_array_value(stroke);
+            let join = match &stroke.line_join {
+                None => String::new(),
+                Some(join) => format!(" stroke-linejoin=\"{}\"", line_join_value(&layer.id, join)?),
+            };
+            let start = marker_reference(&layer.id, marker_start.as_ref(), true)?;
+            let end = marker_reference(&layer.id, marker_end.as_ref(), false)?;
             let _ = writeln!(
                 out,
                 "{pad}<line x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" \
                  stroke=\"{color}\" stroke-width=\"{width}\" \
-                 stroke-linecap=\"butt\"{common}/>",
+                 stroke-linecap=\"{cap}\"{dash}{join}{start}{end}{common}/>",
                 x1 = number(x),
                 y1 = number(y + h / 2.0),
                 x2 = number(x + w),
                 y2 = number(y + h / 2.0),
                 color = color(&stroke.color)?,
                 width = number(stroke.width),
+                cap = cap,
+                dash = dash,
+                join = join,
+                start = start,
+                end = end,
                 common = common,
             );
         }
@@ -683,7 +759,11 @@ fn write_shape(
 /// Returns the `fill` value, the stroke attributes (empty when there is no
 /// stroke to draw) and the inset to apply to the geometry — `s/2`, or 0 when
 /// nothing is stroked.
-fn shape_paint(shape: &ShapeLayer, minimum: f64) -> Result<(String, String, f64), RenderError> {
+fn shape_paint(
+    shape: &ShapeLayer,
+    minimum: f64,
+    layer: &LayerId,
+) -> Result<(String, String, f64), RenderError> {
     let fill = match &shape.fill {
         Some(color_value) => color(color_value)?,
         None => "none".to_owned(),
@@ -707,12 +787,256 @@ fn shape_paint(shape: &ShapeLayer, minimum: f64) -> Result<(String, String, f64)
     Ok((
         fill,
         format!(
-            " stroke=\"{}\" stroke-width=\"{}\"",
+            " stroke=\"{}\" stroke-width=\"{}\"{}",
             color(&stroke.color)?,
-            number(width)
+            number(width),
+            // Dash, cap and join ride on the same element. The stroke drew
+            // the inset geometry; the pattern inherits that geometry
+            // unchanged (D5) — there is no second, un-inset path for dashes
+            // to follow.
+            stroke_paint(shape, layer)?
         ),
         width / 2.0,
     ))
+}
+
+/// The dash, cap and join attributes a shape's stroke asks for.
+///
+/// Each is emitted only when set: SVG's defaults (no dashes, `butt`,
+/// `miter`) are what an unset field means, and an attribute that restates
+/// its default would make every existing shape's output longer for nothing.
+/// A cap or join this build does not know is refused, never guessed at — the
+/// same bargain as an unknown blend mode.
+fn stroke_paint(shape: &ShapeLayer, layer: &LayerId) -> Result<String, RenderError> {
+    let Some(stroke) = &shape.stroke else {
+        return Ok(String::new());
+    };
+    let cap = match &stroke.line_cap {
+        None => String::new(),
+        Some(cap) => format!(" stroke-linecap=\"{}\"", line_cap_value(layer, cap)?),
+    };
+    let join = match &stroke.line_join {
+        None => String::new(),
+        Some(join) => format!(" stroke-linejoin=\"{}\"", line_join_value(layer, join)?),
+    };
+    Ok(format!("{}{cap}{join}", dash_array_value(stroke)))
+}
+
+/// The `stroke-dasharray` value for a stroke that carries a pattern.
+///
+/// Space-separated, in document units, in the order written. The SVG rule
+/// that an odd count repeats to an even one is the rasterizer's business and
+/// was measured to hold (the Step 1 spike), so no entry is added or dropped
+/// here.
+fn dash_array_value(stroke: &Stroke) -> String {
+    match &stroke.dash_array {
+        None => String::new(),
+        Some(values) => {
+            let joined = values
+                .iter()
+                .map(|value| number(*value))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!(" stroke-dasharray=\"{joined}\"")
+        }
+    }
+}
+
+/// The attribute value for a cap this build draws, or a typed refusal.
+fn line_cap_value(layer: &LayerId, cap: &LineCap) -> Result<String, RenderError> {
+    match cap {
+        LineCap::Butt => Ok("butt".to_owned()),
+        LineCap::Round => Ok("round".to_owned()),
+        LineCap::Square => Ok("square".to_owned()),
+        LineCap::Other(value) => Err(RenderError::UnsupportedLineCap {
+            layer: layer.clone(),
+            value: value.to_string(),
+        }),
+    }
+}
+
+/// The attribute value for a join this build draws, or a typed refusal.
+fn line_join_value(layer: &LayerId, join: &LineJoin) -> Result<String, RenderError> {
+    match join {
+        LineJoin::Miter => Ok("miter".to_owned()),
+        LineJoin::Round => Ok("round".to_owned()),
+        LineJoin::Bevel => Ok("bevel".to_owned()),
+        LineJoin::Other(value) => Err(RenderError::UnsupportedLineJoin {
+            layer: layer.clone(),
+            value: value.to_string(),
+        }),
+    }
+}
+
+/// The `d` string of a path shape or clip, checked against the grammar.
+///
+/// Operation time validates every `d` a `create` or `update` stores, but a
+/// document is a file: a hand edit can carry a bad one past that gate. The
+/// render refuses, carrying the grammar's own message — which command, which
+/// byte — and never invents a repair, because a silently "fixed" path would
+/// not be the document's path.
+fn checked_path_d(layer: &LayerId, d: &str) -> Result<String, RenderError> {
+    assemblash_core::validate_path(d).map_err(|error| RenderError::InvalidPathData {
+        layer: layer.clone(),
+        reason: error.to_string(),
+    })?;
+    Ok(d.to_owned())
+}
+
+/// The transform attribute of a path shape's element.
+///
+/// A path's `d` is written in the layer's own box space, so the box's
+/// position enters as a `translate` — the one attribute every unrotated path
+/// carries. Rotation and mirror act about the box centre, composed in local
+/// coordinates, which is the same centre the other layer kinds rotate about
+/// in their parent's space.
+fn path_transform_attribute(transform: &Transform) -> String {
+    let (cx, cy) = (transform.width / 2.0, transform.height / 2.0);
+    let flipped = transform.flip_horizontal || transform.flip_vertical;
+    let mut list = format!(
+        " transform=\"translate({x} {y})",
+        x = number(transform.x),
+        y = number(transform.y),
+    );
+    if flipped {
+        let _ = write!(
+            list,
+            " translate({cx} {cy}) rotate({angle}) scale({sx} {sy}) translate({ncx} {ncy})",
+            cx = number(cx),
+            cy = number(cy),
+            angle = number(transform.rotation),
+            sx = number(flip_scale(transform.flip_horizontal)),
+            sy = number(flip_scale(transform.flip_vertical)),
+            ncx = number(-cx),
+            ncy = number(-cy),
+        );
+    } else if transform.rotation != 0.0 {
+        let _ = write!(
+            list,
+            " rotate({} {} {})",
+            number(transform.rotation),
+            number(cx),
+            number(cy),
+        );
+    }
+    list.push('"');
+    list
+}
+
+/// The `<marker>` definitions one line layer asks for, if it asks for any.
+///
+/// **The geometry rule is fixed, and it is the only rule**: a marker's
+/// length is the stroke width times three, in user units
+/// (`markerUnits="userSpaceOnUse"`, `markerWidth` = `markerHeight` = that
+/// length). There is no adaptive sizing and no renderer-invented number —
+/// one multiplication, closed form, the same on every target. The shapes
+/// live in a `0 0 10 10` view box:
+///
+/// * **Arrow** — a filled triangle, tip at `(10, 5)`, base corners `(0, 0)`
+///   and `(0, 10)`. `refX` is 10, so the tip sits on the segment's endpoint.
+///   At the start end the same triangle carries `orient="auto-start-reverse"`,
+///   which turns it to point outward along the line; the Step 1 spike
+///   measured that resvg 0.48.1 honours it.
+/// * **Circle** — a filled disc, centre `(5, 5)`, radius 5, `refX`/`refY`
+///   5, so the disc sits centred on the endpoint, three widths across.
+///
+/// Definitions exist only for the ends a line actually asks about, and the
+/// `none` marker asks for nothing at all. An end this build does not know is
+/// refused, never drawn as something else.
+fn marker_defs(layer: &Layer, shape: &ShapeLayer) -> Result<String, RenderError> {
+    let ShapeKind::Line {
+        marker_start,
+        marker_end,
+        ..
+    } = &shape.shape
+    else {
+        return Ok(String::new());
+    };
+    // A line that draws no stroke draws no markers either: a definition
+    // would reference a width there is no line to carry it on.
+    let Some(stroke) = &shape.stroke else {
+        return Ok(String::new());
+    };
+    if stroke.width <= 0.0 {
+        return Ok(String::new());
+    }
+
+    let length = number(stroke.width * 3.0);
+    let fill = color(&stroke.color)?;
+    let mut out = String::new();
+    for (marker, start) in [(marker_start.as_ref(), true), (marker_end.as_ref(), false)] {
+        let Some(marker) = marker else {
+            continue;
+        };
+        let definition = match marker {
+            LineMarker::Arrow => {
+                let orient = if start {
+                    " orient=\"auto-start-reverse\""
+                } else {
+                    " orient=\"auto\""
+                };
+                format!(
+                    "    <marker id=\"{id}\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
+                     markerWidth=\"{length}\" markerHeight=\"{length}\" \
+                     markerUnits=\"userSpaceOnUse\"{orient}>\n\
+                     \x20     <polygon points=\"0,0 10,5 0,10\" fill=\"{fill}\"/>\n\
+                     \x20   </marker>\n",
+                    id = marker_id(&layer.id, marker, start)?,
+                )
+            }
+            LineMarker::Circle => format!(
+                "    <marker id=\"{id}\" viewBox=\"0 0 10 10\" refX=\"5\" refY=\"5\" \
+                 markerWidth=\"{length}\" markerHeight=\"{length}\" \
+                 markerUnits=\"userSpaceOnUse\">\n\
+                 \x20     <circle cx=\"5\" cy=\"5\" r=\"5\" fill=\"{fill}\"/>\n\
+                 \x20   </marker>\n",
+                id = marker_id(&layer.id, marker, start)?,
+            ),
+            LineMarker::None => continue,
+            LineMarker::Other(value) => {
+                return Err(RenderError::UnsupportedLineMarker {
+                    layer: layer.id.clone(),
+                    value: value.to_string(),
+                })
+            }
+        };
+        out.push_str(&definition);
+    }
+    Ok(out)
+}
+
+/// The id of one marker definition, unique to the layer, the end and the kind.
+fn marker_id(layer: &LayerId, marker: &LineMarker, start: bool) -> Result<String, RenderError> {
+    let kind = match marker {
+        LineMarker::Arrow => "arrow",
+        LineMarker::Circle => "circle",
+        LineMarker::None => return Ok(String::new()),
+        LineMarker::Other(value) => {
+            return Err(RenderError::UnsupportedLineMarker {
+                layer: layer.clone(),
+                value: value.to_string(),
+            })
+        }
+    };
+    let end = if start { "start" } else { "end" };
+    Ok(format!("marker-{kind}-{end}-{layer}"))
+}
+
+/// The `marker-start`/`marker-end` attribute for one end of a line.
+fn marker_reference(
+    layer: &LayerId,
+    marker: Option<&LineMarker>,
+    start: bool,
+) -> Result<String, RenderError> {
+    let Some(marker) = marker else {
+        return Ok(String::new());
+    };
+    if matches!(marker, LineMarker::None) {
+        return Ok(String::new());
+    }
+    let id = marker_id(layer, marker, start)?;
+    let attribute = if start { "marker-start" } else { "marker-end" };
+    Ok(format!(" {attribute}=\"url(#{id})\""))
 }
 
 /// A rounded rectangle as four straight edges and four cubic quarter-arcs.
@@ -1180,15 +1504,15 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
     for (index, effect) in layer.effects.iter().enumerate() {
         let result = format!("e{index}");
         match effect {
-            Effect::Brightness { amount } => {
+            Effect::Brightness { amount, .. } => {
                 component_transfer(&mut body, &input, &result, *amount, 0.0);
             }
-            Effect::Contrast { amount } => {
+            Effect::Contrast { amount, .. } => {
                 // Pivot around mid grey, so contrast 0 is flat grey rather
                 // than black: slope a, intercept (1 - a) / 2.
                 component_transfer(&mut body, &input, &result, *amount, (1.0 - amount) / 2.0);
             }
-            Effect::Saturation { amount } => {
+            Effect::Saturation { amount, .. } => {
                 let _ = writeln!(
                     body,
                     "      <feColorMatrix in=\"{input}\" result=\"{result}\" \
@@ -1196,7 +1520,7 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
                     number(*amount)
                 );
             }
-            Effect::Blur { radius } => {
+            Effect::Blur { radius, .. } => {
                 let _ = writeln!(
                     body,
                     "      <feGaussianBlur in=\"{input}\" result=\"{result}\" \
@@ -1208,6 +1532,7 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
                 amount,
                 seed,
                 scale,
+                ..
             } => {
                 grain(&mut body, &input, &result, *amount, *seed, *scale);
             }
@@ -1219,6 +1544,7 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
                 dy,
                 blur,
                 color: shadow,
+                ..
             } => {
                 let [r, g, b, a] = shadow
                     .to_rgba()
@@ -1305,7 +1631,7 @@ fn shadow_region(layer: &Layer) -> Option<(f64, f64, f64, f64)> {
                 offsets.push((*dx, *dy));
                 sigma = sigma.max(*blur);
             }
-            Effect::Blur { radius } => sigma = sigma.max(*radius),
+            Effect::Blur { radius, .. } => sigma = sigma.max(*radius),
             _ => {}
         }
     }
@@ -1578,7 +1904,7 @@ fn clip_def(layer: &Layer) -> Result<String, RenderError> {
     };
 
     let geometry = match clip {
-        Clip::Rect { corner_radius } => {
+        Clip::Rect { corner_radius, .. } => {
             // Clamped like a shape rect's radius: larger than the box makes a
             // stadium rather than a refusal.
             let radius = corner_radius.clamp(0.0, (w.min(h) / 2.0).max(0.0));
@@ -1597,10 +1923,24 @@ fn clip_def(layer: &Layer) -> Result<String, RenderError> {
                 )
             }
         }
-        Clip::Ellipse => format!(
+        Clip::Ellipse { .. } => format!(
             "<path d=\"{}\"{transform}/>",
             ellipse_path(cx, cy, w / 2.0, h / 2.0)
         ),
+        // A path clip carries its `d` in the layer's own box space, like a
+        // path shape does: the box position enters as a `translate`, and the
+        // inverse rotation and mirror keep the mask on the box in the
+        // parent's space, exactly as the rect and ellipse masks above keep
+        // theirs. The `d` is checked here for the same reason a path
+        // shape's is — refused, never repaired.
+        Clip::Path { d, .. } => {
+            let d = checked_path_d(&layer.id, d)?;
+            let placed = match inverse_transform(t, cx, cy) {
+                Some(list) => format!("{list} translate({} {})", number(x), number(y)),
+                None => format!("translate({} {})", number(x), number(y)),
+            };
+            format!("<path d=\"{}\" transform=\"{placed}\"/>", attribute(&d))
+        }
         Clip::Other(_) => unreachable!("refused above"),
     };
 
@@ -1702,7 +2042,7 @@ fn attribute(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
 
@@ -1779,6 +2119,262 @@ mod tests {
         assert_eq!(
             color(&Color::new("#ff800080")).unwrap(),
             "rgba(255,128,0,0.501961)"
+        );
+    }
+
+    // -- 1.10.0 paint emission (path, dash, cap, join, markers) ------------
+
+    fn paint_document(shape: ShapeKind, fill: Option<&str>, stroke: Option<Stroke>) -> Document {
+        let mut document = Document::new(
+            &mut assemblash_core::SequentialIdSource::new(),
+            200.0,
+            200.0,
+        );
+        document.canvas.background = Some(Color::new("#ffffff"));
+        document.layers.push(Layer::new(
+            LayerId::new("layer_00000000000000000000000001"),
+            Transform::new(20.0, 20.0, 160.0, 160.0),
+            LayerKind::Shape(ShapeLayer {
+                shape,
+                fill: fill.map(Color::new),
+                stroke,
+                extra: assemblash_core::document::Extras::new(),
+            }),
+        ));
+        document
+    }
+
+    fn paint_svg(shape: ShapeKind, fill: Option<&str>, stroke: Option<Stroke>) -> String {
+        doc_to_svg(
+            &paint_document(shape, fill, stroke),
+            &FontSet::unchecked(),
+            &AssetHrefs::new(),
+        )
+        .unwrap()
+    }
+
+    fn solid_stroke(width: f64) -> Stroke {
+        Stroke {
+            color: Color::new("#101820"),
+            width,
+            dash_array: None,
+            line_cap: None,
+            line_join: None,
+            extra: assemblash_core::document::Extras::new(),
+        }
+    }
+
+    fn rect_kind() -> ShapeKind {
+        ShapeKind::Rect {
+            corner_radius: 0.0,
+            extra: assemblash_core::document::Extras::new(),
+        }
+    }
+
+    fn line_kind(start: Option<LineMarker>, end: Option<LineMarker>) -> ShapeKind {
+        ShapeKind::Line {
+            marker_start: start,
+            marker_end: end,
+            extra: assemblash_core::document::Extras::new(),
+        }
+    }
+
+    #[test]
+    fn dash_cap_and_join_are_emitted_only_when_set() {
+        let stroke = Stroke {
+            dash_array: Some(vec![6.0, 4.0, 2.0]),
+            line_cap: Some(LineCap::Square),
+            line_join: Some(LineJoin::Bevel),
+            ..solid_stroke(3.0)
+        };
+        let svg = paint_svg(rect_kind(), Some("#3366cc"), Some(stroke));
+        assert!(svg.contains("stroke-dasharray=\"6 4 2\""), "{svg}");
+        assert!(svg.contains("stroke-linecap=\"square\""), "{svg}");
+        assert!(svg.contains("stroke-linejoin=\"bevel\""), "{svg}");
+
+        // Unset fields stay silent: the SVG defaults are what they mean, and
+        // every document from before 1.10.0 must not gain a restated default.
+        let svg = paint_svg(rect_kind(), Some("#3366cc"), Some(solid_stroke(3.0)));
+        assert!(!svg.contains("dasharray"), "{svg}");
+        assert!(!svg.contains("linecap=\"square\""), "{svg}");
+        assert!(!svg.contains("linejoin"), "{svg}");
+    }
+
+    #[test]
+    fn a_cap_or_join_this_build_does_not_know_is_refused() {
+        let stroke = Stroke {
+            line_cap: Some(LineCap::Other(serde_json::json!("wavy"))),
+            ..solid_stroke(3.0)
+        };
+        let error = doc_to_svg(
+            &paint_document(rect_kind(), None, Some(stroke)),
+            &FontSet::unchecked(),
+            &AssetHrefs::new(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, RenderError::UnsupportedLineCap { value, .. } if value == "\"wavy\""),
+            "{error:?}"
+        );
+
+        let stroke = Stroke {
+            line_join: Some(LineJoin::Other(serde_json::json!("spiralled"))),
+            ..solid_stroke(3.0)
+        };
+        let error = doc_to_svg(
+            &paint_document(rect_kind(), None, Some(stroke)),
+            &FontSet::unchecked(),
+            &AssetHrefs::new(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, RenderError::UnsupportedLineJoin { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_path_shape_is_emitted_verbatim_in_its_box_space() {
+        let d = "M 10 0 L 90 0 L 90 80 L 10 80 Z";
+        let kind = || ShapeKind::Path {
+            d: d.to_owned(),
+            extra: assemblash_core::document::Extras::new(),
+        };
+        let svg = paint_svg(kind(), Some("#3366cc"), None);
+        assert!(svg.contains(&format!("<path d=\"{d}\"")), "{svg}");
+        // The box position enters as a translate on the same element.
+        assert!(svg.contains("transform=\"translate(20 20)\""), "{svg}");
+
+        // Rotation turns about the box centre, in local coordinates.
+        let mut document = paint_document(kind(), None, None);
+        document.layers[0].transform.rotation = 30.0;
+        let svg = doc_to_svg(&document, &FontSet::unchecked(), &AssetHrefs::new()).unwrap();
+        assert!(
+            svg.contains("transform=\"translate(20 20) rotate(30 80 80)\""),
+            "{svg}"
+        );
+    }
+
+    #[test]
+    fn a_bad_hand_edited_d_is_refused_never_repaired() {
+        let error = checked_path_d(&LayerId::new("layer_1"), "M 0 0 Q 5 5 10 10 Z").unwrap_err();
+        let RenderError::InvalidPathData { layer, reason } = &error else {
+            panic!("expected InvalidPathData, got {error:?}");
+        };
+        assert_eq!(layer.as_str(), "layer_1");
+        // The grammar's own message comes through: which command, which byte.
+        assert!(
+            reason.contains('Q') && reason.contains("byte 6"),
+            "{reason}"
+        );
+
+        // An unclosed silhouette is a line layer's business, not a path's.
+        assert!(checked_path_d(&LayerId::new("layer_1"), "M 0 0 L 10 10").is_err());
+    }
+
+    #[test]
+    fn a_path_clip_is_a_clip_path_wrapping_the_same_d() {
+        let d = "M 10 0 L 90 0 L 90 80 L 10 80 Z";
+        let mut document = paint_document(rect_kind(), Some("#3366cc"), None);
+        document.layers[0].clip = Some(Clip::Path {
+            d: d.to_owned(),
+            extra: assemblash_core::document::Extras::new(),
+        });
+        let svg = doc_to_svg(&document, &FontSet::unchecked(), &AssetHrefs::new()).unwrap();
+
+        assert!(
+            svg.contains(&format!(
+                "<clipPath id=\"clip-layer_00000000000000000000000001\">\n      \
+                 <path d=\"{d}\" transform=\"translate(20 20)\"/>"
+            )),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("<g clip-path=\"url(#clip-layer_00000000000000000000000001)\">"),
+            "{svg}"
+        );
+    }
+
+    #[test]
+    fn markers_emit_fixed_definitions_only_for_named_ends() {
+        let svg = paint_svg(
+            line_kind(Some(LineMarker::Arrow), Some(LineMarker::Circle)),
+            None,
+            Some(solid_stroke(4.0)),
+        );
+
+        // The fixed geometry rule: markerWidth = markerHeight = 3 x width,
+        // in user units, closed form.
+        let arrow = svg
+            .lines()
+            .find(|line| line.contains("marker-arrow-start-layer_00000000000000000000000001"))
+            .expect("the start arrow is defined");
+        assert!(arrow.contains("markerWidth=\"12\""), "{arrow}");
+        assert!(arrow.contains("markerHeight=\"12\""), "{arrow}");
+        assert!(arrow.contains("orient=\"auto-start-reverse\""), "{arrow}");
+        assert!(arrow.contains("refX=\"10\""), "{arrow}");
+
+        let circle = svg
+            .lines()
+            .find(|line| line.contains("marker-circle-end-layer_00000000000000000000000001"))
+            .expect("the end circle is defined");
+        assert!(circle.contains("markerWidth=\"12\""), "{circle}");
+        assert!(circle.contains("refX=\"5\""), "{circle}");
+        assert!(!circle.contains("orient"), "{circle}");
+
+        // Both ends referenced on the element, and nothing else defined.
+        assert!(
+            svg.contains("marker-start=\"url(#marker-arrow-start-"),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("marker-end=\"url(#marker-circle-end-"),
+            "{svg}"
+        );
+        assert_eq!(svg.matches("<marker ").count(), 2, "{svg}");
+    }
+
+    #[test]
+    fn a_marker_rule_of_none_or_no_field_emits_nothing() {
+        // An explicit `none` is a real value, and it draws no marker.
+        let svg = paint_svg(
+            line_kind(Some(LineMarker::None), Some(LineMarker::None)),
+            None,
+            Some(solid_stroke(4.0)),
+        );
+        assert!(!svg.contains("<marker "), "{svg}");
+        assert!(!svg.contains("marker-start"), "{svg}");
+        assert!(!svg.contains("marker-end"), "{svg}");
+
+        // So does a line that asks for no markers at all.
+        let svg = paint_svg(line_kind(None, None), None, Some(solid_stroke(4.0)));
+        assert!(!svg.contains("<marker "), "{svg}");
+
+        // And a line with no stroke has no ends to mark.
+        let svg = paint_svg(
+            line_kind(Some(LineMarker::Arrow), Some(LineMarker::Arrow)),
+            None,
+            None,
+        );
+        assert!(!svg.contains("<marker "), "{svg}");
+        assert!(!svg.contains("<line"), "{svg}");
+    }
+
+    #[test]
+    fn a_marker_this_build_does_not_know_is_refused() {
+        let error = doc_to_svg(
+            &paint_document(
+                line_kind(Some(LineMarker::Other(serde_json::json!("diamond"))), None),
+                None,
+                Some(solid_stroke(4.0)),
+            ),
+            &FontSet::unchecked(),
+            &AssetHrefs::new(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, RenderError::UnsupportedLineMarker { value, .. } if value == "\"diamond\""),
+            "{error:?}"
         );
     }
 }

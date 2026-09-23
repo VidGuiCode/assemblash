@@ -4,7 +4,7 @@
 // Operation — the same value the CLI builds and the MCP server sends. The UI
 // has no second idea of what a document is, and no code path that edits one
 // locally and syncs later (PRD §7.2).
-import { goToLogin, withToken } from "./token.js";
+import { goToLogin } from "./token.js";
 /** The layers of a document, with the schema's default applied. */
 export function layersOf(document) {
     return document.layers ?? [];
@@ -25,13 +25,9 @@ export class ApiError extends Error {
     }
 }
 async function request(path, init) {
-    const response = await fetch(path, {
-        ...init,
-        headers: withToken(init?.headers),
-    });
+    const response = await fetch(path, init);
     if (response.status === 401) {
-        // The token is missing, wrong, or the server was restarted with a new
-        // one. Asking again is the only thing that helps, and continuing would
+        // The session cookie is missing or the server token changed. Asking again is the only thing that helps, and continuing would
         // leave every control broken with no explanation.
         goToLogin();
         throw new ApiError("unauthorized", "this server needs an access token", null);
@@ -93,6 +89,31 @@ export async function createProject(id, width, height, background, name) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id, width, height, background, name }),
+    });
+}
+/**
+ * Renames a project.
+ *
+ * The project id is the directory name, so this renames the directory: the
+ * project comes back under a new id, and anything that held it open addresses
+ * it by the new id from now on.
+ */
+export async function renameProject(project, name) {
+    return request(`/api/projects/${encodeURIComponent(project)}/rename`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+    });
+}
+/**
+ * Deletes a project, with its directory, document, history, and assets.
+ *
+ * The server closes a project this process holds open on the way in, and
+ * refuses one another process still holds with `projectLocked`.
+ */
+export async function deleteProject(project) {
+    return request(`/api/projects/${encodeURIComponent(project)}`, {
+        method: "DELETE",
     });
 }
 export async function getDocument(project) {
@@ -187,6 +208,18 @@ export async function agentAccess() {
 export async function agentSessions() {
     return request("/api/agent-sessions");
 }
+/** Reads the update status. Read-only: the server makes no request for this. */
+export async function updateStatus() {
+    return request("/api/update-status");
+}
+/** Records the one-time update-check answer in the workspace config. */
+export async function setUpdateConsent(consent) {
+    return request("/api/update-consent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ updateCheck: consent }),
+    });
+}
 /**
  * Uploads a file into a project's assets.
  *
@@ -196,7 +229,7 @@ export async function agentSessions() {
 export async function uploadAsset(project, file) {
     const response = await fetch(`/api/projects/${encodeURIComponent(project)}/assets?filename=${encodeURIComponent(file.name)}`, {
         method: "POST",
-        headers: withToken({ "content-type": file.type || "application/octet-stream" }),
+        headers: { "content-type": file.type || "application/octet-stream" },
         body: file,
     });
     if (response.status === 401) {
@@ -221,7 +254,9 @@ export async function uploadAsset(project, file) {
 /** The fit modes the engine draws an image or SVG asset with. */
 export const IMAGE_FITS = ["fill", "contain", "cover"];
 /** The shape kinds this build draws, and what each is called in the panel. */
-export const SHAPE_KINDS = ["rect", "ellipse", "line"];
+export const SHAPE_KINDS = ["rect", "ellipse", "line", "path"];
+/** The most entries a stroke's dash pattern may hold. The engine refuses more. */
+export const MAX_DASH_ENTRIES = 8;
 /**
  * The `kind` of a shape layer's geometry, or `null` if there is not one.
  *
@@ -429,6 +464,22 @@ export async function fonts() {
     const body = await request("/api/fonts");
     return body.families;
 }
+/** The exact stored face that a specimen must use. */
+export function fontSpecimenUrl(face, sample = "Aa Bb 0123") {
+    const query = new URLSearchParams({
+        family: face.family,
+        weight: String(face.weight),
+        style: face.style,
+        hash: face.hash,
+        sample,
+    });
+    return `/api/fonts/specimen.png?${query.toString()}`;
+}
+/** These assets are generated from the pinned manifest, with no page download. */
+export async function catalogueSpecimens() {
+    const manifest = await request("/catalogue-specimens/manifest.json");
+    return manifest.families;
+}
 /** The store as the font manager shows it: families, and the faces of each. */
 export async function fontFaces() {
     const body = await request("/api/fonts");
@@ -492,25 +543,22 @@ export function svgUrl(project, version) {
     return `/api/projects/${encodeURIComponent(project)}/preview.svg?v=${version}`;
 }
 /**
- * Fetches an image as a blob URL, carrying the token.
+ * Fetches an image as a blob URL with the browser session cookie.
  *
- * An `<img src>` cannot send a header, and putting the token in the query
- * string is exactly what "never in a URL" rules out — it would land in
- * history, in referrers, and in any proxy log on the way. So the bytes are
- * fetched properly and handed to the element as a blob.
+ * The bytes are fetched and handed to the element as a blob.
  */
 export async function imageObjectUrl(url) {
     return URL.createObjectURL(await fetchBlob(url));
 }
 /**
- * The bytes behind a rendered file, carrying the token.
+ * The bytes behind a rendered file.
  *
  * Separate from `imageObjectUrl` because a download wants to say how big the
  * file is, and a blob URL has thrown that away by the time it is handed to an
  * anchor.
  */
 export async function fetchBlob(url) {
-    const response = await fetch(url, { headers: withToken() });
+    const response = await fetch(url);
     if (response.status === 401) {
         goToLogin();
         throw new ApiError("unauthorized", "this server needs an access token", null);
