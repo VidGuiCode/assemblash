@@ -515,9 +515,23 @@ fn a_slow_local_export_is_cancelled_when_the_editor_arrives() {
     );
 
     // The journal holds exactly the 600 layer adds: one request = one
-    // transaction, and the cancelled export applied nothing.
-    let (status, history) = editor.api("GET", "/api/projects/poster/history", None);
-    assert_eq!(status, 200);
+    // transaction, and the cancelled export applied nothing. The relay
+    // releases the project as part of the switch, and the cancelled render
+    // still burns CPU behind it, so the release can land a few seconds after
+    // the answer. The editor meets the lock the way a person's click can, so
+    // the history read retries until the release lands.
+    let deadline = Instant::now() + Duration::from_secs(45);
+    let history = loop {
+        let (status, history) = editor.api("GET", "/api/projects/poster/history", None);
+        if status == 200 {
+            break history;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the relay never released the project after the switch: {status} {history}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
     assert_eq!(
         history["entries"].as_array().map(Vec::len),
         Some(600),
