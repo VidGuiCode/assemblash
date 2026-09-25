@@ -462,15 +462,37 @@ impl AppState {
     /// process next must wait for that, or the other process meets
     /// `projectLocked`. Returns `false` when `timeout` passed first.
     pub fn close_all_and_wait(&self, timeout: std::time::Duration) -> bool {
-        let closed: Vec<std::sync::Weak<Mutex<Session>>> = match self.inner.open.lock() {
+        let deadline = std::time::Instant::now() + timeout;
+        let (closed, locks): (
+            Vec<std::sync::Weak<Mutex<Session>>>,
+            Vec<std::path::PathBuf>,
+        ) = match self.inner.open.lock() {
             Ok(mut open) => {
+                let locks = open
+                    .keys()
+                    .filter_map(|id| ProjectId::new(id).ok())
+                    .map(|id| {
+                        self.inner
+                            .workspace
+                            .project_dir(&id)
+                            .join(assemblash_core::session::LOCK_FILE)
+                    })
+                    .collect();
                 let handles = open.values().map(Arc::downgrade).collect();
                 open.clear();
-                handles
+                (handles, locks)
             }
             Err(_) => return false,
         };
-        wait_until_dropped(&closed, timeout)
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if !wait_until_dropped(&closed, remaining) {
+            return false;
+        }
+        // The last handle on a session is gone a moment before the session's
+        // Drop removes the lock file. Waiting for the handles is not yet
+        // waiting for the locks, so the files are waited for too.
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        wait_until_locks_released(&locks, remaining)
     }
 
     /// Registers a session for a project that has just been created.
@@ -595,6 +617,29 @@ pub fn wait_until_dropped(
     let deadline = std::time::Instant::now() + timeout;
     loop {
         if sessions.iter().all(|session| session.strong_count() == 0) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Waits until each of these lock files is gone from disk.
+///
+/// Dropping the last handle on a session runs the session's `Drop`, which
+/// removes the lock file. The handle count reaches zero first, so a caller
+/// that waited only for the handles can still see the file for one instant.
+/// This closes that window: it waits for the effect the next process sees.
+/// Returns `false` when `timeout` passed first.
+pub fn wait_until_locks_released(
+    locks: &[std::path::PathBuf],
+    timeout: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if locks.iter().all(|lock| !lock.exists()) {
             return true;
         }
         if std::time::Instant::now() >= deadline {

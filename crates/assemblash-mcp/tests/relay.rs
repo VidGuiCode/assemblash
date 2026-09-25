@@ -438,9 +438,13 @@ fn a_slow_local_export_is_cancelled_when_the_editor_arrives() {
     let scratch = tempfile::tempdir().unwrap();
     let root = workspace(scratch.path());
 
-    // The agent starts first and builds a heavy project: many blurred layers
-    // on a large canvas at a doubled scale, so one export takes well over
-    // the few seconds the set-up below needs.
+    // The agent starts first and builds a heavy project: hundreds of large
+    // blurred layers on a large canvas, exported at a doubled scale. The
+    // render then runs for tens of seconds on every target. The relay needs
+    // only a second or two to notice the editor and cancel, so the export is
+    // still under way when the cancellation arrives — on a fast runner too.
+    // A lighter scene once finished first on windows-aarch64 and answered
+    // with success instead of the cancelled error.
     let mut relay = Relay::start(&root);
     relay
         .call(
@@ -449,21 +453,21 @@ fn a_slow_local_export_is_cancelled_when_the_editor_arrives() {
         )
         .unwrap();
     let mut version = 0;
-    for index in 0..150 {
+    for index in 0..600 {
         let added = relay
             .call(
                 "add_shape_layer",
                 json!({
                     "project": "poster", "expectedVersion": version, "shape": "ellipse",
-                    "x": (index % 30) as f64 * 170.0, "y": (index / 30) as f64 * 170.0,
-                    "width": 800.0, "height": 800.0,
+                    "x": (index % 30) as f64 * 170.0, "y": (index / 30) as f64 * 250.0,
+                    "width": 1000.0, "height": 1000.0,
                     "effects": [{ "type": "blur", "radius": 24.0 }]
                 }),
             )
             .unwrap();
         version = added["version"].as_u64().unwrap();
     }
-    assert_eq!(version, 150);
+    assert_eq!(version, 600);
 
     // Send the export without waiting for its answer.
     let export_id = relay.next_id;
@@ -510,15 +514,13 @@ fn a_slow_local_export_is_cancelled_when_the_editor_arrives() {
         "the cancelled export was answered with success: {answer}"
     );
 
-    // The journal holds exactly the 120 layer adds: one request = one
-    // transaction, and the cancelled export applied nothing.
-    // The journal holds exactly the 150 layer adds: one request = one
+    // The journal holds exactly the 600 layer adds: one request = one
     // transaction, and the cancelled export applied nothing.
     let (status, history) = editor.api("GET", "/api/projects/poster/history", None);
     assert_eq!(status, 200);
     assert_eq!(
         history["entries"].as_array().map(Vec::len),
-        Some(150),
+        Some(600),
         "the journal changed behind the cancelled export: {history}"
     );
     assert!(!root.join("projects/poster/exports/slow.png").exists());
@@ -527,7 +529,7 @@ fn a_slow_local_export_is_cancelled_when_the_editor_arrives() {
     let state = relay
         .call("get_document_state", json!({ "project": "poster" }))
         .unwrap_or_else(|error| panic!("the relay did not follow the editor: {error}"));
-    assert_eq!(state["version"], 150);
+    assert_eq!(state["version"], 600);
     relay.finish();
     drop(editor);
 }

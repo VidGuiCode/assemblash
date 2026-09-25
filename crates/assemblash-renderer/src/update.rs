@@ -1140,6 +1140,7 @@ mod tests {
                 manager: "Homebrew"
             }
         );
+        #[cfg(windows)]
         assert_eq!(
             classify_install(Path::new(
                 "C:\\Users\\a\\AppData\\Local\\Microsoft\\WinGet\\Packages\\assemblash\\assemblash.exe"

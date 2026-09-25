@@ -598,6 +598,12 @@ impl Backend {
             Root::Workspace(state) => state.close_all_and_wait(timeout),
             Root::SingleProject { .. } => true,
         };
+        let lock = match &self.root {
+            Root::SingleProject { directory, .. } => {
+                Some(directory.join(assemblash_core::session::LOCK_FILE))
+            }
+            Root::Workspace(_) => None,
+        };
         let single: Vec<_> = match self.single.lock() {
             Ok(mut single) => {
                 let handles = single.values().map(std::sync::Arc::downgrade).collect();
@@ -607,7 +613,18 @@ impl Backend {
             Err(_) => Vec::new(),
         };
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        workspace_released && assemblash_server::state::wait_until_dropped(&single, remaining)
+        if !workspace_released || !assemblash_server::state::wait_until_dropped(&single, remaining)
+        {
+            return false;
+        }
+        // The session can be gone a moment before its lock file is, so the
+        // file is waited for too. The workspace path does the same inside
+        // its own close.
+        let Some(lock) = lock else {
+            return true;
+        };
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        assemblash_server::state::wait_until_locks_released(std::slice::from_ref(&lock), remaining)
     }
 
     /// Whether tools need to be told which project they mean.
