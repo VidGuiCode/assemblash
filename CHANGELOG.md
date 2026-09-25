@@ -10,7 +10,7 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
-## [1.10.0] — 2026-09-24
+## [1.10.0] — 2026-09-25
 
 No 1.9.1 was released: no defect was outstanding after 1.9.0. The sweep ran
 on a local release build of the 1.9.0 tree on 2026-09-21. Every 1.9.0
