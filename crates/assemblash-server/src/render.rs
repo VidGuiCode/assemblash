@@ -78,6 +78,112 @@ pub fn fonts_for(document: &Document, store: &FontStore) -> Result<LoadedFonts, 
     Ok(store.load_families(&families)?)
 }
 
+/// How many projects the href cache keeps at once.
+///
+/// A workspace edited by one person touches one project at a time; sixteen
+/// covers a page with several projects open without growing without bound.
+const HREF_CACHE_PROJECTS: usize = 16;
+
+/// What one asset file looked like when its data URI was built.
+///
+/// A data URI is a pure function of the file's bytes. Reading the bytes to
+/// compare them would defeat the cache, so the entry is keyed by what a stat
+/// can tell about them: the path, the length, and the mtime. A file replaced
+/// between two renders changes at least one of the three.
+#[derive(Clone, PartialEq)]
+struct AssetIdentity {
+    file: PathBuf,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+/// One project's built hrefs, with the asset identities they were built from.
+struct HrefCacheEntry {
+    fingerprint: Vec<AssetIdentity>,
+    hrefs: std::sync::Arc<assemblash_renderer::AssetHrefs>,
+}
+
+/// A bounded cache of asset data-URI strings, one entry per project.
+///
+/// Every render reads every referenced asset file and encodes it as base64
+/// into the SVG text. One committed edit asks for three renders, so a poster
+/// with one large background was read and encoded three times per edit. The
+/// strings only change when an asset file does, so a project whose assets are
+/// unchanged reuses them, and the three renders of one version share one
+/// build: the miss is built while holding the lock, so concurrent renders
+/// wait for the first instead of each rebuilding.
+///
+/// A hit returns exactly the string `data_uris` would have built — the render
+/// is byte-identical whether it came from the cache or not.
+#[derive(Default)]
+pub(crate) struct HrefCache {
+    entries: std::sync::Mutex<std::collections::HashMap<PathBuf, HrefCacheEntry>>,
+}
+
+impl HrefCache {
+    /// The hrefs a render needs, rebuilt only when an asset file changed.
+    ///
+    /// Storage failures are the caller's shape: an unreadable asset refuses
+    /// the render, exactly as an uncached build would.
+    pub(crate) fn get(
+        &self,
+        document: &Document,
+        project_dir: &Path,
+    ) -> Result<
+        std::sync::Arc<assemblash_renderer::AssetHrefs>,
+        assemblash_core::storage::StorageError,
+    > {
+        let mut fingerprint = Vec::with_capacity(document.assets.len());
+        for asset in &document.assets {
+            let file = assemblash_core::storage::asset_path(project_dir, asset);
+            let metadata = std::fs::metadata(&file).map_err(|source| {
+                assemblash_core::storage::StorageError::Io {
+                    operation: "reading",
+                    path: file.clone(),
+                    source,
+                }
+            })?;
+            fingerprint.push(AssetIdentity {
+                file,
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+            });
+        }
+
+        // The cache holds only pure strings, so a lock poisoned by a panic
+        // elsewhere is safe to recover: the worst an interrupted build can
+        // leave behind is an entry that misses again.
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = entries.get(project_dir) {
+            if entry.fingerprint == fingerprint {
+                return Ok(std::sync::Arc::clone(&entry.hrefs));
+            }
+        }
+
+        // Built under the lock on purpose: three renders of one version then
+        // read and encode the assets once, not three times.
+        let hrefs = std::sync::Arc::new(assemblash_renderer::data_uris(document, project_dir)?);
+        if !entries.contains_key(project_dir) && entries.len() >= HREF_CACHE_PROJECTS {
+            // Bounded, eviction arbitrary: a workspace edit is a small
+            // working set, and no entry is ever wrong, only absent.
+            if let Some(oldest) = entries.keys().next().cloned() {
+                entries.remove(&oldest);
+            }
+        }
+        entries.insert(
+            project_dir.to_path_buf(),
+            HrefCacheEntry {
+                fingerprint,
+                hrefs: std::sync::Arc::clone(&hrefs),
+            },
+        );
+        Ok(hrefs)
+    }
+}
+
 /// Renders a document to SVG.
 ///
 /// The same function the PNG path runs through, one step earlier — which is
@@ -89,17 +195,17 @@ pub fn svg_for(
     store: &FontStore,
 ) -> Result<Rendered, ApiError> {
     let fonts = fonts_for(document, store)?;
-    svg_for_loaded(document, project_dir, &fonts)
+    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
+    svg_for_loaded(document, &fonts, &hrefs)
 }
 
 /// Renders a document to SVG with an already loaded deterministic font set.
 pub fn svg_for_loaded(
     document: &Document,
-    project_dir: &Path,
     fonts: &LoadedFonts,
+    hrefs: &assemblash_renderer::AssetHrefs,
 ) -> Result<Rendered, ApiError> {
-    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
-    let svg = doc_to_svg(document, fonts.font_set(), &hrefs)?;
+    let svg = doc_to_svg(document, fonts.font_set(), hrefs)?;
     Ok(Rendered {
         bytes: svg.into_bytes(),
         width: document.canvas.width.round() as u32,
@@ -115,21 +221,21 @@ pub fn png_for(
     scale: f32,
 ) -> Result<Rendered, ApiError> {
     let fonts = fonts_for(document, store)?;
-    png_for_loaded(document, project_dir, &fonts, scale)
+    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
+    png_for_loaded(document, &fonts, &hrefs, scale)
 }
 
 /// Renders a document to PNG with an already loaded deterministic font set.
 pub fn png_for_loaded(
     document: &Document,
-    project_dir: &Path,
     fonts: &LoadedFonts,
+    hrefs: &assemblash_renderer::AssetHrefs,
     scale: f32,
 ) -> Result<Rendered, ApiError> {
-    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
     let png = document_to_png(
         document,
         fonts,
-        &hrefs,
+        hrefs,
         scale,
         // No timestamp: two renders of an unchanged document are identical,
         // which is what makes a client's cache — and a byte comparison —
@@ -152,7 +258,8 @@ pub fn export_into_project(
     name: Option<&str>,
 ) -> Result<Exported, ApiError> {
     let fonts = fonts_for(document, store)?;
-    export_into_project_loaded(document, project_dir, &fonts, scale, name)
+    let hrefs = assemblash_renderer::data_uris(document, project_dir)?;
+    export_into_project_loaded(document, project_dir, &fonts, &hrefs, scale, name)
 }
 
 /// Renders a PNG export with an already loaded deterministic font set.
@@ -160,6 +267,7 @@ pub fn export_into_project_loaded(
     document: &Document,
     project_dir: &Path,
     fonts: &LoadedFonts,
+    hrefs: &assemblash_renderer::AssetHrefs,
     scale: f32,
     name: Option<&str>,
 ) -> Result<Exported, ApiError> {
@@ -167,7 +275,7 @@ pub fn export_into_project_loaded(
         Some(name) => safe_stem(name)?,
         None => "export".to_owned(),
     };
-    let rendered = png_for_loaded(document, project_dir, fonts, scale)?;
+    let rendered = png_for_loaded(document, fonts, hrefs, scale)?;
 
     let directory = project_dir.join(EXPORTS_DIR);
     std::fs::create_dir_all(&directory).map_err(|source| io(&directory, "creating", source))?;
@@ -325,6 +433,10 @@ pub fn render_variants_loaded(
     let directory = project_dir.join(EXPORTS_DIR);
     std::fs::create_dir_all(&directory).map_err(|source| io(&directory, "creating", source))?;
 
+    // Filling edits layers, never assets, so every variant renders from the
+    // template's own hrefs: read and encoded once for the whole batch.
+    let hrefs = assemblash_renderer::data_uris(template, project_dir)?;
+
     let mut rendered = Vec::with_capacity(variants.len());
     for variant in variants {
         let stem = safe_stem(&variant.name)?;
@@ -344,7 +456,7 @@ pub fn render_variants_loaded(
             .map_err(|source| ApiError::from(SessionError::from(source)))?;
         }
 
-        let png = png_for_loaded(&filled, project_dir, fonts, scale)?;
+        let png = png_for_loaded(&filled, fonts, &hrefs, scale)?;
         let file = format!("{stem}.png");
         let path = directory.join(&file);
         std::fs::write(&path, &png.bytes).map_err(|source| io(&path, "writing", source))?;

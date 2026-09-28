@@ -2107,3 +2107,127 @@ fn workspace_files(root: &Path) -> Vec<(PathBuf, String)> {
     files.sort();
     files
 }
+
+// A history read that grows with the journal makes every edit slower over a
+// long session, for data the panel never shows. The tail bounds the read and
+// keeps the two counts that describe the whole journal.
+#[test]
+fn a_history_tail_serves_the_newest_entries_and_keeps_the_whole_journal_counts() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    for _ in 0..3 {
+        let response = http::post_json(
+            &harness.url("/api/projects/poster/operations"),
+            &json!({ "operation": {"op":"updateCanvas","width":500}, "actor": {"kind":"agent"} }),
+        );
+        assert_eq!(response.status, 200, "{}", response.json());
+    }
+
+    let history = http::get(&harness.url("/api/projects/poster/history?tail=2")).json();
+    assert_eq!(
+        history["position"], 3,
+        "position still counts the whole journal"
+    );
+    assert_eq!(history["head"], 3, "head still counts the whole journal");
+    let entries = history["entries"].as_array().expect("entries is an array");
+    assert_eq!(entries.len(), 2, "a tail of two serves two entries");
+    assert_eq!(entries[0]["position"], 2);
+    assert_eq!(entries[1]["position"], 3);
+
+    // The default read stays the whole journal: only a caller that asks for
+    // a tail gets one.
+    let full = http::get(&harness.url("/api/projects/poster/history")).json();
+    assert_eq!(full["entries"].as_array().expect("entries").len(), 3);
+}
+
+// A client that applies every operation does not need a second round trip to
+// learn the state it just produced — and a client that never asks sees no
+// change in the response shape at all.
+#[test]
+fn a_write_can_return_the_document_it_produced() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+
+    let with = http::post_json(
+        &harness.url("/api/projects/poster/operations?includeDocument=true"),
+        &json!({ "operation": {"op":"updateCanvas","width":500} }),
+    );
+    assert_eq!(with.status, 200, "{}", with.json());
+    let body = with.json();
+    assert_eq!(
+        body["document"]["canvas"]["width"], 500.0,
+        "the document rides along with the write"
+    );
+    assert_eq!(
+        body["document"]["version"], body["version"],
+        "it is the version the write produced"
+    );
+
+    let without = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": {"op":"updateCanvas","width":600} }),
+    );
+    assert_eq!(without.status, 200, "{}", without.json());
+    assert!(
+        without.json().get("document").is_none(),
+        "{}",
+        without.json()
+    );
+
+    // The batch route offers the same ride-along, over the same flag.
+    let layer = add_shape(
+        &harness,
+        "poster",
+        json!({
+            "transform": { "x": 10.0, "y": 10.0, "width": 120.0, "height": 60.0 },
+            "shape": { "kind": "rect" },
+            "fill": "#3366cc"
+        }),
+    );
+    let expected = http::get(&harness.url("/api/projects/poster/document")).json()["version"]
+        .as_u64()
+        .expect("a version");
+    let batch = http::post_json(
+        &harness.url("/api/projects/poster/operation-batches?includeDocument=true"),
+        &json!({
+            "expectedVersion": expected,
+            "label": "move selection",
+            "commands": [{ "op": "move", "id": layer, "dx": 5.0, "dy": 0.0 }]
+        }),
+    );
+    assert_eq!(batch.status, 200, "{}", batch.json());
+    let body = batch.json();
+    assert_eq!(body["document"]["version"], body["version"]);
+    let layers = body["document"]["layers"].as_array().expect("layers");
+    let moved = layers
+        .iter()
+        .find(|one| one["id"] == json!(layer))
+        .expect("the moved layer");
+    assert_eq!(moved["transform"]["x"], 15.0, "the document shows the move");
+}
+
+// The href cache changes how often asset data URIs are built, never what they
+// are. A cold read builds them, a warm read reuses them, and the pixels a
+// client sees must not be able to tell the two apart.
+#[test]
+fn preview_bytes_do_not_change_when_the_href_cache_is_warm() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+
+    let upload = http::post_bytes(
+        &harness.url("/api/projects/poster/assets?filename=swatch.png"),
+        "image/png",
+        &solid_png(),
+    );
+    assert_eq!(upload.status, 201, "{}", upload.json());
+
+    let first = http::get(&harness.url("/api/projects/poster/preview.png?scale=1"));
+    assert_eq!(first.status, 200);
+    let second = http::get(&harness.url("/api/projects/poster/preview.png?scale=1"));
+    assert_eq!(second.status, 200);
+    assert!(!first.body.is_empty(), "a preview is not empty");
+    assert_eq!(
+        first.body, second.body,
+        "a warm cache serves the same bytes a cold one built"
+    );
+}

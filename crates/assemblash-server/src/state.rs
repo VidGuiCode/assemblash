@@ -88,6 +88,11 @@ struct Inner {
     /// single-writer for as long as this server owns it, the same guarantee
     /// [`Session`] gives a project.
     font_writes: Mutex<()>,
+    /// Asset data-URI strings per project, reused across renders (see
+    /// [`crate::render::HrefCache`]). A lock is poisoned only by a panic; the
+    /// cache holds pure strings, so recovery is safe and the next call misses
+    /// or hits exactly as before.
+    hrefs: crate::render::HrefCache,
     /// What the install route downloads with.
     font_fetcher: SharedFontFetcher,
     /// Which manifest the install route reads, when it is not the compiled-in
@@ -198,6 +203,7 @@ impl AppState {
                 open: Mutex::new(BTreeMap::new()),
                 fonts: Mutex::new(BTreeMap::new()),
                 font_writes: Mutex::new(()),
+                hrefs: crate::render::HrefCache::default(),
                 font_fetcher,
                 font_manifest,
                 reclaim_stale_locks,
@@ -379,6 +385,24 @@ impl AppState {
         let fonts = store.load_families(&families)?;
         cache.insert(key, fonts.clone());
         Ok(fonts)
+    }
+
+    /// The asset data-URI strings a render of this document needs, served from
+    /// the cache whenever the asset files are unchanged.
+    ///
+    /// Shared across the renders of one version: a preview round asks for the
+    /// same assets three times, and they are read and encoded once. The bytes
+    /// handed to the renderer are the ones `data_uris` would have built — the
+    /// cache changes how often they are built, never what they are.
+    pub fn asset_hrefs(
+        &self,
+        document: &Document,
+        project_dir: &std::path::Path,
+    ) -> Result<std::sync::Arc<assemblash_renderer::AssetHrefs>, ApiError> {
+        self.inner
+            .hrefs
+            .get(document, project_dir)
+            .map_err(ApiError::from)
     }
 
     /// The open session for a project, opening it the first time it is asked

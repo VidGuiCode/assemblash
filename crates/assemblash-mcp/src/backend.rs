@@ -733,11 +733,9 @@ impl Backend {
     /// hand out different pictures of the same document.
     pub fn svg(&self, project: Option<&str>) -> Result<SvgRender, ApiError> {
         let loaded = self.loaded(project)?;
-        let rendered = assemblash_server::render::svg_for_loaded(
-            &loaded.document,
-            &loaded.directory,
-            &loaded.fonts,
-        )?;
+        let hrefs = assemblash_renderer::data_uris(&loaded.document, &loaded.directory)?;
+        let rendered =
+            assemblash_server::render::svg_for_loaded(&loaded.document, &loaded.fonts, &hrefs)?;
         // The writer built a `String` and the shared type carries bytes; this
         // cannot fail, and saying so beats a lossy conversion that would hide
         // it if it ever did.

@@ -556,7 +556,10 @@ async fn font_specimen(
         }),
     ));
     let fonts = state.fonts_for(&document)?;
-    let rendered = render::png_for_loaded(&document, std::path::Path::new("."), &fonts, 1.0)?;
+    // A specimen names no assets, so there is nothing for the href cache to
+    // keep: an empty map is the whole truth.
+    let hrefs = assemblash_renderer::AssetHrefs::new();
+    let rendered = render::png_for_loaded(&document, &fonts, &hrefs, 1.0)?;
     Ok((
         [
             (header::CONTENT_TYPE, "image/png"),
@@ -1066,9 +1069,17 @@ async fn thumbnail(
 
     let scale = (THUMBNAIL_WIDTH / document.canvas.width.max(1.0)).min(1.0) as f32;
     let fonts = state.fonts_for(&document)?;
-    let rendered = render::png_for_loaded(&document, &directory, &fonts, scale)?;
-    state.with_index(|index| index.set_thumbnail(&project_id, version, &rendered.bytes));
-    Ok(png_response(rendered.bytes))
+    let hrefs = state.asset_hrefs(&document, &directory)?;
+    // Rasterization and PNG encoding are CPU-bound; they belong off the async
+    // workers, behind every other request the page is making.
+    let bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, ApiError> {
+        let rendered = render::png_for_loaded(&document, &fonts, &hrefs, scale)?;
+        state.with_index(|index| index.set_thumbnail(&project_id, version, &rendered.bytes));
+        Ok(rendered.bytes)
+    })
+    .await
+    .map_err(join_error)??;
+    Ok(png_response(bytes))
 }
 
 fn png_response(bytes: Vec<u8>) -> axum::response::Response {
@@ -1201,17 +1212,45 @@ struct HistoryResponse {
     entries: Vec<assemblash_core::history::JournalEntry>,
 }
 
+/// How many entries a tail may ask for, in one number.
+///
+/// The tail exists so an interface that shows recent work stops paying for
+/// the whole journal on every read; a ceiling keeps a caller from asking for
+/// it all by naming a large tail.
+const HISTORY_TAIL_MAX: usize = 1000;
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HistoryQuery {
+    /// Only the newest entries, when present. `position` and `head` always
+    /// describe the whole journal, so a client can tell whether it has seen
+    /// everything.
+    #[serde(default)]
+    tail: Option<usize>,
+}
+
 async fn get_history(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<HistoryQuery>,
 ) -> Result<Json<HistoryResponse>, ApiError> {
     let id = ProjectId::new(id)?;
     let project = state.project(&id, now_millis())?;
     let session = lock_project(&project)?;
+    let mut entries: Vec<assemblash_core::history::JournalEntry> =
+        session.history().entries().to_vec();
+    if let Some(tail) = query.tail {
+        // One read does not grow with the journal: the newest `tail` entries
+        // are the ones a history panel shows, and the oldest are history.
+        let skip = entries
+            .len()
+            .saturating_sub(tail.clamp(1, HISTORY_TAIL_MAX));
+        entries.drain(..skip);
+    }
     Ok(Json(HistoryResponse {
         position: session.history().position(),
         head: session.history().head(),
-        entries: session.history().entries().to_vec(),
+        entries,
     }))
 }
 
@@ -1329,47 +1368,96 @@ struct OperationResponse {
     /// nothing to say, and never present for a dry run.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<ExportWarning>,
+    /// The document as this write left it, when the caller asked with
+    /// `?includeDocument=true`. The same value `GET …/document` serves;
+    /// absent otherwise, so a caller that never asked sees no change in
+    /// shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document: Option<Document>,
+}
+
+/// Query flags the write routes take.
+///
+/// The body schema stays untouched — these are transport options, not part of
+/// the operation. `includeDocument` asks the response to carry the document
+/// exactly as `GET …/document` would serve it, so a client that applies every
+/// operation does not need a second round trip to learn the state it just
+/// produced.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WriteQuery {
+    #[serde(default)]
+    include_document: Option<bool>,
+}
+
+/// A blocking task that died before it could answer.
+///
+/// The task holds no state the server must repair: a project lock dies with
+/// the thread that held it, and everything the task had already done — a
+/// journalled operation, a rendered PNG — is on disk or was not done at all.
+fn join_error(error: tokio::task::JoinError) -> ApiError {
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "internal",
+        error.to_string(),
+    )
 }
 
 async fn apply_operation(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(write): Query<WriteQuery>,
     ApiJson(request): ApiJson<OperationRequest>,
 ) -> Result<Json<OperationResponse>, ApiError> {
     let id = ProjectId::new(id)?;
     let actor = request.actor.actor()?;
     let operation = parse_operation(request.operation)?;
-    let project = state.project(&id, now_millis())?;
-    let mut session = lock_project(&project)?;
+    let expected_version = request.expected_version;
+    let dry_run = request.dry_run;
+    let include_document = write.include_document.unwrap_or(false);
 
-    if request.dry_run {
-        let outcome = session.dry_run(&operation, request.expected_version, &mut UlidIdSource)?;
-        return Ok(Json(OperationResponse {
+    // Everything from opening the project onward blocks: the apply journals
+    // with an fsync and rewrites the document, and a project lock is a
+    // `std::sync` mutex that must never sit across an await. The work runs on
+    // the blocking pool, so reads and previews behind it keep moving.
+    let response = tokio::task::spawn_blocking(move || -> Result<OperationResponse, ApiError> {
+        let project = state.project(&id, now_millis())?;
+        let mut session = lock_project(&project)?;
+
+        if dry_run {
+            let outcome = session.dry_run(&operation, expected_version, &mut UlidIdSource)?;
+            return Ok(OperationResponse {
+                version: session.version(),
+                dry_run: true,
+                transaction: None,
+                outcome,
+                warnings: Vec::new(),
+                document: None,
+            });
+        }
+
+        let (outcome, transaction) = session.apply(
+            &operation,
+            &actor,
+            now_millis(),
+            expected_version,
+            &mut UlidIdSource,
+        )?;
+        let touched = [outcome.created.clone(), outcome.changed.clone()].concat();
+        let document = session.document().clone();
+        let warnings = write_warnings(&state, &document, &touched);
+        Ok(OperationResponse {
             version: session.version(),
-            dry_run: true,
-            transaction: None,
+            dry_run: false,
+            transaction: Some(transaction.to_string()),
             outcome,
-            warnings: Vec::new(),
-        }));
-    }
-
-    let (outcome, transaction) = session.apply(
-        &operation,
-        &actor,
-        now_millis(),
-        request.expected_version,
-        &mut UlidIdSource,
-    )?;
-    let touched = [outcome.created.clone(), outcome.changed.clone()].concat();
-    let document = session.document().clone();
-    let warnings = write_warnings(&state, &document, &touched);
-    Ok(Json(OperationResponse {
-        version: session.version(),
-        dry_run: false,
-        transaction: Some(transaction.to_string()),
-        outcome,
-        warnings,
-    }))
+            warnings,
+            document: include_document.then_some(document),
+        })
+    })
+    .await
+    .map_err(join_error)??;
+    Ok(Json(response))
 }
 
 /// What a write made worse, for the layers it touched (DEF-28).
@@ -1459,6 +1547,11 @@ struct OperationBatchResponse {
     transaction_id: String,
     #[serde(flatten)]
     outcome: OpOutcome,
+    /// The document as this batch left it, when the caller asked with
+    /// `?includeDocument=true`. The same value `GET …/document` serves;
+    /// absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document: Option<Document>,
 }
 
 /// Applies several existing operations as one reversible UI command.
@@ -1470,6 +1563,7 @@ struct OperationBatchResponse {
 async fn apply_operation_batch(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(write): Query<WriteQuery>,
     ApiJson(request): ApiJson<OperationBatchRequest>,
 ) -> Result<Json<OperationBatchResponse>, ApiError> {
     if request.commands.is_empty() {
@@ -1482,7 +1576,7 @@ async fn apply_operation_batch(
             "an operation batch may contain at most 500 commands",
         ));
     }
-    let label = request.label.trim();
+    let label = request.label.trim().to_owned();
     if label.is_empty() || label.len() > 120 {
         return Err(ApiError::bad_request(
             "an operation batch label must contain 1 to 120 characters",
@@ -1491,76 +1585,91 @@ async fn apply_operation_batch(
 
     let id = ProjectId::new(id)?;
     let actor = request.actor.actor()?;
-    let project = state.project(&id, now_millis())?;
-    let mut session = lock_project(&project)?;
-    if request.expected_version != session.version() {
-        return Err(SessionError::VersionConflict {
-            expected: request.expected_version,
-            actual: session.version(),
-        }
-        .into());
-    }
+    let expected_version = request.expected_version;
+    let include_document = write.include_document.unwrap_or(false);
 
-    let mut candidate = session.document().clone();
-    let mut compiled = Vec::new();
-    let mut generated = RecordingIds::default();
-    for command in request.commands {
-        assemblash_core::ops::check_properties(&command).map_err(SessionError::Operation)?;
-        let command: OperationBatchCommand = serde_json::from_value(command).map_err(|error| {
-            ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "malformedRequest",
-                error.to_string(),
-            )
-        })?;
-        match command {
-            OperationBatchCommand::Operation(operation) => {
-                apply_compiled(&mut candidate, *operation, &mut compiled, &mut generated)?;
-            }
-            OperationBatchCommand::Macro(OperationBatchMacro::InsertLayerTree {
-                source_project,
-                layers,
-                position,
-                offset_x,
-                offset_y,
-            }) => {
-                if source_project != id.as_str() {
-                    return Err(ApiError::bad_request(
-                        "insertLayerTree is restricted to the current project",
-                    ));
+    // Blocking from the project open onward, for the same reason as
+    // [`apply_operation`]: the journal fsync and the document rewrite are
+    // disk work behind a `std::sync` lock.
+    let response =
+        tokio::task::spawn_blocking(move || -> Result<OperationBatchResponse, ApiError> {
+            let project = state.project(&id, now_millis())?;
+            let mut session = lock_project(&project)?;
+            if expected_version != session.version() {
+                return Err(SessionError::VersionConflict {
+                    expected: expected_version,
+                    actual: session.version(),
                 }
-                if layers.is_empty() {
-                    return Err(ApiError::bad_request(
-                        "insertLayerTree needs at least one layer",
-                    ));
-                }
-                insert_layer_tree(
-                    &mut candidate,
-                    &layers,
-                    &position,
-                    offset_x,
-                    offset_y,
-                    &mut compiled,
-                    &mut generated,
-                )?;
+                .into());
             }
-        }
-    }
 
-    let mut replay = ReplayThenUlid::new(generated.raws);
-    let (outcome, transaction) = session.apply_batch(
-        label,
-        &compiled,
-        &actor,
-        now_millis(),
-        Some(request.expected_version),
-        &mut replay,
-    )?;
-    Ok(Json(OperationBatchResponse {
-        version: session.version(),
-        transaction_id: transaction.to_string(),
-        outcome,
-    }))
+            let mut candidate = session.document().clone();
+            let mut compiled = Vec::new();
+            let mut generated = RecordingIds::default();
+            for command in request.commands {
+                assemblash_core::ops::check_properties(&command)
+                    .map_err(SessionError::Operation)?;
+                let command: OperationBatchCommand =
+                    serde_json::from_value(command).map_err(|error| {
+                        ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            "malformedRequest",
+                            error.to_string(),
+                        )
+                    })?;
+                match command {
+                    OperationBatchCommand::Operation(operation) => {
+                        apply_compiled(&mut candidate, *operation, &mut compiled, &mut generated)?;
+                    }
+                    OperationBatchCommand::Macro(OperationBatchMacro::InsertLayerTree {
+                        source_project,
+                        layers,
+                        position,
+                        offset_x,
+                        offset_y,
+                    }) => {
+                        if source_project != id.as_str() {
+                            return Err(ApiError::bad_request(
+                                "insertLayerTree is restricted to the current project",
+                            ));
+                        }
+                        if layers.is_empty() {
+                            return Err(ApiError::bad_request(
+                                "insertLayerTree needs at least one layer",
+                            ));
+                        }
+                        insert_layer_tree(
+                            &mut candidate,
+                            &layers,
+                            &position,
+                            offset_x,
+                            offset_y,
+                            &mut compiled,
+                            &mut generated,
+                        )?;
+                    }
+                }
+            }
+
+            let mut replay = ReplayThenUlid::new(generated.raws);
+            let (outcome, transaction) = session.apply_batch(
+                &label,
+                &compiled,
+                &actor,
+                now_millis(),
+                Some(expected_version),
+                &mut replay,
+            )?;
+            Ok(OperationBatchResponse {
+                version: session.version(),
+                transaction_id: transaction.to_string(),
+                outcome,
+                document: include_document.then(|| session.document().clone()),
+            })
+        })
+        .await
+        .map_err(join_error)??;
+    Ok(Json(response))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1608,18 +1717,27 @@ async fn history_step(
         serde_json::from_slice(body).map_err(|source| ApiError::bad_request(source.to_string()))?
     };
     let actor = request.actor.actor()?;
-    let project = state.project(&id, now_millis())?;
-    let mut session = lock_project(&project)?;
 
-    let transaction = if undoing {
-        session.undo(&actor, now_millis(), &mut UlidIdSource)?
-    } else {
-        session.redo(&actor, now_millis(), &mut UlidIdSource)?
-    };
-    Ok(Json(HistoryStepResponse {
-        transaction: transaction.to_string(),
-        version: session.version(),
-    }))
+    // An undo or a redo journals with an fsync and rewrites the document —
+    // the same disk work a write does, on the blocking pool for the same
+    // reason.
+    let response = tokio::task::spawn_blocking(move || -> Result<HistoryStepResponse, ApiError> {
+        let project = state.project(&id, now_millis())?;
+        let mut session = lock_project(&project)?;
+
+        let transaction = if undoing {
+            session.undo(&actor, now_millis(), &mut UlidIdSource)?
+        } else {
+            session.redo(&actor, now_millis(), &mut UlidIdSource)?
+        };
+        Ok(HistoryStepResponse {
+            transaction: transaction.to_string(),
+            version: session.version(),
+        })
+    })
+    .await
+    .map_err(join_error)??;
+    Ok(Json(response))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1767,13 +1885,22 @@ async fn preview(
     let (document, directory) = read_for_render(&state, id)?;
     let document = filtered_preview(document, query.only.as_deref(), query.exclude.as_deref())?;
     let fonts = state.fonts_for(&document)?;
-    let rendered = render::png_for_loaded(&document, &directory, &fonts, query.scale)?;
+    let hrefs = state.asset_hrefs(&document, &directory)?;
+    let scale = query.scale;
+    // The editor asks for three renders per committed edit (the canvas and
+    // the two drag-compositor halves). Rasterizing them on the blocking pool
+    // keeps them from stalling each other or the writes behind them.
+    let bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, ApiError> {
+        Ok(render::png_for_loaded(&document, &fonts, &hrefs, scale)?.bytes)
+    })
+    .await
+    .map_err(join_error)??;
     Ok((
         [
             (header::CONTENT_TYPE, "image/png"),
             (header::CACHE_CONTROL, "no-store"),
         ],
-        rendered.bytes,
+        bytes,
     ))
 }
 
@@ -1879,13 +2006,18 @@ async fn preview_svg(
 ) -> Result<impl IntoResponse, ApiError> {
     let (document, directory) = read_for_render(&state, id)?;
     let fonts = state.fonts_for(&document)?;
-    let rendered = render::svg_for_loaded(&document, &directory, &fonts)?;
+    let hrefs = state.asset_hrefs(&document, &directory)?;
+    let bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, ApiError> {
+        Ok(render::svg_for_loaded(&document, &fonts, &hrefs)?.bytes)
+    })
+    .await
+    .map_err(join_error)??;
     Ok((
         [
             (header::CONTENT_TYPE, "image/svg+xml"),
             (header::CACHE_CONTROL, "no-store"),
         ],
-        rendered.bytes,
+        bytes,
     ))
 }
 
@@ -2022,13 +2154,22 @@ async fn export_document(
     let project = id.clone();
     let (document, directory) = read_for_render(&state, id)?;
     let fonts = state.fonts_for(&document)?;
-    let mut exported = render::export_into_project_loaded(
-        &document,
-        &directory,
-        &fonts,
-        request.scale,
-        request.name.as_deref(),
-    )?;
+    let hrefs = state.asset_hrefs(&document, &directory)?;
+    let scale = request.scale;
+    let name = request.name;
+    let mut exported =
+        tokio::task::spawn_blocking(move || -> Result<render::Exported, ApiError> {
+            render::export_into_project_loaded(
+                &document,
+                &directory,
+                &fonts,
+                &hrefs,
+                scale,
+                name.as_deref(),
+            )
+        })
+        .await
+        .map_err(join_error)??;
     // Peeked, not taken. The project summary is where the notice is consumed,
     // so exporting first does not rob the interface of it — and a second
     // export after the summary has read it says nothing, which is right.
@@ -2146,13 +2287,15 @@ async fn render_variants(
 ) -> Result<Json<render::RenderedVariants>, ApiError> {
     let (document, directory) = read_for_render(&state, id)?;
     let fonts = state.fonts_for(&document)?;
-    Ok(Json(render::render_variants_loaded(
-        &document,
-        &directory,
-        &fonts,
-        request.scale,
-        &request.variants,
-    )?))
+    let scale = request.scale;
+    let variants = request.variants;
+    let rendered =
+        tokio::task::spawn_blocking(move || -> Result<render::RenderedVariants, ApiError> {
+            render::render_variants_loaded(&document, &directory, &fonts, scale, &variants)
+        })
+        .await
+        .map_err(join_error)??;
+    Ok(Json(rendered))
 }
 
 /// A project's directory, with the lock held only long enough to find it.

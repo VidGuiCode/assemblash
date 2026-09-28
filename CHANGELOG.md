@@ -10,6 +10,29 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+**A faster interface path for edits.** The document schema stays at
+`schemaVersion` 1. The `Operation` union does not grow. Every change is
+additive, and every old client keeps working.
+
+- A write can return the document it produced. `POST …/operations` and
+  `POST …/operation-batches` take `?includeDocument=true`. The response
+  then carries a `document` field, the same value `GET …/document`
+  serves. A client that does not ask sees no change in the response.
+- A history read can bound its read. `GET …/history?tail=N` serves the
+  newest `N` entries, up to 1000. `position` and `head` always describe
+  the whole journal. The read without `tail` stays the whole journal.
+- Renders run on the blocking pool. A render, a write, an undo or a redo
+  no longer holds an async worker while it rasterizes, journals, or
+  writes the document. Previews and reads behind them keep moving.
+- Asset data URIs are cached per project. A render reads and encodes each
+  asset file once, and the three renders one edit asks for share that
+  work. A cache hit returns the same bytes an uncached build made.
+- The reference interface keeps its drag preview until the engine's own
+  render of the new version arrives. The layer no longer snaps back to
+  the older picture between the drop and the render, and a new drag can
+  continue from the painted pixels. A refusal takes the painted pixels
+  back at once.
+
 ## [1.10.0] — 2026-09-25
 
 No 1.9.1 was released: no defect was outstanding after 1.9.0. The sweep ran

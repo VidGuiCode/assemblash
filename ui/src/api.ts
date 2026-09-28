@@ -52,6 +52,12 @@ export interface OperationResult {
   created?: string[];
   changed?: string[];
   removed?: string[];
+  /**
+   * The document as the write left it, when the request asked with
+   * `includeDocument`. The same value `getDocument` serves; absent
+   * otherwise, so a client that never asks sees no change in shape.
+   */
+  document?: Document;
 }
 
 export type OperationBatchCommand = Operation | {
@@ -217,10 +223,20 @@ export async function recoverProjectLock(project: string, expectedPid: number): 
   return result.unlocked;
 }
 
+/**
+ * The journal, newest tail included.
+ *
+ * `tail` bounds the read: the panel shows recent work, and a read that
+ * grows with the journal would make every edit slower over a long session.
+ * `position` and `head` always describe the whole journal, so a caller can
+ * tell whether it has seen everything.
+ */
 export async function getHistory(
   project: string,
+  tail = 100,
 ): Promise<{ position: number; head: number; entries: HistoryEntry[] }> {
-  return request(`/api/projects/${encodeURIComponent(project)}/history`);
+  const query = new URLSearchParams({ tail: String(tail) });
+  return request(`/api/projects/${encodeURIComponent(project)}/history?${query.toString()}`);
 }
 
 export async function validate(
@@ -243,7 +259,7 @@ export async function applyOperation(
   dryRun = false,
 ): Promise<OperationResult> {
   return request<OperationResult>(
-    `/api/projects/${encodeURIComponent(project)}/operations`,
+    `/api/projects/${encodeURIComponent(project)}/operations?includeDocument=true`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -265,7 +281,7 @@ export async function applyOperationBatch(
   expectedVersion: number,
 ): Promise<OperationBatchResult> {
   return request<OperationBatchResult>(
-    `/api/projects/${encodeURIComponent(project)}/operation-batches`,
+    `/api/projects/${encodeURIComponent(project)}/operation-batches?includeDocument=true`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },

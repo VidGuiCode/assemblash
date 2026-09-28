@@ -128,8 +128,17 @@ export async function recoverProjectLock(project, expectedPid) {
     });
     return result.unlocked;
 }
-export async function getHistory(project) {
-    return request(`/api/projects/${encodeURIComponent(project)}/history`);
+/**
+ * The journal, newest tail included.
+ *
+ * `tail` bounds the read: the panel shows recent work, and a read that
+ * grows with the journal would make every edit slower over a long session.
+ * `position` and `head` always describe the whole journal, so a caller can
+ * tell whether it has seen everything.
+ */
+export async function getHistory(project, tail = 100) {
+    const query = new URLSearchParams({ tail: String(tail) });
+    return request(`/api/projects/${encodeURIComponent(project)}/history?${query.toString()}`);
 }
 export async function validate(project) {
     return request(`/api/projects/${encodeURIComponent(project)}/validate`);
@@ -142,7 +151,7 @@ export async function validate(project) {
  * structured refusal instead of one silently overwriting the other.
  */
 export async function applyOperation(project, operation, expectedVersion, dryRun = false) {
-    return request(`/api/projects/${encodeURIComponent(project)}/operations`, {
+    return request(`/api/projects/${encodeURIComponent(project)}/operations?includeDocument=true`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -155,7 +164,7 @@ export async function applyOperation(project, operation, expectedVersion, dryRun
 }
 /** Applies existing operations as one atomic, one-undo UI command. */
 export async function applyOperationBatch(project, label, commands, expectedVersion) {
-    return request(`/api/projects/${encodeURIComponent(project)}/operation-batches`, {
+    return request(`/api/projects/${encodeURIComponent(project)}/operation-batches?includeDocument=true`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

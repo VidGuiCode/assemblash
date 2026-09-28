@@ -64,6 +64,14 @@ interface State {
     preserveSelectionScale?: boolean;
     lastDelta?: { x: number; y: number };
     previewActive?: boolean;
+    /**
+     * Where the adopted painted preview already sits, in document units.
+     * Set when a new drag begins on pixels an earlier commit painted; the
+     * preview then moves by `adoptedDelta + (dx, dy)`, so the layer never
+     * jumps back to where the canvas image — still the older render —
+     * shows it.
+     */
+    adoptedDelta?: { x: number; y: number };
   } | null;
   busy: boolean;
   zoom: number | null;
@@ -261,6 +269,23 @@ interface DragPreviewCache {
 }
 
 let dragPreviewCache: DragPreviewCache | null = null;
+
+/**
+ * The blob URLs a painted drag preview is showing. They live until the
+ * preview is unmounted, not until the cache is replaced: between a commit
+ * and the authoritative render's arrival, these pixels are the only honest
+ * picture of the document the page has.
+ */
+let paintedPreviewUrls: string[] = [];
+/**
+ * The document version a painted preview's pixels depict, when one is
+ * painted outside a drag. A commit paints its prediction and names the
+ * version it asked the engine for; the preview of that version then takes
+ * over, and anything else — another actor, an undo — takes the preview down.
+ */
+let paintedPreviewVersion: number | null = null;
+/** Where the painted selection image sits, in document units. */
+let paintedPreviewOrigin: { x: number; y: number } | null = null;
 
 function el<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -756,6 +781,20 @@ async function refresh(): Promise<void> {
   const sequence = ++refreshSequence;
   const doc = await api.getDocument(state.project);
   if (sequence !== refreshSequence || !state.project) return;
+  applyDocument(doc);
+}
+
+/**
+ * Puts one authoritative document on the page.
+ *
+ * The pixels and the side panels trail the state on purpose. Neither belongs
+ * in the serial window an interaction waits on: the preview fetch is the
+ * dominant cost of a commit, and blocking further input on it is what used to
+ * make rapid actions disappear. Called with a document the server handed back
+ * with a write's own response, it is also what removes the second round trip
+ * a read-after-write used to need.
+ */
+function applyDocument(doc: Document): void {
   state.document = doc;
   state.selection = state.selection.filter((id) =>
     api.flatten(api.layersOf(doc)).some(({ layer }) => layer.id === id),
@@ -770,14 +809,18 @@ async function refresh(): Promise<void> {
   // a template is a document that names some of its own layers.
   state.slots = (doc.slots ?? []) as api.Slot[];
 
+  // A painted preview depicts one version. When the truth is a different
+  // one — another actor's commit, an undo — the painted pixels are wrong
+  // from this moment, so they go now rather than misleading until a render
+  // happens to replace them.
+  if (paintedPreviewVersion !== null && api.versionOf(doc) !== paintedPreviewVersion) {
+    unmountDragPreview();
+  }
+
   drawLayers();
   drawOverlay();
   drawInspector();
 
-  // The pixels and the side panels trail the state on purpose. Neither
-  // belongs in the serial window an interaction waits on: the preview fetch
-  // is the dominant cost of a commit, and blocking further input on it is
-  // what used to make rapid actions disappear.
   requestPreview();
   void loadPresets().catch((error: unknown) => report("presets", error));
   void drawHistory().catch((error: unknown) => report("history", error));
@@ -827,7 +870,15 @@ function requestPreview(): void {
         const previous = dom.canvasImage.src;
         dom.canvasImage.src = url;
         if (previous.startsWith("blob:")) URL.revokeObjectURL(previous);
-        clearDragPreviewCache();
+        // This image is the truth for `version`. A painted preview — the
+        // pixels a drag left behind — hands the canvas back here, and the
+        // swap is invisible because both show the same state. An image older
+        // than the painted prediction arriving while a commit is still in
+        // flight stays behind it: the truth for that version has not landed
+        // yet, and showing it would move the layer back.
+        if (!state.drag && (paintedPreviewVersion === null || version >= paintedPreviewVersion)) {
+          unmountDragPreview();
+        }
         dom.canvasImage.dataset["previewName"] = current.name ?? project;
         dom.canvasImage.alt = translate("canvas.previewAlt", { name: current.name ?? project });
         dom.canvas.style.aspectRatio = `${current.canvas.width} / ${current.canvas.height}`;
@@ -2896,6 +2947,9 @@ function snapshotForEcho(): () => void {
     if (!before || state.project !== project) return;
     const current = state.document;
     if (current && api.versionOf(current) === api.versionOf(before)) {
+      // The prediction was refused: the painted pixels say a state the
+      // server never accepted, so they go before anything redraws.
+      unmountDragPreview();
       state.document = before;
       drawLayers();
       drawOverlay();
@@ -2943,7 +2997,11 @@ async function send(
       applied = true;
       say(translate("status.editDone", { version: result.version }));
       if (result.created?.length) state.selection = result.created;
-      await refresh();
+      // The response carries the document when the server offers it: the
+      // read-after-write round trip disappears, and the version the next
+      // queued action sends is the one this write produced.
+      if (result.document) applyDocument(result.document);
+      else await refresh();
     },
     onError: (error) => {
       // The engine accepted the change if `applied` is set: only the read
@@ -2993,7 +3051,8 @@ async function sendBatch(what: string, operations: api.OperationBatchCommand[]):
       applied = true;
       if (result.created?.length) state.selection = result.created;
       say(translate("status.editDone", { version: result.version }));
-      await refresh();
+      if (result.document) applyDocument(result.document);
+      else await refresh();
     },
     onError: (error) => {
       if (!applied) restore();
@@ -3031,14 +3090,42 @@ function beginDrag(
     preserveSelectionScale:
       mode === "resize" && selected.length === 1 && selected[0]?.layer.type === "text",
   };
-  mountDragPreview(state.drag);
-  const cache = dragPreviewCache;
-  if (!state.drag.previewActive && cache) {
-    void cache.pending.then(() => {
-      if (state.drag && dragPreviewCache === cache) mountDragPreview(state.drag);
-    });
+  if (!adoptPaintedPreview(state.drag)) {
+    // Pixels an earlier commit painted, depicting a version the document has
+    // left, are wrong from this drag's first pixel: take them down rather
+    // than drag from a lie.
+    if (paintedPreviewVersion !== null) unmountDragPreview();
+    mountDragPreview(state.drag);
+    const cache = dragPreviewCache;
+    if (!state.drag.previewActive && cache) {
+      void cache.pending.then(() => {
+        if (state.drag && dragPreviewCache === cache) mountDragPreview(state.drag);
+      });
+    }
   }
   (event.target as Element).setPointerCapture?.(event.pointerId);
+}
+
+/**
+ * Continues a drag from pixels an earlier commit painted, when they depict
+ * the document as it is now. The painted selection image stays where the
+ * commit left it, and the drag moves it from there — the layer never jumps
+ * back to where the canvas image, still an older render, shows it.
+ *
+ * Only a move adopts. A resize or a rotate repaints its pixels through a
+ * different transform, which the painted image cannot be re-anchored into.
+ */
+function adoptPaintedPreview(drag: NonNullable<State["drag"]>): boolean {
+  if (
+    drag.mode !== "move" ||
+    !state.document ||
+    paintedPreviewOrigin === null ||
+    paintedPreviewVersion !== api.versionOf(state.document)
+  ) return false;
+  drag.adoptedDelta = paintedPreviewOrigin;
+  drag.previewActive = true;
+  updateDragPreview(drag, drag.lastDelta?.x ?? 0, drag.lastDelta?.y ?? 0);
+  return true;
 }
 
 function dragPreviewKey(ids: readonly string[]): string | null {
@@ -3046,19 +3133,28 @@ function dragPreviewKey(ids: readonly string[]): string | null {
   return `${state.project}:${api.versionOf(state.document)}:${[...ids].sort().join(",")}`;
 }
 
-function clearDragPreviewCache(): void {
-  unmountDragPreview();
+/**
+ * Drops the cached pair. URLs a painted preview is showing stay alive until
+ * that preview is unmounted — replacing the cache never takes the pixels
+ * the page is looking at out from under it.
+ */
+function retireDragPreviewCache(): void {
   const cache = dragPreviewCache;
   dragPreviewCache = null;
-  if (cache?.baseUrl) URL.revokeObjectURL(cache.baseUrl);
-  if (cache?.selectionUrl) URL.revokeObjectURL(cache.selectionUrl);
+  if (!cache) return;
+  if (cache.baseUrl && !paintedPreviewUrls.includes(cache.baseUrl)) {
+    URL.revokeObjectURL(cache.baseUrl);
+  }
+  if (cache.selectionUrl && !paintedPreviewUrls.includes(cache.selectionUrl)) {
+    URL.revokeObjectURL(cache.selectionUrl);
+  }
 }
 
 async function prepareDragPreview(ids: readonly string[]): Promise<void> {
   const key = dragPreviewKey(ids);
   if (!key || !state.project || !state.document) return;
   if (dragPreviewCache?.key === key) return dragPreviewCache.pending;
-  clearDragPreviewCache();
+  retireDragPreviewCache();
 
   const project = state.project;
   const version = api.versionOf(state.document);
@@ -3107,6 +3203,10 @@ function mountDragPreview(drag: NonNullable<State["drag"]>): void {
   selection.src = cache.selectionUrl;
   dom.overlay.before(base, selection);
   dom.canvasImage.classList.add("drag-preview-hidden");
+  // The images hold these URLs from here on; unmounting is what revokes
+  // them, whenever that happens — this drag, the next render's hand-off, or
+  // a refusal taking the prediction back.
+  paintedPreviewUrls = [cache.baseUrl, cache.selectionUrl];
   drag.previewActive = true;
   updateDragPreview(drag, drag.lastDelta?.x ?? 0, drag.lastDelta?.y ?? 0);
 }
@@ -3115,6 +3215,10 @@ function unmountDragPreview(): void {
   document.getElementById("drag-preview-base")?.remove();
   document.getElementById("drag-preview-selection")?.remove();
   dom.canvasImage.classList.remove("drag-preview-hidden");
+  for (const url of paintedPreviewUrls) URL.revokeObjectURL(url);
+  paintedPreviewUrls = [];
+  paintedPreviewVersion = null;
+  paintedPreviewOrigin = null;
 }
 
 function dragResizedBounds(
@@ -3145,8 +3249,13 @@ function updateDragPreview(
   const canvas = state.document.canvas;
   selection.style.transformOrigin = "0 0";
   if (drag.mode === "move") {
+    // An adopted preview already sits where the last commit left it; the
+    // drag moves it from there, not from where the older canvas image shows
+    // the layer.
+    const originX = drag.adoptedDelta?.x ?? 0;
+    const originY = drag.adoptedDelta?.y ?? 0;
     selection.style.transform =
-      `translate(${(dx / canvas.width) * 100}%, ${(dy / canvas.height) * 100}%)`;
+      `translate(${((originX + dx) / canvas.width) * 100}%, ${((originY + dy) / canvas.height) * 100}%)`;
   } else if (drag.mode === "resize") {
     const next = dragResizedBounds(drag, dx, dy);
     if (drag.preserveSelectionScale) {
@@ -3242,13 +3351,31 @@ window.addEventListener("pointerup", async (event) => {
   const dx = Math.round(drag.lastDelta?.x ?? (event.clientX - drag.startX) * scale);
   const dy = Math.round(drag.lastDelta?.y ?? (event.clientY - drag.startY) * scale);
   if (dx === 0 && dy === 0) {
-    unmountDragPreview();
+    // No edit, so nothing to hand over. Pixels adopted from an earlier
+    // commit stay until the render of that version replaces them; taking
+    // them down here would flash the older canvas image underneath.
+    if (paintedPreviewVersion === null) unmountDragPreview();
     return;
   }
-  let saving: Promise<void>;
+  // The pixels this drag painted become the prediction of the state the
+  // batch is about to create. Naming the version it will produce is what
+  // lets the render hand-off — and a foreign commit, an undo — tell the
+  // prediction and the truth apart.
+  paintedPreviewVersion = api.versionOf(state.document!) + 1;
+  paintedPreviewOrigin = drag.mode === "move"
+    ? {
+        x: (drag.adoptedDelta?.x ?? 0) + dx,
+        y: (drag.adoptedDelta?.y ?? 0) + dy,
+      }
+    // A resized or rotated selection repaints through a different
+    // transform, so it cannot be re-anchored; it hands over to the render
+    // like the rest, but a later drag starts fresh.
+    : null;
   if (drag.mode === "move") {
-    saving = sendBatch("move selection", drag.ids.map((id) => ({ op: "move", id, dx, dy } as Operation)));
-  } else if (drag.mode === "resize") {
+    void sendBatch("move selection", drag.ids.map((id) => ({ op: "move", id, dx, dy } as Operation)));
+    return;
+  }
+  if (drag.mode === "resize") {
     let next = dragResizedBounds(drag, dx, dy);
     const horizontalTextResize =
       drag.ids.length === 1 && (drag.handle === "e" || drag.handle === "w");
@@ -3300,24 +3427,23 @@ window.addEventListener("pointerup", async (event) => {
         height: Math.max(1, Math.round(resized.height)),
       } as Operation);
     }
-    saving = sendBatch("resize selection", operations);
-  } else {
-    const canvasRect = dom.canvas.getBoundingClientRect();
-    const centreX = canvasRect.left + ((drag.bounds.x + drag.bounds.width / 2) / state.document!.canvas.width) * canvasRect.width;
-    const centreY = canvasRect.top + ((drag.bounds.y + drag.bounds.height / 2) / state.document!.canvas.height) * canvasRect.height;
-    const start = Math.atan2(drag.startY - centreY, drag.startX - centreX);
-    const current = Math.atan2(event.clientY - centreY, event.clientX - centreX);
-    const delta = ((current - start) * 180) / Math.PI;
-    saving = sendBatch(
-      "rotate selection",
-      drag.origins.map((origin) => ({
-        op: "rotate",
-        id: origin.id,
-        degrees: Math.round((origin.rotation + delta) * 10) / 10,
-      } as Operation)),
-    );
+    void sendBatch("resize selection", operations);
+    return;
   }
-  void saving.finally(() => unmountDragPreview());
+  const canvasRect = dom.canvas.getBoundingClientRect();
+  const centreX = canvasRect.left + ((drag.bounds.x + drag.bounds.width / 2) / state.document!.canvas.width) * canvasRect.width;
+  const centreY = canvasRect.top + ((drag.bounds.y + drag.bounds.height / 2) / state.document!.canvas.height) * canvasRect.height;
+  const start = Math.atan2(drag.startY - centreY, drag.startX - centreX);
+  const current = Math.atan2(event.clientY - centreY, event.clientX - centreX);
+  const delta = ((current - start) * 180) / Math.PI;
+  void sendBatch(
+    "rotate selection",
+    drag.origins.map((origin) => ({
+      op: "rotate",
+      id: origin.id,
+      degrees: Math.round((origin.rotation + delta) * 10) / 10,
+    } as Operation)),
+  );
 });
 
 function snapMove(
@@ -3329,13 +3455,16 @@ function snapMove(
 ): { dx: number; dy: number } {
   if (!state.document) return { dx, dy };
   const threshold = 6 * screenScale;
+  // This runs on every pointermove of a drag, so the layer tree is walked
+  // once here and every lookup below reads that one pass.
+  const flat = api.flatten(api.layersOf(state.document));
   // A single selection's handle DOM is its local box plus CSS rotation. Use
   // its actual canvas extents for snapping while leaving that DOM geometry
   // untouched. Multi-selection bounds already contain rotated extents.
   let snappingBounds = bounds;
   if (ids.length === 1) {
-    const one = api.flatten(api.layersOf(state.document)).find(({ layer }) => layer.id === ids[0]);
-    const offset = one ? ancestorOffset(api.flatten(api.layersOf(state.document)), one.parent) : null;
+    const one = flat.find(({ layer }) => layer.id === ids[0]);
+    const offset = one ? ancestorOffset(flat, one.parent) : null;
     if (one && offset) {
       snappingBounds = rotatedRectBounds({
         x: one.layer.transform.x + offset.x,
@@ -3359,7 +3488,6 @@ function snapMove(
   const targetsX = [0, state.document.canvas.width / 2, state.document.canvas.width];
   const targetsY = [0, state.document.canvas.height / 2, state.document.canvas.height];
   const otherBounds: Array<{ left: number; right: number; top: number; bottom: number }> = [];
-  const flat = api.flatten(api.layersOf(state.document));
   for (const { layer, parent } of flat) {
     if (ids.includes(layer.id)) continue;
     const offset = ancestorOffset(flat, parent);
@@ -3953,6 +4081,10 @@ function openFromQueue(project: string | null): void {
   void guard("open", async () => {
     state.project = project;
     state.selection = [];
+    // Painted pixels belong to the project they were painted in. A version
+    // number alone cannot vouch for them across an open.
+    unmountDragPreview();
+    retireDragPreviewCache();
     await openProject();
   });
 }
