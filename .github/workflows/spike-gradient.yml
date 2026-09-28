@@ -1,0 +1,71 @@
+name: Gradient bit-identity spike
+
+# Cross-target bit-identity check for gradient rasterization. The spike
+# documents are rendered and hashed on all six targets, and one job compares
+# the six hash tables byte for byte. This workflow lives on the spike branch
+# only; it is deleted once the spike question is answered.
+
+on: [push, workflow_dispatch]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  render:
+    name: Render (${{ matrix.target-name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target-name: linux-aarch64
+          - os: windows-latest
+            target-name: windows-x86_64
+          - os: windows-11-arm
+            target-name: windows-aarch64
+          - os: macos-15-intel
+            target-name: macos-x86_64
+          - os: macos-14
+            target-name: macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: spike-${{ matrix.target-name }}
+      - name: Render and hash the spike documents
+        shell: bash
+        run: >-
+          cargo run -p assemblash-renderer
+          --example gradient_bit_identity_spike
+          -- --out "$RUNNER_TEMP/grad-spike"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grad-spike-${{ matrix.target-name }}
+          path: ${{ runner.temp }}/grad-spike
+          if-no-files-found: error
+
+  compare:
+    name: Compare hashes across targets
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: grad-spike-*
+          path: hashes
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: All six hash tables must be byte-equal
+        run: python scripts/gradient_spike_compare.py hashes
