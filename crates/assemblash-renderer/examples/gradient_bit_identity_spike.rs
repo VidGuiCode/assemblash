@@ -23,6 +23,25 @@ const BACKGROUND_PNG: &[u8] = include_bytes!("fixtures/gradient-background.png")
 
 type Stop = (f64, &'static str, f64);
 
+/// Use the renderer's existing six-decimal SVG number format.
+fn number(value: f64) -> String {
+    if !value.is_finite() {
+        return "0".to_owned();
+    }
+    let rounded = (value * 1_000_000.0).round() / 1_000_000.0;
+    if rounded == 0.0 {
+        return "0".to_owned();
+    }
+    let mut text = format!("{rounded:.6}");
+    while text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = out_dir();
     fs::create_dir_all(&out)?;
@@ -241,14 +260,16 @@ fn linear_gradient(id: &str, angle_deg: f64, stops: &[Stop]) -> String {
     let mut svg = format!(
         "  <linearGradient id=\"{id}\" gradientUnits=\"objectBoundingBox\" \
          x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">\n",
-        0.5 - dx,
-        0.5 - dy,
-        0.5 + dx,
-        0.5 + dy,
+        number(0.5 - dx),
+        number(0.5 - dy),
+        number(0.5 + dx),
+        number(0.5 + dy),
     );
     for (offset, color, alpha) in stops {
         svg.push_str(&format!(
-            "    <stop offset=\"{offset}\" stop-color=\"{color}\" stop-opacity=\"{alpha}\"/>\n"
+            "    <stop offset=\"{}\" stop-color=\"{color}\" stop-opacity=\"{}\"/>\n",
+            number(*offset),
+            number(*alpha)
         ));
     }
     svg.push_str("  </linearGradient>\n");
@@ -259,11 +280,15 @@ fn radial_gradient(id: &str, center: (f64, f64), radius: f64, stops: &[Stop]) ->
     let mut svg = format!(
         "  <radialGradient id=\"{id}\" gradientUnits=\"objectBoundingBox\" \
          cx=\"{}\" cy=\"{}\" r=\"{}\">\n",
-        center.0, center.1, radius,
+        number(center.0),
+        number(center.1),
+        number(radius),
     );
     for (offset, color, alpha) in stops {
         svg.push_str(&format!(
-            "    <stop offset=\"{offset}\" stop-color=\"{color}\" stop-opacity=\"{alpha}\"/>\n"
+            "    <stop offset=\"{}\" stop-color=\"{color}\" stop-opacity=\"{}\"/>\n",
+            number(*offset),
+            number(*alpha)
         ));
     }
     svg.push_str("  </radialGradient>\n");
