@@ -19,28 +19,28 @@
 class Assemblash < Formula
   desc "Structured document engine with a local browser-based editor"
   homepage "https://github.com/VidGuiCode/assemblash"
-  version "1.10.0"
+  version "1.11.0"
   license "Apache-2.0"
 
   on_macos do
     on_arm do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.10.0/assemblash-v1.10.0-macos-aarch64.tar.gz"
-      sha256 "90aae0747705170060bfcb700528b65f6f2305f3832cce7c20eb5805129b91aa"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.11.0/assemblash-v1.11.0-macos-aarch64.tar.gz"
+      sha256 "11b98589d7cf5bffaebbf7c3c6ecb063a1cc71492c4ceb5ec3cd24e0fa0201f5"
     end
     on_intel do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.10.0/assemblash-v1.10.0-macos-x86_64.tar.gz"
-      sha256 "02555a86d3c62694c8e6095a6b423857d319687f544aeca8eeb4648ba382831b"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.11.0/assemblash-v1.11.0-macos-x86_64.tar.gz"
+      sha256 "7cd60e8442f94ed7be91ed23e5bda30c2128ede63eeddd433630d0160a615eba"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.10.0/assemblash-v1.10.0-linux-aarch64.tar.gz"
-      sha256 "0f1b3f47beeff905be8997334fa81b62fe63f99c37c7c098dba3a410be0231b2"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.11.0/assemblash-v1.11.0-linux-aarch64.tar.gz"
+      sha256 "8526e18d79c39f6afb8dc7366e785bddf63d6e66bd73f5254d0418c6a5aeb403"
     end
     on_intel do
-      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.10.0/assemblash-v1.10.0-linux-x86_64.tar.gz"
-      sha256 "41342c1007ca9e5c16aeabeb21a88350058d8068d1e04c539d09f52897024dc1"
+      url "https://github.com/VidGuiCode/assemblash/releases/download/v1.11.0/assemblash-v1.11.0-linux-x86_64.tar.gz"
+      sha256 "34d6087f0a0f33f0f2a237f7a4e4e979f900cc9d18934ad1e2f2298e13632c9e"
     end
   end
 
