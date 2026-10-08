@@ -1129,22 +1129,32 @@ async function closeFirstRunAgentsDialog(page, expectFirstRunOffer) {
   if (!await page.evaluate(`document.querySelector("#agents-dialog")?.dataset.state === "open"`)) return;
   await page.waitFor(`(() => {
     const dialog = document.querySelector("#agents-dialog");
+    const content = dialog?.querySelector(".mantine-Modal-content");
     const button = dialog?.querySelector(".mantine-Modal-close");
-    return dialog?.dataset.state === "open" && button?.getClientRects().length > 0
-      && [...dialog.querySelectorAll(".mantine-Modal-content")].every((node) => node.getAnimations({ subtree: true })
-        .every((animation) => animation.playState !== "running"));
+    return dialog?.dataset.state === "open" && content?.checkVisibility({ visibilityProperty: true })
+      && getComputedStyle(content).opacity === "1" && button?.getClientRects().length > 0
+      && content.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
   })()`, "the first-run Agents dialog and close button to settle", 10000);
-  await page.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-  const target = await page.evaluate(`(() => {
+  // Mantine can schedule its entrance animation after the content first mounts.
+  const target = await waitFor(() => page.evaluate(`(async () => {
+    const content = document.querySelector("#agents-dialog .mantine-Modal-content");
     const button = document.querySelector("#agents-dialog .mantine-Modal-close");
-    const bounds = button?.getBoundingClientRect();
-    if (!button || !bounds) return null;
+    let bounds = button?.getBoundingClientRect();
+    if (!content || !button || !bounds) return false;
+    for (let frame = 0; frame < 2; frame += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const current = button.getBoundingClientRect();
+      if (["left", "top", "width", "height"].some((key) => Math.abs(current[key] - bounds[key]) > 0.5)) return false;
+      bounds = current;
+    }
+    if (getComputedStyle(content).opacity !== "1"
+      || content.getAnimations({ subtree: true }).some((animation) => animation.playState === "running")) return false;
     const x = bounds.left + bounds.width / 2;
     const y = bounds.top + bounds.height / 2;
     const hit = document.elementFromPoint(x, y);
     return { x, y, width: bounds.width, height: bounds.height, hit: Boolean(hit && button.contains(hit)),
       dialogOpen: document.querySelector("#agents-dialog")?.dataset.state === "open" };
-  })()`);
+  })()`), "the first-run Agents close button geometry to stay stable", 10000);
   assert.ok(target?.dialogOpen && target.width > 0 && target.height > 0 && target.hit,
     `the first-run Agents close button is not pointer-reachable: ${JSON.stringify(target)}`);
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: target.x, y: target.y });
@@ -2017,10 +2027,10 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     const evidenceDirectory = process.env.ASSEMBLASH_LAYOUT_EVIDENCE_DIR;
     const check = (condition, message) => { if (!condition) problems.push(message); };
     const navigateFixture = async () => {
-      const targetUrl = `${fixture.url}?layout-run=${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const targetUrl = new URL(`?layout-run=${Date.now()}-${Math.random().toString(16).slice(2)}`, fixture.url).href;
       await page.send("Page.navigate", { url: targetUrl });
       await page.waitFor(
-        `location.search.includes("layout-run=") && document.readyState === "complete"`,
+        `location.href === ${JSON.stringify(targetUrl)} && document.readyState === "complete"`,
         "layout fixture navigation",
         10000,
       );
