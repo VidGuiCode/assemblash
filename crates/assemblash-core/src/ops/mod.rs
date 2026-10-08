@@ -618,6 +618,21 @@ pub(super) fn ensure_subtree_mutable(document: &Document, id: &LayerId) -> Resul
 }
 
 fn update_canvas(document: &mut Document, request: &UpdateCanvas) -> Result<OpOutcome, OpError> {
+    if request.background_image.is_some() && request.clear_background_image {
+        return Err(OpError::ConflictingCanvasBackgroundImage);
+    }
+    if let Some(background) = &request.background_image {
+        if !document
+            .assets
+            .iter()
+            .any(|asset| asset.id == background.asset)
+        {
+            return Err(OpError::NoSuchCanvasBackgroundAsset {
+                asset: background.asset.clone(),
+            });
+        }
+    }
+
     let old_width = document.canvas.width;
     let old_height = document.canvas.height;
     let new_width = request.width.unwrap_or(old_width);
@@ -660,7 +675,15 @@ fn update_canvas(document: &mut Document, request: &UpdateCanvas) -> Result<OpOu
     document.canvas.width = new_width;
     document.canvas.height = new_height;
     if let Some(background) = &request.background {
+        if let Some(paint) = background {
+            requests::check_paint(None, paint)?;
+        }
         document.canvas.background = background.clone();
+    }
+    if let Some(background) = &request.background_image {
+        document.canvas.background_image = Some(background.clone());
+    } else if request.clear_background_image {
+        document.canvas.background_image = None;
     }
     let mut changed = Vec::new();
     if moves_layers {
@@ -806,6 +829,7 @@ fn define_preset(
             reason: "a preset that sets nothing would do nothing",
         });
     }
+    check_preset_paints(preset)?;
     // The same checks setting these properties directly would face, so a
     // preset cannot be a way to smuggle in a blend mode or an effect that
     // nothing can draw.
@@ -840,6 +864,38 @@ fn define_preset(
         None => document.presets.push(preset.clone()),
     }
     Ok(OpOutcome::nothing())
+}
+
+/// Applies the same paint refusals to a preset that its compiled update gets.
+///
+/// A preset is stored before it is applied, so validating it only when its
+/// update runs would let an unusable paint sit in the document indefinitely.
+fn check_preset_paints(preset: &crate::presets::Preset) -> Result<(), OpError> {
+    let id = LayerId::new(format!("preset:{}", preset.name));
+    for paint in [
+        preset.properties.color.as_ref(),
+        preset
+            .properties
+            .stroke
+            .as_ref()
+            .map(|stroke| &stroke.color),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        requests::check_paint(Some(&id), paint)?;
+    }
+    if let Some(fill) = &preset.properties.fill {
+        requests::check_shape_fill(Some(&id), fill)?;
+    }
+    if let Some(effects) = &preset.properties.effects {
+        for effect in effects {
+            if let crate::document::Effect::DropShadow { color, .. } = effect {
+                requests::check_shadow_color(Some(&id), color)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn delete_preset(document: &mut Document, name: &str) -> Result<OpOutcome, OpError> {
@@ -931,7 +987,8 @@ mod tests {
 
     use super::*;
     use crate::document::{
-        Clip, Crop, Extras, FontStyle, GroupLayer, TextAlign, Transform, VerticalAlign,
+        BackgroundImage, Clip, Crop, Extras, FontStyle, GroupLayer, ImageFit, TextAlign, Transform,
+        VerticalAlign,
     };
     use crate::ids::SequentialIdSource;
     use crate::{Color, Layer};
@@ -1507,10 +1564,262 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "background": null })).unwrap();
         assert_eq!(omitted.background, None);
         assert_eq!(cleared.background, Some(None));
+        assert_eq!(omitted.background_image, None);
+        assert!(!omitted.clear_background_image);
         assert_eq!(
             serde_json::to_value(&cleared).unwrap()["background"],
             serde_json::Value::Null
         );
+    }
+
+    #[test]
+    fn canvas_background_image_updates_set_preserve_and_clear_explicitly() {
+        let mut doc = document();
+        let asset = crate::Asset {
+            id: crate::AssetId::new("asset_00000000000000000000000001"),
+            path: "background.png".to_owned(),
+            hash: format!("sha256:{}", "0".repeat(64)),
+            media_type: "image/png".to_owned(),
+            width: Some(2),
+            height: Some(2),
+            extra: Extras::new(),
+        };
+        let asset_id = asset.id.clone();
+        doc.assets.push(asset);
+        let background = BackgroundImage {
+            asset: asset_id.clone(),
+            fit: ImageFit::Cover,
+            extra: Extras::new(),
+        };
+        let set = UpdateCanvas {
+            background_image: Some(background.clone()),
+            ..UpdateCanvas::default()
+        };
+        let set_json = serde_json::to_value(&set).unwrap();
+        assert_eq!(set_json["backgroundImage"]["asset"], asset_id.as_str());
+        assert_eq!(set_json["backgroundImage"]["fit"], "cover");
+        assert!(set_json.get("clearBackgroundImage").is_none());
+
+        apply(
+            &mut doc,
+            &Operation::UpdateCanvas(set),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        assert_eq!(doc.canvas.background_image, Some(background.clone()));
+
+        apply(
+            &mut doc,
+            &Operation::UpdateCanvas(UpdateCanvas::default()),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        assert_eq!(doc.canvas.background_image, Some(background));
+
+        let clear = UpdateCanvas {
+            clear_background_image: true,
+            ..UpdateCanvas::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&clear).unwrap()["clearBackgroundImage"],
+            true
+        );
+        apply(
+            &mut doc,
+            &Operation::UpdateCanvas(clear),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        assert_eq!(doc.canvas.background_image, None);
+        assert_eq!(
+            doc.assets.len(),
+            1,
+            "clearing a reference keeps the asset record"
+        );
+    }
+
+    #[test]
+    fn canvas_background_image_refusals_are_typed_and_atomic() {
+        let background = BackgroundImage {
+            asset: crate::AssetId::new("asset_missing"),
+            fit: ImageFit::Fill,
+            extra: Extras::new(),
+        };
+        for (request, error) in [
+            (
+                UpdateCanvas {
+                    background_image: Some(background.clone()),
+                    clear_background_image: true,
+                    ..UpdateCanvas::default()
+                },
+                "conflict",
+            ),
+            (
+                UpdateCanvas {
+                    background_image: Some(background),
+                    ..UpdateCanvas::default()
+                },
+                "missing asset",
+            ),
+        ] {
+            let mut doc = document();
+            let before = doc.clone();
+            let result = apply(
+                &mut doc,
+                &Operation::UpdateCanvas(request),
+                &mut SequentialIdSource::new(),
+            );
+            match error {
+                "conflict" => assert!(matches!(
+                    result,
+                    Err(OpError::ConflictingCanvasBackgroundImage)
+                )),
+                _ => assert!(matches!(
+                    result,
+                    Err(OpError::NoSuchCanvasBackgroundAsset { .. })
+                )),
+            }
+            assert_eq!(doc, before, "a refused canvas image update is atomic");
+        }
+    }
+
+    #[test]
+    fn image_shape_fills_are_refused_atomically_with_clip_guidance() {
+        let mut doc = document();
+        let created = apply(
+            &mut doc,
+            &serde_json::from_value(serde_json::json!({
+                "op": "create", "position": { "at": "root" },
+                "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+                "type": "shape", "shape": { "kind": "rect" }, "fill": "#ffffff"
+            }))
+            .unwrap(),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        let before = doc.clone();
+        for fill in [
+            serde_json::json!("asset_background"),
+            serde_json::json!({ "kind": "image", "asset": "asset_background" }),
+        ] {
+            for value in [
+                serde_json::json!({
+                    "op": "create", "position": { "at": "root" },
+                    "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+                    "type": "shape", "shape": { "kind": "rect" }, "fill": fill
+                }),
+                serde_json::json!({ "op": "update", "id": created.created[0], "fill": fill }),
+                serde_json::json!({
+                    "op": "definePreset",
+                    "preset": { "name": "image", "properties": { "fill": fill } }
+                }),
+            ] {
+                let operation = serde_json::from_value(value).unwrap();
+                let error =
+                    apply(&mut doc, &operation, &mut SequentialIdSource::new()).unwrap_err();
+                assert!(
+                    matches!(error, OpError::ImageInShapeFill { .. }),
+                    "{error:?}"
+                );
+                assert!(
+                    error.to_string().contains("image layer and clip"),
+                    "{error}"
+                );
+                assert_eq!(
+                    doc, before,
+                    "a refused image fill must not change the document"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn preset_definition_rejects_malformed_and_unsupported_paints() {
+        let malformed: Color = serde_json::from_value(serde_json::json!({
+            "kind": "linear",
+            "angle": "not-a-number",
+            "stops": []
+        }))
+        .unwrap();
+        let preset = crate::presets::Preset {
+            name: "malformed".to_owned(),
+            description: None,
+            properties: crate::presets::PresetProperties {
+                fill: Some(malformed),
+                ..Default::default()
+            },
+            extra: Extras::new(),
+        };
+        let mut doc = document();
+        let before = doc.clone();
+        assert!(matches!(
+            apply(
+                &mut doc,
+                &Operation::DefinePreset { preset },
+                &mut SequentialIdSource::new()
+            ),
+            Err(OpError::Invalid(_))
+        ));
+        assert_eq!(doc, before, "a malformed preset must not be stored");
+
+        let unknown: Color = serde_json::from_value(serde_json::json!({
+            "kind": "conic",
+            "stops": []
+        }))
+        .unwrap();
+        let preset = crate::presets::Preset {
+            name: "unsupported".to_owned(),
+            description: None,
+            properties: crate::presets::PresetProperties {
+                fill: Some(unknown),
+                ..Default::default()
+            },
+            extra: Extras::new(),
+        };
+        assert!(matches!(
+            apply(
+                &mut doc,
+                &Operation::DefinePreset { preset },
+                &mut SequentialIdSource::new()
+            ),
+            Err(OpError::UnsupportedGradient { kind, .. }) if kind == "conic"
+        ));
+        assert_eq!(doc, before, "an unsupported preset must not be stored");
+    }
+
+    #[test]
+    fn preset_definition_refuses_gradient_shadow_colours() {
+        let gradient: Color = serde_json::from_value(serde_json::json!({
+            "kind": "linear",
+            "angle": 0.0,
+            "stops": [{ "offset": 0.0, "color": "#ffffff", "alpha": 1.0 }]
+        }))
+        .unwrap();
+        let preset = crate::presets::Preset {
+            name: "shadow".to_owned(),
+            description: None,
+            properties: crate::presets::PresetProperties {
+                effects: Some(vec![crate::document::Effect::DropShadow {
+                    dx: 0.0,
+                    dy: 2.0,
+                    blur: 4.0,
+                    color: gradient,
+                    extra: Extras::new(),
+                }]),
+                ..Default::default()
+            },
+            extra: Extras::new(),
+        };
+        let mut doc = document();
+        assert!(matches!(
+            apply(
+                &mut doc,
+                &Operation::DefinePreset { preset },
+                &mut SequentialIdSource::new()
+            ),
+            Err(OpError::GradientInShadowColor { .. })
+        ));
+        assert!(doc.presets.is_empty());
     }
 
     #[test]

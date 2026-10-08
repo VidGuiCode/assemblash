@@ -49,3 +49,6 @@
 # Preserve upstream font licenses, including source trailing spaces.
 ui/src/catalogue-specimens/licenses/*.txt -whitespace
 ui/dist/catalogue-specimens/licenses/*.txt -whitespace
+
+# Preserve whitespace inside bundled dependency template strings.
+ui/dist/*.js whitespace=-blank-at-eol

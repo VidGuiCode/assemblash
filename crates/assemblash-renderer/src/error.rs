@@ -39,6 +39,13 @@ pub enum RenderError {
         asset: AssetId,
     },
 
+    /// The canvas background image's asset has no href.
+    #[error("canvas background: asset {asset} was not resolved to a source")]
+    UnresolvedCanvasBackgroundAsset {
+        /// The asset the canvas background referenced.
+        asset: AssetId,
+    },
+
     /// A layer asks to composite with a mode this build does not render.
     ///
     /// Refused rather than composited as `normal`. A document written by a
@@ -92,6 +99,46 @@ pub enum RenderError {
         shape: String,
     },
 
+    /// A colour position carries a gradient kind this build does not render.
+    ///
+    /// Same bargain as an unknown blend mode (D21): the paint is preserved in
+    /// the document, and refused when something tries to draw it. Rendering
+    /// it as a solid would produce a picture that looks finished and is
+    /// wrong.
+    #[error(
+        "{}gradient kind {kind:?} is not one this build renders",
+        layer_prefix(layer)
+    )]
+    UnsupportedGradient {
+        /// The layer at fault, or none when the canvas background carries it.
+        layer: Option<LayerId>,
+        /// The gradient kind it asked for.
+        kind: String,
+    },
+
+    /// Gradient geometry overflowed while it was mapped into SVG coordinates.
+    #[error(
+        "{}gradient coordinates exceed finite render bounds",
+        layer_prefix(layer)
+    )]
+    InvalidGradientGeometry {
+        /// The layer at fault, or none when the canvas background carries it.
+        layer: Option<LayerId>,
+    },
+
+    /// A drop shadow's colour is a gradient.
+    ///
+    /// The shadow is one `feFlood`, and a flood has no gradient primitive.
+    /// Every other colour position renders gradients; this one refuses,
+    /// naming the limitation.
+    #[error(
+        "layer {layer}: a gradient in dropShadow.color is refused; the shadow filter draws a solid colour only"
+    )]
+    GradientInShadowColor {
+        /// The layer at fault.
+        layer: LayerId,
+    },
+
     /// A clip on a box that has no area.
     ///
     /// Validation allows a zero-width or zero-height box, and a clip of it
@@ -109,6 +156,17 @@ pub enum RenderError {
         width: f64,
         /// The box height.
         height: f64,
+    },
+
+    /// Retained for source compatibility. Gradient line strokes now use a
+    /// user-space stroke envelope and this error is not emitted.
+    #[error(
+        "layer {layer}: a gradient stroke on a line would draw nothing — the line's \
+         zero-height box gives an objectBoundingBox gradient nothing to span"
+    )]
+    GradientOnLineStroke {
+        /// The layer at fault.
+        layer: LayerId,
     },
 
     /// A crop rectangle that shares no area with the source image.
@@ -254,6 +312,16 @@ pub enum RenderError {
     /// The PNG encoder or decoder refused the data.
     #[error("PNG encoding failed: {0}")]
     PngEncoding(String),
+}
+
+/// `"layer <id>: "`, or `"the canvas: "` when the fault sits on the canvas —
+/// the background has no layer to name, and an unnamed "somewhere" would not
+/// help anyone find it.
+fn layer_prefix(layer: &Option<LayerId>) -> String {
+    match layer {
+        Some(layer) => format!("layer {layer}: "),
+        None => "the canvas: ".to_owned(),
+    }
 }
 
 /// The two sentences [`RenderError::SvgAssetTextWithoutFont`] says.

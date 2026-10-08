@@ -96,7 +96,7 @@ fn a_rebinding_host_is_refused_on_every_route() {
     );
     assert_eq!(status, 200);
 
-    for path in ["/api/version", "/api/projects", "/", "/app.js"] {
+    for path in ["/api/version", "/api/projects", "/", "/main.js"] {
         let (status, body) = request(
             port,
             "GET",

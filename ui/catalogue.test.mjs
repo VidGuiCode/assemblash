@@ -8,9 +8,9 @@ function placeholders(message) {
 
 test("all catalogues use the English keys and parameter names", async () => {
   const [{ en }, { fr }, { de }] = await Promise.all([
-    import("./dist/locale-en.js"),
-    import("./dist/locale-fr.js"),
-    import("./dist/locale-de.js"),
+    import("./.test-dist/locale-en.js"),
+    import("./.test-dist/locale-fr.js"),
+    import("./.test-dist/locale-de.js"),
   ]);
   const keys = Object.keys(en).sort();
   assert.ok(keys.length > 0, "English catalogue is empty");
@@ -58,8 +58,8 @@ test("locale preference survives a reload and unknown values use English", async
   };
   try {
     const [{ en }, first] = await Promise.all([
-      import("./dist/locale-en.js"),
-      import("./dist/i18n.js?first"),
+      import("./.test-dist/locale-en.js"),
+      import("./.test-dist/i18n.js?first"),
     ]);
     const ordinaryKey = Object.keys(en).find((key) => !key.endsWith(".one") && !key.endsWith(".other"));
     assert.ok(ordinaryKey);
@@ -67,7 +67,7 @@ test("locale preference survives a reload and unknown values use English", async
     assert.equal(first.getLocale(), "de");
     assert.equal(document.documentElement.lang, "de");
     assert.equal(stored.get("assemblash.language"), "de");
-    const reloaded = await import("./dist/i18n.js?reloaded");
+    const reloaded = await import("./.test-dist/i18n.js?reloaded");
     assert.equal(reloaded.getLocale(), "de");
     assert.equal(reloaded.t(ordinaryKey), first.t(ordinaryKey));
     reloaded.setLocale("not-a-locale");
@@ -75,7 +75,7 @@ test("locale preference survives a reload and unknown values use English", async
     assert.equal(document.documentElement.lang, "en");
     assert.equal(reloaded.t(ordinaryKey), en[ordinaryKey]);
     stored.set("assemblash.language", "unknown");
-    const badPreference = await import("./dist/i18n.js?bad-preference");
+    const badPreference = await import("./.test-dist/i18n.js?bad-preference");
     assert.equal(badPreference.getLocale(), "en");
   } finally {
     globalThis.window = original.window;
@@ -86,10 +86,10 @@ test("locale preference survives a reload and unknown values use English", async
 
 test("count formatting selects locale plurals and formats the number", async () => {
   const [{ en }, { fr }, { de }, runtime] = await Promise.all([
-    import("./dist/locale-en.js"),
-    import("./dist/locale-fr.js"),
-    import("./dist/locale-de.js"),
-    import("./dist/i18n.js?counts"),
+    import("./.test-dist/locale-en.js"),
+    import("./.test-dist/locale-fr.js"),
+    import("./.test-dist/locale-de.js"),
+    import("./.test-dist/i18n.js?counts"),
   ]);
   const base = Object.keys(en).find((key) => key.endsWith(".other") && Object.hasOwn(en, key.slice(0, -6) + ".one") && placeholders(en[key]).join() === "count")?.slice(0, -6);
   assert.ok(base, "no usable plural message");

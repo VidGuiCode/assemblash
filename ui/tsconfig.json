@@ -3,8 +3,8 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "outDir": "dist",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "ESNext.Collection", "DOM", "DOM.Iterable"],
     "rootDir": "src",
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -17,7 +17,8 @@
     "declaration": false,
     "sourceMap": false,
     "removeComments": false,
-    "newLine": "lf"
+    "newLine": "lf",
+    "noEmit": true
   },
-  "include": ["src/**/*.ts", "../schema/document.d.ts", "../schema/operation.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../schema/document.d.ts", "../schema/operation.d.ts"]
 }

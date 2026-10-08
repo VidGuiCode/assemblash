@@ -85,6 +85,7 @@ impl Document {
                 width,
                 height,
                 background: None,
+                background_image: None,
                 extra: Extras::new(),
             },
             assets: Vec::new(),
@@ -139,6 +140,9 @@ pub struct Canvas {
     /// Background fill. `None` means transparent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<Color>,
+    /// Image composited over the fill and under every layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_image: Option<BackgroundImage>,
     /// Keys this build does not know about, preserved verbatim.
     #[serde(flatten)]
     pub extra: Extras,
@@ -805,6 +809,10 @@ pub struct Stroke {
     /// deterministic and identical on every target, so it is documented here
     /// rather than refused — but at that width the box is not quite the
     /// visual box.
+    ///
+    /// Gradient strokes draw on every shape. A line uses its stroke envelope
+    /// in local user space because its geometric box has no height. A
+    /// zero-length line uses a square whose sides equal the stroke width.
     pub width: f64,
     /// The dash pattern, alternating paint and gap in document units,
     /// starting with paint. `None` is a solid line.
@@ -969,6 +977,8 @@ pub enum Effect {
         blur: f64,
         /// Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so
         /// a shadow's strength is written where every other colour writes it.
+        /// Solid colours only: the flood filter has no gradient primitive, and
+        /// a gradient here is refused when an operation sets it and at render.
         color: Color,
         /// Keys this build does not know about, preserved verbatim (D27).
         #[serde(flatten)]
@@ -1262,15 +1272,105 @@ pub enum ImageFit {
     Cover,
 }
 
-/// An sRGB colour, `#rrggbb` or `#rrggbbaa`.
+/// An imported image drawn across the canvas behind every layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundImage {
+    /// Id of an asset in the document's `assets` list.
+    pub asset: AssetId,
+    /// How the image fills the canvas.
+    #[serde(default)]
+    pub fit: ImageFit,
+    /// Keys this build does not know about, preserved verbatim.
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// The greatest number of stops a gradient may carry.
 ///
-/// Stored as written so a document round-trips exactly; validation checks the
-/// shape and [`Color::to_rgba`] parses it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct Color(String);
+/// Stops beyond this are refused, not truncated: a silently shortened
+/// gradient is a different gradient.
+pub const MAX_GRADIENT_STOPS: usize = 16;
+
+/// A paint in a colour position: a solid colour or a gradient (D13).
+///
+/// The bare `#rrggbb[aa]` string is the solid form, and the only form there
+/// was before 1.11 — every document an older build wrote loads here
+/// unchanged. A gradient is an object tagged by `kind` in the same field;
+/// there is no sibling fill field. A colour position accepts exactly these
+/// forms; anything else is refused when the document or the operation that
+/// carries it is validated.
+///
+/// The cost is D1-class and named per release: a build from 1.0 to 1.10
+/// refuses to load any document that contains a gradient, because its
+/// `Color` parses strings only. Documents without gradients are
+/// byte-identical across the change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Color {
+    /// A solid sRGB colour, the string form.
+    Solid(SolidColor),
+    /// A linear gradient.
+    Linear(LinearGradient),
+    /// A radial gradient.
+    Radial(RadialGradient),
+    /// A gradient kind this build does not render, preserved verbatim (D21).
+    Other(UnknownGradient),
+}
 
 impl Color {
+    /// Wraps a solid colour string without checking it.
+    pub fn new(raw: impl Into<String>) -> Self {
+        Self::Solid(SolidColor::new(raw))
+    }
+
+    /// The solid colour, when this is one.
+    pub fn as_solid(&self) -> Option<&SolidColor> {
+        match self {
+            Self::Solid(solid) => Some(solid),
+            _ => None,
+        }
+    }
+
+    /// Parses the solid arm into 8-bit RGBA components, or `None` when this
+    /// is a gradient or a malformed solid.
+    pub fn to_rgba(&self) -> Option<[u8; 4]> {
+        self.as_solid().and_then(SolidColor::to_rgba)
+    }
+
+    /// What form this paint takes: `solid`, `linear`, `radial`, or the
+    /// unknown kind's own tag.
+    pub fn kind_name(&self) -> &str {
+        match self {
+            Self::Solid(_) => "solid",
+            Self::Linear(_) => "linear",
+            Self::Radial(_) => "radial",
+            Self::Other(other) => &other.kind,
+        }
+    }
+
+    /// Whether this build draws this paint at all. Every solid and gradient
+    /// arm renders; an unknown kind does not (D21).
+    pub fn is_rendered(&self) -> bool {
+        !matches!(self, Self::Other(_))
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self::new("#000000")
+    }
+}
+
+/// A solid sRGB colour, `#rrggbb` or `#rrggbbaa`.
+///
+/// Stored as written so a document round-trips exactly; validation checks the
+/// shape and [`SolidColor::to_rgba`] parses it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct SolidColor(String);
+
+impl SolidColor {
     /// Wraps a colour string without checking it.
     pub fn new(raw: impl Into<String>) -> Self {
         Self(raw.into())
@@ -1283,16 +1383,7 @@ impl Color {
 
     /// Parses the colour into 8-bit RGBA components, or `None` if malformed.
     pub fn to_rgba(&self) -> Option<[u8; 4]> {
-        let hex = self.0.strip_prefix('#')?;
-        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return None;
-        }
-        let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
-        match hex.len() {
-            6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
-            8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
-            _ => None,
-        }
+        parse_solid(&self.0)
     }
 
     /// Whether the colour has a shape this build understands.
@@ -1301,10 +1392,153 @@ impl Color {
     }
 }
 
-impl Default for Color {
+impl Default for SolidColor {
     fn default() -> Self {
         Self::new("#000000")
     }
+}
+
+/// Parses a `#rrggbb` or `#rrggbbaa` colour into 8-bit RGBA components.
+fn parse_solid(raw: &str) -> Option<[u8; 4]> {
+    let hex = raw.strip_prefix('#')?;
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+    match hex.len() {
+        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+        _ => None,
+    }
+}
+
+/// A linear gradient.
+///
+/// The axis runs through the centre of the painted box. `angle` is degrees,
+/// measured from the positive x axis and turning clockwise as drawn, where y
+/// grows downward: `0` paints left to right, `90` top to bottom, `200` up
+/// and to the left. The schema description carries the same convention.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearGradient {
+    /// The kind tag; only `linear` is accepted here.
+    pub kind: LinearTag,
+    /// Axis angle in degrees; must be finite.
+    #[serde(default)]
+    pub angle: f64,
+    /// Colour stops along the axis, from `0.0` at the axis start to `1.0` at
+    /// its end.
+    #[serde(default)]
+    pub stops: Vec<GradientStop>,
+    /// Keys this build does not know about, preserved verbatim (D27).
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// The `kind` tag of a linear gradient: only `linear` deserializes here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum LinearTag {
+    /// The tag every linear gradient carries.
+    Linear,
+}
+
+/// A radial gradient.
+///
+/// `center` and `radius` are fractions of the painted box, emitted as SVG's
+/// `objectBoundingBox` units: the centre is a fraction across and down the
+/// box, and the radius is a distance in those same units. On a non-square
+/// box the rings are therefore elliptical, and a radius of `0.5` reaches the
+/// box edge on both axes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RadialGradient {
+    /// The kind tag; only `radial` is accepted here.
+    pub kind: RadialTag,
+    /// Centre of the rings, as fractions of the box.
+    #[serde(default = "default_gradient_center")]
+    pub center: GradientCenter,
+    /// Radius in box fractions; must be finite and greater than 0.
+    #[serde(default = "default_gradient_radius")]
+    pub radius: f64,
+    /// Colour stops from the centre outward.
+    #[serde(default)]
+    pub stops: Vec<GradientStop>,
+    /// Keys this build does not know about, preserved verbatim (D27).
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// The `kind` tag of a radial gradient: only `radial` deserializes here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum RadialTag {
+    /// The tag every radial gradient carries.
+    Radial,
+}
+
+/// A position inside a box, as fractions of its width and height.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientCenter {
+    /// Across the box: `0.0` is the left edge, `1.0` the right.
+    pub x: f64,
+    /// Down the box: `0.0` is the top edge, `1.0` the bottom.
+    pub y: f64,
+    /// Keys this build does not know about, preserved verbatim (D27).
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// One colour stop of a gradient.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientStop {
+    /// Position along the gradient axis, `0.0` to `1.0`. Stops must be
+    /// strictly ascending; an unordered list is refused, never sorted.
+    pub offset: f64,
+    /// The stop colour, `#rrggbb` or `#rrggbbaa`. A stop colour is solid —
+    /// a gradient of gradients is not a form this format has.
+    pub color: SolidColor,
+    /// Opacity at the stop, `0.0` to `1.0`; `1.0` when omitted. Multiplied
+    /// with the colour's own alpha when it carries one.
+    #[serde(default = "default_stop_alpha")]
+    pub alpha: f64,
+    /// Keys this build does not know about, preserved verbatim (D27).
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+/// A gradient this build does not render — `conic`, a misspelling, or a kind
+/// from a newer build.
+///
+/// Preserved verbatim on load (D21), refused when an operation tries to set
+/// one, and refused when something tries to draw it — never guessed at,
+/// never lost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownGradient {
+    /// The `kind` tag as written. Unknown kinds must still identify themselves.
+    pub kind: String,
+    /// The rest of the object, preserved verbatim.
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+fn default_stop_alpha() -> f64 {
+    1.0
+}
+
+fn default_gradient_center() -> GradientCenter {
+    GradientCenter {
+        x: 0.5,
+        y: 0.5,
+        extra: Extras::default(),
+    }
+}
+
+fn default_gradient_radius() -> f64 {
+    0.5
 }
 
 #[cfg(test)]
@@ -1379,6 +1613,20 @@ mod tests {
         assert_eq!(back["topLevelUnknown"], "keep me");
         assert_eq!(back["canvas"]["futureField"], serde_json::json!([1, 2]));
         assert_eq!(back["layers"][0]["somethingNewer"]["nested"], true);
+    }
+
+    #[test]
+    fn unknown_keys_inside_canvas_background_image_survive_a_round_trip() {
+        let json = serde_json::json!({
+            "asset": "asset_background",
+            "fit": "cover",
+            "futureMetadata": { "cropAnchor": "top-left", "revision": 2 }
+        });
+        let background: BackgroundImage = serde_json::from_value(json.clone()).unwrap();
+
+        assert_eq!(background.fit, ImageFit::Cover);
+        assert_eq!(background.extra["futureMetadata"]["cropAnchor"], "top-left");
+        assert_eq!(serde_json::to_value(&background).unwrap(), json);
     }
 
     #[test]
@@ -1686,5 +1934,116 @@ mod tests {
         assert_eq!(Color::new("#fff").to_rgba(), None);
         assert_eq!(Color::new("ff8000").to_rgba(), None);
         assert_eq!(Color::new("#gggggg").to_rgba(), None);
+    }
+
+    #[test]
+    fn a_solid_colour_serializes_as_the_bare_string() {
+        // The solid arm is the string every 1.x document wrote; the widened
+        // type must not wrap it in an object.
+        let json = serde_json::to_value(Color::new("#3366cc")).unwrap();
+        assert_eq!(json, serde_json::json!("#3366cc"));
+    }
+
+    #[test]
+    fn a_gradient_round_trips_through_serde() {
+        let json = serde_json::json!({
+            "kind": "linear",
+            "angle": 45.0,
+            "stops": [
+                { "offset": 0.0, "color": "#112233", "alpha": 1.0 },
+                { "offset": 1.0, "color": "#D99D28", "alpha": 0.6 }
+            ]
+        });
+        let color: Color = serde_json::from_value(json.clone()).unwrap();
+        assert!(matches!(color, Color::Linear(_)));
+        assert_eq!(color.kind_name(), "linear");
+        assert_eq!(serde_json::to_value(&color).unwrap(), json);
+    }
+
+    #[test]
+    fn a_radial_gradient_round_trips_through_serde() {
+        let json = serde_json::json!({
+            "kind": "radial",
+            "center": {
+                "x": 0.35,
+                "y": 0.6,
+                "futureCenterMetadata": { "version": 2, "preserve": true }
+            },
+            "radius": 0.55,
+            "stops": [
+                { "offset": 0.0, "color": "#FFFFFF", "alpha": 1.0 },
+                { "offset": 1.0, "color": "#101010", "alpha": 0.35 }
+            ]
+        });
+        let color: Color = serde_json::from_value(json.clone()).unwrap();
+        assert!(matches!(color, Color::Radial(_)));
+        assert_eq!(serde_json::to_value(&color).unwrap(), json);
+    }
+
+    #[test]
+    fn an_omitted_stop_alpha_reads_as_one_and_writes_back() {
+        let json = serde_json::json!({
+            "kind": "radial",
+            "center": { "x": 0.5, "y": 0.5 },
+            "radius": 0.5,
+            "stops": [{ "offset": 0.0, "color": "#FFFFFF" }]
+        });
+        let color: Color = serde_json::from_value(json).unwrap();
+        let back = serde_json::to_value(&color).unwrap();
+        assert_eq!(back["stops"][0]["alpha"], serde_json::json!(1.0));
+    }
+
+    #[test]
+    fn a_gradient_kind_this_build_lacks_is_preserved_verbatim() {
+        let json = serde_json::json!({
+            "kind": "conic",
+            "sweep": 2.0,
+            "stops": [{ "offset": 0.0, "color": "#112233" }]
+        });
+        let color: Color = serde_json::from_value(json.clone()).unwrap();
+        assert!(matches!(color, Color::Other(_)));
+        assert_eq!(color.kind_name(), "conic");
+        assert!(!color.is_rendered());
+        // The whole object rides along, so a newer build reads back what
+        // this one preserved.
+        assert_eq!(serde_json::to_value(&color).unwrap(), json);
+    }
+
+    #[test]
+    fn junk_in_a_colour_position_is_refused_at_parse() {
+        // A string always parses — as a solid, whose well-formedness
+        // validation checks, exactly as before the widening. A tagged object
+        // with an unknown string kind is preserved verbatim (D21). An
+        // untagged or non-string kind is malformed and must not become a
+        // guessed paint.
+        for junk in [
+            serde_json::json!(42),
+            serde_json::json!(true),
+            serde_json::json!([1, 2]),
+        ] {
+            assert!(
+                serde_json::from_value::<Color>(junk).is_err(),
+                "junk should not parse as a colour"
+            );
+        }
+        for malformed in [
+            serde_json::json!({ "stops": [] }),
+            serde_json::json!({ "kind": 42, "stops": [] }),
+        ] {
+            assert!(
+                serde_json::from_value::<Color>(malformed).is_err(),
+                "malformed paint object should not parse"
+            );
+        }
+    }
+
+    #[test]
+    fn a_radial_object_is_not_read_as_a_linear_gradient() {
+        // The kind tag is part of each gradient's shape: a radial object
+        // must not deserialize into the linear arm just because it carries
+        // stops.
+        let color: Color =
+            serde_json::from_value(serde_json::json!({ "kind": "radial", "stops": [] })).unwrap();
+        assert!(matches!(color, Color::Radial(_)));
     }
 }

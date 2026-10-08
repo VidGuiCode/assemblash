@@ -50,6 +50,17 @@ pub enum OpError {
         asset: AssetId,
     },
 
+    /// A canvas background image referenced an asset the document does not have.
+    #[error("canvas background: no asset {asset} in this document")]
+    NoSuchCanvasBackgroundAsset {
+        /// The asset that was asked for.
+        asset: AssetId,
+    },
+
+    /// An update tried to set and clear the background image at the same time.
+    #[error("canvas backgroundImage cannot be set and cleared in the same update")]
+    ConflictingCanvasBackgroundImage,
+
     /// A blend mode was set that this build does not render.
     ///
     /// Refused on the way in rather than stored and discovered at render
@@ -106,6 +117,48 @@ pub enum OpError {
         id: Option<LayerId>,
         /// The clip shape that was asked for, or the one already there.
         shape: String,
+    },
+
+    /// A gradient kind was set that this build does not render.
+    ///
+    /// The same bargain as [`OpError::UnsupportedShape`] (D21): a gradient
+    /// written by a newer build is preserved as written when a document
+    /// carries one, and refused the moment an operation tries to set one — a
+    /// document that saves cleanly and then cannot be drawn is the worst
+    /// place to find out.
+    #[error(
+        "{}gradient kind {kind:?} is not one this build renders",
+        layer_prefix(id)
+    )]
+    UnsupportedGradient {
+        /// The layer in question, when there is one.
+        id: Option<LayerId>,
+        /// The gradient kind that was asked for.
+        kind: String,
+    },
+
+    /// An image asset was requested as a shape fill.
+    #[error(
+        "{}image assets cannot fill a shape; add an image layer and clip it instead",
+        layer_prefix(id)
+    )]
+    ImageInShapeFill {
+        /// The layer in question, when there is one.
+        id: Option<LayerId>,
+    },
+
+    /// A gradient was set as a drop shadow's colour.
+    ///
+    /// The shadow is one `feFlood`, and a flood has no gradient primitive.
+    /// Refused on the way in and at render, naming the limitation; every
+    /// other colour position renders gradients.
+    #[error(
+        "{}a gradient in dropShadow.color is refused; the shadow filter draws a solid colour only",
+        layer_prefix(id)
+    )]
+    GradientInShadowColor {
+        /// The layer in question, when there is one.
+        id: Option<LayerId>,
     },
 
     /// A crop was set on an image whose asset records no pixel size.

@@ -10,9 +10,9 @@
 
 use std::path::Path;
 
-use assemblash_core::document::{TextAlign, Transform};
+use assemblash_core::document::{Asset, BackgroundImage, ImageFit, TextAlign, Transform};
 use assemblash_core::history::{Actor, ActorKind, EntryKind};
-use assemblash_core::ids::{LayerId, SequentialIdSource};
+use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::ops::{
     CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, OpError, Operation, UpdateCanvas,
 };
@@ -49,6 +49,47 @@ fn new_text(text: &str) -> Operation {
     })
 }
 
+fn set_background_image(image: BackgroundImage) -> Operation {
+    Operation::UpdateCanvas(UpdateCanvas {
+        width: None,
+        height: None,
+        background: None,
+        background_image: Some(image),
+        clear_background_image: false,
+        anchor: None,
+    })
+}
+
+fn clear_background_image() -> Operation {
+    Operation::UpdateCanvas(UpdateCanvas {
+        width: None,
+        height: None,
+        background: None,
+        background_image: None,
+        clear_background_image: true,
+        anchor: None,
+    })
+}
+
+fn set_canvas_width(width: f64) -> Operation {
+    Operation::UpdateCanvas(UpdateCanvas {
+        width: Some(width),
+        height: None,
+        background: None,
+        background_image: None,
+        clear_background_image: false,
+        anchor: None,
+    })
+}
+
+fn background_image(asset: &str, fit: ImageFit) -> BackgroundImage {
+    BackgroundImage {
+        asset: AssetId::new(asset),
+        fit,
+        extra: Default::default(),
+    }
+}
+
 struct Project {
     _dir: tempfile::TempDir,
     session: Session,
@@ -61,6 +102,28 @@ impl Project {
         let mut ids = SequentialIdSource::new();
         let document = Document::new(&mut ids, 400.0, 400.0);
         let session = Session::create(dir.path(), document, Some(1)).unwrap();
+        Self {
+            _dir: dir,
+            session,
+            ids,
+        }
+    }
+
+    fn with_background_asset() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ids = SequentialIdSource::new();
+        let mut document = Document::new(&mut ids, 400.0, 400.0);
+        document.assets.push(Asset {
+            id: AssetId::new("asset_background"),
+            path: "background.png".to_owned(),
+            hash: format!("sha256:{}", "0".repeat(64)),
+            media_type: "image/png".to_owned(),
+            width: Some(4),
+            height: Some(4),
+            extra: Default::default(),
+        });
+        let session = Session::create(dir.path(), document, Some(1)).unwrap();
+        std::fs::write(dir.path().join("assets/background.png"), b"test asset").unwrap();
         Self {
             _dir: dir,
             session,
@@ -83,6 +146,14 @@ impl Project {
     fn document_bytes(&self) -> Vec<u8> {
         std::fs::read(self.path().join(DOCUMENT_FILE)).unwrap()
     }
+}
+
+fn reopen_project(project: Project) -> Project {
+    let Project { _dir, session, ids } = project;
+    let path = session.project_dir().to_path_buf();
+    drop(session);
+    let session = Session::open(&path, Some(9)).unwrap();
+    Project { _dir, session, ids }
 }
 
 /// Closes a project, edits the document on disk, and reopens it.
@@ -141,6 +212,7 @@ fn canvas_update_undoes_and_redoes_byte_identically() {
         height: Some(500.0),
         background: Some(Some(Color::new("#12345678"))),
         anchor: Some(CanvasAnchor::Center),
+        ..UpdateCanvas::default()
     }));
     let after = project.document_bytes();
     assert_ne!(after, before);
@@ -155,6 +227,53 @@ fn canvas_update_undoes_and_redoes_byte_identically() {
         .redo(&human(), Some(3), &mut project.ids)
         .unwrap();
     assert_eq!(project.document_bytes(), after);
+}
+
+#[test]
+fn canvas_background_image_set_and_clear_undo_redo_byte_identically() {
+    let mut project = Project::with_background_asset();
+    let before = project.document_bytes();
+    let background = BackgroundImage {
+        asset: AssetId::new("asset_background"),
+        fit: ImageFit::Cover,
+        extra: Default::default(),
+    };
+
+    project.apply(Operation::UpdateCanvas(UpdateCanvas {
+        background_image: Some(background.clone()),
+        ..UpdateCanvas::default()
+    }));
+    let after_set = project.document_bytes();
+    assert_ne!(after_set, before);
+
+    project.apply(Operation::UpdateCanvas(UpdateCanvas {
+        clear_background_image: true,
+        ..UpdateCanvas::default()
+    }));
+    let after_clear = project.document_bytes();
+    assert_ne!(after_clear, after_set);
+
+    project
+        .session
+        .undo(&human(), Some(3), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), after_set);
+    project
+        .session
+        .undo(&human(), Some(4), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), before);
+
+    project
+        .session
+        .redo(&human(), Some(5), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), after_set);
+    project
+        .session
+        .redo(&human(), Some(6), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), after_clear);
 }
 /// The 1.6.0 form of exit test 1: a new layer kind, and the two properties
 /// that can be *cleared* rather than only set, have to undo as exactly as
@@ -357,6 +476,483 @@ fn a_new_operation_after_an_undo_makes_the_redo_tail_unreachable() {
         .filter(|operation| format!("{operation:?}").contains("two"))
         .count();
     assert_eq!(abandoned, 1);
+}
+
+fn move_to_branch_with_a_stale_future_snapshot(project: &mut Project) {
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Contain,
+    )));
+    project.apply(set_canvas_width(500.0));
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Cover,
+    )));
+
+    project
+        .session
+        .undo(&human(), Some(2), &mut project.ids)
+        .unwrap();
+    project
+        .session
+        .redo(&human(), Some(3), &mut project.ids)
+        .unwrap();
+    project
+        .session
+        .undo(&human(), Some(4), &mut project.ids)
+        .unwrap();
+}
+
+#[test]
+fn repeated_branches_discard_stale_future_snapshots_after_reopen() {
+    let mut project = Project::with_background_asset();
+    move_to_branch_with_a_stale_future_snapshot(&mut project);
+    // Reopen so max_applied_position must be recovered from the append-only
+    // journal before the old future snapshot is invalidated.
+    project = reopen_project(project);
+
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Fill,
+    )));
+    let expected = project.document_bytes();
+    project = reopen_project(project);
+    project.apply(clear_background_image());
+    project
+        .session
+        .undo(&human(), Some(5), &mut project.ids)
+        .unwrap();
+
+    assert_eq!(
+        project.document_bytes(),
+        expected,
+        "undo must rebuild from the new branch, not an abandoned snapshot"
+    );
+
+    project
+        .session
+        .undo(&human(), Some(6), &mut project.ids)
+        .unwrap();
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Cover,
+    )));
+    let expected_second_branch = project.document_bytes();
+    project = reopen_project(project);
+    project.apply(clear_background_image());
+    project
+        .session
+        .undo(&human(), Some(7), &mut project.ids)
+        .unwrap();
+    assert_eq!(
+        project.document_bytes(),
+        expected_second_branch,
+        "a later branch must discard the snapshot written for the first branch"
+    );
+
+    assert_eq!(
+        project.session.history().entries().len(),
+        13,
+        "branching must retain the append-only journal"
+    );
+}
+
+#[test]
+fn a_batch_branch_discards_a_stale_future_snapshot_before_append() {
+    let mut project = Project::with_background_asset();
+    move_to_branch_with_a_stale_future_snapshot(&mut project);
+
+    let operations = [
+        set_background_image(background_image("asset_background", ImageFit::Fill)),
+        set_canvas_width(640.0),
+    ];
+    project
+        .session
+        .apply_batch(
+            "change canvas background",
+            &operations,
+            &human(),
+            Some(5),
+            None,
+            &mut project.ids,
+        )
+        .unwrap();
+    let expected = project.document_bytes();
+    project.apply(clear_background_image());
+    project
+        .session
+        .undo(&human(), Some(6), &mut project.ids)
+        .unwrap();
+
+    assert_eq!(
+        project.document_bytes(),
+        expected,
+        "undo must rebuild from the new batch branch"
+    );
+}
+
+#[test]
+fn a_refused_branch_append_preserves_future_asset_snapshots_for_redo() {
+    let mut project = Project::new();
+    project.apply(new_text("first"));
+    project.apply(set_canvas_width(500.0));
+
+    let source = project._dir.path().join("source.png");
+    std::fs::write(&source, b"asset bytes").unwrap();
+    let project_path = project.path().to_path_buf();
+    let asset =
+        assemblash_core::storage::import_asset(&project_path, &source, &mut project.ids).unwrap();
+    project.session.register_asset(asset).unwrap();
+
+    // Model a snapshot write by an older build: the bytes change, but the
+    // cache index hash is not updated to associate them with the transaction.
+    let snapshot_path = project
+        .path()
+        .join(assemblash_core::history::HISTORY_DIR)
+        .join(assemblash_core::history::SNAPSHOTS_DIR)
+        .join("000000000002.json");
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    snapshot["futureSnapshotMetadata"] = serde_json::json!({ "revision": 3 });
+    let mut snapshot_bytes = serde_json::to_vec_pretty(&snapshot).unwrap();
+    snapshot_bytes.push(b'\n');
+    std::fs::write(&snapshot_path, snapshot_bytes).unwrap();
+
+    project
+        .session
+        .undo(&human(), Some(2), &mut project.ids)
+        .unwrap();
+
+    let journal_path = project
+        .path()
+        .join(assemblash_core::history::HISTORY_DIR)
+        .join(assemblash_core::history::JOURNAL_FILE);
+    let journal = std::fs::read(&journal_path).unwrap();
+    std::fs::remove_file(&journal_path).unwrap();
+    std::fs::create_dir(&journal_path).unwrap();
+
+    let refused = project.session.apply(
+        &new_text("branch"),
+        &human(),
+        Some(3),
+        None,
+        &mut project.ids,
+    );
+    assert!(refused.is_err(), "the directory must refuse journal append");
+
+    std::fs::remove_dir(&journal_path).unwrap();
+    std::fs::write(&journal_path, journal).unwrap();
+    project
+        .session
+        .redo(&human(), Some(4), &mut project.ids)
+        .unwrap();
+
+    assert_eq!(project.session.document().assets.len(), 1);
+    assert_eq!(
+        project
+            .session
+            .document()
+            .extra
+            .get("futureSnapshotMetadata"),
+        Some(&serde_json::json!({ "revision": 3 })),
+        "a legacy snapshot replacement must remain available for old redo"
+    );
+}
+
+#[test]
+fn a_missing_snapshot_index_preserves_legacy_assets_and_discards_old_branch_state() {
+    let mut project = Project::new();
+    project.apply(new_text("first"));
+    project.apply(set_canvas_width(500.0));
+
+    let source = project._dir.path().join("source.png");
+    std::fs::write(&source, b"asset bytes").unwrap();
+    let project_path = project.path().to_path_buf();
+    let asset =
+        assemblash_core::storage::import_asset(&project_path, &source, &mut project.ids).unwrap();
+    project.session.register_asset(asset).unwrap();
+
+    let snapshots = project
+        .path()
+        .join(assemblash_core::history::HISTORY_DIR)
+        .join(assemblash_core::history::SNAPSHOTS_DIR);
+    let index_path = snapshots.join("cache-index.json");
+    assert!(index_path.is_file());
+    std::fs::remove_file(&index_path).unwrap();
+    project = reopen_project(project);
+    assert!(!index_path.exists());
+
+    project
+        .session
+        .undo(&human(), Some(2), &mut project.ids)
+        .unwrap();
+    project
+        .session
+        .redo(&human(), Some(3), &mut project.ids)
+        .unwrap();
+    assert_eq!(
+        project.session.document().assets.len(),
+        1,
+        "a snapshot without an index must retain imported asset metadata"
+    );
+
+    project
+        .session
+        .undo(&human(), Some(4), &mut project.ids)
+        .unwrap();
+    std::fs::remove_file(&index_path).unwrap();
+    project.apply(set_canvas_width(600.0));
+    assert_eq!(project.session.document().canvas.width, 600.0);
+    assert!(project.session.document().assets.is_empty());
+
+    project = reopen_project(project);
+    project
+        .session
+        .undo(&human(), Some(5), &mut project.ids)
+        .unwrap();
+    project
+        .session
+        .redo(&human(), Some(6), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.session.document().canvas.width, 600.0);
+    assert!(
+        project.session.document().assets.is_empty(),
+        "redo must replay the new branch instead of the old asset snapshot"
+    );
+}
+
+#[test]
+fn a_deleted_or_corrupt_index_does_not_revive_abandoned_snapshots() {
+    for corrupt in [false, true] {
+        let mut project = Project::with_background_asset();
+        move_to_branch_with_a_stale_future_snapshot(&mut project);
+        project.apply(set_background_image(background_image(
+            "asset_background",
+            ImageFit::Fill,
+        )));
+        let expected = project.document_bytes();
+        project.apply(clear_background_image());
+        let index = project
+            .path()
+            .join(assemblash_core::history::HISTORY_DIR)
+            .join(assemblash_core::history::SNAPSHOTS_DIR)
+            .join("cache-index.json");
+        if corrupt {
+            std::fs::write(&index, b"invalid JSON").unwrap();
+        } else {
+            std::fs::remove_file(&index).unwrap();
+        }
+        project = reopen_project(project);
+        project
+            .session
+            .undo(&human(), Some(8), &mut project.ids)
+            .unwrap();
+        assert_eq!(project.document_bytes(), expected);
+    }
+}
+
+#[test]
+fn snapshot_sidecars_preserve_imported_assets_after_index_loss_on_a_branch() {
+    for corrupt in [false, true] {
+        let mut project = Project::with_background_asset();
+        move_to_branch_with_a_stale_future_snapshot(&mut project);
+        project.apply(set_background_image(background_image(
+            "asset_background",
+            ImageFit::Fill,
+        )));
+        let source = project._dir.path().join("second.png");
+        std::fs::write(&source, b"second imported asset").unwrap();
+        let asset = assemblash_core::storage::import_asset(
+            project.path(),
+            &source,
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        project.session.register_asset(asset).unwrap();
+        let expected = project.document_bytes();
+        project.apply(clear_background_image());
+        let index = project
+            .path()
+            .join(assemblash_core::history::HISTORY_DIR)
+            .join(assemblash_core::history::SNAPSHOTS_DIR)
+            .join("cache-index.json");
+        if corrupt {
+            std::fs::write(&index, b"invalid JSON").unwrap();
+        } else {
+            std::fs::remove_file(&index).unwrap();
+        }
+        project = reopen_project(project);
+        project
+            .session
+            .undo(&human(), Some(8), &mut project.ids)
+            .unwrap();
+        assert_eq!(project.document_bytes(), expected);
+        assert_eq!(project.session.document().assets.len(), 2);
+        project
+            .session
+            .redo(&human(), Some(9), &mut project.ids)
+            .unwrap();
+        assert_eq!(project.session.document().assets.len(), 2);
+    }
+}
+
+#[test]
+fn losing_all_associations_refuses_ambiguous_branch_snapshots_atomically() {
+    let mut project = Project::with_background_asset();
+    move_to_branch_with_a_stale_future_snapshot(&mut project);
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Fill,
+    )));
+    project.apply(clear_background_image());
+    let snapshots = project
+        .path()
+        .join(assemblash_core::history::HISTORY_DIR)
+        .join(assemblash_core::history::SNAPSHOTS_DIR);
+    std::fs::remove_file(snapshots.join("cache-index.json")).unwrap();
+    for entry in std::fs::read_dir(&snapshots).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(".association.json")
+        {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    let before = project.document_bytes();
+    let entries = project.session.history().entries().len();
+    let refused = project
+        .session
+        .undo(&human(), Some(8), &mut project.ids)
+        .unwrap_err();
+    assert!(matches!(
+        refused,
+        SessionError::History(assemblash_core::history::HistoryError::UnassociatedSnapshot { .. })
+    ));
+    assert_eq!(project.document_bytes(), before);
+    assert_eq!(project.session.history().entries().len(), entries);
+}
+
+#[test]
+fn a_later_verified_snapshot_covers_an_ambiguous_older_snapshot() {
+    let mut project = Project::with_background_asset();
+    move_to_branch_with_a_stale_future_snapshot(&mut project);
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Fill,
+    )));
+    project.apply(clear_background_image());
+    project
+        .session
+        .undo(&human(), Some(8), &mut project.ids)
+        .unwrap();
+    project
+        .session
+        .redo(&human(), Some(9), &mut project.ids)
+        .unwrap();
+    let expected = project.document_bytes();
+    let snapshots = project
+        .path()
+        .join(assemblash_core::history::HISTORY_DIR)
+        .join(assemblash_core::history::SNAPSHOTS_DIR);
+    let index_path = snapshots.join("cache-index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&index_path).unwrap()).unwrap();
+    index.as_object_mut().unwrap().remove("3");
+    std::fs::write(&index_path, serde_json::to_vec(&index).unwrap()).unwrap();
+    std::fs::remove_file(snapshots.join("000000000003.association.json")).unwrap();
+    project.apply(set_canvas_width(650.0));
+    project
+        .session
+        .undo(&human(), Some(10), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), expected);
+}
+
+#[test]
+fn a_stale_sidecar_does_not_replace_a_matching_central_association() {
+    let mut project = Project::with_background_asset();
+    move_to_branch_with_a_stale_future_snapshot(&mut project);
+    let snapshots = project
+        .path()
+        .join(assemblash_core::history::HISTORY_DIR)
+        .join(assemblash_core::history::SNAPSHOTS_DIR);
+    let sidecar = snapshots.join("000000000003.association.json");
+    let stale = std::fs::read(&sidecar).unwrap();
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Fill,
+    )));
+    let source = project._dir.path().join("second.png");
+    std::fs::write(&source, b"second imported asset").unwrap();
+    let asset = assemblash_core::storage::import_asset(
+        project.path(),
+        &source,
+        &mut SequentialIdSource::new(),
+    )
+    .unwrap();
+    project.session.register_asset(asset).unwrap();
+    let expected = project.document_bytes();
+    std::fs::write(sidecar, stale).unwrap();
+    project.apply(clear_background_image());
+    project
+        .session
+        .undo(&human(), Some(8), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), expected);
+    assert_eq!(project.session.document().assets.len(), 2);
+}
+
+#[test]
+fn a_second_branch_cannot_associate_ambiguous_legacy_snapshots() {
+    let mut project = Project::with_background_asset();
+    move_to_branch_with_a_stale_future_snapshot(&mut project);
+    project.apply(set_background_image(background_image(
+        "asset_background",
+        ImageFit::Fill,
+    )));
+    project
+        .session
+        .undo(&human(), Some(8), &mut project.ids)
+        .unwrap();
+    let snapshots = project
+        .path()
+        .join(assemblash_core::history::HISTORY_DIR)
+        .join(assemblash_core::history::SNAPSHOTS_DIR);
+    std::fs::remove_file(snapshots.join("cache-index.json")).unwrap();
+    for entry in std::fs::read_dir(&snapshots).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(".association.json")
+        {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    let before = project.document_bytes();
+    let entries = project.session.history().entries().len();
+    let refused = project
+        .session
+        .apply(
+            &set_canvas_width(650.0),
+            &human(),
+            Some(9),
+            None,
+            &mut project.ids,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        refused,
+        SessionError::History(assemblash_core::history::HistoryError::UnassociatedSnapshot { .. })
+    ));
+    assert_eq!(project.document_bytes(), before);
+    assert_eq!(project.session.history().entries().len(), entries);
 }
 
 #[test]
@@ -653,6 +1249,8 @@ fn opening_read_only_never_writes() {
     drop(session);
 
     let snapshots = path.join("history/snapshots");
+    let index_path = snapshots.join("cache-index.json");
+    let index_before = std::fs::read(&index_path).unwrap();
     let before: Vec<_> = std::fs::read_dir(&snapshots)
         .map(|entries| {
             entries
@@ -675,6 +1273,11 @@ fn opening_read_only_never_writes() {
         })
         .unwrap_or_default();
     assert_eq!(before, after, "a read-only open must not write a snapshot");
+    assert_eq!(
+        std::fs::read(index_path).unwrap(),
+        index_before,
+        "a read-only open must not write snapshot associations"
+    );
 }
 
 #[test]

@@ -590,6 +590,11 @@ def stale_lock_step(
 
 def install_step(server: Serve) -> dict[str, object]:
     """`--online` only: the default pack, over HTTP, with nothing seeded silently."""
+    manifest_path = Path(__file__).resolve().parents[1] / "crates" / "assemblash-renderer" / "fonts" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected = {family["name"] for family in manifest["families"] if "default" in family["packs"]}
+    if not expected:
+        raise SmokeFailure("the default font pack contains no families")
     status, before = json_request(server.base, "GET", "/api/fonts")
     expect(status, 200, before, "GET /api/fonts before an install")
     had = set(before.get("families", []))
@@ -600,11 +605,11 @@ def install_step(server: Serve) -> dict[str, object]:
     expect(status, 201, installed, 'POST /api/fonts/install {"pack":"default"}')
     now = set(installed.get("families", []))
     added = sorted(now - had)
-    if len(added) != 3:
+    if now != had | expected:
         raise SmokeFailure(
-            f"the default pack added {len(added)} families, expected 3: {added!r}"
+            f"the default pack returned {sorted(now)!r}, expected {sorted(had | expected)!r}"
         )
-    return {"status": "passed", "families": added}
+    return {"status": "passed", "families": sorted(expected), "addedFamilies": added}
 
 
 def main() -> int:

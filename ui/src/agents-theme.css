@@ -1,0 +1,20 @@
+/* Keep the config output readable when the dialog opens in a narrow window. */
+.agents-config {
+  margin: 0 0 var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default-hover);
+  overflow-x: auto;
+}
+
+.agents-config code {
+  white-space: pre;
+}
+
+#agents-token {
+  margin: 0 0 var(--mantine-spacing-md);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border-left: 3px solid var(--mantine-primary-color-filled);
+  background: var(--mantine-color-default-hover);
+}

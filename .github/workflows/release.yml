@@ -79,6 +79,16 @@ jobs:
             ./target/release/assemblash --version
           fi
 
+      - name: Verify renderer identity in the release profile
+        run: cargo test --release -p assemblash-renderer --test gate
+
+      - name: Save the release renderer identity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-renderer-${{ matrix.target-name }}
+          path: target/gate/hashes.json
+          if-no-files-found: error
+
       - name: Package
         shell: bash
         run: |
@@ -140,7 +150,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target-name }}
+          name: package-${{ matrix.target-name }}
           path: |
             dist/*.tar.gz
             dist/*.zip
@@ -150,7 +160,7 @@ jobs:
 
   attach:
     name: Attach binaries to the release
-    needs: build
+    needs: [build, render-identity]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -158,6 +168,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+          pattern: package-*
 
       - name: Checksums
         run: |
@@ -209,3 +220,22 @@ jobs:
           --repo "${{ github.repository }}"
           --canvas
           --no-terminal
+          --paint
+
+  render-identity:
+    name: Compare release renderer bytes on all six targets
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-renderer-*
+          path: release-renderer-hashes
+      - run: python scripts/renderer_identity_compare.py release-renderer-hashes --prefix release-renderer-

@@ -792,7 +792,7 @@ impl Backend {
         project: &str,
         width: f64,
         height: f64,
-        background: Option<&str>,
+        background: Option<Color>,
         name: Option<&str>,
     ) -> Result<ProjectSummary, ApiError> {
         let state = match &self.root {
@@ -810,12 +810,30 @@ impl Backend {
         };
 
         let id = ProjectId::new(project)?;
-        let directory = state.workspace().create_project_dir(&id)?;
-
+        let directory = state.workspace().project_dir(&id);
         let mut document = Document::new(&mut UlidIdSource, width, height);
         document.name = name.map(ToOwned::to_owned);
-        document.canvas.background = background.map(Color::new);
+        assemblash_core::ops::apply(
+            &mut document,
+            &assemblash_core::Operation::UpdateCanvas(assemblash_core::ops::UpdateCanvas {
+                background: background.map(Some),
+                ..Default::default()
+            }),
+            &mut UlidIdSource,
+        )
+        .map_err(|error| match error {
+            assemblash_core::ops::OpError::Invalid(source) => {
+                assemblash_core::SessionError::Storage(
+                    assemblash_core::storage::StorageError::InvalidDocument {
+                        path: directory.join(assemblash_core::storage::DOCUMENT_FILE),
+                        source,
+                    },
+                )
+            }
+            error => assemblash_core::SessionError::Operation(error),
+        })?;
 
+        state.workspace().create_project_dir(&id)?;
         let session = assemblash_core::Session::create(&directory, document, now_millis())?;
         let summary = summarise(id.as_str(), session.document());
         // Adopted rather than reopened: the session already holds the lock,

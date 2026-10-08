@@ -163,6 +163,25 @@ mod tests {
         feed
     }
 
+    fn next_patch_version() -> String {
+        let mut components = env!("CARGO_PKG_VERSION").split('.');
+        let major = components.next().unwrap().parse::<u64>().unwrap();
+        let minor = components.next().unwrap().parse::<u64>().unwrap();
+        let patch = components
+            .next()
+            .unwrap()
+            .split(['-', '+'])
+            .next()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        format!("{major}.{minor}.{}", patch + 1)
+    }
+
+    fn next_tag() -> String {
+        format!("v{}", next_patch_version())
+    }
+
     /// A local HTTP server that counts its requests, so the tests can assert
     /// that a gated check costs nothing and a due check costs exactly one.
     struct CountingServer {
@@ -277,7 +296,9 @@ mod tests {
     /// and the cache answers the due-window question for the next 24 hours.
     #[test]
     fn a_due_check_costs_one_request_and_then_the_cache_answers() {
-        let server = CountingServer::start(atom(&["v1.10.1"]));
+        let latest = next_patch_version();
+        let tag = next_tag();
+        let server = CountingServer::start(atom(&[&tag]));
         let endpoint = format!("{}/releases.atom", server.base);
         let root = temp_root("due");
         set_consent(&root, Some(UpdateCheck::Notify));
@@ -285,7 +306,7 @@ mod tests {
         let answered = startup_check(&root, &endpoint, LOCAL, &HttpReleaseFetcher, now())
             .unwrap()
             .unwrap();
-        assert_eq!(answered.remote, "1.10.1");
+        assert_eq!(answered.remote, latest);
         assert!(answered.newer);
         assert_eq!(server.count(), 1);
 
@@ -293,7 +314,7 @@ mod tests {
         let cached = startup_check(&root, &endpoint, LOCAL, &HttpReleaseFetcher, now() + 60_000)
             .unwrap()
             .unwrap();
-        assert_eq!(cached.remote, "1.10.1");
+        assert_eq!(cached.remote, latest);
         assert_eq!(server.count(), 1, "the 24-hour cache must answer");
 
         // Past the window the one request is allowed again.
@@ -306,7 +327,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(later.remote, "1.10.1");
+        assert_eq!(later.remote, latest);
         assert_eq!(server.count(), 2);
     }
 
@@ -314,7 +335,9 @@ mod tests {
     /// any fetch happening on read.
     #[test]
     fn status_reads_consent_and_cache_without_fetching() {
-        let server = CountingServer::start(atom(&["v1.10.1"]));
+        let latest = next_patch_version();
+        let tag = next_tag();
+        let server = CountingServer::start(atom(&[&tag]));
         let endpoint = format!("{}/releases.atom", server.base);
         let root = temp_root("status");
         set_consent(&root, Some(UpdateCheck::Notify));
@@ -325,7 +348,7 @@ mod tests {
 
         startup_check(&root, &endpoint, LOCAL, &HttpReleaseFetcher, now()).unwrap();
         let status = status_of(&root, LOCAL);
-        assert_eq!(status.latest.as_deref(), Some("1.10.1"));
+        assert_eq!(status.latest.as_deref(), Some(latest.as_str()));
         assert!(status.newer);
         assert_eq!(server.count(), 1, "reading the status must not fetch");
 
@@ -352,10 +375,12 @@ mod tests {
     #[test]
     fn a_cache_round_trips_through_the_workspace() {
         let root = temp_root("cache-shape");
+        let latest = next_patch_version();
+        let notes_url = format!("https://example.com/tag/v{latest}");
         let cache = UpdateCache {
             version: 1,
-            latest: "1.10.1".to_owned(),
-            notes_url: Some("https://example.com/tag/v1.10.1".to_owned()),
+            latest: latest.clone(),
+            notes_url: Some(notes_url.clone()),
             checked_at_ms: now(),
         };
         std::fs::write(
@@ -364,11 +389,8 @@ mod tests {
         )
         .unwrap();
         let status = status_of(&root, LOCAL);
-        assert_eq!(status.latest.as_deref(), Some("1.10.1"));
+        assert_eq!(status.latest.as_deref(), Some(latest.as_str()));
         assert!(status.newer);
-        assert_eq!(
-            status.notes_url.as_deref(),
-            Some("https://example.com/tag/v1.10.1")
-        );
+        assert_eq!(status.notes_url.as_deref(), Some(notes_url.as_str()));
     }
 }

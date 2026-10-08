@@ -128,6 +128,7 @@ fn canvas_resize_changes_surface_and_background_without_scaling_then_undoes_pixe
                 height: Some(50.0),
                 background: Some(Some(Color::new("#ff0000"))),
                 anchor: Some(CanvasAnchor::Center),
+                ..UpdateCanvas::default()
             }),
             &Actor::named(ActorKind::Human, "renderer-test"),
             Some(2),

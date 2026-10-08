@@ -18,7 +18,7 @@
 import * as api from "./api.js";
 import type { Document, Layer, Operation } from "./api.js";
 import { mountAgents } from "./agents.js";
-import { mountExport } from "./export.js";
+import { mountExport } from "./export-mantine.js";
 import {
   placedAssetSize,
   resizeItemInSelection,
@@ -27,11 +27,40 @@ import {
   rotatedRectBounds,
   selectionBounds,
 } from "./geometry.js";
-import { appendInstalledFontSpecimen, facesOf, mountFontSelector, mountFonts, releaseFontSpecimens } from "./fonts.js";
+import { appendInstalledFontSpecimen, facesOf, releaseFontSpecimens } from "./fonts.js";
+import type { FontSelector } from "./fonts.js";
+import { mountFontSelectorMantine as mountFontSelector } from "./font-selector-mantine.js";
+import { mountFontsMantine } from "./fonts-mantine.js";
 import { formatCount, formatNumber, getLocale, setLocale, t as translate, type MessageKey } from "./i18n.js";
 import { ActionQueue } from "./queue.js";
 import type { QueueSettlement } from "./queue.js";
-import { mountTemplates } from "./templates.js";
+import { mountProjectCreate } from "./project-create-mantine.js";
+import { mountNamePrompt } from "./name-prompt-mantine.js";
+import { mountSettings, type SettingsGroup } from "./settings-mantine.js";
+import { mountProjectPicker } from "./project-picker-mantine.js";
+import { mountTemplates } from "./templates-mantine.js";
+import { mountStructurePanel, type DockView, type ReorderPosition, type StructureSnapshot } from "./structure-mantine.js";
+import { mountPaintInput } from "./paint-input.js";
+import { mountCanvasImageInput } from "./canvas-image-input.js";
+import { mountCanvasAnchorPicker, type CanvasAnchor } from "./canvas-anchor-mantine.js";
+import { batchMantinePortals, registerLocaleRefresh } from "./mantine-root.js";
+import { mountInspectorField, mountInspectorButton, mountInspectorCheckbox } from "./inspector-controls-mantine.js";
+import { mountContextMenu, type ContextMenuItem } from "./context-menu-mantine.js";
+import { mountRecentProjects } from "./canvas-surface.js";
+import {
+  mountStatusChrome,
+  currentStatusKind,
+  setAgentCount,
+  setConsentVisible,
+  setDocumentDimensions,
+  setSaveIndicator,
+  setStatusKind,
+  setStatusMessage,
+  setUpdateBanner,
+} from "./status-chrome.js";
+import { positionPopoverIsOpen, setPositionPopoverOpen } from "./position-popover-mantine.js";
+import { mountDockSection } from "./dock-section-mantine.js";
+import { setAssetUploadHandler } from "./chrome.js";
 
 interface State {
   project: string | null;
@@ -132,21 +161,15 @@ queue.onSettled = (settlement: QueueSettlement): void => {
 };
 
 function setSaveState(iconName: string, key: "save.working" | "save.allChangesSaved" | "save.needsAttention"): void {
-  const icon = document.createElement("i");
-  icon.className = `ph ${iconName}`;
-  icon.setAttribute("aria-hidden", "true");
-  const label = document.createElement("span");
-  label.dataset["i18n"] = key;
-  label.textContent = translate(key);
-  dom.saveState.replaceChildren(icon, label);
+  setSaveIndicator(iconName, key);
 }
 
 queue.onActiveChange = (active: boolean): void => {
   state.busy = active;
   if (active) {
-    dom.status.dataset["kind"] = "info";
+    setStatusKind("info");
     setSaveState("ph-circle-notch", "save.working");
-  } else if (dom.status.dataset["kind"] !== "error") {
+  } else if (currentStatusKind() !== "error") {
     setSaveState("ph-check-circle", "save.allChangesSaved");
   }
 };
@@ -201,6 +224,18 @@ function drawPerfOverlay(): void {
  * the inspector.
  */
 const SHAPE_FILL_COLOUR = "#3366cc";
+
+/** UI colour pickers edit solid colours only. Keep gradients intact and make
+ * controls that cannot represent them read-only instead of flattening them. */
+function solidColour(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function colourDescription(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "kind" in value) return translate("paint.gradient");
+  return "";
+}
 const SHAPE_STROKE_COLOUR = "#111111";
 const SHAPE_STROKE_WIDTH = 2;
 
@@ -300,16 +335,72 @@ function localizedSpan(key: MessageKey): HTMLSpanElement {
   return span;
 }
 
+const settings = mountSettings();
+let layerQuery = "";
+let historySnapshot: StructureSnapshot["history"] = null;
+let activeDock: DockView = "layers";
+const structurePanel = mountStructurePanel(el<HTMLElement>("structure-panel"), {
+  document: null,
+  selectedIds: [],
+  query: layerQuery,
+  history: historySnapshot,
+  dock: activeDock,
+}, {
+  setQuery(query) {
+    layerQuery = query;
+    drawLayers();
+  },
+  select(id, additive) {
+    state.selection = additive
+      ? state.selection.includes(id) ? state.selection.filter((one) => one !== id) : [...state.selection, id]
+      : [id];
+    drawLayers();
+    drawOverlay();
+    drawInspector();
+    if (window.matchMedia("(max-width: 720px)").matches && selectedLayer()?.type !== "text") {
+      dom.structure.classList.remove("mobile-open");
+      dom.dockToggle.setAttribute("aria-expanded", "false");
+    }
+  },
+  toggleVisibility(id) {
+    const layer = state.document && api.flatten(api.layersOf(state.document)).find((row) => row.layer.id === id)?.layer;
+    if (layer) void send(layer.visible === false ? "show layer" : "hide layer", { op: "setVisible", id, visible: layer.visible === false } as Operation);
+  },
+  toggleLocked(id) {
+    const layer = state.document && api.flatten(api.layersOf(state.document)).find((row) => row.layer.id === id)?.layer;
+    if (layer) void send(layer.locked ? "unlock layer" : "lock layer", { op: "setLocked", id, locked: !layer.locked } as Operation);
+  },
+  rename(id, name) {
+    void send("rename layer", { op: "rename", id, name: name || undefined } as Operation);
+  },
+  reorder(draggedId, _targetId, position: ReorderPosition) {
+    const to = position.at === "root"
+      ? { at: "root" as const, index: position.index }
+      : { at: "in" as const, parent: position.parent, index: position.index };
+    void send("reorder layer", { op: "reorder", id: draggedId, to } as Operation);
+  },
+  groupSelection() {
+    if (state.selection.length < 2) return;
+    void send("group", { op: "group", ids: [...state.selection] } as Operation);
+  },
+  deleteSelection() { deleteSelection(); },
+  undo() { dom.undo.click(); },
+  redo() { dom.redo.click(); },
+  showDock(view) { showDock(view); },
+  contextMenu(_id, x, y) {
+    drawOverlay();
+    drawInspector();
+    openContextMenu(x, y);
+  },
+});
+const contextMenuController = mountContextMenu(el<HTMLElement>("context-menu-root"));
 const dom = {
-  projects: el<HTMLSelectElement>("projects"),
-  projectOptions: el<HTMLDivElement>("project-options"),
-  projectPickerToggle: el<HTMLButtonElement>("project-picker-toggle"),
   newProject: el<HTMLButtonElement>("new-project"),
   renameProject: el<HTMLButtonElement>("rename-project"),
   deleteProject: el<HTMLButtonElement>("delete-project"),
   reload: el<HTMLButtonElement>("reload"),
-  search: el<HTMLInputElement>("project-search"),
-  recents: el<HTMLDivElement>("recents"),
+  get search(): HTMLInputElement { return el<HTMLInputElement>("project-search"); },
+  recents: el<HTMLDivElement>("recents-mount"),
   canvasEmpty: el<HTMLDivElement>("canvas-empty"),
   canvas: el<HTMLDivElement>("canvas"),
   canvasImage: el<HTMLImageElement>("canvas-image"),
@@ -327,9 +418,7 @@ const dom = {
   layersView: el<HTMLElement>("layers-view"),
   historyView: el<HTMLElement>("history-view"),
   historyShortcut: el<HTMLButtonElement>("history-shortcut"),
-  status: el<HTMLDivElement>("status"),
-  saveState: el<HTMLSpanElement>("save-state"),
-  documentDimensions: el<HTMLSpanElement>("document-dimensions"),
+  statusChromeRoot: el<HTMLDivElement>("status-chrome-root"),
   version: el<HTMLSpanElement>("version"),
   selectTool: el<HTMLButtonElement>("select-tool"),
   addPanel: el<HTMLElement>("add-panel"),
@@ -340,8 +429,6 @@ const dom = {
   addText: el<HTMLButtonElement>("add-text"),
   addShape: el<HTMLButtonElement>("add-shape"),
   addImage: el<HTMLButtonElement>("add-image"),
-  imageFile: el<HTMLInputElement>("image-file"),
-  uploadDropzone: el<HTMLButtonElement>("upload-dropzone"),
   uploadFeedback: el<HTMLDivElement>("upload-feedback"),
   openTemplates: el<HTMLButtonElement>("open-templates"),
   deleteLayer: el<HTMLButtonElement>("delete-layer"),
@@ -352,54 +439,46 @@ const dom = {
   shutdown: el<HTMLButtonElement>("shutdown"),
   emptyCreate: el<HTMLButtonElement>("empty-create"),
   agents: el<HTMLButtonElement>("agents"),
-  agentsConnected: el<HTMLSpanElement>("agents-connected"),
-  newProjectDialog: el<HTMLDialogElement>("new-project-dialog"),
-  newProjectForm: el<HTMLFormElement>("new-project-form"),
-  newProjectName: el<HTMLInputElement>("new-project-name"),
-  newProjectWidth: el<HTMLInputElement>("new-project-width"),
-  newProjectHeight: el<HTMLInputElement>("new-project-height"),
-  newProjectBackground: el<HTMLInputElement>("new-project-background"),
-  createProjectConfirm: el<HTMLButtonElement>("create-project-confirm"),
-  canvasPresets: el<HTMLDivElement>("canvas-presets"),
-  nameDialog: el<HTMLDialogElement>("name-dialog"),
-  nameDialogForm: el<HTMLFormElement>("name-dialog-form"),
-  nameDialogTitle: el<HTMLHeadingElement>("name-dialog-title"),
-  nameDialogLabel: el<HTMLSpanElement>("name-dialog-label"),
-  nameDialogInput: el<HTMLInputElement>("name-dialog-input"),
-  nameDialogConfirm: el<HTMLButtonElement>("name-dialog-confirm"),
   positionPopover: el<HTMLDivElement>("position-popover"),
   positionClose: el<HTMLButtonElement>("position-close"),
   positionFields: el<HTMLDivElement>("position-fields"),
   contextMenu: el<HTMLDivElement>("context-menu"),
   stageViewport: el<HTMLDivElement>("stage-viewport"),
+  canvasControlsRoot: el<HTMLDivElement>("canvas-controls-root"),
+  stage: el<HTMLDivElement>("stage"),
   zoomOut: el<HTMLButtonElement>("zoom-out"),
   zoomValue: el<HTMLButtonElement>("zoom-value"),
   zoomIn: el<HTMLButtonElement>("zoom-in"),
   zoom100: el<HTMLButtonElement>("zoom-100"),
-  templatesPanel: el<HTMLElement>("templates"),
+  get templatesPanel(): HTMLElement { return el<HTMLElement>("templates"); },
   templatesToggle: el<HTMLButtonElement>("templates-toggle"),
-  templatesClose: el<HTMLButtonElement>("templates-close"),
+  get templatesClose(): HTMLButtonElement { return el<HTMLButtonElement>("templates-close"); },
   settings: el<HTMLButtonElement>("settings"),
-  settingsDialog: el<HTMLDialogElement>("settings-dialog"),
   settingsForm: el<HTMLFormElement>("settings-form"),
-  settingsGroups: [...document.querySelectorAll<HTMLDetailsElement>(".settings-section")],
 
   settingFollow: el<HTMLInputElement>("setting-follow"),
   settingLanguage: el<HTMLSelectElement>("setting-language"),
   settingsFontsOpen: el<HTMLButtonElement>("settings-fonts-open"),
   settingUpdateCheck: el<HTMLInputElement>("setting-update-check"),
   updateNote: el<HTMLParagraphElement>("update-note"),
-  consentBar: el<HTMLElement>("consent-bar"),
-  consentNotify: el<HTMLButtonElement>("consent-notify"),
-  consentOff: el<HTMLButtonElement>("consent-off"),
-  updateBanner: el<HTMLElement>("update-banner"),
-  updateBannerText: el<HTMLSpanElement>("update-banner-text"),
-  updateBannerLink: el<HTMLAnchorElement>("update-banner-link"),
-  updateBannerDismiss: el<HTMLButtonElement>("update-banner-dismiss"),
   canvasHints: el<HTMLParagraphElement>("canvas-hints"),
 };
 
-let submitRequestedName: ((name: string) => void) | null = null;
+mountStatusChrome(
+  dom.statusChromeRoot,
+  (consent) => { void recordConsent(consent); },
+  (version) => {
+    window.localStorage.setItem("assemblash-update-banner-v1", version);
+    setUpdateBanner(null);
+  },
+);
+
+const projectPicker = mountProjectPicker({
+  openProject: (projectId) => openFromQueue(projectId),
+  search: () => { void guard("search", () => loadProjects()); },
+}, document.querySelector<HTMLElement>(".project-combobox")!);
+
+const namePrompt = mountNamePrompt();
 
 function requestName(
   titleKey: MessageKey,
@@ -407,44 +486,11 @@ function requestName(
   confirmKey: MessageKey,
   submit: (name: string) => void,
 ): void {
-  submitRequestedName = submit;
-  dom.nameDialogTitle.dataset["i18n"] = titleKey;
-  dom.nameDialogTitle.textContent = translate(titleKey);
-  dom.nameDialogLabel.dataset["i18n"] = labelKey;
-  dom.nameDialogLabel.textContent = translate(labelKey);
-  dom.nameDialogConfirm.dataset["i18n"] = confirmKey;
-  dom.nameDialogConfirm.textContent = translate(confirmKey);
-  dom.nameDialogInput.value = "";
-  dom.nameDialog.showModal();
-  dom.nameDialogInput.focus();
+  namePrompt.request(titleKey, labelKey, confirmKey, submit);
 }
 
-dom.nameDialogInput.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  dom.nameDialogForm.requestSubmit(dom.nameDialogConfirm);
-});
-
-dom.nameDialogForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
-  if (submitter?.value === "cancel") {
-    submitRequestedName = null;
-    dom.nameDialog.close("cancel");
-    return;
-  }
-  if (!dom.nameDialogForm.reportValidity()) return;
-  const name = dom.nameDialogInput.value.trim();
-  if (!name) return;
-  const submit = submitRequestedName;
-  submitRequestedName = null;
-  dom.nameDialog.close("default");
-  submit?.(name);
-});
-
 function say(message: string, kind: "info" | "error" = "info"): void {
-  dom.status.textContent = message;
-  dom.status.dataset["kind"] = kind;
+  setStatusMessage(message, kind);
 }
 
 /**
@@ -514,6 +560,7 @@ function report(_what: string, error: unknown): void {
  * The template panel, which is a client of this page exactly as this page is
  * a client of the engine: it is handed what it needs and owns nothing else.
  */
+el<HTMLElement>("add-template-section").append(el<HTMLElement>("templates-mantine-mount"));
 const templates = mountTemplates({
   project: () => state.project,
   document: () => state.document,
@@ -525,7 +572,6 @@ const templates = mountTemplates({
 // Template work belongs to the same creation panel as Text, Uploads, and
 // Vector. Moving the existing renderer-backed controls here avoids a second
 // floating workspace covering the canvas.
-el<HTMLElement>("add-template-section").append(dom.templatesPanel);
 
 /**
  * The font manager, which owns the store the renderer draws from.
@@ -534,7 +580,7 @@ el<HTMLElement>("add-template-section").append(dom.templatesPanel);
  * thing only it can report: which families exist, so the shared suggestion
  * list follows an import or a removal without a page reload.
  */
-const fontsPanel = mountFonts({
+const fontsPanel = mountFontsMantine({
   project: () => state.project,
   document: () => state.document,
   say,
@@ -545,7 +591,7 @@ const fontsPanel = mountFonts({
     fontStore.faces = [...listing.faces];
     drawInspector();
   },
-});
+}, el<HTMLElement>("fonts-mantine-mount"));
 
 const exporter = mountExport({
   project: () => state.project,
@@ -554,11 +600,24 @@ const exporter = mountExport({
   guard,
 });
 
+const projectCreator = mountProjectCreate({
+  create: async (id, width, height, background) => {
+    let created = false;
+    await guard("create", async () => {
+      await api.createProject(id, width, height, background, id);
+      await loadProjects(id);
+      say(translate("projects.created", { id }));
+      created = true;
+    });
+    return created;
+  },
+});
+
 const agents = mountAgents({ say });
 
 // Settings hands control to the agent dialog. Only one modal stays open.
 dom.agents.addEventListener("click", () => {
-  if (dom.settingsDialog.open) dom.settingsDialog.close("cancel");
+  if (settings.isOpen()) settings.close();
 }, { capture: true });
 
 // --- settings -----------------------------------------------------------------
@@ -585,11 +644,12 @@ function followEnabled(): boolean {
 }
 
 /** Opens Settings at the requested configuration group. */
-function openSettings(group = "settings-agents"): void {
+function openSettings(group: SettingsGroup = "settings-agents"): void {
   dom.settingFollow.checked = followEnabled();
-  dom.settingLanguage.value = getLocale();
-  for (const section of dom.settingsGroups) section.open = section.id === group;
-  dom.settingsDialog.showModal();
+  const locale = getLocale();
+  const language = locale === "pseudo" ? "en" : locale;
+  dom.settingLanguage.value = language;
+  settings.open(group, { follow: followEnabled(), language });
 }
 
 dom.settings.addEventListener("click", () => openSettings());
@@ -600,7 +660,7 @@ dom.settingLanguage.addEventListener("change", () => {
 });
 
 // Update parameterized labels in place so an active input keeps its value and focus.
-window.addEventListener("assemblash:localechange", () => {
+registerLocaleRefresh(() => {
   for (const element of document.querySelectorAll<HTMLElement>("[data-effect-action]")) {
     const key = element.dataset["effectAction"] as "effects.moveUp" | "effects.moveDown";
     const value = translate(key, { effect: element.dataset["effectType"] ?? "" });
@@ -624,8 +684,9 @@ window.addEventListener("assemblash:localechange", () => {
   if (previewName) dom.canvasImage.alt = translate("canvas.previewAlt", { name: previewName });
   if (state.document) {
     dom.version.textContent = formatNumber(api.versionOf(state.document));
-    dom.documentDimensions.textContent =
-      `${formatNumber(Math.round(state.document.canvas.width))} × ${formatNumber(Math.round(state.document.canvas.height))}`;
+    setDocumentDimensions(
+      `${formatNumber(Math.round(state.document.canvas.width))} × ${formatNumber(Math.round(state.document.canvas.height))}`,
+    );
     applyZoom();
   }
 });
@@ -635,7 +696,7 @@ dom.settingFollow.addEventListener("change", () => {
 });
 
 dom.settingsFontsOpen.addEventListener("click", () => {
-  dom.settingsDialog.close("cancel");
+  settings.close();
   void guard("fonts", () => openFontManager(true));
 });
 
@@ -666,24 +727,23 @@ async function loadUpdateStatus(): Promise<void> {
   dom.settingUpdateCheck.checked = status.consent === "notify";
   // The consent question shows while no answer is recorded. It is answered
   // once; after that the config holds the answer and the bar stays hidden.
-  dom.consentBar.hidden = status.consent !== null;
+  setConsentVisible(status.consent === null);
   const dismissed = window.localStorage.getItem(BANNER_DISMISSED_KEY);
   const showBanner = status.newer && Boolean(status.latest) && dismissed !== status.latest;
-  dom.updateBanner.hidden = !showBanner;
-  if (showBanner && status.latest) {
-    dom.updateBannerText.textContent =
-      translate("updates.versionAvailable", { latest: status.latest, current: status.current });
-    dom.updateBannerText.dataset["version"] = status.latest;
-    dom.updateBannerLink.href = status.notesUrl ?? "";
-    dom.updateBannerLink.hidden = !status.notesUrl;
-  }
+  setUpdateBanner(showBanner && status.latest
+    ? {
+        version: status.latest,
+        text: translate("updates.versionAvailable", { latest: status.latest, current: status.current }),
+        notesUrl: status.notesUrl ?? null,
+      }
+    : null);
 }
 
 /** Records the consent, then reflects the answer everywhere it is shown. */
 async function recordConsent(consent: api.UpdateConsent): Promise<void> {
   try {
     const status = await api.setUpdateConsent(consent);
-    dom.consentBar.hidden = status.consent !== null;
+    setConsentVisible(status.consent === null);
     dom.settingUpdateCheck.checked = status.consent === "notify";
     say(status.consent === "notify"
       ? translate("updates.checkOn")
@@ -695,16 +755,8 @@ async function recordConsent(consent: api.UpdateConsent): Promise<void> {
   }
 }
 
-dom.consentNotify.addEventListener("click", () => void recordConsent("notify"));
-dom.consentOff.addEventListener("click", () => void recordConsent("off"));
-
 dom.settingUpdateCheck.addEventListener("change", () => {
   void recordConsent(dom.settingUpdateCheck.checked ? "notify" : "off");
-});
-
-dom.updateBannerDismiss.addEventListener("click", () => {
-  window.localStorage.setItem(BANNER_DISMISSED_KEY, dom.updateBannerText.dataset["version"] ?? "");
-  dom.updateBanner.hidden = true;
 });
 
 // The form's own Escape path closes it through the browser; this covers the
@@ -714,7 +766,7 @@ dom.updateBannerDismiss.addEventListener("click", () => {
 dom.settingsForm.addEventListener("submit", (event) => {
   const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
   if (submitter?.value === "cancel") {
-    dom.settingsDialog.close("cancel");
+    settings.close();
   }
 });
 
@@ -733,6 +785,27 @@ function selectedLayers(): Layer[] {
     .flatten(api.layersOf(state.document))
     .map(({ layer }) => layer)
     .filter((layer) => selected.has(layer.id));
+}
+
+/** A layer inherits each parent group's editing guard. */
+function layerGuardReason(layer: Layer, allowLocked = false): string | null {
+  const own = api.whyNotEditable(layer);
+  if (own && (!allowLocked || layer.protected || layer.readOnly)) return own;
+  if (!state.document) return null;
+  const flat = api.flatten(api.layersOf(state.document));
+  let parent = flat.find((entry) => entry.layer.id === layer.id)?.parent;
+  while (parent) {
+    const ancestor = flat.find((entry) => entry.layer.id === parent);
+    if (!ancestor) break;
+    const reason = api.whyNotEditable(ancestor.layer);
+    if (reason) return reason;
+    parent = ancestor.parent;
+  }
+  return null;
+}
+
+function editableLayer(layer: Layer): boolean {
+  return layerGuardReason(layer) === null;
 }
 
 function wireLongPressMenu(
@@ -802,9 +875,11 @@ function applyDocument(doc: Document): void {
   dom.version.textContent = formatNumber(api.versionOf(doc));
   dom.canvasEmpty.hidden = true;
   dom.canvas.hidden = false;
+  dom.canvasControlsRoot.hidden = false;
   showCanvasHint();
-  dom.documentDimensions.textContent =
-    `${formatNumber(Math.round(doc.canvas.width))} × ${formatNumber(Math.round(doc.canvas.height))}`;
+  setDocumentDimensions(
+    `${formatNumber(Math.round(doc.canvas.width))} × ${formatNumber(Math.round(doc.canvas.height))}`,
+  );
   // Slots come with the document itself, so there is nothing extra to fetch:
   // a template is a document that names some of its own layers.
   state.slots = (doc.slots ?? []) as api.Slot[];
@@ -817,11 +892,10 @@ function applyDocument(doc: Document): void {
     unmountDragPreview();
   }
 
+  requestPreview();
   drawLayers();
   drawOverlay();
   drawInspector();
-
-  requestPreview();
   void loadPresets().catch((error: unknown) => report("presets", error));
   void drawHistory().catch((error: unknown) => report("history", error));
 }
@@ -843,9 +917,11 @@ async function loadPresets(): Promise<void> {
  */
 let previewStreaming: Promise<void> | null = null;
 let previewWanted: number | null = null;
+let lastRequestedPreviewScale: number | null = null;
 
 function requestPreview(): void {
   if (!state.project || !state.document) return;
+  lastRequestedPreviewScale = interactivePreviewScale();
   previewWanted = api.versionOf(state.document);
   if (previewStreaming) return;
   const project = state.project;
@@ -896,285 +972,59 @@ function requestPreview(): void {
   })();
 }
 
+function requestPreviewIfScaleChanged(): void {
+  if (!state.document || interactivePreviewScale() === lastRequestedPreviewScale) return;
+  requestPreview();
+}
+
 /**
  * Ask the deterministic renderer for the pixels the editor can actually show.
  * Export remains full resolution; rendering hidden pixels on every edit only
  * delays feedback and does not improve the fitted canvas.
  */
-/**
- * The horizontal inset the stage keeps around the canvas. It mirrors the
- * stage's own spacing (the `--space-12` scale step on each side) in the two
- * places that must agree with it: the preview scale and the fit zoom.
- */
-const STAGE_INSET_PX = 96;
+/** The stage padding is the canvas inset and comes from the active layout. */
+function stageInsets(): { horizontal: number; vertical: number } {
+  const style = window.getComputedStyle(dom.stage);
+  const pixels = (value: string): number => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  };
+  return {
+    horizontal: pixels(style.paddingLeft) + pixels(style.paddingRight),
+    vertical: pixels(style.paddingTop) + pixels(style.paddingBottom),
+  };
+}
 
-function interactivePreviewScale(): number {
+/** The zoom that fits the canvas in the current stage content box. */
+function fitZoomScale(): number {
   if (!state.document) return 1;
-  const availableWidth = Math.max(240, dom.stageViewport.clientWidth - STAGE_INSET_PX);
-  const availableHeight = Math.max(180, dom.stageViewport.clientHeight - STAGE_INSET_PX);
-  const fit = Math.min(
+  const insets = stageInsets();
+  const availableWidth = Math.max(1, dom.stageViewport.clientWidth - insets.horizontal);
+  const availableHeight = Math.max(1, dom.stageViewport.clientHeight - insets.vertical);
+  return Math.min(
     availableWidth / state.document.canvas.width,
     availableHeight / state.document.canvas.height,
     1,
   );
-  const displayed = state.zoom ?? fit;
+}
+
+function currentZoomScale(): number {
+  return state.zoom ?? fitZoomScale();
+}
+
+function interactivePreviewScale(): number {
+  if (!state.document) return 1;
   const density = Math.max(1, window.devicePixelRatio || 1);
-  return Math.min(1, Math.max(0.1, displayed * density));
+  return Math.min(1, Math.max(0.1, currentZoomScale() * density));
 }
 
 function drawLayers(): void {
-  dom.layers.replaceChildren();
-  if (!state.document) {
-    dom.layerSearch.disabled = true;
-    return;
-  }
-  const query = dom.layerSearch.value.trim().toLowerCase();
-  const flat = api.flatten(api.layersOf(state.document));
-  dom.layerSearch.disabled = flat.length === 0;
-  const searchKey = flat.length === 0 ? "layers.noSearch" : "layers.searchPlaceholder";
-  dom.layerSearch.placeholder = translate(searchKey);
-  dom.layerSearch.dataset["i18nAttr"] = `placeholder:${searchKey}`;
-
-  const appendEmptyState = (titleKey: MessageKey, hintKey: MessageKey, compact = false): void => {
-    const item = document.createElement("li");
-    item.className = `layers-empty${compact ? " compact" : ""}`;
-    const icon = document.createElement("i");
-    icon.className = `ph ${compact ? "ph-magnifying-glass" : "ph-stack-simple"}`;
-    icon.setAttribute("aria-hidden", "true");
-    const heading = document.createElement("strong");
-    heading.dataset["i18n"] = titleKey;
-    heading.textContent = translate(titleKey);
-    const copy = document.createElement("span");
-    copy.dataset["i18n"] = hintKey;
-    copy.textContent = translate(hintKey);
-    item.append(icon, heading, copy);
-    dom.layers.append(item);
-  };
-
-  if (flat.length === 0) {
-    dom.layerSearch.value = "";
-    appendEmptyState("layers.none", "layers.emptyHint");
-    return;
-  }
-
-  const appendLayer = (layer: Layer, depth: number, parent: string | null): void => {
-    const visibleName = layer.name ?? (layer.type === "text" ? layer.text : layer.type) ?? layer.type;
-    const childMatches =
-      layer.type === "group" &&
-      (layer.children ?? []).some((child) =>
-        (child.name ?? (child.type === "text" ? child.text : child.type) ?? child.type)
-          .toLowerCase()
-          .includes(query),
-      );
-    if (query && !visibleName.toLowerCase().includes(query) && !childMatches) return;
-
-    const item = document.createElement("li");
-    item.className = "layer";
-    item.dataset["type"] = layer.type;
-    item.style.setProperty("--layer-depth", String(depth));
-    item.dataset["id"] = layer.id;
-    item.dataset["parent"] = parent ?? "";
-    if (state.selection.includes(layer.id)) item.classList.add("selected");
-    item.tabIndex = 0;
-    item.draggable = api.isEditable(layer);
-
-    const visibility = document.createElement("button");
-    visibility.type = "button";
-    visibility.className = "layer-control";
-    visibility.title = layer.visible ? translate("layers.hide") : translate("layers.show");
-    visibility.dataset["i18nAttr"] = `title:${layer.visible ? "layers.hide" : "layers.show"}`;
-    visibility.disabled = !api.isEditable(layer);
-    const visibilityIcon = document.createElement("i");
-    visibilityIcon.className = `ph ${layer.visible ? "ph-eye" : "ph-eye-slash"}`;
-    visibilityIcon.setAttribute("aria-hidden", "true");
-    const visibilityName = document.createElement("span");
-    visibilityName.className = "sr-only";
-    visibilityName.dataset["i18n"] = layer.visible ? "layers.hide" : "layers.show";
-    visibilityName.textContent = visibility.title;
-    visibility.append(visibilityIcon, visibilityName);
-    visibility.addEventListener("click", (event) => {
-      event.stopPropagation();
-      void send(layer.visible ? "hide layer" : "show layer", {
-        op: "setVisible",
-        id: layer.id,
-        visible: !layer.visible,
-      } as Operation);
-    });
-
-    const icon = document.createElement("i");
-    const layerIcons: Record<string, string> = {
-      text: "ph-text-t",
-      image: "ph-image",
-      svg: "ph-pen-nib",
-      group: "ph-stack",
-    };
-    // A shape says which shape it is: four rects in a list would otherwise
-    // read the same as four ellipses. A kind this build cannot draw gets the
-    // generic mark rather than a wrong one.
-    const shapeIcons: Record<string, string> = {
-      rect: "ph-square",
-      ellipse: "ph-circle",
-      line: "ph-line-segment",
-    };
-    const kindIcon = layer.type === "shape"
-      ? shapeIcons[api.shapeKindOf(layer) ?? ""] ?? "ph-shapes"
-      : layerIcons[layer.type];
-    icon.className = `ph ${kindIcon ?? "ph-square"} layer-icon`;
-    icon.setAttribute("aria-hidden", "true");
-
-    const label = document.createElement("span");
-    label.className = "name";
-    label.textContent = visibleName;
-    label.title = translate("layers.renameHint");
-    label.dataset["i18nAttr"] = "title:layers.renameHint";
-
-    const lock = document.createElement("button");
-    lock.type = "button";
-    lock.className = "layer-control";
-    lock.title = layer.locked ? translate("layers.unlock") : translate("layers.lock");
-    lock.dataset["i18nAttr"] = `title:${layer.locked ? "layers.unlock" : "layers.lock"}`;
-    lock.disabled = Boolean(layer.protected || layer.readOnly);
-    const lockIcon = document.createElement("i");
-    lockIcon.className = `ph ${layer.locked ? "ph-lock" : "ph-lock-open"}`;
-    lockIcon.setAttribute("aria-hidden", "true");
-    const lockName = document.createElement("span");
-    lockName.className = "sr-only";
-    lockName.dataset["i18n"] = layer.locked ? "layers.unlock" : "layers.lock";
-    lockName.textContent = lock.title;
-    lock.append(lockIcon, lockName);
-    lock.addEventListener("click", (event) => {
-      event.stopPropagation();
-      void send(layer.locked ? "unlock layer" : "lock layer", {
-        op: "setLocked",
-        id: layer.id,
-        locked: !layer.locked,
-      } as Operation);
-    });
-
-    item.append(visibility, icon, label, lock);
-
-    const why = api.whyNotEditable(layer);
-    if (why) {
-      label.title = why;
-      item.classList.add("guarded");
-    }
-    if (!layer.visible) item.classList.add("hidden-layer");
-
-    item.addEventListener("click", (event) => {
-      // Additive selection with a modifier, which is what group needs.
-      if (event.shiftKey || event.metaKey || event.ctrlKey) {
-        state.selection = state.selection.includes(layer.id)
-          ? state.selection.filter((id) => id !== layer.id)
-          : [...state.selection, layer.id];
-      } else {
-        state.selection = [layer.id];
-      }
-      drawLayers();
-      drawOverlay();
-      drawInspector();
-      if (window.matchMedia("(max-width: 720px)").matches && selectedLayer()?.type !== "text") {
-        dom.structure.classList.remove("mobile-open");
-        dom.dockToggle.setAttribute("aria-expanded", "false");
-      }
-    });
-    label.addEventListener("dblclick", (event) => {
-      event.stopPropagation();
-      beginLayerRename(layer, label);
-    });
-    item.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      if (!state.selection.includes(layer.id)) state.selection = [layer.id];
-      drawLayers();
-      drawOverlay();
-      drawInspector();
-      openContextMenu(event.clientX, event.clientY);
-    });
-    wireLongPressMenu(item, () => {
-      if (!state.selection.includes(layer.id)) state.selection = [layer.id];
-      drawLayers();
-      drawOverlay();
-      drawInspector();
-    });
-    item.addEventListener("keydown", (event) => {
-      if (event.key === "F2") {
-        event.preventDefault();
-        beginLayerRename(layer, label);
-      }
-      if (event.key === "F10" && event.shiftKey) {
-        event.preventDefault();
-        const rect = item.getBoundingClientRect();
-        openContextMenu(rect.left + 24, rect.top + 24);
-      }
-    });
-    item.addEventListener("dragstart", (event) => {
-      event.dataTransfer?.setData("text/plain", layer.id);
-      item.classList.add("dragging");
-    });
-    item.addEventListener("dragend", () => item.classList.remove("dragging"));
-    item.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      item.classList.add("drop-target");
-    });
-    item.addEventListener("dragleave", () => item.classList.remove("drop-target"));
-    item.addEventListener("drop", (event) => {
-      event.preventDefault();
-      item.classList.remove("drop-target");
-      const moved = event.dataTransfer?.getData("text/plain");
-      if (!moved || moved === layer.id) return;
-      const target = flat.find(({ layer: one }) => one.id === layer.id);
-      const parentLayer = target?.parent
-        ? flat.find(({ layer: one }) => one.id === target.parent)?.layer
-        : null;
-      const parentLayers = parentLayer?.type === "group"
-        ? parentLayer.children ?? []
-        : api.layersOf(state.document!);
-      const targetIndex = parentLayers.findIndex((one) => one.id === layer.id);
-      const to = layer.type === "group"
-        ? { at: "in", parent: layer.id }
-        : target?.parent
-          ? { at: "in", parent: target.parent, index: Math.max(0, targetIndex + 1) }
-          : { at: "root", index: Math.max(0, targetIndex + 1) };
-      void send("reorder layer", { op: "reorder", id: moved, to } as Operation);
-    });
-    dom.layers.append(item);
-    if (layer.type === "group") {
-      for (const child of [...(layer.children ?? [])].reverse()) {
-        appendLayer(child, depth + 1, layer.id);
-      }
-    }
-  };
-
-  for (const layer of [...api.layersOf(state.document)].reverse()) {
-    appendLayer(layer, 0, null);
-  }
-  if (dom.layers.childElementCount === 0) {
-    appendEmptyState("layers.noMatching", "layers.trySearch", true);
-  }
-}
-
-function beginLayerRename(layer: Layer, label: HTMLElement): void {
-  if (layer.protected || layer.readOnly) return;
-  const input = document.createElement("input");
-  input.className = "layer-rename";
-  input.value = layer.name ?? (layer.type === "text" ? layer.text : layer.type) ?? layer.type;
-  label.replaceWith(input);
-  input.focus();
-  input.select();
-  let finished = false;
-  const finish = (commit: boolean): void => {
-    if (finished) return;
-    finished = true;
-    const next = input.value.trim();
-    if (commit && next !== (layer.name ?? "")) {
-      void send("rename layer", { op: "rename", id: layer.id, name: next || undefined } as Operation);
-    } else {
-      drawLayers();
-    }
-  };
-  input.addEventListener("blur", () => finish(true));
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") finish(true);
-    if (event.key === "Escape") finish(false);
+  structurePanel.setSnapshot({
+    document: state.document,
+    selectedIds: state.selection,
+    query: layerQuery,
+    history: historySnapshot,
+    dock: activeDock,
   });
 }
 
@@ -1300,7 +1150,7 @@ function drawOverlay(): void {
     event.stopPropagation();
     openContextMenu(event.clientX, event.clientY);
   });
-  const editable = selected.every(({ layer }) => api.isEditable(layer));
+  const editable = selected.every(({ layer }) => editableLayer(layer));
   if (editable) {
     box.addEventListener("pointerdown", (event) => beginDrag(event, selected, bounds, "move"));
     box.addEventListener("dblclick", (event) => {
@@ -1336,7 +1186,7 @@ function drawOverlay(): void {
     box.append(rotate);
   } else {
     box.classList.add("guarded");
-    box.title = selected.map(({ layer }) => api.whyNotEditable(layer)).filter(Boolean).join("; ");
+    box.title = selected.map(({ layer }) => layerGuardReason(layer)).filter(Boolean).join("; ");
   }
   dom.overlay.append(box);
 }
@@ -1352,95 +1202,118 @@ function drawCanvasInspector(target: HTMLElement): void {
   form.id = "canvas-settings";
   form.className = "canvas-settings";
   form.setAttribute("aria-label", translate("canvas.settingsLabel"));
-  form.innerHTML = `
-    <h2 data-i18n="common.canvas">Canvas</h2>
-    <div class="property-grid">
-      <label class="field"><span data-i18n="canvas.widthPx">Width (px)</span><input id="canvas-width" type="number" min="0" step="any" required></label>
-      <label class="field"><span data-i18n="canvas.heightPx">Height (px)</span><input id="canvas-height" type="number" min="0" step="any" required></label>
-    </div>
-    <label class="field canvas-background-field" for="canvas-background" data-i18n="common.background">Background</label>
-    <div class="canvas-background-row">
-      <input id="canvas-background-picker" type="color" aria-label="Choose canvas background colour" data-i18n-attr="aria-label:canvas.chooseBackground">
-      <input id="canvas-background" type="text" spellcheck="false" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" required title="Use #RRGGBB or #RRGGBBAA" data-i18n-attr="title:canvas.hexHint">
-    </div>
-    <label class="canvas-transparent"><input id="canvas-transparent" type="checkbox"> <span data-i18n="canvas.transparentBackground">Transparent background</span></label>
-    <fieldset class="canvas-anchor-fieldset" aria-describedby="canvas-anchor-hint">
-      <legend data-i18n="canvas.anchor">Anchor</legend>
-      <div class="canvas-size-anchor-grid"></div>
-      <p id="canvas-anchor-hint" class="hint" data-i18n="canvas.anchorHint">Keep this point fixed when resizing. Layers keep their size.</p>
-    </fieldset>
-    <button id="canvas-apply" type="submit" class="primary" disabled data-i18n="canvas.applyChanges">Apply canvas changes</button>
-  `;
-  const width = form.querySelector<HTMLInputElement>("#canvas-width")!;
-  const height = form.querySelector<HTMLInputElement>("#canvas-height")!;
-  const background = form.querySelector<HTMLInputElement>("#canvas-background")!;
-  const picker = form.querySelector<HTMLInputElement>("#canvas-background-picker")!;
-  const transparent = form.querySelector<HTMLInputElement>("#canvas-transparent")!;
+  form.innerHTML = [
+    '<h2 data-i18n="common.canvas">Canvas</h2>',
+    '<div class="property-grid"><div class="field" id="canvas-width-mount"></div><div class="field" id="canvas-height-mount"></div></div>',
+    '<div class="canvas-background-field"><span data-i18n="common.background">Background</span><div id="canvas-background-paint"></div></div>',
+    '<div id="canvas-background-image-mount"></div>',
+    '<div class="canvas-transparent" id="canvas-transparent-mount"></div>',
+    '<fieldset class="canvas-anchor-fieldset" aria-describedby="canvas-anchor-hint">',
+    '<legend data-i18n="canvas.anchor">Anchor</legend><div class="canvas-size-anchor-grid" id="canvas-size-anchor-grid"></div>',
+    '<p id="canvas-anchor-hint" class="hint" data-i18n="canvas.anchorHint">Keep this point fixed when resizing. Layers keep their size.</p></fieldset>',
+    '<div id="canvas-apply-mount"></div>',
+  ].join("");
+  const widthTarget = form.querySelector<HTMLElement>("#canvas-width-mount")!;
+  const heightTarget = form.querySelector<HTMLElement>("#canvas-height-mount")!;
+  let width: HTMLInputElement | null = null;
+  let height: HTMLInputElement | null = null;
+  let apply: HTMLButtonElement | null = null;
+  mountedInspectorWidgets.push(mountInspectorField(widthTarget, {
+    id: "canvas-width", label: () => translate("canvas.widthPx"), value: String(canvas.width),
+    type: "number", min: 0, step: "any", onMount: (element) => { width = element as HTMLInputElement; update(); }, onCommit: () => {},
+  }));
+  mountedInspectorWidgets.push(mountInspectorField(heightTarget, {
+    id: "canvas-height", label: () => translate("canvas.heightPx"), value: String(canvas.height),
+    type: "number", min: 0, step: "any", onMount: (element) => { height = element as HTMLInputElement; update(); }, onCommit: () => {},
+  }));
+  const transparentTarget = form.querySelector<HTMLElement>("#canvas-transparent-mount")!;
+  const anchorTarget = form.querySelector<HTMLElement>("#canvas-size-anchor-grid")!;
   const anchorFieldset = form.querySelector<HTMLFieldSetElement>(".canvas-anchor-fieldset")!;
-  const anchorGrid = form.querySelector<HTMLDivElement>(".canvas-size-anchor-grid")!;
-  const apply = form.querySelector<HTMLButtonElement>("#canvas-apply")!;
-  width.value = String(canvas.width);
-  height.value = String(canvas.height);
-  background.value = canvas.background ?? "#ffffff";
-  picker.value = background.value.slice(0, 7);
-  transparent.checked = canvas.background == null;
-  const anchors = [
-    ["top-left", "Top left", "↖"], ["top", "Top", "↑"], ["top-right", "Top right", "↗"],
-    ["left", "Left", "←"], ["center", "Center", "•"], ["right", "Right", "→"],
-    ["bottom-left", "Bottom left", "↙"], ["bottom", "Bottom", "↓"], ["bottom-right", "Bottom right", "↘"],
-  ] as const;
-  for (const [value, name, glyph] of anchors) {
-    const label = document.createElement("label");
-    label.className = "canvas-anchor";
-    const anchorKey = value === "center" ? "canvas.anchorCenter" : `position.${value === "top" || value === "bottom" || value === "left" || value === "right" ? value : value.replace(/-([a-z])/g, (_, part: string) => part.toUpperCase())}`;
-    label.title = translate(anchorKey as Parameters<typeof translate>[0]);
-    const radio = document.createElement("input");
-    radio.type = "radio";
-    radio.name = "canvas-anchor";
-    radio.value = value;
-    radio.checked = value === "top-left";
-    radio.setAttribute("aria-label", label.title);
-    const mark = document.createElement("span");
-    mark.textContent = glyph;
-    mark.setAttribute("aria-hidden", "true");
-    label.append(radio, mark);
-    anchorGrid.append(label);
+  const applyTarget = form.querySelector<HTMLElement>("#canvas-apply-mount")!;
+  let backgroundDraft: api.Color = canvas.background ?? "#ffffff";
+  let backgroundImage: api.BackgroundImage | null = canvas.backgroundImage ?? null;
+  let transparentDraft = canvas.background == null;
+  let anchorDraft: CanvasAnchor = "top-left";
+  mountPaint(form.querySelector<HTMLElement>("#canvas-background-paint")!, "canvas-background",
+    translate("common.background"), backgroundDraft, false, (value) => {
+      backgroundDraft = value;
+      transparentDraft = false;
+      mountTransparency();
+      update();
+    });
+  const transparencyProps = () => ({
+    id: "canvas-transparent",
+    label: () => translate("canvas.transparentBackground"),
+    checked: transparentDraft,
+    onChange(checked: boolean) { transparentDraft = checked; update(); },
+  });
+  let destroyTransparency = mountInspectorCheckbox(transparentTarget, transparencyProps());
+  mountedInspectorWidgets.push(() => destroyTransparency());
+  function mountTransparency(): void {
+    batchMantinePortals(() => {
+      destroyTransparency();
+      destroyTransparency = mountInspectorCheckbox(transparentTarget, transparencyProps());
+    });
   }
-  const nextBackground = (): string | null => transparent.checked ? null : background.value;
-  const resizing = (): boolean => Number(width.value) !== canvas.width || Number(height.value) !== canvas.height;
-  const update = (): void => {
+  const anchorPicker = mountCanvasAnchorPicker(anchorTarget, anchorDraft, true, (value) => {
+    anchorDraft = value;
+    update();
+  });
+  mountedInspectorWidgets.push(anchorPicker.destroy);
+  mountedInspectorWidgets.push(mountCanvasImageInput(form.querySelector<HTMLElement>("#canvas-background-image-mount")!, {
+    assets: state.document.assets ?? [], value: backgroundImage,
+    onChange(value) {
+      backgroundImage = value;
+      const operation: Operation = value
+        ? { op: "updateCanvas", backgroundImage: value } as Operation
+        : { op: "updateCanvas", clearBackgroundImage: true } as Operation;
+      void send(value ? "set canvas background image" : "clear canvas background image", operation);
+    },
+    onUpload(file) {
+      const project = state.project;
+      if (!project) return;
+      void guard("upload canvas background image", async () => {
+        const uploaded = await api.uploadAsset(project, file);
+        const operation = {
+          op: "updateCanvas",
+          backgroundImage: { asset: uploaded.asset.id, fit: backgroundImage?.fit ?? "fill" },
+        } as Operation;
+        const result = await api.applyOperation(project, operation, uploaded.version);
+        say(translate("status.editDone", { version: result.version }));
+        if (result.document) applyDocument(result.document);
+        else await refresh();
+      });
+    },
+  }));
+  mountedInspectorWidgets.push(mountInspectorButton(applyTarget, {
+    id: "canvas-apply", type: "submit", label: () => translate("canvas.applyChanges"),
+    className: "primary", disabled: true, onMount: (button) => { apply = button; update(); }, onClick: () => {},
+  }));
+  const resizing = (): boolean => Boolean(width && height && (Number(width.value) !== canvas.width || Number(height.value) !== canvas.height));
+  function update(): void {
+    if (!width || !height || !apply) return;
     for (const input of [width, height]) {
       input.setCustomValidity(Number.isFinite(input.valueAsNumber) && input.valueAsNumber > 0
         ? "" : translate("canvas.invalidDimension"));
     }
-    background.disabled = transparent.checked;
-    picker.disabled = transparent.checked;
     anchorFieldset.disabled = !resizing();
-    apply.disabled = !resizing() && nextBackground() === (canvas.background ?? null);
-    if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(background.value)) {
-      picker.value = background.value.slice(0, 7);
-    }
-  };
-  picker.addEventListener("input", () => { background.value = picker.value; update(); });
+    anchorPicker.setState(anchorDraft, !resizing());
+    apply.disabled = !resizing() && samePaint(transparentDraft ? null : backgroundDraft, canvas.background ?? null);
+  }
   form.addEventListener("input", update);
   form.addEventListener("change", update);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     update();
-    if (apply.disabled || !form.reportValidity()) return;
-    const chosen = form.querySelector<HTMLInputElement>('input[name="canvas-anchor"]:checked')?.value;
-    const anchor = anchors.find(([value]) => value === chosen)?.[0] ?? "top-left";
+    if (!apply || apply.disabled || !form.reportValidity() || !width || !height) return;
+    const nextBackground = transparentDraft ? null : backgroundDraft;
     const operation: Operation = {
       op: "updateCanvas",
-      ...(resizing() ? { width: Number(width.value), height: Number(height.value), anchor } : {}),
-      ...(nextBackground() !== (canvas.background ?? null) ? { background: nextBackground() } : {}),
+      ...(resizing() ? { width: Number(width.value), height: Number(height.value), anchor: anchorDraft } : {}),
+      ...(!samePaint(nextBackground, canvas.background ?? null) ? { background: nextBackground } : {}),
     };
     apply.disabled = true;
-    void send("update canvas", operation).finally(() => {
-      if (!form.isConnected || !state.document) return;
-      Object.assign(canvas, state.document.canvas);
-      update();
-    });
+    void send("update canvas", operation);
   });
   update();
   target.append(form);
@@ -1448,52 +1321,13 @@ function drawCanvasInspector(target: HTMLElement): void {
 
 /** Opens one collapsible Properties section in `container` and returns its body. */
 function dockSection(container: HTMLElement, title: string): HTMLElement {
-  const details = document.createElement("details");
-  details.className = "dock-section";
-  details.open = !["Clip and mirror", "Appearance", "Effects", "Presets", "Slots"].includes(title);
-  const summary = document.createElement("summary");
-  const icons: Record<string, string> = {
-    Canvas: "ph-frame-corners",
-    Transform: "ph-arrows-out-cardinal",
-    Typography: "ph-text-aa",
-    Image: "ph-image",
-    Shape: "ph-shapes",
-    "Clip and mirror": "ph-crop",
-    Appearance: "ph-palette",
-    Effects: "ph-magic-wand",
-    Presets: "ph-swatches",
-    Slots: "ph-brackets-curly",
-  };
-  const icon = document.createElement("i");
-  icon.className = `ph ${icons[title] ?? "ph-sliders-horizontal"} dock-section-icon`;
-  icon.setAttribute("aria-hidden", "true");
-  const heading = document.createElement("h2");
-  const sectionKeys: Record<string, MessageKey> = {
-    Canvas: "canvas.section",
-    Transform: "properties.transform",
-    Typography: "properties.typography",
-    Image: "properties.image",
-    Media: "properties.media",
-    Shape: "properties.shape",
-    "Clip and mirror": "properties.clipMirror",
-    Appearance: "properties.appearance",
-    Effects: "properties.effects",
-    Presets: "properties.presets",
-    Slots: "properties.slots",
-  };
-  const headingKey = sectionKeys[title];
-  if (headingKey) {
-    heading.dataset["i18n"] = headingKey;
-    heading.textContent = translate(headingKey);
-  } else {
-    heading.textContent = title;
-  }
-  summary.append(icon, heading);
-  const body = document.createElement("div");
-  body.className = "dock-section-body";
-  details.append(summary, body);
-  container.append(details);
-  return body;
+  const section = mountDockSection(
+    container,
+    title,
+    !["Clip and mirror", "Appearance", "Effects", "Presets", "Slots"].includes(title),
+  );
+  mountedInspectorSections.push(section.destroy);
+  return section.body;
 }
 
 /**
@@ -1503,10 +1337,34 @@ function dockSection(container: HTMLElement, title: string): HTMLElement {
  * a family is committed from either only when the store has it, and always as
  * one ordinary `update` operation through the queue.
  */
+const mountedFontSelectors: FontSelector[] = [];
+const mountedInspectorWidgets: Array<() => void> = [];
+const mountedInspectorSections: Array<() => void> = [];
+let nextInspectorControlId = 0;
+
+function mountPaint(
+  target: HTMLElement,
+  id: string,
+  label: string,
+  value: api.Color,
+  disabled: boolean,
+  onCommit: (next: api.Color) => void,
+  className?: string,
+  clear?: { label: string; className?: string; title?: string; disabled?: boolean; onClear(): void },
+  compact = false,
+): void {
+  mountedInspectorWidgets.push(mountPaintInput(target, { id, label, value, disabled, onCommit, className, clear, compact }));
+}
+
+function samePaint(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function fontSelectorFor(layer: Extract<Layer, { type: "text" }>, disabled: boolean): ReturnType<typeof mountFontSelector> {
   const selector = mountFontSelector({ store: () => fontStore }, (family) => {
     void send("change font", { op: "update", id: layer.id, fontFamily: family } as Operation);
   });
+  mountedFontSelectors.push(selector);
   selector.setFamily(layer.fontFamily);
   selector.setDisabled(disabled);
   return selector;
@@ -1527,6 +1385,13 @@ function syncSelectedTextProperties(layers: Layer[]): void {
 }
 
 function drawInspector(): void {
+  batchMantinePortals(drawInspectorContent);
+}
+
+function drawInspectorContent(): void {
+  for (const selector of mountedFontSelectors.splice(0)) selector.destroy();
+  for (const destroy of mountedInspectorWidgets.splice(0)) destroy();
+  for (const destroy of mountedInspectorSections.splice(0)) destroy();
   releaseFontSpecimens(dom.inspector);
   releaseFontSpecimens(dom.advancedInspector);
   dom.inspector.replaceChildren();
@@ -1549,27 +1414,27 @@ function drawInspector(): void {
     shapeControlErrors.clear();
     shapeControlErrorsSelection = selectionKey;
   }
-  dom.deleteLayer.disabled = layers.length === 0 || layers.some((one) => !api.isEditable(one));
-  dom.groupLayers.disabled = layers.length < 2 || layers.some((one) => !api.isEditable(one));
+  dom.deleteLayer.disabled = layers.length === 0 || layers.some((one) => !editableLayer(one));
+  dom.groupLayers.disabled = layers.length < 2 || layers.some((one) => !editableLayer(one));
   renderPositionFields(layers);
   if (state.document) {
-    const canvasButton = document.createElement("button");
-    canvasButton.type = "button";
-    canvasButton.id = "edit-canvas";
-    canvasButton.className = "toolbar-action";
-    canvasButton.setAttribute("aria-label", translate("editor.canvasSizeBackground"));
-    canvasButton.dataset["i18nAttr"] = "aria-label:editor.canvasSizeBackground;title:editor.canvasSizeBackground";
-    canvasButton.innerHTML = '<i class="ph ph-frame-corners" aria-hidden="true"></i><span data-i18n="common.canvas">Canvas</span>';
-    canvasButton.title = translate("editor.canvasSizeBackground");
-    canvasButton.addEventListener("click", () => {
-      dom.contextMenu.hidden = true;
+    const canvasButtonHost = document.createElement("span");
+    canvasButtonHost.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(canvasButtonHost, {
+      id: "edit-canvas",
+      label: () => translate("editor.canvasSizeBackground"),
+      icon: "ph-frame-corners",
+      className: "toolbar-action",
+      onClick() {
+      contextMenuController.close();
       state.selection = [];
       drawLayers();
       drawOverlay();
       drawInspector();
       showDock("properties");
-    });
-    dom.inspector.append(canvasButton);
+      },
+    }));
+    dom.inspector.append(canvasButtonHost);
   }
 
   if (layers.length === 0) {
@@ -1589,29 +1454,34 @@ function drawInspector(): void {
     return;
   }
 
-  const guarded = layers.some((one) => !api.isEditable(one));
+  const guarded = layers.some((one) => !editableLayer(one));
+  let nextActionId = 0;
   const action = (
     labelKey: MessageKey,
     icon: string,
     run: () => void,
     disabled = guarded,
     className = "toolbar-action",
-  ): HTMLButtonElement => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = className;
-    button.disabled = disabled;
-    button.title = translate(labelKey);
-    button.dataset["i18nAttr"] = `title:${labelKey}`;
-    const symbol = document.createElement("i");
-    symbol.className = `ph ${icon}`;
-    symbol.setAttribute("aria-hidden", "true");
-    const text = document.createElement("span");
-    text.dataset["i18n"] = labelKey;
-    text.textContent = translate(labelKey);
-    button.append(symbol, text);
-    button.addEventListener("click", run);
-    return button;
+    decorate?: (button: HTMLButtonElement) => void,
+    iconOnly = false,
+  ): HTMLSpanElement => {
+    const target = document.createElement("span");
+    target.className = "inspector-button-host";
+    target.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(target, {
+      id: `inspector-action-${++nextActionId}`,
+      label: () => translate(labelKey),
+      icon,
+      className,
+      iconOnly,
+      disabled,
+      onMount(button) {
+        button.title = translate(labelKey);
+        decorate?.(button);
+      },
+      onClick: run,
+    }));
+    return target;
   };
 
   if (layer?.type === "text") {
@@ -1623,40 +1493,30 @@ function drawInspector(): void {
     // One selector for both homes: installed families only, with the store's
     // refusal shown at the control when what is typed matches none of them.
     const selector = fontSelectorFor(layer, guarded);
-    selector.input.setAttribute("aria-label", translate("editor.fontFamily"));
-    selector.input.dataset["i18nAttr"] = "aria-label:editor.fontFamily";
     font.append(selector.root);
     dom.inspector.append(font);
 
-    const size = document.createElement("label");
+    const size = document.createElement("span");
     size.className = "toolbar-field toolbar-number";
-    const sizeInput = document.createElement("input");
-    sizeInput.type = "number";
-    sizeInput.min = "1";
-    sizeInput.value = String(layer.fontSize);
-    sizeInput.disabled = guarded;
-    sizeInput.setAttribute("aria-label", translate("editor.fontSize"));
-    sizeInput.dataset["i18nAttr"] = "aria-label:editor.fontSize";
-    sizeInput.addEventListener("change", () =>
-      void send("change font size", {
-        op: "update",
-        id: layer.id,
-        fontSize: Number(sizeInput.value),
+    mountedInspectorWidgets.push(mountInspectorField(size, {
+      id: "toolbar-font-size",
+      label: () => translate("editor.fontSize"),
+      value: String(layer.fontSize),
+      type: "number",
+      size: "xs",
+      min: 1,
+      disabled: guarded,
+      className: "toolbar-font-size",
+      onCommit: (next) => void send("change font size", {
+        op: "update", id: layer.id, fontSize: Number(next),
       } as Operation),
-    );
-    size.append(sizeInput);
+    }));
     dom.inspector.append(size);
 
-    const colour = document.createElement("input");
-    colour.type = "color";
-    colour.className = "toolbar-colour";
-    colour.value = layer.color ?? "#000000";
-    colour.disabled = guarded;
-    colour.setAttribute("aria-label", translate("editor.textColour"));
-    colour.dataset["i18nAttr"] = "aria-label:editor.textColour";
-    colour.addEventListener("change", () =>
-      void send("change colour", { op: "update", id: layer.id, color: colour.value } as Operation),
-    );
+    const colour = document.createElement("div");
+    colour.className = "toolbar-paint";
+    mountPaint(colour, "text-color", translate("editor.textColour"), layer.color ?? "#000000", guarded,
+      (value) => void send("change colour", { op: "update", id: layer.id, color: value } as Operation), "toolbar-colour", undefined, true);
     dom.inspector.append(colour);
 
     for (const [value, icon] of [
@@ -1669,13 +1529,12 @@ function drawInspector(): void {
         center: "editor.alignCenter",
         right: "editor.alignRight",
       }[value] as MessageKey;
-      const button = action(alignKey, icon, () => {
+      const host = action(alignKey, icon, () => {
         void send(`align text ${value}`, { op: "update", id: layer.id, align: value } as Operation);
-      }, guarded, "icon-button toolbar-icon");
-      button.title = translate(alignKey);
-      button.querySelector("span")?.classList.add("sr-only");
-      button.classList.toggle("selected", (layer.align ?? "left") === value);
-      dom.inspector.append(button);
+      }, guarded, "icon-button toolbar-icon", (button) => {
+        button.classList.toggle("selected", (layer.align ?? "left") === value);
+      }, true);
+      dom.inspector.append(host);
     }
     const divider = document.createElement("span");
     divider.className = "toolbar-divider";
@@ -1721,7 +1580,7 @@ function drawInspector(): void {
     return;
   }
 
-  const why = api.whyNotEditable(layer);
+  const why = layerGuardReason(layer);
   if (why) {
     const note = document.createElement("p");
     note.className = "guarded-note";
@@ -1733,41 +1592,84 @@ function drawInspector(): void {
     labelKey: MessageKey,
     value: string,
     apply: (next: string) => Operation | null,
-    type = "number",
+    type: "number" | "text" | "textarea" = "number",
     list?: string,
     className?: string,
+    disabled = false,
   ): void => {
-    const wrapper = document.createElement("label");
+    const wrapper = document.createElement("div");
     wrapper.className = "field";
-    const caption = document.createElement("span");
-    caption.dataset["i18n"] = labelKey;
-    caption.textContent = translate(labelKey);
-    wrapper.append(caption);
-    const input = document.createElement("input");
-    input.type = type;
-    input.value = value;
-    input.disabled = why !== null;
-    if (list) input.setAttribute("list", list);
-    if (className) input.className = className;
-    input.addEventListener("change", () => {
-      if (input.value === value) return;
-      const operation = apply(input.value);
-      if (operation) void send(`change ${translate(labelKey)}`, operation);
-    });
-    wrapper.append(input);
+    mountedInspectorWidgets.push(mountInspectorField(wrapper, {
+      id: className ?? `field-${labelKey.replaceAll(".", "-")}`,
+      label: () => translate(labelKey),
+      value,
+      type,
+      className,
+      disabled: why !== null || disabled,
+      list,
+      onCommit(next) {
+        if (next === value) return;
+        const operation = apply(next);
+        if (operation) void send(`change ${translate(labelKey)}`, operation);
+      },
+    }));
+    pane.append(wrapper);
+  };
+  const choiceField = (
+    labelKey: MessageKey,
+    id: string,
+    value: string,
+    options: readonly { value: string; label: string }[],
+    apply: (next: string) => void,
+    disabled = false,
+  ): void => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "field";
+    mountedInspectorWidgets.push(mountInspectorField(wrapper, {
+      id,
+      label: () => translate(labelKey),
+      value,
+      className: id,
+      disabled: why !== null || disabled,
+      options,
+      onCommit: apply,
+    }));
+    pane.append(wrapper);
+  };
+  const paintField = (
+    labelKey: MessageKey,
+    id: string,
+    value: api.Color,
+    apply: (next: api.Color) => Operation,
+    clear?: { className: string; disabled: boolean; onClear(): void },
+  ): void => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "field paint-field";
+    mountPaint(wrapper, id, translate(labelKey), value, why !== null,
+      (next) => void send(`change ${translate(labelKey)}`, apply(next)), id,
+      clear ? {
+        label: translate("canvas.none"),
+        className: clear.className,
+        title: translate("canvas.removeColor", { label: translate(labelKey).toLowerCase() }),
+        disabled: clear.disabled,
+        onClear: clear.onClear,
+      } : undefined);
     pane.append(wrapper);
   };
 
 
   if (layer.type === "text") {
     pane = beginSection("Typography");
-    const editText = document.createElement("button");
-    editText.type = "button";
-    editText.className = "wide-action edit-text-button";
-    editText.disabled = why !== null;
-    editText.innerHTML = '<i class="ph ph-pencil-simple" aria-hidden="true"></i>';
-    editText.append(localizedSpan("canvas.editText"));
-    editText.addEventListener("click", () => beginInlineTextEdit(layer));
+    const editText = document.createElement("span");
+    editText.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(editText, {
+      id: "edit-layer-text",
+      label: () => translate("canvas.editText"),
+      icon: "ph-pencil-simple",
+      className: "wide-action edit-text-button",
+      disabled: why !== null,
+      onClick: () => beginInlineTextEdit(layer),
+    }));
     pane.append(editText);
     const familyAvailable = fontStore.families.includes(layer.fontFamily);
     const summary = document.createElement("div");
@@ -1784,12 +1686,14 @@ function drawInspector(): void {
       status.className = "current-font-status";
       status.dataset["i18n"] = "properties.fontMissing";
       status.textContent = translate("properties.fontMissing");
-      const install = document.createElement("button");
-      install.type = "button";
-      install.className = "small";
-      install.dataset["i18n"] = "fonts.installFonts";
-      install.textContent = translate("fonts.installFonts");
-      install.addEventListener("click", () => void guard("fonts", () => openFontManager(true)));
+      const install = document.createElement("span");
+      install.style.display = "contents";
+      mountedInspectorWidgets.push(mountInspectorButton(install, {
+        id: "install-fonts",
+        label: () => translate("fonts.installFonts"),
+        className: "small",
+        onClick: () => void guard("fonts", () => openFontManager(true)),
+      }));
       summary.append(status, install);
     } else {
       const specimen = document.createElement("span");
@@ -1814,8 +1718,6 @@ function drawInspector(): void {
     fontField.className = "field";
     fontField.append(localizedSpan("properties.font"));
     const fontSelector = fontSelectorFor(layer, why !== null);
-    fontSelector.input.setAttribute("aria-label", translate("editor.fontFamily"));
-    fontSelector.input.dataset["i18nAttr"] = "aria-label:editor.fontFamily";
     fontField.append(fontSelector.root);
     pane.append(fontField);
     field("properties.fontSize", String(layer.fontSize), (next) => ({ op: "update", id: layer.id, fontSize: Number(next) }) as Operation);
@@ -1826,42 +1728,18 @@ function drawInspector(): void {
     // the number field the document carries.
     const faces = facesOf(layer.fontFamily, fontStore.faces);
     if (faces.length) {
-      const weightField = document.createElement("label");
-      weightField.className = "field";
-      weightField.append(localizedSpan("properties.weight"));
-      const weightSelect = document.createElement("select");
-      weightSelect.disabled = why !== null;
-      weightSelect.setAttribute("aria-label", translate("canvas.fontWeight"));
-    weightSelect.dataset["i18nAttr"] = "aria-label:canvas.fontWeight";
       const currentWeight = layer.fontWeight ?? 400;
       const currentStyle = layer.fontStyle ?? "normal";
       const known = [...new Set([
         ...faces.filter((face) => face.style === currentStyle).map((face) => face.weight),
         currentWeight,
       ])].sort((a, b) => a - b);
-      for (const weight of known) {
-        const option = document.createElement("option");
-        option.value = String(weight);
-        option.textContent = String(weight);
-        weightSelect.append(option);
-      }
-      weightSelect.value = String(currentWeight);
-      weightSelect.addEventListener("change", () =>
-        void send("change Weight", { op: "update", id: layer.id, fontWeight: Number(weightSelect.value) } as Operation),
-      );
-      weightField.append(weightSelect);
-      pane.append(weightField);
+      choiceField("properties.weight", "font-weight", String(currentWeight), known.map((weight) => ({ value: String(weight), label: String(weight) })),
+        (next) => void send("change Weight", { op: "update", id: layer.id, fontWeight: Number(next) } as Operation));
     } else {
       field("properties.weight", String(layer.fontWeight ?? 400), (next) => ({ op: "update", id: layer.id, fontWeight: Number(next) }) as Operation);
     }
     field("properties.letterSpacing", String(layer.letterSpacing ?? 0), (next) => ({ op: "update", id: layer.id, letterSpacing: Number(next) }) as Operation);
-    const fontStyle = document.createElement("label");
-    fontStyle.className = "field";
-    fontStyle.append(localizedSpan("properties.style"));
-    const fontStyleSelect = document.createElement("select");
-    fontStyleSelect.disabled = why !== null;
-    fontStyleSelect.setAttribute("aria-label", translate("canvas.fontStyle"));
-    fontStyleSelect.dataset["i18nAttr"] = "aria-label:canvas.fontStyle";
     const currentStyle = layer.fontStyle ?? "normal";
     const currentWeight = layer.fontWeight ?? 400;
     const availableStyles = faces
@@ -1870,47 +1748,15 @@ function drawInspector(): void {
     const styles = faces.length
       ? [...new Set([...availableStyles, currentStyle])]
       : [currentStyle];
-    for (const style of styles) {
-      const option = document.createElement("option");
-      option.value = style;
-      option.textContent = style;
-      fontStyleSelect.append(option);
-    }
-    fontStyleSelect.value = layer.fontStyle ?? "normal";
-    fontStyleSelect.addEventListener("change", () =>
-      void send("change font style", { op: "update", id: layer.id, fontStyle: fontStyleSelect.value } as Operation),
-    );
-    fontStyle.append(fontStyleSelect);
-    pane.append(fontStyle);
-    const valign = document.createElement("label");
-    valign.className = "field";
-    valign.append(localizedSpan("properties.verticalAlign"));
-    const valignSelect = document.createElement("select");
-    valignSelect.disabled = why !== null;
-    valignSelect.setAttribute("aria-label", translate("canvas.verticalAlign"));
-    valignSelect.dataset["i18nAttr"] = "aria-label:canvas.verticalAlign";
-    for (const mode of ["top", "middle", "bottom"]) {
-      const option = document.createElement("option");
-      option.value = mode;
-      option.textContent = mode;
-      valignSelect.append(option);
-    }
-    valignSelect.value = layer.verticalAlign ?? "top";
-    valignSelect.addEventListener("change", () =>
-      void send("change vertical align", { op: "update", id: layer.id, verticalAlign: valignSelect.value } as Operation),
-    );
-    valign.append(valignSelect);
-    pane.append(valign);
-    field("properties.colour", layer.color ?? "#000000", (next) =>
-      next === "none"
-        ? ({ op: "update", id: layer.id, color: null }) as Operation
-        : ({ op: "update", id: layer.id, color: next }) as Operation,
-    "color");
-    field("properties.strokeColour", layer.stroke?.color ?? "none", (next) =>
-      next === "none"
-        ? ({ op: "update", id: layer.id, stroke: null }) as Operation
-        : ({ op: "update", id: layer.id, stroke: { color: next, width: layer.stroke?.width ?? 1 } }) as Operation,
-    "color");
+    choiceField("properties.style", "font-style", layer.fontStyle ?? "normal", styles.map((style) => ({ value: style, label: style })),
+      (next) => void send("change font style", { op: "update", id: layer.id, fontStyle: next } as Operation));
+    choiceField("properties.verticalAlign", "vertical-align", layer.verticalAlign ?? "top", ["top", "middle", "bottom"].map((mode) => ({ value: mode, label: mode })),
+      (next) => void send("change vertical align", { op: "update", id: layer.id, verticalAlign: next } as Operation));
+    paintField("properties.colour", "text-fill", layer.color ?? "#000000",
+      (next) => ({ op: "update", id: layer.id, color: next }) as Operation);
+    paintField("properties.strokeColour", "text-stroke", layer.stroke?.color ?? "#000000",
+      (next) => ({ op: "update", id: layer.id, stroke: { color: next, width: layer.stroke?.width ?? 1 } }) as Operation,
+      { className: "text-stroke-none", disabled: !layer.stroke, onClear: () => void send("clear text stroke", { op: "update", id: layer.id, stroke: null } as Operation) });
     field("properties.strokeWidth", String(layer.stroke?.width ?? 1), (next) => ({ op: "update", id: layer.id, stroke: { color: layer.stroke?.color ?? "#000000", width: Number(next) } }) as Operation);
   }
 
@@ -1922,21 +1768,21 @@ function drawInspector(): void {
     value: string,
     apply: (next: string) => Operation | null,
   ): void => {
-    const wrapper = document.createElement("label");
+    const className = `transform-${labelKey.split(".").at(-1)}`;
+    const wrapper = document.createElement("div");
     wrapper.className = "field";
-    const caption = document.createElement("span");
-    caption.dataset["i18n"] = labelKey;
-    caption.textContent = translate(labelKey);
-    wrapper.append(caption);
-    const input = document.createElement("input");
-    input.type = "number";
-    input.value = value;
-    input.disabled = why !== null;
-    input.addEventListener("change", () => {
-      const operation = apply(input.value);
-      if (operation) void send(`change ${translate(labelKey)}`, operation);
-    });
-    wrapper.append(input);
+    mountedInspectorWidgets.push(mountInspectorField(wrapper, {
+      id: className,
+      label: () => translate(labelKey),
+      value,
+      type: "number",
+      className,
+      disabled: why !== null,
+      onCommit(next) {
+        const operation = apply(next);
+        if (operation) void send(`change ${translate(labelKey)}`, operation);
+      },
+    }));
     grid.append(wrapper);
   };
   const t = layer.transform;
@@ -1953,25 +1799,8 @@ function drawInspector(): void {
     // stretches; until now the only way to ask for anything else was to edit
     // the file, and an upload was silently given `contain` with no way back.
     pane = beginSection("Media");
-    const fit = document.createElement("label");
-    fit.className = "field";
-    fit.append(localizedSpan("properties.fit"));
-    const fitSelect = document.createElement("select");
-    fitSelect.disabled = why !== null;
-    fitSelect.setAttribute("aria-label", translate("canvas.fit"));
-    fitSelect.dataset["i18nAttr"] = "aria-label:canvas.fit";
-    for (const mode of api.IMAGE_FITS) {
-      const option = document.createElement("option");
-      option.value = mode;
-      option.textContent = mode;
-      fitSelect.append(option);
-    }
-    fitSelect.value = layer.fit ?? "fill";
-    fitSelect.addEventListener("change", () =>
-      void send("change fit", { op: "update", id: layer.id, fit: fitSelect.value } as Operation),
-    );
-    fit.append(fitSelect);
-    pane.append(fit);
+    choiceField("properties.fit", "layer-fit", layer.fit ?? "fill", api.IMAGE_FITS.map((mode) => ({ value: mode, label: mode })),
+      (next) => void send("change fit", { op: "update", id: layer.id, fit: next } as Operation));
 
     if (layer.type === "image") {
       // A crop is a rectangle in the image's own pixels, not a fit mode. It
@@ -2002,21 +1831,7 @@ function drawInspector(): void {
         value: number,
         change: (next: number) => Operation | null,
       ): void => {
-        const wrapper = document.createElement("label");
-        wrapper.className = "field";
-        wrapper.append(localizedSpan(labelKey));
-        const input = document.createElement("input");
-        input.type = "number";
-        input.className = name;
-        input.value = String(value);
-        input.disabled = why !== null || !sourceKnown;
-        input.addEventListener("change", () => {
-          if (input.value === String(value)) return;
-          const operation = change(Number(input.value));
-          if (operation) void send(`change ${translate(labelKey)}`, operation);
-        });
-        wrapper.append(input);
-        pane.append(wrapper);
+        field(labelKey, String(value), (next) => change(Number(next)), "number", undefined, name, !sourceKnown);
       };
       // One crop is four numbers, so every field sends the whole rectangle
       // with the one value the person changed. A crop that is not a positive
@@ -2033,18 +1848,16 @@ function drawInspector(): void {
 
       const clearRow = document.createElement("div");
       clearRow.className = "field";
-      const clear = document.createElement("button");
-      clear.type = "button";
-      clear.className = "small crop-clear";
-      clear.dataset["i18n"] = "canvas.clearCrop";
-    clear.textContent = translate("canvas.clearCrop");
-      clear.dataset["i18nAttr"] = "title:canvas.wholeImage";
-      clear.title = translate("canvas.wholeImage");
-      clear.disabled = why !== null || crop === null;
-      clear.addEventListener("click", () => {
-        clear.disabled = true;
-        void send("clear crop", { op: "update", id: layer.id, crop: null } as Operation);
-      });
+      const clear = document.createElement("span");
+      clear.style.display = "contents";
+      mountedInspectorWidgets.push(mountInspectorButton(clear, {
+        id: "clear-image-crop",
+        label: () => translate("canvas.clearCrop"),
+        title: () => translate("canvas.wholeImage"),
+        className: "small crop-clear",
+        disabled: why !== null || crop === null,
+        onClick: () => void send("clear crop", { op: "update", id: layer.id, crop: null } as Operation),
+      }));
       clearRow.append(clear);
       pane.append(clearRow);
     }
@@ -2065,15 +1878,12 @@ function drawInspector(): void {
     // elsewhere may carry `#rrggbbaa`. Showing the opaque part of it is much
     // closer to the truth than the black an invalid value falls back to. Only
     // the swatch is trimmed: the width row still sends the colour as stored.
-    const swatch = (colour: string): string =>
-      /^#[0-9a-fA-F]{8}$/.test(colour) ? colour.slice(0, 7) : colour;
-
     const paint = (
       labelKey: MessageKey,
       name: string,
-      colour: string,
+      colour: api.Color,
       present: boolean,
-      set: (next: string) => Operation,
+      set: (next: api.Color) => Operation,
       clear: () => Operation,
     ): void => {
       const row = document.createElement("div");
@@ -2083,30 +1893,15 @@ function drawInspector(): void {
       caption.textContent = translate(labelKey);
       const controls = document.createElement("span");
       controls.className = "shape-paint";
-      const input = document.createElement("input");
-      input.type = "color";
-      input.className = name;
-      input.value = colour;
-      input.disabled = why !== null;
-      input.setAttribute("aria-label", translate(labelKey));
-      input.dataset["i18nAttr"] = `aria-label:${labelKey}`;
-      // Absent is shown as the colour this build would give it, so picking
-      // one adds the paint that was described rather than a surprise.
-      if (!present) {
-        input.dataset["paintLabelKey"] = labelKey;
-        input.title = translate("canvas.noColor", { label: translate(labelKey).toLowerCase() });
-      }
-      input.addEventListener("change", () => void send(`change ${translate(labelKey)}`, set(input.value)));
-      const none = document.createElement("button");
-      none.type = "button";
-      none.className = `small ${name}-none`;
-      none.dataset["i18n"] = "canvas.none";
-    none.textContent = translate("canvas.none");
-      none.dataset["paintLabelKey"] = labelKey;
-      none.title = translate("canvas.removeColor", { label: translate(labelKey).toLowerCase() });
-      none.disabled = why !== null || !present;
-      none.addEventListener("click", () => void send(`clear ${translate(labelKey)}`, clear()));
-      controls.append(input, none);
+      mountPaint(controls, name, translate(labelKey), colour, why !== null,
+        (next) => void send(`change ${translate(labelKey)}`, set(next)), name, {
+          label: translate("canvas.none"),
+          className: `small ${name}-none`,
+          title: translate("canvas.removeColor", { label: translate(labelKey).toLowerCase() }),
+          disabled: !present,
+          onClear: () => void send(`clear ${translate(labelKey)}`, clear()),
+        });
+      if (!present) controls.title = translate("canvas.noColor", { label: translate(labelKey).toLowerCase() });
       row.append(caption, controls);
       pane.append(row);
     };
@@ -2114,7 +1909,7 @@ function drawInspector(): void {
     paint(
       "properties.fill",
       "shape-fill",
-      swatch(layer.fill ?? SHAPE_FILL_COLOUR),
+      layer.fill ?? SHAPE_FILL_COLOUR,
       Boolean(layer.fill),
       (next) => ({ op: "update", id: layer.id, fill: next }) as Operation,
       () => ({ op: "update", id: layer.id, fill: null }) as Operation,
@@ -2125,7 +1920,7 @@ function drawInspector(): void {
     paint(
       "properties.stroke",
       "shape-stroke",
-      swatch(strokeColour),
+      strokeColour,
       Boolean(layer.stroke),
       (next) => ({ op: "update", id: layer.id, stroke: { color: next, width: strokeWidth } }) as Operation,
       () => ({ op: "update", id: layer.id, stroke: null }) as Operation,
@@ -2180,34 +1975,30 @@ function drawInspector(): void {
     // for the box. The grammar is the engine's business, so nothing is
     // pre-checked here: the typed InvalidPath refusal (which command, which
     // byte) is shown at this control, and a refused update writes nothing.
-    const pathRow = document.createElement("label");
+    const pathRow = document.createElement("div");
     pathRow.className = "field shape-field shape-path";
-    const pathCaption = document.createElement("span");
-    pathCaption.dataset["i18n"] = "canvas.pathData";
-    pathCaption.textContent = translate("canvas.pathData");
-    const pathInput = document.createElement("textarea");
-    pathInput.className = "shape-path-d";
-    pathInput.rows = 3;
-    pathInput.maxLength = 2048;
-    pathInput.disabled = why !== null;
-    pathInput.setAttribute("aria-label", translate("canvas.pathData"));
-    pathInput.dataset["i18nAttr"] = "aria-label:canvas.pathData";
     const shapeRecord = layer.shape as Record<string, unknown>;
-    if (kind === "path" && typeof shapeRecord["d"] === "string") {
-      pathInput.value = shapeRecord["d"];
-    }
-    const committedD = pathInput.value;
-    pathInput.addEventListener("change", () => {
-      const d = pathInput.value.trim();
-      if (!d || d === committedD) return;
+    const pathValue = kind === "path" && typeof shapeRecord["d"] === "string" ? shapeRecord["d"] : "";
+    mountedInspectorWidgets.push(mountInspectorField(pathRow, {
+      id: "shape-path-d",
+      label: () => translate("canvas.pathData"),
+      type: "textarea",
+      value: pathValue,
+      className: "shape-path-d",
+      rows: 3,
+      maxLength: 2048,
+      disabled: why !== null,
+      onCommit: (raw) => {
+      const d = raw.trim();
+      if (!d || d === pathValue) return;
       shapeControlErrors.delete("path-d");
       void send("set path data", {
         op: "update",
         id: layer.id,
         shape: { kind: "path", d },
       } as Operation, refuseAtControl("path-d"));
-    });
-    pathRow.append(pathCaption, pathInput);
+    },
+    }));
     drawControlError(pathRow, "path-d");
     pane.append(pathRow);
 
@@ -2215,22 +2006,19 @@ function drawInspector(): void {
     // checked here, because a form that sends a refusal it could have caught
     // buys a round trip that says nothing new; anything the engine still
     // refuses arrives back in its own words, at this control.
-    const dashRow = document.createElement("label");
+    const dashRow = document.createElement("div");
     dashRow.className = "field shape-field shape-dash-row";
-    dashRow.append(localizedSpan("canvas.dashPattern"));
-    const dashInput = document.createElement("input");
-    dashInput.type = "text";
-    dashInput.className = "shape-dash";
-    dashInput.dataset["i18nAttr"] = "placeholder:canvas.dashExample;aria-label:canvas.dashPattern";
-    dashInput.placeholder = translate("canvas.dashExample");
-    dashInput.disabled = why !== null;
-    dashInput.setAttribute("aria-label", translate("canvas.dashPattern"));
-    dashInput.value = (layer.stroke?.dashArray ?? []).join(", ");
-    dashRow.append(dashInput);
-    drawControlError(dashRow, "dash");
-    pane.append(dashRow);
-    dashInput.addEventListener("change", () => {
-      const text = dashInput.value.trim();
+    const dashValue = (layer.stroke?.dashArray ?? []).join(", ");
+    mountedInspectorWidgets.push(mountInspectorField(dashRow, {
+      id: "shape-dash",
+      label: () => translate("canvas.dashPattern"),
+      type: "text",
+      value: dashValue,
+      className: "shape-dash",
+      placeholder: translate("canvas.dashExample"),
+      disabled: why !== null,
+      onCommit: (raw) => {
+      const text = raw.trim();
       shapeControlErrors.delete("dash");
       const numbers = text ? text.split(",").map((part) => Number(part.trim())) : [];
       if (numbers.some((value) => !Number.isFinite(value) || value <= 0)) {
@@ -2248,7 +2036,10 @@ function drawInspector(): void {
         dashArray: numbers.length ? numbers : null,
       };
       void send("change dash pattern", { op: "update", id: layer.id, stroke } as Operation, refuseAtControl("dash"));
-    });
+    },
+    }));
+    drawControlError(dashRow, "dash");
+    pane.append(dashRow);
 
     // Cap and join, from the sets the engine draws. A value written by a
     // newer build is listed as itself, so it can be seen and kept but never
@@ -2259,14 +2050,6 @@ function drawInspector(): void {
       key: "lineCap" | "lineJoin",
       choices: readonly string[],
     ): void => {
-      const row = document.createElement("label");
-      row.className = "field shape-field";
-      row.append(localizedSpan(labelKey));
-      const select = document.createElement("select");
-      select.className = className;
-      select.disabled = why !== null;
-      select.setAttribute("aria-label", translate(labelKey));
-      select.dataset["i18nAttr"] = `aria-label:${labelKey}`;
       // A cap or join written by a newer build round-trips verbatim, so its
       // runtime type is only ever checked here, at the control.
       const raw = layer.stroke?.[key];
@@ -2274,22 +2057,13 @@ function drawInspector(): void {
       const offered = current && !choices.includes(current)
         ? [...choices, current]
         : [...choices];
-      for (const choice of offered) {
-        const option = document.createElement("option");
-        option.value = choice;
-        option.textContent = choice;
-        select.append(option);
-      }
-      select.value = current ?? choices[0] ?? "";
-      select.addEventListener("change", () => {
+      choiceField(labelKey, className, current ?? choices[0] ?? "", offered.map((choice) => ({ value: choice, label: choice })), (next) => {
         const stroke = {
           ...(layer.stroke ?? { color: strokeColour, width: strokeWidth }),
-          [key]: select.value,
+          [key]: next,
         };
         void send(`change ${translate(labelKey).toLowerCase()}`, { op: "update", id: layer.id, stroke } as Operation);
       });
-      row.append(select);
-      pane.append(row);
     };
     strokeChoice("properties.lineCap", "shape-stroke-cap", "lineCap", ["butt", "round", "square"]);
     strokeChoice("properties.lineJoin", "shape-stroke-join", "lineJoin", ["miter", "round", "bevel"]);
@@ -2303,35 +2077,18 @@ function drawInspector(): void {
         className: string,
         key: "markerStart" | "markerEnd",
       ): void => {
-        const row = document.createElement("label");
-        row.className = "field shape-field";
-        row.append(localizedSpan(labelKey));
-        const select = document.createElement("select");
-        select.className = className;
-        select.disabled = why !== null;
-        select.setAttribute("aria-label", translate(labelKey));
-        select.dataset["i18nAttr"] = `aria-label:${labelKey}`;
         const current = shapeRecord[key];
         const offered = typeof current === "string" && current !== "none" &&
             !["arrow", "circle"].includes(current)
           ? ["none", "arrow", "circle", current]
           : ["none", "arrow", "circle"];
-        for (const choice of offered) {
-          const option = document.createElement("option");
-          option.value = choice;
-          option.textContent = choice;
-          select.append(option);
-        }
-        select.value = typeof current === "string" ? current : "none";
-        select.addEventListener("change", () =>
+        choiceField(labelKey, className, typeof current === "string" ? current : "none", offered.map((choice) => ({ value: choice, label: choice })), (next) =>
           void send(`change ${translate(labelKey).toLowerCase()}`, {
             op: "update",
             id: layer.id,
-            [key]: select.value,
+            [key]: next,
           } as Operation),
         );
-        row.append(select);
-        pane.append(row);
       };
       markerRow("properties.markerStart", "shape-marker-start", "markerStart");
       markerRow("properties.markerEnd", "shape-marker-end", "markerEnd");
@@ -2343,27 +2100,11 @@ function drawInspector(): void {
   pane = beginSection("Clip and mirror");
 
   const clipShape = clipShapeOf(layer);
-  const clipRow = document.createElement("label");
-  clipRow.className = "field";
-  clipRow.append(localizedSpan("properties.clip"));
-  const clipSelect = document.createElement("select");
-  clipSelect.className = "clip-shape";
-  clipSelect.disabled = why !== null;
-  clipSelect.setAttribute("aria-label", translate("properties.clip"));
-    clipSelect.dataset["i18nAttr"] = "aria-label:properties.clip";
   // A clip shape this build does not know is listed as itself, so it can be
   // seen and replaced but never silently becomes something else.
   const clipChoices: string[] = [...CLIP_SHAPES];
   if (clipShape && !clipChoices.includes(clipShape)) clipChoices.push(clipShape);
-  for (const choice of ["none", ...clipChoices]) {
-    const option = document.createElement("option");
-    option.value = choice;
-    option.textContent = choice;
-    clipSelect.append(option);
-  }
-  clipSelect.value = clipShape ?? "none";
-  clipSelect.addEventListener("change", () => {
-    const chosen = clipSelect.value;
+  choiceField("properties.clip", "clip-shape", clipShape ?? "none", ["none", ...clipChoices].map((choice) => ({ value: choice, label: choice })), (chosen) => {
     if (chosen === (clipShape ?? "none")) return;
     const clip = chosen === "none"
       ? null
@@ -2372,8 +2113,6 @@ function drawInspector(): void {
         : { shape: chosen };
     void send("change clip", { op: "update", id: layer.id, clip } as Operation);
   });
-  clipRow.append(clipSelect);
-  pane.append(clipRow);
 
   if (clipShape === "rect") {
     // Only a rect clip has corners. The engine refuses this property on any
@@ -2395,19 +2134,16 @@ function drawInspector(): void {
   const mirror = document.createElement("div");
   mirror.className = "property-flags";
   const flip = (labelKey: MessageKey, name: string, key: string, current: boolean): void => {
-    const wrapper = document.createElement("label");
+    const wrapper = document.createElement("div");
     wrapper.className = "field checkbox";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.className = name;
-    input.checked = current;
-    input.disabled = why !== null;
-    input.setAttribute("aria-label", translate(labelKey));
-    input.dataset["i18nAttr"] = `aria-label:${labelKey}`;
-    input.addEventListener("change", () =>
-      void send(translate(labelKey).toLowerCase(), { op: "update", id: layer.id, [key]: input.checked } as Operation),
-    );
-    wrapper.append(input, localizedSpan(labelKey));
+    mountedInspectorWidgets.push(mountInspectorCheckbox(wrapper, {
+      id: name,
+      label: () => translate(labelKey),
+      checked: current,
+      disabled: why !== null,
+      className: name,
+      onChange: (checked) => void send(translate(labelKey).toLowerCase(), { op: "update", id: layer.id, [key]: checked } as Operation),
+    }));
     mirror.append(wrapper);
   };
   flip("properties.flipHorizontal", "flip-horizontal", "flipHorizontal", layer.transform.flipHorizontal ?? false);
@@ -2415,23 +2151,8 @@ function drawInspector(): void {
   pane.append(mirror);
 
   pane = beginSection("Appearance");
-  const blend = document.createElement("label");
-  blend.className = "field";
-  blend.append(localizedSpan("properties.blendMode"));
-  const blendSelect = document.createElement("select");
-  blendSelect.disabled = why !== null;
-  for (const mode of api.BLEND_MODES) {
-    const option = document.createElement("option");
-    option.value = mode;
-    option.textContent = mode;
-    blendSelect.append(option);
-  }
-  blendSelect.value = layer.blendMode ?? "normal";
-  blendSelect.addEventListener("change", () =>
-    void send("change blend mode", { op: "update", id: layer.id, blendMode: blendSelect.value } as Operation),
-  );
-  blend.append(blendSelect);
-  pane.append(blend);
+  choiceField("properties.blendMode", "blend-mode", layer.blendMode ?? "normal", api.BLEND_MODES.map((mode) => ({ value: mode, label: mode })),
+    (next) => void send("change blend mode", { op: "update", id: layer.id, blendMode: next } as Operation));
 
   drawEffects(dom.advancedInspector, layer, why !== null);
   drawPresets(dom.advancedInspector, layer, why !== null);
@@ -2439,26 +2160,24 @@ function drawInspector(): void {
 
   const flags = document.createElement("div");
   flags.className = "property-flags";
-  const visible = document.createElement("label");
+  const visible = document.createElement("div");
   visible.className = "field checkbox";
-  const visibleInput = document.createElement("input");
-  visibleInput.type = "checkbox";
-  visibleInput.checked = layer.visible ?? true;
-  visibleInput.disabled = why !== null;
-  visibleInput.addEventListener("change", () =>
-    void send("show/hide", { op: "setVisible", id: layer.id, visible: visibleInput.checked } as Operation),
-  );
-  visible.append(visibleInput, localizedSpan("properties.visible"));
-  const locked = document.createElement("label");
+  mountedInspectorWidgets.push(mountInspectorCheckbox(visible, {
+    id: "layer-visible",
+    label: () => translate("properties.visible"),
+    checked: layer.visible ?? true,
+    disabled: why !== null,
+    onChange: (checked) => void send("show/hide", { op: "setVisible", id: layer.id, visible: checked } as Operation),
+  }));
+  const locked = document.createElement("div");
   locked.className = "field checkbox";
-  const lockedInput = document.createElement("input");
-  lockedInput.type = "checkbox";
-  lockedInput.checked = layer.locked ?? false;
-  lockedInput.disabled = Boolean(layer.protected || layer.readOnly);
-  lockedInput.addEventListener("change", () =>
-    void send(lockedInput.checked ? "lock layer" : "unlock layer", { op: "setLocked", id: layer.id, locked: lockedInput.checked } as Operation),
-  );
-  locked.append(lockedInput, localizedSpan("properties.locked"));
+  mountedInspectorWidgets.push(mountInspectorCheckbox(locked, {
+    id: "layer-locked",
+    label: () => translate("properties.locked"),
+    checked: layer.locked ?? false,
+    disabled: layerGuardReason(layer, true) !== null,
+    onChange: (checked) => void send(checked ? "lock layer" : "unlock layer", { op: "setLocked", id: layer.id, locked: checked } as Operation),
+  }));
   flags.append(visible, locked);
   pane.append(flags);
 }
@@ -2497,21 +2216,26 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
     // one of them is the parameter, so each field is named in the row.
     const fields = api.effectFields(effect);
     if (fields.length > 1) row.classList.add("multi");
-    const editField = (field: api.EffectField): HTMLInputElement => {
-      const input = document.createElement("input");
-      input.type = field.kind === "color" ? "text" : "number";
-      if (field.kind === "number") input.step = "0.05";
-      input.value = String(field.value);
-      input.disabled = guarded;
-      input.dataset["field"] = field.name;
-      input.setAttribute("aria-label", `${effect.type} ${field.name}`);
-      input.addEventListener("change", () => {
-        const value = field.kind === "color" ? input.value.trim() : Number(input.value);
-        if (typeof value === "number" && !Number.isFinite(value)) return;
-        if (value === field.value) return;
-        setStack(effects.map((one, at) => (at === index ? { ...one, [field.name]: value } : one)));
-      });
-      return input;
+    const editField = (field: api.EffectField): HTMLElement => {
+      const host = document.createElement("span");
+      host.className = "effect-input-host";
+      const id = `effect-${layer.id}-${index}-${field.name}`;
+      mountedInspectorWidgets.push(mountInspectorField(host, {
+        id,
+        label: `${label.textContent} ${field.name}`,
+        value: String(field.value),
+        type: field.kind === "color" ? "text" : "number",
+        step: field.kind === "number" ? "0.05" : undefined,
+        disabled: guarded,
+        onMount: (input) => { input.dataset["field"] = field.name; },
+        onCommit: (raw) => {
+          const value = field.kind === "color" ? raw.trim() : Number(raw);
+          if (typeof value === "number" && !Number.isFinite(value)) return;
+          if (value === field.value) return;
+          setStack(effects.map((one, at) => (at === index ? { ...one, [field.name]: value } : one)));
+        },
+      }));
+      return host;
     };
     if (fields.length === 1 && fields[0]) {
       row.append(editField(fields[0]));
@@ -2542,68 +2266,56 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
       setStack(next);
     };
 
-    const up = document.createElement("button");
-    up.type = "button";
-    up.className = "small effect-up";
-    up.innerHTML = '<i class="ph ph-arrow-up" aria-hidden="true"></i>';
-    const upName = document.createElement("span");
-    upName.className = "sr-only";
-    up.dataset["effectAction"] = "effects.moveUp";
-    up.dataset["effectType"] = effect.type;
-    upName.textContent = translate("effects.moveUp", { effect: effect.type });
-    up.title = upName.textContent;
-    up.append(upName);
-    up.disabled = guarded || index === 0;
-    up.addEventListener("click", () => swap(index - 1));
-
-    const down = document.createElement("button");
-    down.type = "button";
-    down.className = "small effect-down";
-    down.innerHTML = '<i class="ph ph-arrow-down" aria-hidden="true"></i>';
-    const downName = document.createElement("span");
-    downName.className = "sr-only";
-    down.dataset["effectAction"] = "effects.moveDown";
-    down.dataset["effectType"] = effect.type;
-    downName.textContent = translate("effects.moveDown", { effect: effect.type });
-    down.title = downName.textContent;
-    down.append(downName);
-    down.disabled = guarded || index === effects.length - 1;
-    down.addEventListener("click", () => swap(index + 1));
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "small effect-remove";
-    remove.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i><span data-i18n="effects.remove" class="sr-only">Remove effect</span>';
-    remove.disabled = guarded;
-    remove.addEventListener("click", () =>
-      setStack(effects.filter((_, at) => at !== index)),
+    const actionHost = (className: string, label: string, icon: string, disabled: boolean, onClick: () => void): HTMLElement => {
+      const host = document.createElement("span");
+      host.style.display = "contents";
+      mountedInspectorWidgets.push(mountInspectorButton(host, {
+        id: `effect-action-${layer.id}-${index}-${className}`,
+        className,
+        label,
+        title: label,
+        icon,
+        disabled,
+        onClick,
+      }));
+      return host;
+    };
+    row.append(
+      actionHost("small effect-up", translate("effects.moveUp", { effect: effect.type }), "ph-arrow-up", guarded || index === 0, () => swap(index - 1)),
+      actionHost("small effect-down", translate("effects.moveDown", { effect: effect.type }), "ph-arrow-down", guarded || index === effects.length - 1, () => swap(index + 1)),
+      actionHost("small effect-remove", translate("effects.remove"), "ph-trash", guarded, () => setStack(effects.filter((_, at) => at !== index))),
     );
-    row.append(up, down, remove);
     body.append(row);
   }
 
   const add = document.createElement("div");
   add.className = "effect-add-row";
-  const chooser = document.createElement("select");
-  chooser.className = "effect-chooser";
-  chooser.setAttribute("aria-label", translate("effects.choose"));
-    chooser.dataset["i18nAttr"] = "aria-label:effects.choose";
-  chooser.disabled = guarded;
-  for (const type of api.EFFECT_TYPES) {
-    const option = document.createElement("option");
-    option.value = type;
-    option.textContent = type.replace(/([A-Z])/g, " $1").replace(/^./, (one) => one.toUpperCase());
-    chooser.append(option);
-  }
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "effect-add";
-  button.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i><span data-i18n="effects.add">Add effect</span>';
-  button.disabled = guarded;
-  button.addEventListener("click", () => {
-    setStack([...effects, api.newEffect(chooser.value)]);
-  });
-  add.append(chooser, button);
+  let chosenEffect = api.EFFECT_TYPES[0] ?? "brightness";
+  const chooser = document.createElement("span");
+  mountedInspectorWidgets.push(mountInspectorField(chooser, {
+    id: `effect-chooser-${layer.id}`,
+    label: () => translate("effects.choose"),
+    value: chosenEffect,
+    className: "effect-chooser",
+    disabled: guarded,
+    options: api.EFFECT_TYPES.map((type) => ({ value: type, label: type.replace(/([A-Z])/g, " $1").replace(/^./, (one) => one.toUpperCase()) })),
+    onCommit: (value) => { chosenEffect = value as typeof chosenEffect; },
+  }));
+  const addButton = document.createElement("span");
+  addButton.style.display = "contents";
+  mountedInspectorWidgets.push(mountInspectorButton(addButton, {
+    id: `effect-add-${layer.id}`,
+    className: "effect-add",
+    icon: "ph-plus",
+    label: () => translate("effects.add"),
+    disabled: guarded,
+    onClick: () => {
+      const current = dom.advancedInspector.querySelector<HTMLSelectElement>(`.effect-chooser`);
+      if (current) chosenEffect = current.value as typeof chosenEffect;
+      setStack([...effects, api.newEffect(chosenEffect)]);
+    },
+  }));
+  add.append(chooser, addButton);
   body.append(add);
 }
 
@@ -2634,50 +2346,52 @@ function drawPresets(target: HTMLElement, layer: Layer, guarded: boolean): void 
     if (preset.description) label.title = preset.description;
     row.append(label);
 
-    const apply = document.createElement("button");
-    apply.type = "button";
-    apply.className = "small";
-    apply.dataset["i18n"] = "common.apply";
-    apply.textContent = translate("common.apply");
-    apply.disabled = guarded;
-    apply.addEventListener("click", () =>
-      void send(`apply ${preset.name}`, {
+    const apply = document.createElement("span");
+    apply.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(apply, {
+      id: `preset-apply-${++nextInspectorControlId}`,
+      label: () => translate("common.apply"),
+      className: "small",
+      disabled: guarded,
+      onClick: () => void send(`apply ${preset.name}`, {
         op: "applyPreset",
         id: layer.id,
         preset: preset.name,
       } as Operation),
-    );
+    }));
     row.append(apply);
 
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "small";
-    remove.dataset["i18n"] = "common.delete";
-    remove.textContent = translate("common.delete");
-    remove.addEventListener("click", () =>
-      void send(`delete ${preset.name}`, {
+    const remove = document.createElement("span");
+    remove.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(remove, {
+      id: `preset-remove-${++nextInspectorControlId}`,
+      label: () => translate("common.delete"),
+      className: "small",
+      onClick: () => void send(`delete ${preset.name}`, {
         op: "deletePreset",
         name: preset.name,
       } as Operation),
-    );
+    }));
     row.append(remove);
     body.append(row);
   }
 
   const save = document.createElement("div");
   save.className = "inspector-add-row";
-  const button = document.createElement("button");
-  button.type = "button";
-  button.dataset["i18n"] = "presets.saveStyle";
-    button.textContent = translate("presets.saveStyle");
-  button.addEventListener("click", () => {
+  const button = document.createElement("span");
+  button.style.display = "contents";
+  mountedInspectorWidgets.push(mountInspectorButton(button, {
+    id: `preset-save-${++nextInspectorControlId}`,
+    label: () => translate("presets.saveStyle"),
+    onClick: () => {
     requestName("presets.saveTitle", "presets.name", "presets.saveButton", (name) => {
       void send(`define ${name}`, {
         op: "definePreset",
         preset: { name, properties: api.styleOf(layer) },
       } as Operation);
     });
-  });
+  },
+  }));
   save.append(button);
   body.append(save);
 }
@@ -2704,57 +2418,65 @@ function drawSlots(target: HTMLElement, layer: Layer): void {
 
     // A slot an agent can update (MCP `update_slot`) needs a home here too:
     // rename it, retype it, or repoint it, in the same one operation.
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "small slot-edit";
-    edit.dataset["slot"] = slot.name;
-    edit.dataset["i18n"] = "common.edit";
-    edit.textContent = translate("common.edit");
-    edit.title = translate("slots.editHint", { name: slot.name });
-    edit.dataset["slotName"] = slot.name;
-    edit.addEventListener("click", () => beginSlotEdit(row, slot));
+    const edit = document.createElement("span");
+    edit.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(edit, {
+      id: `slot-edit-${++nextInspectorControlId}`,
+      label: () => translate("common.edit"),
+      className: "small slot-edit",
+      title: () => translate("slots.editHint", { name: slot.name }),
+      onMount(button) {
+        button.dataset["slot"] = slot.name;
+        button.dataset["slotName"] = slot.name;
+      },
+      onClick: () => beginSlotEdit(row, slot),
+    }));
     row.append(edit);
 
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "small";
-    remove.dataset["i18n"] = "common.remove";
-    remove.textContent = translate("common.remove");
-    remove.addEventListener("click", () =>
-      void send(`remove slot ${slot.name}`, {
+    const remove = document.createElement("span");
+    remove.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(remove, {
+      id: `slot-remove-${++nextInspectorControlId}`,
+      label: () => translate("common.remove"),
+      className: "small",
+      onClick: () => void send(`remove slot ${slot.name}`, {
         op: "removeSlot",
         name: slot.name,
       } as Operation),
-    );
+    }));
     row.append(remove);
     body.append(row);
   }
 
   const buttons = document.createElement("div");
   buttons.className = "inspector-add-row";
-  const kind = document.createElement("select");
-  for (const option of ["text", "image", "color"]) {
-    const element = document.createElement("option");
-    element.value = option;
-    element.textContent = option;
-    kind.append(element);
-  }
   // A text layer cannot be an image slot and vice versa; the engine refuses
   // either way, but offering the wrong one is a form that invites a refusal.
-  kind.value = layer.type === "image" ? "image" : "text";
-
-  const offer = document.createElement("button");
-  offer.type = "button";
-  offer.dataset["i18n"] = "slots.offer";
-    offer.textContent = translate("slots.offer");
-  offer.addEventListener("click", () => {
+  let selectedKind = layer.type === "image" ? "image" : "text";
+  const kind = document.createElement("span");
+  kind.style.display = "contents";
+  mountedInspectorWidgets.push(mountInspectorField(kind, {
+    id: `slot-kind-${++nextInspectorControlId}`,
+    label: () => translate("slots.kind"),
+    value: selectedKind,
+    className: "slot-kind-select",
+    options: ["text", "image", "color"].map((value) => ({ value, label: value })),
+    onCommit: (next) => { selectedKind = next; },
+  }));
+  const offer = document.createElement("span");
+  offer.style.display = "contents";
+  mountedInspectorWidgets.push(mountInspectorButton(offer, {
+    id: `slot-offer-${++nextInspectorControlId}`,
+    label: () => translate("slots.offer"),
+    onClick: () => {
     requestName("slots.createTitle", "slots.name", "slots.createButton", (name) => {
       void send(`offer ${name}`, {
         op: "defineSlot",
-        slot: { name, layer: layer.id, kind: kind.value },
+        slot: { name, layer: layer.id, kind: selectedKind },
       } as Operation);
     });
-  });
+  },
+  }));
   buttons.append(kind, offer);
   body.append(buttons);
 }
@@ -2768,61 +2490,68 @@ function drawSlots(target: HTMLElement, layer: Layer): void {
  */
 function beginSlotEdit(row: HTMLElement, slot: api.Slot): void {
   row.replaceChildren();
-  const name = document.createElement("input");
-  name.type = "text";
-  name.className = "slot-edit-name";
-  name.value = slot.name;
-  name.setAttribute("aria-label", translate("slots.name"));
-    name.dataset["i18nAttr"] = "aria-label:slots.name";
-  const kind = document.createElement("select");
-  kind.className = "slot-edit-kind";
-  kind.setAttribute("aria-label", translate("slots.kind"));
-    kind.dataset["i18nAttr"] = "aria-label:slots.kind";
-  for (const option of ["text", "image", "color"]) {
-    const element = document.createElement("option");
-    element.value = option;
-    element.textContent = option;
-    kind.append(element);
-  }
-  kind.value = slot.kind ?? "text";
-  const layerId = document.createElement("input");
-  layerId.type = "text";
-  layerId.className = "slot-edit-layer";
-  layerId.value = slot.layer;
-  layerId.setAttribute("aria-label", translate("slots.layerId"));
-  layerId.dataset["i18nAttr"] = "aria-label:slots.layerId;title:slots.layerIdHint";
-  layerId.title = translate("slots.layerIdHint");
-  const save = document.createElement("button");
-  save.type = "button";
-  save.className = "small slot-edit-save";
-  save.dataset["i18n"] = "common.save";
-    save.textContent = translate("common.save");
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.className = "small";
-  cancel.dataset["i18n"] = "common.cancel";
-    cancel.textContent = translate("common.cancel");
+  const nameHost = document.createElement("span");
+  const kindHost = document.createElement("span");
+  const layerHost = document.createElement("span");
+  const saveHost = document.createElement("span");
+  const cancelHost = document.createElement("span");
+  for (const host of [nameHost, kindHost, layerHost, saveHost, cancelHost]) host.style.display = "contents";
+  row.append(nameHost, kindHost, layerHost, saveHost, cancelHost);
+  const id = ++nextInspectorControlId;
+  mountedInspectorWidgets.push(mountInspectorField(nameHost, {
+    id: `slot-edit-name-${id}`,
+    label: () => translate("slots.name"),
+    value: slot.name,
+    className: "slot-edit-name",
+    onCommit: () => undefined,
+  }));
+  mountedInspectorWidgets.push(mountInspectorField(kindHost, {
+    id: `slot-edit-kind-${id}`,
+    label: () => translate("slots.kind"),
+    value: slot.kind ?? "text",
+    className: "slot-edit-kind",
+    options: ["text", "image", "color"].map((value) => ({ value, label: value })),
+    onCommit: () => undefined,
+  }));
+  mountedInspectorWidgets.push(mountInspectorField(layerHost, {
+    id: `slot-edit-layer-${id}`,
+    label: () => translate("slots.layerId"),
+    title: () => translate("slots.layerIdHint"),
+    value: slot.layer,
+    className: "slot-edit-layer",
+    onCommit: () => undefined,
+  }));
   const finish = (commit: boolean): void => {
     if (!commit) {
       drawInspector();
       return;
     }
-    const nextName = name.value.trim();
+    const nextName = row.querySelector<HTMLInputElement>(".slot-edit-name")?.value.trim() ?? "";
     if (!nextName) return;
     void send(`update slot ${slot.name}`, {
       op: "updateSlot",
       name: slot.name,
       slot: {
         name: nextName,
-        layer: layerId.value.trim() || slot.layer,
-        kind: kind.value,
+        layer: row.querySelector<HTMLInputElement>(".slot-edit-layer")?.value.trim() || slot.layer,
+        kind: row.querySelector<HTMLSelectElement>(".slot-edit-kind")?.value ?? slot.kind ?? "text",
         description: slot.description,
         required: slot.required ?? false,
       },
     } as Operation);
   };
-  save.addEventListener("click", () => finish(true));
-  cancel.addEventListener("click", () => finish(false));
+  mountedInspectorWidgets.push(mountInspectorButton(saveHost, {
+    id: `slot-edit-save-${id}`,
+    label: () => translate("common.save"),
+    className: "small slot-edit-save",
+    onClick: () => finish(true),
+  }));
+  mountedInspectorWidgets.push(mountInspectorButton(cancelHost, {
+    id: `slot-edit-cancel-${id}`,
+    label: () => translate("common.cancel"),
+    className: "small",
+    onClick: () => finish(false),
+  }));
   row.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -2834,8 +2563,7 @@ function beginSlotEdit(row: HTMLElement, slot: api.Slot): void {
       finish(false);
     }
   });
-  row.append(name, kind, layerId, save, cancel);
-  name.focus();
+  row.querySelector<HTMLInputElement>(".slot-edit-name")?.focus();
 }
 
 /** Draws the journal when it is still the newest one requested. */
@@ -2845,15 +2573,8 @@ async function drawHistory(): Promise<void> {
   const sequence = ++historySequence;
   const history = await api.getHistory(state.project);
   if (sequence !== historySequence) return;
-  dom.history.replaceChildren();
-  for (const entry of history.entries.slice().reverse()) {
-    const item = document.createElement("li");
-    item.textContent = `${entry.position}. ${entry.kind} — ${entry.actor.kind}${
-      entry.actor.detail ? ` (${entry.actor.detail})` : ""
-    }`;
-    if (entry.position > history.position) item.classList.add("undone");
-    dom.history.append(item);
-  }
+  historySnapshot = { entries: history.entries, position: history.position, head: history.head };
+  drawLayers();
   dom.undo.disabled = history.position === 0;
   dom.redo.disabled = history.position >= history.head;
 }
@@ -2922,9 +2643,10 @@ function echoOperations(operations: api.OperationBatchCommand[]): boolean {
     }
   }
   if (echoed) {
-    drawLayers();
+    // Geometry changes the canvas handles immediately. Rebuild the inspector
+    // once, from the authoritative response, so controls do not delay dispatch.
     drawOverlay();
-    drawInspector();
+    if (positionPopoverIsOpen()) renderPositionFields(selectedLayers());
   }
   return echoed;
 }
@@ -3641,13 +3363,7 @@ function visualCollectiveBounds(geometry = selectionGeometry()): {
 
 function applyZoom(): void {
   if (!state.document) return;
-  const availableWidth = Math.max(240, dom.stageViewport.clientWidth - STAGE_INSET_PX);
-  const availableHeight = Math.max(180, dom.stageViewport.clientHeight - STAGE_INSET_PX);
-  const fit = Math.min(
-    availableWidth / state.document.canvas.width,
-    availableHeight / state.document.canvas.height,
-    1,
-  );
+  const fit = fitZoomScale();
   const scale = state.zoom ?? fit;
   dom.canvas.style.width = `${Math.max(1, Math.round(state.document.canvas.width * scale))}px`;
   dom.canvas.style.height = `${Math.max(1, Math.round(state.document.canvas.height * scale))}px`;
@@ -3659,13 +3375,36 @@ function applyZoom(): void {
     : translate("canvas.zoomResetFit");
 }
 
-function setZoom(next: number | null): void {
+function viewportCentre(): { x: number; y: number } {
+  const rect = dom.stageViewport.getBoundingClientRect();
+  return {
+    x: rect.left + dom.stageViewport.clientLeft + dom.stageViewport.clientWidth / 2,
+    y: rect.top + dom.stageViewport.clientTop + dom.stageViewport.clientHeight / 2,
+  };
+}
+
+/** Change zoom while keeping the document point under the anchor in place. */
+function setZoom(next: number | null, anchor = viewportCentre()): void {
+  const before = dom.canvas.getBoundingClientRect();
+  const fractionX = before.width > 0 ? (anchor.x - before.left) / before.width : 0.5;
+  const fractionY = before.height > 0 ? (anchor.y - before.top) / before.height : 0.5;
   state.zoom = next === null ? null : Math.min(4, Math.max(0.1, next));
   applyZoom();
+  requestPreviewIfScaleChanged();
+  if (state.zoom === null) {
+    dom.stageViewport.scrollLeft = 0;
+    dom.stageViewport.scrollTop = 0;
+    return;
+  }
+  if (before.width <= 0 || before.height <= 0) return;
+
+  const after = dom.canvas.getBoundingClientRect();
+  dom.stageViewport.scrollLeft += after.left + fractionX * after.width - anchor.x;
+  dom.stageViewport.scrollTop += after.top + fractionY * after.height - anchor.y;
 }
 
 function beginInlineTextEdit(layer: Extract<Layer, { type: "text" }>): void {
-  if (!state.document || !api.isEditable(layer)) return;
+  if (!state.document || !editableLayer(layer)) return;
   dom.overlay.querySelector(".inline-text-editor")?.remove();
   const flat = api.flatten(api.layersOf(state.document));
   const found = flat.find(({ layer: one }) => one.id === layer.id);
@@ -3686,7 +3425,7 @@ function beginInlineTextEdit(layer: Extract<Layer, { type: "text" }>): void {
   textarea.style.fontSize = `${Math.max(12, layer.fontSize * (dom.canvas.getBoundingClientRect().width / state.document.canvas.width))}px`;
   textarea.style.lineHeight = String(layer.lineHeight ?? 1.2);
   textarea.style.textAlign = layer.align ?? "left";
-  textarea.style.color = layer.color ?? "#000000";
+  textarea.style.color = solidColour(layer.color) ?? "#000000";
   dom.overlay.append(textarea);
   state.editingText = { id: layer.id, original: layer.text };
   textarea.focus();
@@ -3717,7 +3456,12 @@ function beginInlineTextEdit(layer: Extract<Layer, { type: "text" }>): void {
 }
 
 function renderPositionFields(layers: Layer[]): void {
-  dom.positionFields.replaceChildren();
+  batchMantinePortals(() => renderPositionFieldsContent(layers));
+}
+
+function renderPositionFieldsContent(layers: Layer[]): void {
+  for (const unmount of mountedPositionWidgets) unmount();
+  mountedPositionWidgets = [];
   const geometry = selectionGeometry();
   const bounds = collectiveBounds(geometry);
   if (!bounds || layers.length === 0) return;
@@ -3729,14 +3473,15 @@ function renderPositionFields(layers: Layer[]): void {
     ["°", layers.length === 1 ? (layers[0]?.transform.rotation ?? 0) : 0, "rotation"],
   ];
   for (const [label, value, property] of values) {
-    const wrapper = document.createElement("label");
-    wrapper.append(document.createTextNode(label));
-    const input = document.createElement("input");
-    input.type = "number";
-    input.value = String(Math.round(value * 10) / 10);
-    input.disabled = layers.some((layer) => !api.isEditable(layer)) || (property === "rotation" && layers.length > 1);
-    input.addEventListener("change", async () => {
-      const next = Number(input.value);
+    const unmount = mountInspectorField(dom.positionFields, {
+      id: `position-${property}`,
+      label,
+      type: "number",
+      value: String(Math.round(value * 10) / 10),
+      className: "position-field-input",
+      disabled: layers.some((layer) => !editableLayer(layer)) || (property === "rotation" && layers.length > 1),
+      onCommit: async (raw) => {
+      const next = Number(raw);
       if (!Number.isFinite(next)) return;
       if (property === "x" || property === "y") {
         const dx = property === "x" ? next - bounds.x : 0;
@@ -3791,15 +3536,17 @@ function renderPositionFields(layers: Layer[]): void {
         }
         void sendBatch("resize selection", operations);
       }
+    },
     });
-    wrapper.append(input);
-    dom.positionFields.append(wrapper);
+    mountedPositionWidgets.push(unmount);
   }
 }
 
+let mountedPositionWidgets: Array<() => void> = [];
+
 function togglePositionPopover(force?: boolean): void {
-  const open = force ?? dom.positionPopover.hidden;
-  dom.positionPopover.hidden = !open;
+  const open = force ?? !positionPopoverIsOpen();
+  setPositionPopoverOpen(open);
   if (!open) return;
   renderPositionFields(selectedLayers());
   // Spacing exception: these are placement numbers, measured from the trigger
@@ -3859,7 +3606,7 @@ function pasteClipboard(): void {
 
 function deleteSelection(label = "delete selection"): void {
   const layers = selectedLayers();
-  if (layers.length === 0 || layers.some((layer) => !api.isEditable(layer))) return;
+  if (layers.length === 0 || layers.some((layer) => !editableLayer(layer))) return;
   void sendBatch(label, layers.map((layer) => ({ op: "delete", id: layer.id } as Operation)));
 }
 
@@ -3868,7 +3615,7 @@ function moveLayerOrder(where: "front" | "forward" | "backward" | "back"): void 
   const id = state.selection[0];
   const flat = api.flatten(api.layersOf(state.document));
   const found = flat.find(({ layer }) => layer.id === id);
-  if (!found || !api.isEditable(found.layer)) return;
+  if (!found || !editableLayer(found.layer)) return;
   const parentLayer = found.parent ? flat.find(({ layer }) => layer.id === found.parent)?.layer : null;
   const siblings = parentLayer?.type === "group" ? parentLayer.children ?? [] : api.layersOf(state.document);
   const index = siblings.findIndex((layer) => layer.id === id);
@@ -3885,33 +3632,14 @@ function moveLayerOrder(where: "front" | "forward" | "backward" | "back"): void 
 }
 
 function openContextMenu(x: number, y: number): void {
-  dom.contextMenu.replaceChildren();
   const layers = selectedLayers();
-  const editable = layers.length > 0 && layers.every(api.isEditable);
+  const editable = layers.length > 0 && layers.every(editableLayer);
   const one = layers.length === 1 ? layers[0] : null;
+  const items: ContextMenuItem[] = [];
   const add = (labelKey: MessageKey, icon: string, run: () => void, disabled = false): void => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute("role", "menuitem");
-    button.disabled = disabled;
-    const symbol = document.createElement("i");
-    symbol.className = `ph ${icon}`;
-    symbol.setAttribute("aria-hidden", "true");
-    const text = document.createElement("span");
-    text.dataset["i18n"] = labelKey;
-    text.textContent = translate(labelKey);
-    button.append(symbol, text);
-    button.addEventListener("click", () => {
-      dom.contextMenu.hidden = true;
-      run();
-    });
-    dom.contextMenu.append(button);
+    items.push({ kind: "item", key: labelKey, icon, disabled, run });
   };
-  const divider = (): void => {
-    const rule = document.createElement("hr");
-    rule.setAttribute("role", "separator");
-    dom.contextMenu.append(rule);
-  };
+  const divider = (): void => { items.push({ kind: "separator" }); };
   if (one?.type === "text") {
     add("context.editText", "ph-pencil-simple", () => beginInlineTextEdit(one), !editable);
     divider();
@@ -3931,7 +3659,7 @@ function openContextMenu(x: number, y: number): void {
   add("context.ungroup", "ph-stack-minus", () => { if (one) void send("ungroup", { op: "ungroup", id: one.id } as Operation); }, one?.type !== "group" || !editable);
   add(one?.locked ? "context.unlock" : "context.lock", one?.locked ? "ph-lock-open" : "ph-lock", () => {
     if (one) void send(one.locked ? "unlock layer" : "lock layer", { op: "setLocked", id: one.id, locked: !one.locked } as Operation);
-  }, !one || Boolean(one.protected || one.readOnly));
+  }, !one || layerGuardReason(one, true) !== null);
   add(one?.visible === false ? "context.show" : "context.hide", one?.visible === false ? "ph-eye" : "ph-eye-slash", () => {
     if (one) void send(one.visible === false ? "show layer" : "hide layer", { op: "setVisible", id: one.id, visible: one.visible === false } as Operation);
   }, !one || !editable);
@@ -3939,9 +3667,11 @@ function openContextMenu(x: number, y: number): void {
     if (!one) return;
     showDock("layers");
     const row = dom.layers.querySelector<HTMLElement>(`[data-id="${CSS.escape(one.id)}"]`);
-    const label = row?.querySelector<HTMLElement>(".name");
-    if (label) beginLayerRename(one, label);
-  }, !one || Boolean(one.protected || one.readOnly));
+    if (row) {
+      row.focus();
+      row.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true }));
+    }
+  }, !one || !editable);
   divider();
   add("context.alignLeft", "ph-align-left-simple", () => alignFromContextMenu("left"), !editable);
   add("context.alignHorizontalCenters", "ph-align-center-horizontal", () => alignFromContextMenu("centerHorizontal"), !editable);
@@ -3951,12 +3681,7 @@ function openContextMenu(x: number, y: number): void {
   add("context.alignBottom", "ph-align-bottom-simple", () => alignFromContextMenu("bottom"), !editable);
   add("context.distributeHorizontally", "ph-columns", () => void send("distribute horizontally", { op: "distribute", ids: layers.map((layer) => layer.id), axis: "horizontal" } as Operation), !editable || layers.length < 3);
   add("context.distributeVertically", "ph-rows", () => void send("distribute vertically", { op: "distribute", ids: layers.map((layer) => layer.id), axis: "vertical" } as Operation), !editable || layers.length < 3);
-  dom.contextMenu.hidden = false;
-  // Spacing exception: clamping a floating menu to the window edge is
-  // placement, not spacing; 240 is roughly the menu's width plus a margin.
-  dom.contextMenu.style.left = `${Math.min(window.innerWidth - 240, Math.max(8, x))}px`;
-  dom.contextMenu.style.top = `${Math.min(window.innerHeight - dom.contextMenu.offsetHeight - 8, Math.max(8, y))}px`;
-  dom.contextMenu.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
+  contextMenuController.open(items, x, y);
 }
 
 function alignFromContextMenu(
@@ -3984,91 +3709,8 @@ function alignFromContextMenu(
   }
 }
 
-dom.contextMenu.addEventListener("keydown", (event) => {
-  const items = [...dom.contextMenu.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')];
-  if (items.length === 0) return;
-  const current = items.indexOf(document.activeElement as HTMLButtonElement);
-  let next = current;
-  if (event.key === "ArrowDown") next = (current + 1 + items.length) % items.length;
-  else if (event.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
-  else if (event.key === "Home") next = 0;
-  else if (event.key === "End") next = items.length - 1;
-  else if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    dom.contextMenu.hidden = true;
-    dom.canvas.focus();
-    return;
-  } else return;
-  event.preventDefault();
-  items[next]?.focus();
-});
-
 // --- wiring ------------------------------------------------------------------
 
-let projectChoices: readonly api.ProjectSummary[] = [];
-let projectMenuIndex = -1;
-
-function projectChoice(value: string): api.ProjectSummary | null {
-  const normalized = value.trim().toLocaleLowerCase();
-  return projectChoices.find((project) => project.id.toLocaleLowerCase() === normalized ||
-    (project.name ?? project.id).toLocaleLowerCase() === normalized) ?? null;
-}
-
-function projectRows(): HTMLButtonElement[] {
-  return [...dom.projectOptions.querySelectorAll<HTMLButtonElement>("[data-project-id]")];
-}
-
-function setProjectMenuOpen(open: boolean): void {
-  dom.projectOptions.hidden = !open;
-  dom.search.setAttribute("aria-expanded", String(open));
-  dom.projectPickerToggle.setAttribute("aria-expanded", String(open));
-  if (!open) { projectMenuIndex = -1; dom.search.removeAttribute("aria-activedescendant"); }
-}
-
-function markProjectRow(index: number): void {
-  const rows = projectRows();
-  projectMenuIndex = Math.max(0, Math.min(index, rows.length - 1));
-  rows.forEach((row, at) => row.classList.toggle("active", at === projectMenuIndex));
-  const active = rows[projectMenuIndex];
-  if (active) {
-    dom.search.setAttribute("aria-activedescendant", active.id);
-    active.scrollIntoView({ block: "nearest" });
-  }
-}
-
-function openProjectChoice(projectId?: string): void {
-  const project = projectId
-    ? projectChoices.find((one) => one.id === projectId)
-    : projectChoice(dom.search.value);
-  if (!project) return;
-  dom.search.value = "";
-  dom.projects.value = project.id;
-  setProjectMenuOpen(false);
-  openFromQueue(project.id);
-}
-
-dom.projectPickerToggle.addEventListener("click", () => {
-  const opening = dom.projectOptions.hidden;
-  setProjectMenuOpen(opening);
-  if (opening) dom.search.focus();
-});
-dom.search.addEventListener("focus", () => setProjectMenuOpen(true));
-dom.projectOptions.addEventListener("click", (event) => {
-  const row = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-project-id]");
-  if (row?.dataset["projectId"]) openProjectChoice(row.dataset["projectId"]);
-});
-document.addEventListener("pointerdown", (event) => {
-  if (!(event.target instanceof Node) || !dom.search.closest(".project-combobox")?.contains(event.target)) {
-    setProjectMenuOpen(false);
-  }
-});
-
-dom.projects.addEventListener("change", () => {
-  const project = projectChoices.find((one) => one.id === dom.projects.value);
-  if (project) dom.search.placeholder = project.name ?? project.id;
-  openFromQueue(dom.projects.value || null);
-});
 /**
  * Opens a project as a queued action, not at the moment of the click.
  *
@@ -4080,6 +3722,7 @@ dom.projects.addEventListener("change", () => {
 function openFromQueue(project: string | null): void {
   void guard("open", async () => {
     state.project = project;
+    projectPicker.setCurrentProject(project);
     state.selection = [];
     // Painted pixels belong to the project they were painted in. A version
     // number alone cannot vouch for them across an open.
@@ -4145,81 +3788,10 @@ dom.reload.addEventListener("click", () => void guard("reload", async () => {
   say(translate("projects.refreshed"));
 }));
 
-// Searching re-asks the engine rather than filtering a list held here, so the
-// page never has to hold a whole workspace to look through it.
-let searchTimer = 0;
-dom.search.addEventListener("input", () => {
-  window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(() => {
-    void guard("search", () => loadProjects());
-  }, 150);
-});
-dom.search.addEventListener("keydown", (event) => {
-  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-    event.preventDefault();
-    if (dom.projectOptions.hidden) setProjectMenuOpen(true);
-    const direction = event.key === "ArrowDown" ? 1 : -1;
-    markProjectRow(projectMenuIndex < 0 ? (direction > 0 ? 0 : projectRows().length - 1) : projectMenuIndex + direction);
-    return;
-  }
-  if (event.key === "Escape") {
-    setProjectMenuOpen(false);
-    return;
-  }
-  if (event.key !== "Enter") return;
-  const highlighted = projectRows()[projectMenuIndex]?.dataset["projectId"];
-  const project = projectChoice(dom.search.value);
-  if (!project && !highlighted) return;
-  event.preventDefault();
-  openProjectChoice(project?.id ?? highlighted);
-});
-
-dom.newProject.addEventListener("click", () => {
-  dom.newProjectName.value = "";
-  dom.newProjectDialog.showModal();
-  window.setTimeout(() => dom.newProjectName.focus(), 0);
-});
-dom.newProjectName.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  dom.newProjectForm.requestSubmit(dom.createProjectConfirm);
-});
+dom.newProject.addEventListener("click", () => projectCreator.open());
 
 dom.emptyCreate.addEventListener("click", () => dom.newProject.click());
 dom.agents.addEventListener("click", () => void agents.open());
-
-dom.canvasPresets.addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-size]");
-  if (!button) return;
-  const [width, height] = (button.dataset["size"] ?? "").split("x").map(Number);
-  if (!width || !height) return;
-  for (const one of dom.canvasPresets.querySelectorAll("button")) {
-    one.classList.toggle("selected", one === button);
-  }
-  dom.newProjectWidth.value = String(width);
-  dom.newProjectHeight.value = String(height);
-});
-
-dom.newProjectForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
-  if (submitter?.value === "cancel") {
-    dom.newProjectDialog.close("cancel");
-    return;
-  }
-  if (!dom.newProjectForm.reportValidity()) return;
-  const id = dom.newProjectName.value.trim();
-  const width = Number(dom.newProjectWidth.value);
-  const height = Number(dom.newProjectHeight.value);
-  if (!id || !Number.isFinite(width) || !Number.isFinite(height)) return;
-
-  void guard("create", async () => {
-    await api.createProject(id, width, height, dom.newProjectBackground.value, id);
-    dom.newProjectDialog.close();
-    await loadProjects(id);
-    say(translate("projects.created", { id }));
-  });
-});
 
 const addSections = [
   ["add-text-section", "toolbar.textButton", dom.addText],
@@ -4242,7 +3814,7 @@ function showAddSection(id = "add-text-section", active = dom.addText): void {
   dom.addPanel.classList.remove("collapsed");
   dom.structure.classList.remove("mobile-open");
   dom.dockToggle.setAttribute("aria-expanded", "false");
-  dom.templatesPanel.classList.remove("open");
+  templates.setOpen(false);
   const panelKey = addSections.find(([sectionId]) => sectionId === id)?.[1] ?? "toolbar.textButton";
   dom.addPanelTitle.dataset["i18n"] = panelKey;
   dom.addPanelTitle.textContent = translate(panelKey);
@@ -4251,8 +3823,8 @@ function showAddSection(id = "add-text-section", active = dom.addText): void {
     if (section) section.hidden = sectionId !== id;
   }
   const templateMode = id === "add-template-section";
-  dom.templatesPanel.classList.toggle("open", templateMode && !dom.templatesPanel.hidden);
-  dom.openTemplates.hidden = templateMode && !dom.templatesPanel.hidden;
+  templates.setOpen(templateMode && templates.isVisible());
+  dom.openTemplates.hidden = templateMode && templates.isVisible();
   dom.addPanel.scrollTop = 0;
   activateEditorTool(active);
 }
@@ -4434,13 +4006,6 @@ dom.addPanel.addEventListener("click", (event) => {
   }
 });
 
-dom.deleteLayer.addEventListener("click", () => deleteSelection());
-
-dom.groupLayers.addEventListener("click", () => {
-  if (state.selection.length < 2) return;
-  void send("group", { op: "group", ids: [...state.selection] } as Operation);
-});
-
 dom.undo.addEventListener("click", () => {
   void guard("undo", async () => {
     if (!state.project) return;
@@ -4461,7 +4026,8 @@ dom.redo.addEventListener("click", () => {
 
 dom.exportButton.addEventListener("click", () => exporter.open());
 
-dom.uploadDropzone.addEventListener("click", () => dom.imageFile.click());
+setAssetUploadHandler((file) => addAssetFile(file,
+  file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg") ? "svg" : "image"));
 
 function addAssetFile(
   file: File,
@@ -4520,20 +4086,6 @@ function addAssetFile(
 }
 
 for (const type of ["dragenter", "dragover"] as const) {
-  dom.uploadDropzone.addEventListener(type, (event) => {
-    event.preventDefault();
-    dom.uploadDropzone.classList.add("drag-over");
-  });
-}
-dom.uploadDropzone.addEventListener("dragleave", () => dom.uploadDropzone.classList.remove("drag-over"));
-dom.uploadDropzone.addEventListener("drop", (event) => {
-  event.preventDefault();
-  dom.uploadDropzone.classList.remove("drag-over");
-  const file = event.dataTransfer?.files[0];
-  if (file) addAssetFile(file, file.type === "image/svg+xml" ? "svg" : "image");
-});
-
-for (const type of ["dragenter", "dragover"] as const) {
   dom.stageViewport.addEventListener(type, (event) => event.preventDefault());
 }
 dom.stageViewport.addEventListener("drop", (event) => {
@@ -4552,26 +4104,12 @@ dom.stageViewport.addEventListener("drop", (event) => {
   addAssetFile(file, file.type === "image/svg+xml" ? "svg" : "image", point);
 });
 
-dom.imageFile.addEventListener("change", () => {
-  const file = dom.imageFile.files?.[0];
-  dom.imageFile.value = "";
-  if (file) addAssetFile(file, file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg") ? "svg" : "image");
-});
-
 function showDock(view: "properties" | "layers" | "history"): void {
-  dom.propertiesTab.setAttribute("aria-selected", String(view === "properties"));
-  dom.layersTab.setAttribute("aria-selected", String(view === "layers"));
-  dom.historyTab.setAttribute("aria-selected", String(view === "history"));
-  dom.propertiesPanel.hidden = view !== "properties";
-  dom.layersView.hidden = view !== "layers";
-  dom.historyView.hidden = view !== "history";
+  activeDock = view;
+  drawLayers();
 }
 
-dom.propertiesTab.addEventListener("click", () => showDock("properties"));
-dom.layersTab.addEventListener("click", () => showDock("layers"));
-dom.historyTab.addEventListener("click", () => showDock("history"));
 dom.historyShortcut.addEventListener("click", () => showDock("history"));
-dom.layerSearch.addEventListener("input", drawLayers);
 dom.dockToggle.addEventListener("click", () => {
   const open = dom.structure.classList.toggle("mobile-open");
   dom.dockToggle.setAttribute("aria-expanded", String(open));
@@ -4583,7 +4121,7 @@ dom.dockToggle.addEventListener("click", () => {
 dom.selectTool.addEventListener("click", () => {
   if (!state.document) return;
   closeAddPanel();
-  dom.templatesPanel.classList.remove("open");
+  templates.setOpen(false);
   dom.structure.classList.remove("mobile-open");
   dom.dockToggle.setAttribute("aria-expanded", "false");
   dom.canvas.focus();
@@ -4680,14 +4218,14 @@ dom.positionPopover.addEventListener("click", (event) => {
 
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
-  if (!dom.positionPopover.hidden && !dom.positionPopover.contains(target) && !dom.inspector.contains(target)) {
+  if (positionPopoverIsOpen() && !dom.positionPopover.contains(target) && !dom.inspector.contains(target)) {
     togglePositionPopover(false);
   }
-  if (!dom.contextMenu.hidden && !dom.contextMenu.contains(target)) dom.contextMenu.hidden = true;
+  if (contextMenuController.isOpen() && !dom.contextMenu.contains(target)) contextMenuController.close();
 });
 
 dom.openTemplates.addEventListener("click", () => {
-  if (dom.templatesPanel.hidden) {
+  if (!templates.isVisible()) {
     say(translate("editor.noSlotsHint"));
     closeAddPanel();
     showDock("properties");
@@ -4697,25 +4235,30 @@ dom.openTemplates.addEventListener("click", () => {
     }
     return;
   }
-  dom.templatesPanel.classList.add("open");
+  templates.setOpen(true);
   dom.openTemplates.hidden = true;
   dom.templatesPanel.scrollIntoView({ block: "nearest" });
 });
 
 dom.templatesClose.addEventListener("click", () => {
-  dom.templatesPanel.classList.remove("open");
+  templates.setOpen(false);
   dom.openTemplates.hidden = false;
 });
 
-dom.zoomOut.addEventListener("click", () => setZoom((state.zoom ?? dragScale() ** -1) / 1.2));
-dom.zoomIn.addEventListener("click", () => setZoom((state.zoom ?? dragScale() ** -1) * 1.2));
+dom.zoomOut.addEventListener("click", () => setZoom(currentZoomScale() / 1.2));
+dom.zoomIn.addEventListener("click", () => setZoom(currentZoomScale() * 1.2));
 dom.zoomValue.addEventListener("click", () => setZoom(null));
 dom.zoom100.addEventListener("click", () => setZoom(1));
 dom.stageViewport.addEventListener("wheel", (event) => {
   if (!(event.ctrlKey || event.metaKey)) return;
   event.preventDefault();
-  const current = state.zoom ?? dragScale() ** -1;
-  setZoom(current * (event.deltaY > 0 ? 0.9 : 1.1));
+  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? event.deltaY * 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? event.deltaY * dom.stageViewport.clientHeight
+      : event.deltaY;
+  const factor = Math.exp((-delta * Math.log(1.1)) / 100);
+  setZoom(currentZoomScale() * factor, { x: event.clientX, y: event.clientY });
 }, { passive: false });
 function syncResponsivePanels(): void {
   const compact = window.matchMedia("(max-width: 1024px)").matches;
@@ -4732,35 +4275,58 @@ function syncResponsivePanels(): void {
 
 window.addEventListener("resize", () => {
   if (state.zoom === null) applyZoom();
+  requestPreviewIfScaleChanged();
   syncResponsivePanels();
 });
+const stageResizeObserver = new ResizeObserver(() => {
+  if (state.zoom === null) applyZoom();
+  requestPreviewIfScaleChanged();
+});
+stageResizeObserver.observe(dom.stageViewport);
 syncResponsivePanels();
 
 let spacePressed = false;
+let finishActivePan: (() => void) | null = null;
 window.addEventListener("keyup", (event) => {
   if (event.code === "Space") {
     spacePressed = false;
     dom.stageViewport.classList.remove("pan-ready");
   }
 });
+window.addEventListener("blur", () => {
+  spacePressed = false;
+  dom.stageViewport.classList.remove("pan-ready");
+  finishActivePan?.();
+});
 dom.stageViewport.addEventListener("pointerdown", (event) => {
-  if (!spacePressed || event.button !== 0) return;
+  if (event.button !== 1 && !(spacePressed && event.button === 0)) return;
   event.preventDefault();
   event.stopPropagation();
+  finishActivePan?.();
   const start = { x: event.clientX, y: event.clientY };
   const scroll = { x: dom.stageViewport.scrollLeft, y: dom.stageViewport.scrollTop };
   dom.stageViewport.classList.add("panning");
   const move = (next: PointerEvent): void => {
+    if (next.pointerId !== event.pointerId) return;
     dom.stageViewport.scrollLeft = scroll.x - (next.clientX - start.x);
     dom.stageViewport.scrollTop = scroll.y - (next.clientY - start.y);
   };
   const finish = (): void => {
     window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", finish);
+    window.removeEventListener("pointerup", finishPointer);
+    window.removeEventListener("pointercancel", finishPointer);
+    window.removeEventListener("blur", finish);
     dom.stageViewport.classList.remove("panning");
+    if (finishActivePan === finish) finishActivePan = null;
   };
+  const finishPointer = (next: PointerEvent): void => {
+    if (next.pointerId === event.pointerId) finish();
+  };
+  finishActivePan = finish;
   window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", finish);
+  window.addEventListener("pointerup", finishPointer);
+  window.addEventListener("pointercancel", finishPointer);
+  window.addEventListener("blur", finish, { once: true });
 }, { capture: true });
 
 dom.overlay.addEventListener("pointerdown", (event) => {
@@ -4849,7 +4415,7 @@ window.addEventListener("keydown", (event) => {
   }
   if (control && key === "x") {
     event.preventDefault();
-    if (selectedLayers().every(api.isEditable) && copySelection()) deleteSelection("cut layers");
+    if (selectedLayers().every(editableLayer) && copySelection()) deleteSelection("cut layers");
     return;
   }
   if (control && key === "v") {
@@ -4860,7 +4426,7 @@ window.addEventListener("keydown", (event) => {
   if (control && key === "d") {
     event.preventDefault();
     const layers = selectedLayers();
-    if (layers.length && layers.every(api.isEditable)) {
+    if (layers.length && layers.every(editableLayer)) {
       void sendBatch("duplicate", layers.map((one) => ({ op: "duplicate", id: one.id } as Operation)));
     }
     return;
@@ -4871,7 +4437,7 @@ window.addEventListener("keydown", (event) => {
     if (event.shiftKey) {
       const group = layers.length === 1 && layers[0]?.type === "group" ? layers[0] : null;
       if (group) void send("ungroup", { op: "ungroup", id: group.id } as Operation);
-    } else if (layers.length > 1 && layers.every(api.isEditable)) {
+    } else if (layers.length > 1 && layers.every(editableLayer)) {
       void send("group", { op: "group", ids: layers.map((one) => one.id) } as Operation);
     }
     return;
@@ -4883,10 +4449,15 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape") {
+    if (contextMenuController.isOpen()) {
+      contextMenuController.close();
+      dom.canvas.focus();
+      return;
+    }
     // A open Settings modal closes first and alone: clearing the selection or
     // a popover behind it is not something closing a dialog should do.
-    if (dom.settingsDialog.open) {
-      dom.settingsDialog.close("cancel");
+    if (settings.isOpen()) {
+      settings.close();
       return;
     }
     if (!dom.addPanel.classList.contains("collapsed")) {
@@ -4895,7 +4466,7 @@ window.addEventListener("keydown", (event) => {
       return;
     }
     state.selection = [];
-    dom.contextMenu.hidden = true;
+    contextMenuController.close();
     togglePositionPopover(false);
     drawLayers();
     drawOverlay();
@@ -4905,12 +4476,12 @@ window.addEventListener("keydown", (event) => {
 
   const layer = selectedLayer();
   const layers = selectedLayers();
-  if ((event.key === "Enter" || event.key === "F2") && layer?.type === "text" && api.isEditable(layer)) {
+  if ((event.key === "Enter" || event.key === "F2") && layer?.type === "text" && editableLayer(layer)) {
     event.preventDefault();
     beginInlineTextEdit(layer);
     return;
   }
-  if (layers.length === 0 || layers.some((one) => !api.isEditable(one))) return;
+  if (layers.length === 0 || layers.some((one) => !editableLayer(one))) return;
 
   if (event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
@@ -4947,7 +4518,9 @@ function closeProject(): void {
   state.project = null;
   state.document = null;
   state.selection = [];
+  setDocumentDimensions(null);
   dom.canvas.hidden = true;
+  dom.canvasControlsRoot.hidden = true;
   dom.canvasHints.hidden = true;
   dom.canvasImage.removeAttribute("src");
   dom.canvasEmpty.hidden = false;
@@ -5003,13 +4576,13 @@ function deleteProjectFlow(id: string, name: string | null): void {
 dom.renameProject.addEventListener("click", () => {
   const current = state.project;
   if (!current) return;
-  if (dom.settingsDialog.open) dom.settingsDialog.close("cancel");
+  if (settings.isOpen()) settings.close();
   renameProjectFlow(current, state.document?.name ?? null);
 });
 dom.deleteProject.addEventListener("click", () => {
   const current = state.project;
   if (!current) return;
-  if (dom.settingsDialog.open) dom.settingsDialog.close("cancel");
+  if (settings.isOpen()) settings.close();
   deleteProjectFlow(current, state.document?.name ?? null);
 });
 
@@ -5021,59 +4594,17 @@ async function loadProjects(select?: string): Promise<void> {
   const projects = await api.listProjects(query);
   fillProjectOptions(projects, query);
   if (select) {
-    dom.projects.value = select;
     state.project = select;
+    projectPicker.setCurrentProject(select);
     await openProject();
   }
   await drawRecents();
 }
 
-/** Updates the internal select and the visible project list. */
+/** Updates the visible project list from the latest API response. */
 function fillProjectOptions(projects: readonly api.ProjectSummary[], query: string): void {
   listedProjects = projectListKey(projects);
-  projectChoices = projects;
-  dom.projects.replaceChildren();
-  dom.projectOptions.replaceChildren();
-  projectMenuIndex = -1;
-  dom.search.removeAttribute("aria-activedescendant");
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = projects.length ? translate("projects.choose") : query ? translate("projects.nothingMatches") : translate("projects.none");
-  dom.projects.append(placeholder);
-  for (const [index, project] of projects.entries()) {
-    const option = document.createElement("option");
-    option.value = project.id;
-    option.textContent = project.name ?? project.id;
-    dom.projects.append(option);
-    const row = document.createElement("button");
-    row.type = "button";
-    row.id = `project-option-${index}`;
-    row.className = "project-option";
-    row.dataset["projectId"] = project.id;
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", String(project.id === state.project));
-    const name = document.createElement("strong");
-    name.textContent = project.name ?? project.id;
-    const count = document.createElement("span");
-    count.dataset["i18nCount"] = "projects.layerCount";
-    count.dataset["count"] = String(project.layers);
-    count.textContent = formatCount("projects.layerCount", project.layers);
-    row.append(name, count);
-    dom.projectOptions.append(row);
-  }
-  if (projects.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "project-options-empty";
-    empty.textContent = query ? translate("projects.noMatching") : translate("projects.none");
-    dom.projectOptions.append(empty);
-  }
-  const current = state.project ? projects.find((project) => project.id === state.project) : null;
-  if (current) {
-    dom.projects.value = current.id;
-    if (!query) dom.search.placeholder = current.name ?? current.id;
-  } else if (!query) {
-    dom.search.placeholder = projects.length ? translate("projects.searchPlaceholder") : translate("projects.none");
-  }
+  projectPicker.setProjects(projects, query, state.project);
 }
 // --- following other clients ----------------------------------------------------
 //
@@ -5112,21 +4643,13 @@ async function drawAgentsConnected(): Promise<void> {
   if (!agentsConnectedKnown) return;
   try {
     const { count } = await api.agentSessions();
-    dom.agentsConnected.hidden = count === 0;
-    dom.agentsConnected.innerHTML =
-      '<i class="ph ph-robot" aria-hidden="true"></i><span></span>';
-    const label = dom.agentsConnected.querySelector("span");
-    if (label) {
-      label.dataset["i18nCount"] = "agents.connected";
-      label.dataset["count"] = String(count);
-      label.textContent = formatCount("agents.connected", count);
-    }
+    setAgentCount(count);
   } catch (error) {
     // A server without the endpoint (an older one, or one this page was not
     // served by) is not worth asking again.
     if (error instanceof api.ApiError && error.code.startsWith("http4")) {
       agentsConnectedKnown = false;
-      dom.agentsConnected.hidden = true;
+      setAgentCount(null);
     }
   }
 }
@@ -5194,7 +4717,7 @@ async function followOtherClients(): Promise<void> {
 
     // Not while the person has the project list open: replacing its options
     // closes it under their pointer.
-    if (projectListKey(projects) !== listedProjects && document.activeElement !== dom.projects) {
+    if (projectListKey(projects) !== listedProjects && document.activeElement !== document.getElementById("project-search")) {
       fillProjectOptions(projects, query);
       if (!state.project) void drawRecents().catch(() => undefined);
     }
@@ -5225,6 +4748,7 @@ window.setInterval(() => void followOtherClients(), FOLLOW_INTERVAL_MS);
 
 /** Blob URLs the recents strip is holding, so they can be given back. */
 let recentThumbnails: string[] = [];
+let recentSequence = 0;
 
 /**
  * The most recently modified projects, as thumbnails.
@@ -5233,74 +4757,35 @@ let recentThumbnails: string[] = [];
  * can be answered without opening every document to read a timestamp.
  */
 async function drawRecents(): Promise<void> {
+  const sequence = ++recentSequence;
   for (const url of recentThumbnails) URL.revokeObjectURL(url);
   recentThumbnails = [];
-  dom.recents.replaceChildren();
 
   const projects = await api.recentProjects(8);
+  if (sequence !== recentSequence) return;
   // One project is not a list of recents, it is the project you have open.
-  dom.recents.hidden = projects.length < 2;
-  if (dom.recents.hidden) return;
-
-  for (const project of projects) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "recent";
-    button.title = `${project.name ?? project.id} — ${project.layers} layers`;
-
-    // Fetched rather than pointed at, like every image here: an <img src>
-    // cannot carry the access token, and the token must never be in a URL.
+  const cards = await Promise.all(projects.map(async (project) => {
+    // Fetched rather than pointed at: an <img src> cannot carry the access
+    // token, and the token must never go in a URL.
     try {
-      const url = await api.imageObjectUrl(api.thumbnailUrl(project.id));
-      recentThumbnails.push(url);
-      const image = document.createElement("img");
-      image.src = url;
-      image.alt = "";
-      button.append(image);
+      return { project, thumbnail: await api.imageObjectUrl(api.thumbnailUrl(project.id)) };
     } catch {
-      // A project that will not render — a missing font, say — still belongs
-      // in the list; it just has no picture.
+      // A project that will not render still belongs in the list.
+      return { project, thumbnail: null };
     }
-
-    const label = document.createElement("span");
-    label.textContent = project.name ?? project.id;
-    button.append(label);
-
-    button.addEventListener("click", () => {
-      dom.projects.value = project.id;
-      openFromQueue(project.id);
-    });
-
-    // The same per-project rename and delete the picker offers. A button
-    // cannot sit in a button, so each card is a wrapper around the opener
-    // and its two controls.
-    const card = document.createElement("div");
-    card.className = "recent-card";
-    const controls = document.createElement("span");
-    controls.className = "recent-controls";
-    const rename = document.createElement("button");
-    rename.type = "button";
-    rename.className = "small recent-rename";
-    rename.textContent = translate("projects.rename");
-    rename.title = translate("projects.renameNamed", { name: project.name ?? project.id });
-    rename.addEventListener("click", (event) => {
-      event.stopPropagation();
-      renameProjectFlow(project.id, project.name ?? null);
-    });
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "small recent-delete";
-    remove.dataset["i18n"] = "common.delete";
-    remove.textContent = translate("common.delete");
-    remove.title = translate("projects.deleteNamed", { name: project.name ?? project.id });
-    remove.addEventListener("click", (event) => {
-      event.stopPropagation();
-      deleteProjectFlow(project.id, project.name ?? null);
-    });
-    controls.append(rename, remove);
-    card.append(button, controls);
-    dom.recents.append(card);
+  }));
+  if (sequence !== recentSequence) {
+    for (const { thumbnail } of cards) if (thumbnail) URL.revokeObjectURL(thumbnail);
+    return;
   }
+  recentThumbnails = cards.flatMap(({ thumbnail }) => thumbnail ? [thumbnail] : []);
+  mountRecentProjects(
+    dom.recents,
+    cards,
+    (id) => openFromQueue(id),
+    (id, name) => renameProjectFlow(id, name),
+    (id, name) => deleteProjectFlow(id, name),
+  );
 }
 
 dom.shutdown.addEventListener("click", () => {

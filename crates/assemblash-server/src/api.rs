@@ -214,17 +214,7 @@ pub(crate) async fn require_access(
     // The login entry page and its exact import graph are reachable without a token: it is how
     // somebody with a token gets it into the browser, and they say nothing a
     // stranger does not already know from the 401.
-    if matches!(
-        request.uri().path(),
-        "/login.html"
-            | "/login.js"
-            | "/style.css"
-            | "/token.js"
-            | "/i18n.js"
-            | "/locale-en.js"
-            | "/locale-fr.js"
-            | "/locale-de.js"
-    ) {
+    if crate::ui::is_login_asset(request.uri().path()) {
         return next.run(request).await;
     }
     match access.check(request.headers()) {
@@ -1102,7 +1092,7 @@ struct NewProject {
     width: f64,
     height: f64,
     #[serde(default)]
-    background: Option<String>,
+    background: Option<Color>,
     #[serde(default)]
     name: Option<String>,
 }
@@ -1111,12 +1101,28 @@ async fn create_project(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<NewProject>,
 ) -> Result<(StatusCode, Json<ProjectSummary>), ApiError> {
-    let directory = state.workspace().create_project_dir(&request.id)?;
-
+    let directory = state.workspace().project_dir(&request.id);
     let mut document = Document::new(&mut UlidIdSource, request.width, request.height);
     document.name = request.name;
-    document.canvas.background = request.background.map(Color::new);
+    assemblash_core::ops::apply(
+        &mut document,
+        &Operation::UpdateCanvas(assemblash_core::ops::UpdateCanvas {
+            background: request.background.map(Some),
+            ..Default::default()
+        }),
+        &mut UlidIdSource,
+    )
+    .map_err(|error| match error {
+        assemblash_core::ops::OpError::Invalid(source) => {
+            SessionError::Storage(storage::StorageError::InvalidDocument {
+                path: directory.join(storage::DOCUMENT_FILE),
+                source,
+            })
+        }
+        error => SessionError::Operation(error),
+    })?;
 
+    state.workspace().create_project_dir(&request.id)?;
     let session = assemblash_core::Session::create(&directory, document, now_millis())?;
     let summary = summarise(&request.id, session.document());
     state.adopt(&request.id, session)?;
@@ -1945,6 +1951,7 @@ fn filtered_preview(
 
     if only.is_some() {
         document.canvas.background = None;
+        document.canvas.background_image = None;
         for layer in &mut document.layers {
             keep_only_preview_layer(layer, &ids, false);
         }

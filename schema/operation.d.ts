@@ -2,11 +2,114 @@
 // Generated from the Rust types — do not edit. Regenerate with:
 //   cargo run -p assemblash-core --example generate-schema
 
-/// An sRGB colour, `#rrggbb` or `#rrggbbaa`.
+/// A paint in a colour position: a solid colour or a gradient (D13).
+///
+/// The bare `#rrggbb[aa]` string is the solid form, and the only form there
+/// was before 1.11 — every document an older build wrote loads here
+/// unchanged. A gradient is an object tagged by `kind` in the same field;
+/// there is no sibling fill field. A colour position accepts exactly these
+/// forms; anything else is refused when the document or the operation that
+/// carries it is validated.
+///
+/// The cost is D1-class and named per release: a build from 1.0 to 1.10
+/// refuses to load any document that contains a gradient, because its
+/// `Color` parses strings only. Documents without gradients are
+/// byte-identical across the change.
+export type Color = SolidColor | LinearGradient | RadialGradient | UnknownGradient;
+
+/// A solid sRGB colour, `#rrggbb` or `#rrggbbaa`.
 ///
 /// Stored as written so a document round-trips exactly; validation checks the
-/// shape and [`Color::to_rgba`] parses it.
-export type Color = string;
+/// shape and [`SolidColor::to_rgba`] parses it.
+export type SolidColor = string;
+
+/// A linear gradient.
+///
+/// The axis runs through the centre of the painted box. `angle` is degrees,
+/// measured from the positive x axis and turning clockwise as drawn, where y
+/// grows downward: `0` paints left to right, `90` top to bottom, `200` up
+/// and to the left. The schema description carries the same convention.
+export type LinearGradient = {
+  /** The kind tag; only `linear` is accepted here. */
+  kind: LinearTag;
+  /** Axis angle in degrees; must be finite. */
+  angle?: number;
+  /** Colour stops along the axis, from `0.0` at the axis start to `1.0` at */
+  stops?: GradientStop[];
+  [key: string]: unknown;
+};
+
+/// The `kind` tag of a linear gradient: only `linear` deserializes here.
+export type LinearTag = "linear";
+
+/// One colour stop of a gradient.
+export type GradientStop = {
+  /** Position along the gradient axis, `0.0` to `1.0`. Stops must be */
+  offset: number;
+  /** The stop colour, `#rrggbb` or `#rrggbbaa`. A stop colour is solid — */
+  color: SolidColor;
+  /** Opacity at the stop, `0.0` to `1.0`; `1.0` when omitted. Multiplied */
+  alpha?: number;
+  [key: string]: unknown;
+};
+
+/// A radial gradient.
+///
+/// `center` and `radius` are fractions of the painted box, emitted as SVG's
+/// `objectBoundingBox` units: the centre is a fraction across and down the
+/// box, and the radius is a distance in those same units. On a non-square
+/// box the rings are therefore elliptical, and a radius of `0.5` reaches the
+/// box edge on both axes.
+export type RadialGradient = {
+  /** The kind tag; only `radial` is accepted here. */
+  kind: RadialTag;
+  /** Centre of the rings, as fractions of the box. */
+  center?: GradientCenter;
+  /** Radius in box fractions; must be finite and greater than 0. */
+  radius?: number;
+  /** Colour stops from the centre outward. */
+  stops?: GradientStop[];
+  [key: string]: unknown;
+};
+
+/// The `kind` tag of a radial gradient: only `radial` deserializes here.
+export type RadialTag = "radial";
+
+/// A position inside a box, as fractions of its width and height.
+export type GradientCenter = {
+  /** Across the box: `0.0` is the left edge, `1.0` the right. */
+  x: number;
+  /** Down the box: `0.0` is the top edge, `1.0` the bottom. */
+  y: number;
+  [key: string]: unknown;
+};
+
+/// A gradient this build does not render — `conic`, a misspelling, or a kind
+/// from a newer build.
+///
+/// Preserved verbatim on load (D21), refused when an operation tries to set
+/// one, and refused when something tries to draw it — never guessed at,
+/// never lost.
+export type UnknownGradient = {
+  /** The `kind` tag as written. Unknown kinds must still identify themselves. */
+  kind: string;
+  [key: string]: unknown;
+};
+
+/// An imported image drawn across the canvas behind every layer.
+export type BackgroundImage = {
+  /** Id of an asset in the document's `assets` list. */
+  asset: AssetId;
+  /** How the image fills the canvas. */
+  fit?: ImageFit;
+  [key: string]: unknown;
+};
+
+/// Identifier of an imported asset.
+export type AssetId = string;
+
+/// How an image is scaled into its box.
+export type ImageFit = "fill" | "contain" | "cover";
 
 /// The point of the old canvas that stays fixed when its dimensions change.
 export type CanvasAnchor = "top-left" | "top" | "top-right" | "left" | "center" | "right" | "bottom-left" | "bottom" | "bottom-right";
@@ -17,6 +120,10 @@ export type UpdateCanvas = {
   height?: number | null;
   /** Absent preserves the background; null clears it. */
   background?: Color | null;
+  /** Sets the canvas background image. Omission preserves the current image. */
+  backgroundImage?: BackgroundImage | null;
+  /** Clears the canvas background image when true. */
+  clearBackgroundImage?: boolean;
   anchor?: CanvasAnchor | null;
   [key: string]: unknown;
 };
@@ -97,12 +204,6 @@ export type LineJoin = "miter" | "round" | "bevel" | unknown;
 
 /// Where the text block sits vertically in the layer box.
 export type VerticalAlign = "top" | "middle" | "bottom";
-
-/// Identifier of an imported asset.
-export type AssetId = string;
-
-/// How an image is scaled into its box.
-export type ImageFit = "fill" | "contain" | "cover";
 
 /// The geometry of a [`ShapeLayer`], tagged by `"kind"` in JSON.
 ///

@@ -999,3 +999,80 @@ fn canvas_set_resizes_clears_background_and_undoes() {
         .unwrap();
     assert!(!output.status.success());
 }
+
+#[test]
+fn canvas_background_image_flags_set_default_clear_and_refuse_bad_requests() {
+    let scratch = tempfile::tempdir().unwrap();
+    let project = scratch.path().join("canvas-image");
+    let project_arg = project.to_str().unwrap();
+    let source = scratch.path().join("swatch.png");
+    write_test_png(&source);
+    run(&["new", project_arg, "--width", "100", "--height", "80"]);
+    run(&["add-image", project_arg, source.to_str().unwrap()]);
+    let document: serde_json::Value = serde_json::from_str(&run(&["show", project_arg])).unwrap();
+    let asset = document["assets"][0]["id"].as_str().unwrap();
+    let before = std::fs::read(project.join("document.json")).unwrap();
+
+    run(&[
+        "canvas",
+        "set",
+        project_arg,
+        "--background-image",
+        asset,
+        "--background-image-fit",
+        "contain",
+    ]);
+    let shown: serde_json::Value = serde_json::from_str(&run(&["show", project_arg])).unwrap();
+    assert_eq!(shown["canvas"]["backgroundImage"]["asset"], asset);
+    assert_eq!(shown["canvas"]["backgroundImage"]["fit"], "contain");
+    run(&["undo", project_arg]);
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before
+    );
+
+    run(&["canvas", "set", project_arg, "--background-image", asset]);
+    let shown: serde_json::Value = serde_json::from_str(&run(&["show", project_arg])).unwrap();
+    assert_eq!(shown["canvas"]["backgroundImage"]["fit"], "fill");
+    run(&["canvas", "set", project_arg, "--clear-background-image"]);
+    let shown: serde_json::Value = serde_json::from_str(&run(&["show", project_arg])).unwrap();
+    assert!(shown["canvas"]["backgroundImage"].is_null());
+    run(&["undo", project_arg]);
+    run(&["undo", project_arg]);
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before
+    );
+
+    let missing = run_failing(&[
+        "canvas",
+        "set",
+        project_arg,
+        "--background-image",
+        "asset_missing",
+    ]);
+    assert!(!missing.is_empty());
+    for args in [
+        vec![
+            "canvas",
+            "set",
+            project_arg,
+            "--background-image",
+            asset,
+            "--clear-background-image",
+        ],
+        vec![
+            "canvas",
+            "set",
+            project_arg,
+            "--background-image-fit",
+            "contain",
+        ],
+    ] {
+        assert!(!run_failing(&args).is_empty());
+    }
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before
+    );
+}

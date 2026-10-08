@@ -12,8 +12,8 @@
 //! id live.
 
 use assemblash_core::document::{
-    BlendMode, Clip, Crop, Effect, FontStyle, ImageFit, LineCap, LineJoin, ShapeKind, Stroke,
-    TextAlign, Transform, VerticalAlign,
+    BackgroundImage, BlendMode, Clip, Crop, Effect, FontStyle, ImageFit, LineCap, LineJoin,
+    ShapeKind, Stroke, TextAlign, Transform, VerticalAlign,
 };
 use assemblash_core::ops::{
     AlignEdge, Axis, CanvasAnchor, CreateLayer, LayerPosition, NewLayerKind, SnapTarget,
@@ -98,9 +98,9 @@ pub struct AddTextArgs {
     pub font_family: String,
     /// Font size in pixels.
     pub font_size: f64,
-    /// Fill colour, `#rrggbb` or `#rrggbbaa`.
+    /// Solid colour as a hex string, or a linear/radial gradient object.
     #[serde(default)]
-    pub color: Option<String>,
+    pub color: Option<Color>,
     /// `left`, `center`, or `right`.
     #[serde(default)]
     pub align: Option<TextAlign>,
@@ -151,8 +151,8 @@ pub enum ShapeArg {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StrokeArgs {
-    /// Stroke colour, `#rrggbb` or `#rrggbbaa`.
-    pub color: String,
+    /// Solid colour as a hex string, or a linear/radial gradient object.
+    pub color: Color,
     /// Stroke width in document units. Defaults to 1 when omitted.
     #[serde(default)]
     pub width: Option<f64>,
@@ -172,7 +172,7 @@ pub struct StrokeArgs {
 impl StrokeArgs {
     fn to_stroke(&self) -> Stroke {
         Stroke {
-            color: Color::new(self.color.clone()),
+            color: self.color.clone(),
             width: self.width.unwrap_or(1.0),
             dash_array: self.dash_array.clone(),
             line_cap: self.line_cap.clone(),
@@ -202,10 +202,10 @@ pub struct AddShapeArgs {
     /// other geometries do not have corners.
     #[serde(default)]
     pub corner_radius: Option<f64>,
-    /// Interior paint. Rectangles and ellipses default to `#000000`; lines
+    /// Interior paint. Use a hex string or gradient object. Rectangles and ellipses default to `#000000`; lines
     /// default to no fill.
     #[serde(default)]
-    pub fill: Option<String>,
+    pub fill: Option<Color>,
     /// Edge paint. Rectangles and ellipses default to no stroke; lines default
     /// to `#000000` at width 1. A supplied width defaults to 1.
     #[serde(default)]
@@ -284,9 +284,9 @@ pub struct UpdateArgs {
     /// New font size, for a text layer.
     #[serde(default)]
     pub font_size: Option<f64>,
-    /// New colour, for a text layer.
+    /// New solid colour or gradient, for a text layer.
     #[serde(default)]
-    pub color: Option<String>,
+    pub color: Option<Color>,
     /// New alignment, for a text layer.
     #[serde(default)]
     pub align: Option<TextAlign>,
@@ -306,10 +306,10 @@ pub struct UpdateArgs {
     /// `bottom`, for a text layer.
     #[serde(default)]
     pub vertical_align: Option<VerticalAlign>,
-    /// New fill colour for a shape layer, `#rrggbb` or `#rrggbbaa`. Use
+    /// New solid colour or gradient for a shape layer. Use
     /// `clearFill: true` to remove the fill; a JSON null is treated as omitted.
     #[serde(default)]
-    pub fill: Option<String>,
+    pub fill: Option<Color>,
     /// Replace the whole stroke on a shape or text layer. Its width defaults
     /// to 1. Use `clearStroke: true` to remove it; a JSON null is treated as
     /// omitted.
@@ -521,8 +521,13 @@ pub struct UpdateCanvasArgs {
     #[serde(default)]
     pub height: Option<f64>,
     #[serde(default, deserialize_with = "nullable_color")]
-    #[schemars(with = "Option<Option<String>>")]
     pub background: Option<Option<Color>>,
+    /// Set or replace the background image using an existing document asset.
+    #[serde(default)]
+    pub background_image: Option<BackgroundImage>,
+    /// Remove the current background image.
+    #[serde(default)]
+    pub clear_background_image: bool,
     #[serde(default)]
     pub anchor: Option<CanvasAnchor>,
 }
@@ -610,10 +615,10 @@ pub struct NewProjectArgs {
     pub width: f64,
     /// Canvas height in pixels.
     pub height: f64,
-    /// Canvas background, `#rrggbb` or `#rrggbbaa`. Omit for none, which
+    /// Canvas background as a hex string or gradient object. Omit for none, which
     /// exports as transparent.
     #[serde(default)]
-    pub background: Option<String>,
+    pub background: Option<Color>,
     /// Human-facing document name. Not an identifier.
     #[serde(default)]
     pub name: Option<String>,
@@ -693,12 +698,7 @@ impl AssemblashMcp {
                 text: args.text.clone(),
                 font_family: args.font_family.clone(),
                 font_size: args.font_size,
-                color: Some(
-                    args.color
-                        .clone()
-                        .map(Color::new)
-                        .unwrap_or_else(Color::default),
-                ),
+                color: Some(args.color.clone().unwrap_or_else(Color::default)),
                 align: args.align.unwrap_or_default(),
                 line_height: args.line_height.unwrap_or(1.2),
                 font_weight: args.font_weight.unwrap_or(400),
@@ -774,10 +774,10 @@ impl AssemblashMcp {
                 }
             }
         };
-        let fill =
-            args.fill.clone().map(Color::new).or_else(|| {
-                (!matches!(&shape, ShapeKind::Line { .. })).then(|| Color::new("#000000"))
-            });
+        let fill = args
+            .fill
+            .clone()
+            .or_else(|| (!matches!(&shape, ShapeKind::Line { .. })).then(|| Color::new("#000000")));
         let stroke = args.stroke.as_ref().map(StrokeArgs::to_stroke).or_else(|| {
             matches!(&shape, ShapeKind::Line { .. }).then(|| Stroke {
                 color: Color::new("#000000"),
@@ -930,7 +930,7 @@ impl AssemblashMcp {
         let fill = if clear_fill {
             Some(None)
         } else {
-            args.fill.clone().map(|value| Some(Color::new(value)))
+            args.fill.clone().map(Some)
         };
         let stroke = if clear_stroke {
             Some(None)
@@ -940,7 +940,7 @@ impl AssemblashMcp {
         let color = if args.clear_color.unwrap_or(false) {
             Some(None)
         } else {
-            args.color.clone().map(|value| Some(Color::new(value)))
+            args.color.clone().map(Some)
         };
         let operation = Operation::Update(UpdateLayer {
             opacity: args.opacity,
@@ -1268,6 +1268,8 @@ impl AssemblashMcp {
                 width: args.width,
                 height: args.height,
                 background: args.background,
+                background_image: args.background_image,
+                clear_background_image: args.clear_background_image,
                 anchor: args.anchor,
             }),
         )
@@ -1378,7 +1380,7 @@ impl AssemblashMcp {
                 &args.project,
                 args.width,
                 args.height,
-                args.background.as_deref(),
+                args.background,
                 args.name.as_deref(),
             )
             .map_err(to_error)?;

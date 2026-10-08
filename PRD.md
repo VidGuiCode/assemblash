@@ -1,7 +1,11 @@
 # Assemblash Product Requirements Document
 
 **Product:** Assemblash  
-**Status:** **1.6.0 released 2026-09-09** — the document schema stays at `schemaVersion` 1 and the operation API stays compatible with 1.0; a change that breaks either requires a MAJOR release. A fifth layer kind, `shape`, draws a rectangle, an ellipse or a line from the document itself with `fill`, an inset `stroke` and a corner radius, and a `dropShadow` effect joins the stack. Presets carry fill and stroke. A colour slot may target a shape. Every surface — CLI, HTTP, MCP and the reference interface — creates and edits them. Rounded corners and ellipses become cubic curves, so the rasteriser never reaches the platform maths library. Builds 1.0 through 1.5 refuse a document that contains a shape layer; the CHANGELOG names that. Asset uploads accept 64 MiB. Every body over that limit answers with the JSON envelope. All fourteen MVP acceptance criteria (§12) and primary use cases A, B, C, and E (§6) remain demonstrated. Use case D stays out of scope by design.
+**Status:** **1.11.0 released 2026-10-08.**
+The document schema stays at `schemaVersion` 1. The operation API stays compatible with 1.0.
+A change that breaks either contract requires a MAJOR release and a migration.
+See [CHANGELOG.md](CHANGELOG.md) for implemented changes and compatibility limits.
+All fourteen MVP acceptance criteria (§12) remain implemented. Use case D stays outside the scope.
 **Document type:** Product and technical requirements  
 **Audience:** Maintainers, contributors, downstream integrators, and coding agents  
 **Primary deployment model:** Local machine or self-hosted server  

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ActionQueue } from "./dist/queue.js";
+import { ActionQueue } from "./.test-dist/queue.js";
 
 /** A promise the test resolves when it chooses to. */
 function deferred() {

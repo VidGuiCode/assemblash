@@ -105,6 +105,16 @@ jobs:
         working-directory: ui
         run: npm run check
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check bundled UI licence notices
+        run: python scripts/ui_notices.py --check
+
+      - name: Check embedded assets and public login dependencies
+        run: python scripts/ui_assets.py --check
+
       # ui/dist is committed because the binary embeds it: `cargo build` must
       # work with no Node involved. This is what keeps the committed copy
       # honest.
@@ -181,3 +191,137 @@ jobs:
           python scripts/no_terminal_smoke.py
           --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
           --workspace "${{ runner.temp }}/assemblash-no-terminal-smoke"
+
+      - name: Verify paints and canvas images across transports
+        run: >-
+          python scripts/paint_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-paint-smoke"
+
+      - name: Save renderer identity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderer-${{ matrix.target-name }}
+          path: target/gate/hashes.json
+          if-no-files-found: error
+
+  render-identity:
+    name: Compare renderer bytes on all six targets
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: renderer-*
+          path: renderer-hashes
+      - run: python scripts/renderer_identity_compare.py renderer-hashes
+
+  candidate:
+    name: Candidate binary (${{ matrix.target-name }})
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.11.0'
+    needs: [hygiene, lint, ui, deny, test, render-identity]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target-name: linux-aarch64
+          - os: windows-latest
+            target-name: windows-x86_64
+          - os: windows-11-arm
+            target-name: windows-aarch64
+          - os: macos-15-intel
+            target-name: macos-x86_64
+          - os: macos-14
+            target-name: macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: candidate-${{ matrix.target-name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: cargo build --release -p assemblash-cli
+      - name: Verify renderer identity in the release profile
+        run: cargo test --release -p assemblash-renderer --test gate
+      - name: Exercise the candidate executable
+        run: >-
+          python scripts/release_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-candidate-smoke"
+      - name: Verify candidate canvas editing
+        run: >-
+          python scripts/canvas_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-candidate-canvas-smoke"
+          --font crates/assemblash-renderer/tests/fonts/NotoSans-Subset.ttf
+      - name: Verify candidate embedded operation without a terminal
+        run: >-
+          python scripts/no_terminal_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-candidate-no-terminal-smoke"
+      - name: Verify candidate agent concurrency
+        run: >-
+          python scripts/agents_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+      - name: Verify candidate paints and canvas images
+        run: >-
+          python scripts/paint_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-candidate-paint-smoke"
+      - uses: actions/setup-node@v4
+        if: matrix.target-name == 'linux-x86_64'
+        with:
+          node-version: "22"
+      - name: Verify embedded browser authentication and offline assets
+        if: matrix.target-name == 'linux-x86_64'
+        run: >-
+          node scripts/ui_latency_benchmark.mjs
+          --binary target/release/assemblash
+          --workspace "${{ runner.temp }}/assemblash-candidate-browser"
+          --fixture "${{ runner.temp }}/assemblash-candidate-browser-fixture.json"
+          --output "${{ runner.temp }}/assemblash-candidate-browser.json"
+          --login-check true
+          --samples 5
+          --label candidate-auth-offline
+      - name: Save the verified candidate binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.target-name }}
+          path: ${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}
+          if-no-files-found: error
+      - name: Save the candidate renderer identity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-renderer-${{ matrix.target-name }}
+          path: target/gate/hashes.json
+          if-no-files-found: error
+
+  candidate-identity:
+    name: Compare candidate renderer bytes on all six targets
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: candidate-renderer-*
+          path: candidate-renderer-hashes
+      - run: python scripts/renderer_identity_compare.py candidate-renderer-hashes --prefix candidate-renderer-
