@@ -8,9 +8,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
-    BlendMode, Clip, Color, Crop, Document, Effect, Extras, FontStyle, GroupLayer, ImageFit,
-    ImageLayer, Layer, LayerKind, LineMarker, ShapeKind, ShapeLayer, Stroke, TextAlign, TextLayer,
-    Transform, VerticalAlign,
+    BackgroundImage, BlendMode, Clip, Color, Crop, Document, Effect, Extras, FontStyle, GroupLayer,
+    ImageFit, ImageLayer, Layer, LayerKind, LineMarker, ShapeKind, ShapeLayer, Stroke, TextAlign,
+    TextLayer, Transform, VerticalAlign,
 };
 use crate::ids::{AssetId, IdSource, LayerId};
 use crate::ops::error::OpError;
@@ -46,6 +46,12 @@ pub struct UpdateCanvas {
         deserialize_with = "deserialize_optional_nullable"
     )]
     pub background: Option<Option<Color>>,
+    /// Sets the canvas background image. Omission preserves the current image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_image: Option<BackgroundImage>,
+    /// Clears the canvas background image when true.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clear_background_image: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CanvasAnchor>,
 }
@@ -56,6 +62,54 @@ where
     T: Deserialize<'de>,
 {
     Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Refuses a paint an operation may not set.
+///
+/// A gradient kind this build does not render is preserved as written when a
+/// document carries one (D21) and refused the moment an operation tries to
+/// set one. A gradient in a drop shadow's colour is refused in every form:
+/// the flood filter draws a solid colour only. Everything else — solids,
+/// linear and radial gradients in fills, text colours, strokes and the canvas
+/// background — is accepted here and checked by validation.
+pub(super) fn check_paint(id: Option<&LayerId>, paint: &Color) -> Result<(), OpError> {
+    match paint {
+        Color::Other(other)
+            if other.kind.trim().is_empty()
+                || matches!(other.kind.as_str(), "linear" | "radial") =>
+        {
+            // These are malformed tagged objects, not unsupported future
+            // paint kinds. Let document validation return its typed details.
+            Ok(())
+        }
+        Color::Other(other) => Err(OpError::UnsupportedGradient {
+            id: id.cloned(),
+            kind: other.kind.clone(),
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// Refuses image shape fills and names the supported image-layer clip route.
+pub(super) fn check_shape_fill(id: Option<&LayerId>, paint: &Color) -> Result<(), OpError> {
+    let is_image = match paint {
+        Color::Solid(solid) => solid.as_str().starts_with("asset_"),
+        Color::Other(other) => other.kind == "image",
+        _ => false,
+    };
+    if is_image {
+        return Err(OpError::ImageInShapeFill { id: id.cloned() });
+    }
+    check_paint(id, paint)
+}
+
+/// Refuses any gradient as a drop shadow's colour: `feFlood` is solid-only.
+pub(super) fn check_shadow_color(id: Option<&LayerId>, color: &Color) -> Result<(), OpError> {
+    if matches!(color, Color::Solid(_)) {
+        Ok(())
+    } else {
+        Err(OpError::GradientInShadowColor { id: id.cloned() })
+    }
 }
 /// Where a new layer goes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -217,21 +271,29 @@ impl CreateLayer {
                 letter_spacing,
                 stroke,
                 vertical_align,
-            } => LayerKind::Text(TextLayer {
-                text: text.clone(),
-                font_family: font_family.clone(),
-                font_size: *font_size,
-                color: color.clone(),
-                align: *align,
-                line_height: *line_height,
-                font_weight: *font_weight,
-                font_style: *font_style,
-                letter_spacing: *letter_spacing,
-                stroke: stroke.clone(),
-                vertical_align: *vertical_align,
-                runs: Vec::new(),
-                extra: Extras::new(),
-            }),
+            } => {
+                if let Some(paint) = color {
+                    check_paint(None, paint)?;
+                }
+                if let Some(stroke) = stroke {
+                    check_paint(None, &stroke.color)?;
+                }
+                LayerKind::Text(TextLayer {
+                    text: text.clone(),
+                    font_family: font_family.clone(),
+                    font_size: *font_size,
+                    color: color.clone(),
+                    align: *align,
+                    line_height: *line_height,
+                    font_weight: *font_weight,
+                    font_style: *font_style,
+                    letter_spacing: *letter_spacing,
+                    stroke: stroke.clone(),
+                    vertical_align: *vertical_align,
+                    runs: Vec::new(),
+                    extra: Extras::new(),
+                })
+            }
             NewLayerKind::Image { asset, fit } => {
                 // Checked here rather than left to validation so the error
                 // names the asset the caller asked for.
@@ -275,6 +337,12 @@ impl CreateLayer {
                         id: None,
                         kind: shape.kind_name().to_owned(),
                     });
+                }
+                if let Some(paint) = fill {
+                    check_shape_fill(None, paint)?;
+                }
+                if let Some(stroke) = stroke {
+                    check_paint(None, &stroke.color)?;
                 }
                 // Refused here rather than left to validation, for the same
                 // reason `UnsupportedShape` is: the caller should hear the
@@ -573,6 +641,11 @@ impl UpdateLayer {
                     effect: unknown.type_name().to_owned(),
                 });
             }
+            for effect in effects {
+                if let Effect::DropShadow { color, .. } = effect {
+                    check_shadow_color(Some(&layer.id), color)?;
+                }
+            }
             layer.effects = effects.clone();
         }
 
@@ -660,6 +733,9 @@ impl UpdateLayer {
                     text.font_size = value;
                 }
                 if let Some(value) = &self.color {
+                    if let Some(paint) = value {
+                        check_paint(Some(&layer.id), paint)?;
+                    }
                     text.color = value.clone();
                 }
                 if let Some(value) = self.align {
@@ -678,6 +754,9 @@ impl UpdateLayer {
                     text.letter_spacing = value;
                 }
                 if let Some(value) = &self.stroke {
+                    if let Some(stroke) = value {
+                        check_paint(Some(&layer.id), &stroke.color)?;
+                    }
                     text.stroke = value.clone();
                 }
                 if let Some(value) = self.vertical_align {
@@ -750,9 +829,15 @@ impl UpdateLayer {
                     });
                 }
                 if let Some(value) = &self.fill {
+                    if let Some(paint) = value {
+                        check_shape_fill(Some(&layer.id), paint)?;
+                    }
                     shape.fill = value.clone();
                 }
                 if let Some(value) = &self.stroke {
+                    if let Some(stroke) = value {
+                        check_paint(Some(&layer.id), &stroke.color)?;
+                    }
                     shape.stroke = value.clone();
                 }
                 // The whole geometry is replaced, exactly like `transform`

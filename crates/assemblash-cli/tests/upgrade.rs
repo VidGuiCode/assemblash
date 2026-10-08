@@ -102,10 +102,31 @@ fn write_response(stream: &mut TcpStream, status: &str, body: &[u8]) {
     let _ = stream.write_all(body);
 }
 
+fn next_patch_version() -> String {
+    let mut components = env!("CARGO_PKG_VERSION").split('.');
+    let major = components.next().unwrap().parse::<u64>().unwrap();
+    let minor = components.next().unwrap().parse::<u64>().unwrap();
+    let patch = components
+        .next()
+        .unwrap()
+        .split(['-', '+'])
+        .next()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    format!("{major}.{minor}.{}", patch + 1)
+}
+
+fn latest_tag() -> String {
+    format!("v{}", next_patch_version())
+}
+
 fn atom() -> String {
-    "<?xml version=\"1.0\"?><feed><entry><id>x</id><title>v1.10.1</title>\
-     <link href=\"https://example.com/tag/v1.10.1\"/></entry></feed>"
-        .to_owned()
+    let tag = latest_tag();
+    format!(
+        "<?xml version=\"1.0\"?><feed><entry><id>x</id><title>{tag}</title>\
+         <link href=\"https://example.com/tag/{tag}\"/></entry></feed>"
+    )
 }
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -184,7 +205,10 @@ fn upgrade_check_prints_both_versions_over_a_local_feed() {
         stdout.contains(&format!("local: {}", env!("CARGO_PKG_VERSION"))),
         "{stdout}"
     );
-    assert!(stdout.contains("latest: 1.10.1"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("latest: {}", next_patch_version())),
+        "{stdout}"
+    );
     assert_eq!(server.count(), 1, "the check is exactly one request");
 }
 
@@ -208,13 +232,14 @@ fn a_hash_mismatch_is_a_typed_refusal_and_the_old_binary_still_runs() {
     let payload = b"bytes nobody pinned".to_vec();
     let wrong = hash_of(b"other bytes entirely");
     let name = asset_name();
+    let tag = latest_tag();
     let server = FixtureServer::start(vec![
         ("/releases.atom".to_owned(), atom().into_bytes()),
         (
-            "/v1.10.1/SHA256SUMS".to_owned(),
+            format!("/{tag}/SHA256SUMS"),
             format!("{wrong}  {name}\n").into_bytes(),
         ),
-        (format!("/v1.10.1/{name}"), payload),
+        (format!("/{tag}/{name}"), payload),
     ]);
     let workspace = temp_dir("mismatch");
     let output = run(
@@ -246,13 +271,14 @@ fn the_swap_works_on_a_temp_copy_and_old_is_gone_at_the_next_start() {
     // byte identity of what landed, plus that it runs afterwards.
     let payload = std::fs::read(env!("CARGO_BIN_EXE_assemblash")).unwrap();
     let name = asset_name();
+    let tag = latest_tag();
     let server = FixtureServer::start(vec![
         ("/releases.atom".to_owned(), atom().into_bytes()),
         (
-            "/v1.10.1/SHA256SUMS".to_owned(),
+            format!("/{tag}/SHA256SUMS"),
             format!("{}  {name}\n", hash_of(&payload)).into_bytes(),
         ),
-        (format!("/v1.10.1/{name}"), payload.clone()),
+        (format!("/{tag}/{name}"), payload.clone()),
     ]);
     let root = temp_dir("swap");
     let workspace = root.join("workspace");

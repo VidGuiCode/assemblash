@@ -334,6 +334,7 @@ fn document() -> impl Strategy<Value = Document> {
                             width,
                             height,
                             background,
+                            background_image: None,
                             extra: canvas_extra,
                         },
                         assets: assets.clone(),

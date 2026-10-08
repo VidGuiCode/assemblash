@@ -12,7 +12,7 @@ use assemblash_core::document::{
     ShapeLayer, Stroke, TextAlign, Transform, VerticalAlign,
 };
 use assemblash_core::ids::{AssetId, LayerId};
-use assemblash_core::{svg_import, validate, Color, Document};
+use assemblash_core::{svg_import, validate, Color, Document, GradientStop, SolidColor};
 
 use crate::error::RenderError;
 use crate::fonts::FontSet;
@@ -56,6 +56,10 @@ pub fn doc_to_svg(
         if failure.is_some() {
             return;
         }
+        match gradient_defs_for(layer) {
+            Ok(gradient) => defs.push_str(&gradient),
+            Err(error) => failure = Some(error),
+        }
         if !layer.effects.is_empty() {
             match filter_for(layer) {
                 Ok(filter) => defs.push_str(&filter),
@@ -82,17 +86,56 @@ pub fn doc_to_svg(
     if let Some(error) = failure {
         return Err(error);
     }
+    // The canvas background's own definition, under the fixed `canvas` token
+    // the plan gives it: `canvas-background`, never a counter.
+    if let Some(background) = &document.canvas.background {
+        if !matches!(background, Color::Solid(_)) {
+            defs.push_str(&gradient_def("canvas-background", background, None)?);
+        }
+    }
     if !defs.is_empty() {
         let _ = write!(out, "  <defs>\n{defs}  </defs>\n");
     }
 
     if let Some(background) = &document.canvas.background {
+        let fill = match background {
+            Color::Solid(solid) => color(solid)?,
+            _ => "url(#canvas-background)".to_owned(),
+        };
         let _ = writeln!(
             out,
-            "  <rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
+            "  <rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"{fill}\"/>",
             number(document.canvas.width),
             number(document.canvas.height),
-            color(background)?,
+        );
+    }
+
+    if let Some(background) = &document.canvas.background_image {
+        let href = assets.get(&background.asset).ok_or_else(|| {
+            RenderError::UnresolvedCanvasBackgroundAsset {
+                asset: background.asset.clone(),
+            }
+        })?;
+        if document
+            .assets
+            .iter()
+            .find(|asset| asset.id == background.asset)
+            .is_some_and(|asset| asset.media_type == "image/svg+xml")
+        {
+            check_asset_text(&background.asset, href, fonts)?;
+        }
+        let preserve = match background.fit {
+            ImageFit::Fill => "none",
+            ImageFit::Contain => "xMidYMid meet",
+            ImageFit::Cover => "xMidYMid slice",
+        };
+        let _ = writeln!(
+            out,
+            "  <image x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" \
+             preserveAspectRatio=\"{preserve}\" href=\"{}\"/>",
+            number(document.canvas.width),
+            number(document.canvas.height),
+            attribute(href),
         );
     }
 
@@ -245,11 +288,15 @@ fn write_layer(
                 Some(stroke) => format!(
                     " stroke=\"{}\" stroke-width=\"{}\" stroke-linejoin=\"round\" \
                      paint-order=\"stroke\"",
-                    color(&stroke.color)?,
+                    paint_value(&stroke.color, &format!("{}-stroke", layer.id), &layer.id)?,
                     number(stroke.width)
                 ),
             };
 
+            let fill = match &text.color {
+                Some(paint) => paint_value(paint, &format!("{}-color", layer.id), &layer.id)?,
+                None => "none".to_owned(),
+            };
             let _ = write!(
                 out,
                 "{pad}<text x=\"{x}\" y=\"{y}\" font-family=\"{family}\" \
@@ -260,12 +307,7 @@ fn write_layer(
                 y = number(y),
                 family = attribute(&text.font_family),
                 size = number(text.font_size),
-                fill = text
-                    .color
-                    .as_ref()
-                    .map(color)
-                    .transpose()?
-                    .unwrap_or_else(|| "none".to_owned()),
+                fill = fill,
                 anchor = anchor,
                 weight = weight,
                 style = style,
@@ -547,7 +589,21 @@ fn layer_attributes(layer: &Layer, transform: String) -> Result<String, RenderEr
 
 /// The id of a layer's clip path.
 fn clip_id(layer: &Layer) -> String {
-    format!("clip-{}", layer.id)
+    svg_id(&format!("clip-{}", layer.id))
+}
+
+/// Encodes arbitrary UTF-8 identifiers for SVG definitions and URL references.
+/// Safe bytes stay unchanged. Encoding `~` also prevents identifier collisions.
+fn svg_id(raw: &str) -> String {
+    let mut id = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.') {
+            id.push(char::from(byte));
+        } else {
+            let _ = write!(id, "~{byte:02X}");
+        }
+    }
+    id
 }
 
 /// Control-arm length for a quarter arc, as a fraction of the radius.
@@ -663,7 +719,7 @@ fn write_shape(
         ShapeKind::Path { d, .. } => {
             let d = checked_path_d(&layer.id, d)?;
             let fill = match &shape.fill {
-                Some(color_value) => color(color_value)?,
+                Some(paint) => paint_value(paint, &format!("{}-fill", layer.id), &layer.id)?,
                 None => "none".to_owned(),
             };
             let stroke = match &shape.stroke {
@@ -737,7 +793,7 @@ fn write_shape(
                 y1 = number(y + h / 2.0),
                 x2 = number(x + w),
                 y2 = number(y + h / 2.0),
-                color = color(&stroke.color)?,
+                color = paint_value(&stroke.color, &format!("{}-stroke", layer.id), &layer.id)?,
                 width = number(stroke.width),
                 cap = cap,
                 dash = dash,
@@ -765,7 +821,7 @@ fn shape_paint(
     layer: &LayerId,
 ) -> Result<(String, String, f64), RenderError> {
     let fill = match &shape.fill {
-        Some(color_value) => color(color_value)?,
+        Some(paint) => paint_value(paint, &format!("{}-fill", layer), layer)?,
         None => "none".to_owned(),
     };
     let Some(stroke) = &shape.stroke else {
@@ -782,13 +838,17 @@ fn shape_paint(
     if width >= minimum {
         // The stroke has eaten the box. Drawn as the whole shape filled in the
         // stroke colour, which is what the inset rule converges to.
-        return Ok((color(&stroke.color)?, String::new(), 0.0));
+        return Ok((
+            paint_value(&stroke.color, &format!("{}-stroke", layer), layer)?,
+            String::new(),
+            0.0,
+        ));
     }
     Ok((
         fill,
         format!(
             " stroke=\"{}\" stroke-width=\"{}\"{}",
-            color(&stroke.color)?,
+            paint_value(&stroke.color, &format!("{}-stroke", layer), layer)?,
             number(width),
             // Dash, cap and join ride on the same element. The stroke drew
             // the inset geometry; the pattern inherits that geometry
@@ -962,11 +1022,31 @@ fn marker_defs(layer: &Layer, shape: &ShapeLayer) -> Result<String, RenderError>
     }
 
     let length = number(stroke.width * 3.0);
-    let fill = color(&stroke.color)?;
+    let solid_fill = if matches!(stroke.color, Color::Solid(_)) {
+        Some(paint_value(
+            &stroke.color,
+            &format!("{}-stroke", layer.id),
+            &layer.id,
+        )?)
+    } else {
+        None
+    };
     let mut out = String::new();
     for (marker, start) in [(marker_start.as_ref(), true), (marker_end.as_ref(), false)] {
         let Some(marker) = marker else {
             continue;
+        };
+        if matches!(marker, LineMarker::None) {
+            continue;
+        }
+        let id = marker_id(&layer.id, marker, start)?;
+        let fill = if let Some(fill) = &solid_fill {
+            fill.clone()
+        } else {
+            let end = if start { "start" } else { "end" };
+            let paint_id = format!("{}-stroke-marker-{end}", layer.id);
+            out.push_str(&gradient_def(&paint_id, &stroke.color, Some(&layer.id))?);
+            format!("url(#{})", svg_id(&paint_id))
         };
         let definition = match marker {
             LineMarker::Arrow => {
@@ -981,7 +1061,7 @@ fn marker_defs(layer: &Layer, shape: &ShapeLayer) -> Result<String, RenderError>
                      markerUnits=\"userSpaceOnUse\"{orient}>\n\
                      \x20     <polygon points=\"0,0 10,5 0,10\" fill=\"{fill}\"/>\n\
                      \x20   </marker>\n",
-                    id = marker_id(&layer.id, marker, start)?,
+                    id = id,
                 )
             }
             LineMarker::Circle => format!(
@@ -990,9 +1070,9 @@ fn marker_defs(layer: &Layer, shape: &ShapeLayer) -> Result<String, RenderError>
                  markerUnits=\"userSpaceOnUse\">\n\
                  \x20     <circle cx=\"5\" cy=\"5\" r=\"5\" fill=\"{fill}\"/>\n\
                  \x20   </marker>\n",
-                id = marker_id(&layer.id, marker, start)?,
+                id = id,
             ),
-            LineMarker::None => continue,
+            LineMarker::None => unreachable!("none was skipped above"),
             LineMarker::Other(value) => {
                 return Err(RenderError::UnsupportedLineMarker {
                     layer: layer.id.clone(),
@@ -1019,7 +1099,7 @@ fn marker_id(layer: &LayerId, marker: &LineMarker, start: bool) -> Result<String
         }
     };
     let end = if start { "start" } else { "end" };
-    Ok(format!("marker-{kind}-{end}-{layer}"))
+    Ok(svg_id(&format!("marker-{kind}-{end}-{layer}")))
 }
 
 /// The `marker-start`/`marker-end` attribute for one end of a line.
@@ -1479,7 +1559,7 @@ fn filter_attribute(layer: &Layer) -> String {
 }
 
 fn filter_id(layer: &Layer) -> String {
-    format!("fx-{}", layer.id)
+    svg_id(&format!("fx-{}", layer.id))
 }
 
 /// A layer's effect stack, as one SVG filter.
@@ -1546,9 +1626,20 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
                 color: shadow,
                 ..
             } => {
-                let [r, g, b, a] = shadow
+                // A gradient has no primitive here: the shadow is one flood,
+                // and a flood is one solid colour. Refused, naming the
+                // limitation, never approximated.
+                let solid = match shadow {
+                    Color::Solid(solid) => solid,
+                    _ => {
+                        return Err(RenderError::GradientInShadowColor {
+                            layer: layer.id.clone(),
+                        })
+                    }
+                };
+                let [r, g, b, a] = solid
                     .to_rgba()
-                    .ok_or_else(|| RenderError::InvalidColor(shadow.as_str().to_owned()))?;
+                    .ok_or_else(|| RenderError::InvalidColor(solid.as_str().to_owned()))?;
                 // A shadow's strength is written in its colour's alpha, which
                 // is where every other colour in this document writes it; the
                 // filter wants the two separately. Omitted when opaque so the
@@ -1972,7 +2063,300 @@ fn inverse_transform(transform: &Transform, cx: f64, cy: f64) -> Option<String> 
     Some(list)
 }
 
-fn color(color: &Color) -> Result<String, RenderError> {
+/// The value of a `fill` or `stroke` attribute: a solid colour inline, or a
+/// reference to the gradient definition the defs pass emitted for the same
+/// layer and field. The id spelling must match [`gradient_defs_for`] — the
+/// attribute references a definition that pass emits, and a drifted id would
+/// reference nothing.
+fn paint_value(paint: &Color, def_id: &str, layer: &LayerId) -> Result<String, RenderError> {
+    match paint {
+        Color::Solid(solid) => color(solid),
+        Color::Linear(_) | Color::Radial(_) => Ok(format!("url(#{})", svg_id(def_id))),
+        Color::Other(_) => Err(RenderError::UnsupportedGradient {
+            layer: Some(layer.clone()),
+            kind: paint.kind_name().to_owned(),
+        }),
+    }
+}
+
+/// Every gradient definition a layer's paints ask for, keyed by the layer id
+/// plus the field path: `layer_7-fill`, `layer_7-stroke`, `layer_7-color`.
+/// Never a document-order counter, so reordering layers cannot change the
+/// bytes. A solid paint emits nothing; an unknown kind is refused here, with
+/// the layer named, before any element is written.
+fn gradient_defs_for(layer: &Layer) -> Result<String, RenderError> {
+    let mut defs = String::new();
+    {
+        let mut push = |field: &str, paint: &Color| -> Result<(), RenderError> {
+            if matches!(paint, Color::Solid(_)) {
+                return Ok(());
+            }
+            defs.push_str(&gradient_def(
+                &format!("{}-{field}", layer.id),
+                paint,
+                Some(&layer.id),
+            )?);
+            Ok(())
+        };
+        match &layer.kind {
+            LayerKind::Text(text) => {
+                if let Some(paint) = &text.color {
+                    push("color", paint)?;
+                }
+                if let Some(stroke) = &text.stroke {
+                    push("stroke", &stroke.color)?;
+                }
+            }
+            LayerKind::Shape(shape) => {
+                if let Some(paint) = &shape.fill {
+                    push("fill", paint)?;
+                }
+                if let Some(stroke) = &shape.stroke {
+                    if matches!(&shape.shape, ShapeKind::Line { .. }) {
+                        if matches!(stroke.color, Color::Other(_)) {
+                            return Err(RenderError::UnsupportedGradient {
+                                layer: Some(layer.id.clone()),
+                                kind: stroke.color.kind_name().to_owned(),
+                            });
+                        }
+                        if stroke.width > 0.0 && !matches!(stroke.color, Color::Solid(_)) {
+                            defs.push_str(&line_gradient_def(
+                                &format!("{}-stroke", layer.id),
+                                &stroke.color,
+                                line_stroke_envelope(layer, stroke),
+                                &layer.id,
+                            )?);
+                        }
+                    } else {
+                        push("stroke", &stroke.color)?;
+                    }
+                }
+            }
+            LayerKind::Group(_) | LayerKind::Image(_) | LayerKind::Svg(_) => {}
+        }
+    }
+    Ok(defs)
+}
+
+/// One gradient's `<defs>` entry, in the emission shape the bit-identity
+/// spike measured byte-identical on all six targets: `objectBoundingBox`
+/// units, a linear axis through the box centre at the documented angle, and
+/// stops carrying a separate `stop-opacity`.
+fn gradient_def(
+    def_id: &str,
+    paint: &Color,
+    layer: Option<&LayerId>,
+) -> Result<String, RenderError> {
+    let def_id = svg_id(def_id);
+    match paint {
+        Color::Linear(linear) => {
+            // The axis runs through the box centre; the angle turns from the
+            // positive x axis, y downward — the convention the schema
+            // documents and the spike measured.
+            let (cos, sin) =
+                gradient_direction(linear.angle).ok_or_else(|| invalid_gradient_geometry(layer))?;
+            let (dx, dy) = (cos / 2.0, sin / 2.0);
+            let mut def = format!(
+                "  <linearGradient id=\"{def_id}\" gradientUnits=\"objectBoundingBox\" \
+                 x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">\n",
+                number(0.5 - dx),
+                number(0.5 - dy),
+                number(0.5 + dx),
+                number(0.5 + dy),
+            );
+            for stop in &linear.stops {
+                def.push_str(&stop_markup(stop)?);
+            }
+            def.push_str("  </linearGradient>\n");
+            Ok(def)
+        }
+        Color::Radial(radial) => {
+            ensure_finite_gradient_geometry(
+                layer,
+                &[radial.center.x, radial.center.y, radial.radius],
+            )?;
+            let mut def = format!(
+                "  <radialGradient id=\"{def_id}\" gradientUnits=\"objectBoundingBox\" \
+                 cx=\"{}\" cy=\"{}\" r=\"{}\">\n",
+                number(radial.center.x),
+                number(radial.center.y),
+                number(radial.radius),
+            );
+            for stop in &radial.stops {
+                def.push_str(&stop_markup(stop)?);
+            }
+            def.push_str("  </radialGradient>\n");
+            Ok(def)
+        }
+        Color::Other(_) => Err(RenderError::UnsupportedGradient {
+            layer: layer.cloned(),
+            kind: paint.kind_name().to_owned(),
+        }),
+        // Definitions are requested only for gradients; a solid is painted
+        // inline and asks for none.
+        Color::Solid(_) => Ok(String::new()),
+    }
+}
+
+/// The line's local stroke envelope: length plus any drawn cap extension,
+/// with one stroke width across. A zero-length line uses a width-by-width
+/// square so its round or square cap has a defined paint space.
+fn line_stroke_envelope(layer: &Layer, stroke: &Stroke) -> (f64, f64, f64, f64) {
+    let transform = &layer.transform;
+    let half = stroke.width / 2.0;
+    let center_y = transform.y + transform.height / 2.0;
+    if transform.width == 0.0 {
+        return (
+            transform.x - half,
+            center_y - half,
+            stroke.width,
+            stroke.width,
+        );
+    }
+    let extends = matches!(
+        stroke.line_cap.as_ref(),
+        Some(LineCap::Round | LineCap::Square)
+    );
+    let extension = if extends { half } else { 0.0 };
+    (
+        transform.x - extension,
+        center_y - half,
+        transform.width + 2.0 * extension,
+        stroke.width,
+    )
+}
+
+/// Emits a line stroke gradient in the line's pre-transform stroke space.
+///
+/// The common layer transform remains on the line (or its clip wrapper), so
+/// the paint follows that transform once. The bounding box uses absolute
+/// layer-local coordinates because line geometry is emitted in that same
+/// space. `number` canonicalizes every computed endpoint across targets.
+fn line_gradient_def(
+    def_id: &str,
+    paint: &Color,
+    (x, y, width, height): (f64, f64, f64, f64),
+    layer: &LayerId,
+) -> Result<String, RenderError> {
+    let def_id = svg_id(def_id);
+    match paint {
+        Color::Linear(linear) => {
+            ensure_finite_gradient_geometry(Some(layer), &[x, y, width, height])?;
+            let (cos, sin) = gradient_direction(linear.angle)
+                .ok_or_else(|| invalid_gradient_geometry(Some(layer)))?;
+            let (dx, dy) = (cos * width / 2.0, sin * height / 2.0);
+            let coordinates = [
+                x + width / 2.0 - dx,
+                y + height / 2.0 - dy,
+                x + width / 2.0 + dx,
+                y + height / 2.0 + dy,
+            ];
+            ensure_finite_gradient_geometry(Some(layer), &coordinates)?;
+            let mut def = format!(
+                "  <linearGradient id=\"{def_id}\" gradientUnits=\"userSpaceOnUse\" \
+                 x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">\n",
+                number(coordinates[0]),
+                number(coordinates[1]),
+                number(coordinates[2]),
+                number(coordinates[3]),
+            );
+            for stop in &linear.stops {
+                def.push_str(&stop_markup(stop)?);
+            }
+            def.push_str("  </linearGradient>\n");
+            Ok(def)
+        }
+        Color::Radial(radial) => {
+            ensure_finite_gradient_geometry(
+                Some(layer),
+                &[
+                    x,
+                    y,
+                    width,
+                    height,
+                    radial.center.x,
+                    radial.center.y,
+                    radial.radius,
+                    x + radial.center.x * width,
+                    y + radial.center.y * height,
+                    radial.radius * width,
+                    radial.radius * height,
+                ],
+            )?;
+            let mut def = format!(
+                "  <radialGradient id=\"{def_id}\" gradientUnits=\"userSpaceOnUse\" \
+                 cx=\"{}\" cy=\"{}\" r=\"{}\" \
+                 gradientTransform=\"translate({} {}) scale({} {})\">\n",
+                number(radial.center.x),
+                number(radial.center.y),
+                number(radial.radius),
+                number(x),
+                number(y),
+                number(width),
+                number(height),
+            );
+            for stop in &radial.stops {
+                def.push_str(&stop_markup(stop)?);
+            }
+            def.push_str("  </radialGradient>\n");
+            Ok(def)
+        }
+        Color::Other(_) => Err(RenderError::UnsupportedGradient {
+            layer: Some(layer.clone()),
+            kind: paint.kind_name().to_owned(),
+        }),
+        Color::Solid(_) => Ok(String::new()),
+    }
+}
+
+fn gradient_direction(angle_degrees: f64) -> Option<(f64, f64)> {
+    if !angle_degrees.is_finite() {
+        return None;
+    }
+    // Reduce before multiplying by pi. The model permits any finite degree
+    // value, including values too large for direct angle conversion.
+    let radians = angle_degrees.rem_euclid(360.0) * std::f64::consts::PI / 180.0;
+    let (cos, sin) = (radians.cos(), radians.sin());
+    (cos.is_finite() && sin.is_finite()).then_some((cos, sin))
+}
+
+fn ensure_finite_gradient_geometry(
+    layer: Option<&LayerId>,
+    values: &[f64],
+) -> Result<(), RenderError> {
+    if values
+        .iter()
+        .all(|value| value.is_finite() && (value * 1_000_000.0).is_finite())
+    {
+        Ok(())
+    } else {
+        Err(invalid_gradient_geometry(layer))
+    }
+}
+
+fn invalid_gradient_geometry(layer: Option<&LayerId>) -> RenderError {
+    RenderError::InvalidGradientGeometry {
+        layer: layer.cloned(),
+    }
+}
+
+/// One `<stop>`: the offset, the colour normalised to opaque `#rrggbb`, and
+/// the stop's opacity — the colour's own alpha and the stop's alpha
+/// multiplied, which is what two stacked opacities compose to.
+fn stop_markup(stop: &GradientStop) -> Result<String, RenderError> {
+    let [r, g, b, a] = stop
+        .color
+        .to_rgba()
+        .ok_or_else(|| RenderError::InvalidColor(stop.color.as_str().to_owned()))?;
+    let opacity = f64::from(a) / 255.0 * stop.alpha;
+    Ok(format!(
+        "    <stop offset=\"{}\" stop-color=\"#{r:02x}{g:02x}{b:02x}\" stop-opacity=\"{}\"/>\n",
+        number(stop.offset),
+        number(opacity),
+    ))
+}
+
+fn color(color: &SolidColor) -> Result<String, RenderError> {
     let [r, g, b, a] = color
         .to_rgba()
         .ok_or_else(|| RenderError::InvalidColor(color.as_str().to_owned()))?;
@@ -2115,9 +2499,9 @@ mod tests {
 
     #[test]
     fn colors_render_as_hex_or_rgba() {
-        assert_eq!(color(&Color::new("#ff8000")).unwrap(), "#ff8000");
+        assert_eq!(color(&SolidColor::new("#ff8000")).unwrap(), "#ff8000");
         assert_eq!(
-            color(&Color::new("#ff800080")).unwrap(),
+            color(&SolidColor::new("#ff800080")).unwrap(),
             "rgba(255,128,0,0.501961)"
         );
     }
@@ -2177,6 +2561,28 @@ mod tests {
             marker_end: end,
             extra: assemblash_core::document::Extras::new(),
         }
+    }
+
+    fn linear_paint(angle: f64) -> Color {
+        Color::Linear(assemblash_core::document::LinearGradient {
+            kind: assemblash_core::document::LinearTag::Linear,
+            angle,
+            stops: vec![
+                GradientStop {
+                    offset: 0.0,
+                    color: SolidColor::new("#ff0000"),
+                    alpha: 1.0,
+                    extra: assemblash_core::document::Extras::new(),
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: SolidColor::new("#0000ff"),
+                    alpha: 0.5,
+                    extra: assemblash_core::document::Extras::new(),
+                },
+            ],
+            extra: assemblash_core::document::Extras::new(),
+        })
     }
 
     #[test]
@@ -2376,5 +2782,242 @@ mod tests {
             matches!(&error, RenderError::UnsupportedLineMarker { value, .. } if value == "\"diamond\""),
             "{error:?}"
         );
+    }
+
+    #[test]
+    fn unsafe_layer_ids_keep_svg_definitions_and_references_valid() {
+        let stroke = Stroke {
+            color: linear_paint(35.0),
+            ..solid_stroke(4.0)
+        };
+        let mut document = paint_document(rect_kind(), None, Some(stroke.clone()));
+        if let LayerKind::Shape(shape) = &mut document.layers[0].kind {
+            shape.fill = Some(linear_paint(17.0));
+        }
+        document.layers[0].clip = Some(Clip::Path {
+            d: "M 0 0 L 160 0 L 160 160 L 0 160 Z".to_owned(),
+            extra: Default::default(),
+        });
+        document.layers[0].effects = vec![Effect::Blur {
+            radius: 0.5,
+            extra: Default::default(),
+        }];
+        let mut line = paint_document(
+            line_kind(Some(LineMarker::Arrow), Some(LineMarker::Circle)),
+            None,
+            Some(stroke),
+        )
+        .layers
+        .remove(0);
+        line.id = LayerId::new("layer_line");
+        document.layers.push(line);
+        let fonts = crate::raster::LoadedFonts::from_bytes(std::iter::empty::<Vec<u8>>());
+        let safe = doc_to_svg(&document, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        let safe_pixels = crate::raster::svg_to_pixmap(&safe, &fonts, 1.0).unwrap();
+        for suffix in ["\"", "&", " ", "~", "é"] {
+            document.layers[0].id = LayerId::new(format!("layer_rect{suffix}"));
+            document.layers[1].id = LayerId::new(format!("layer_line{suffix}"));
+            let svg = doc_to_svg(&document, fonts.font_set(), &AssetHrefs::new()).unwrap();
+            let pixels = crate::raster::svg_to_pixmap(&svg, &fonts, 1.0).unwrap();
+            assert_eq!(
+                pixels.data(),
+                safe_pixels.data(),
+                "suffix {suffix:?}: {svg}"
+            );
+            assert!(svg.contains(&format!(
+                "id=\"{}-fill\"",
+                svg_id(document.layers[0].id.as_str())
+            )));
+        }
+        assert_ne!(svg_id("layer_~22"), svg_id("layer_\""));
+        assert_eq!(svg_id("layer_A.z_0-9"), "layer_A.z_0-9");
+    }
+
+    #[test]
+    fn a_zero_width_line_does_not_hide_an_unsupported_gradient() {
+        let stroke = Stroke {
+            color: serde_json::from_value(serde_json::json!({ "kind": "conic" })).unwrap(),
+            ..solid_stroke(0.0)
+        };
+        let document = paint_document(line_kind(None, None), None, Some(stroke));
+        assert!(matches!(
+            doc_to_svg(&document, &FontSet::unchecked(), &AssetHrefs::new()),
+            Err(RenderError::UnsupportedGradient { kind, .. }) if kind == "conic"
+        ));
+    }
+
+    #[test]
+    fn line_gradient_uses_the_stroke_envelope_before_layer_transforms() {
+        let stroke = Stroke {
+            color: linear_paint(0.0),
+            width: 4.0,
+            line_cap: Some(LineCap::Square),
+            ..solid_stroke(4.0)
+        };
+        let mut document = paint_document(line_kind(None, None), None, Some(stroke));
+        document.layers[0].transform.rotation = 30.0;
+        document.layers[0].transform.flip_horizontal = true;
+        let svg = doc_to_svg(&document, &FontSet::unchecked(), &AssetHrefs::new()).unwrap();
+
+        // Square caps extend the horizontal envelope by half a stroke width.
+        // The existing line transform applies once; gradient endpoints stay
+        // in its pre-transform user space.
+        assert!(
+            svg.contains(
+                "<linearGradient id=\"layer_00000000000000000000000001-stroke\" \
+                 gradientUnits=\"userSpaceOnUse\" x1=\"18\" y1=\"100\" x2=\"182\" y2=\"100\">"
+            ),
+            "{svg}"
+        );
+        assert!(
+            svg.contains(
+                "transform=\"translate(100 100) rotate(30) scale(-1 1) translate(-100 -100)\""
+            ),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("stroke=\"url(#layer_00000000000000000000000001-stroke)\""),
+            "{svg}"
+        );
+    }
+
+    #[test]
+    fn gradient_angles_wrap_before_trigonometry() {
+        let id = LayerId::new("layer_angle");
+        let normal = gradient_def("g", &linear_paint(17.0), Some(&id)).unwrap();
+        let positive_turn = gradient_def("g", &linear_paint(377.0), Some(&id)).unwrap();
+        let negative_turn = gradient_def("g", &linear_paint(-343.0), Some(&id)).unwrap();
+        assert_eq!(normal, positive_turn);
+        assert_eq!(normal, negative_turn);
+
+        let large = gradient_def("g", &linear_paint(f64::MAX), Some(&id)).unwrap();
+        assert!(!large.contains("NaN"), "{large}");
+        assert!(!large.contains("inf"), "{large}");
+    }
+
+    #[test]
+    fn overflowing_line_gradient_geometry_is_a_typed_refusal() {
+        let id = LayerId::new("layer_overflow");
+        let radial = Color::Radial(assemblash_core::document::RadialGradient {
+            kind: assemblash_core::document::RadialTag::Radial,
+            center: assemblash_core::document::GradientCenter {
+                x: f64::MAX,
+                y: 0.5,
+                extra: Default::default(),
+            },
+            radius: 1.0,
+            stops: vec![GradientStop {
+                offset: 0.0,
+                color: SolidColor::new("#ffffff"),
+                alpha: 1.0,
+                extra: assemblash_core::document::Extras::new(),
+            }],
+            extra: assemblash_core::document::Extras::new(),
+        });
+
+        assert!(matches!(
+            line_gradient_def("g", &radial, (0.0, 0.0, 200.0, 4.0), &id),
+            Err(RenderError::InvalidGradientGeometry { layer: Some(layer) }) if layer == id
+        ));
+        assert!(matches!(
+            gradient_def("g", &radial, Some(&id)),
+            Err(RenderError::InvalidGradientGeometry { layer: Some(layer) }) if layer == id
+        ));
+    }
+
+    #[test]
+    fn gradient_markers_get_independent_marker_space_paints() {
+        let stroke = Stroke {
+            color: linear_paint(45.0),
+            ..solid_stroke(4.0)
+        };
+        let svg = paint_svg(
+            line_kind(Some(LineMarker::Arrow), Some(LineMarker::Circle)),
+            None,
+            Some(stroke),
+        );
+
+        assert_eq!(svg.matches("<linearGradient ").count(), 3, "{svg}");
+        assert!(
+            svg.contains("id=\"layer_00000000000000000000000001-stroke-marker-start\""),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("id=\"layer_00000000000000000000000001-stroke-marker-end\""),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("<polygon points=\"0,0 10,5 0,10\" fill=\"url(#layer_00000000000000000000000001-stroke-marker-start)\"/>"),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("<circle cx=\"5\" cy=\"5\" r=\"5\" fill=\"url(#layer_00000000000000000000000001-stroke-marker-end)\"/>"),
+            "{svg}"
+        );
+    }
+
+    #[test]
+    fn zero_length_gradient_line_uses_a_stroke_width_square() {
+        let stroke = Stroke {
+            color: linear_paint(0.0),
+            width: 6.0,
+            line_cap: Some(LineCap::Round),
+            ..solid_stroke(6.0)
+        };
+        let mut document = paint_document(line_kind(None, None), None, Some(stroke));
+        document.layers[0].transform = Transform::new(50.0, 50.0, 0.0, 20.0);
+        let svg = doc_to_svg(&document, &FontSet::unchecked(), &AssetHrefs::new()).unwrap();
+        assert!(
+            svg.contains("x1=\"47\" y1=\"60\" x2=\"53\" y2=\"60\""),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("<line x1=\"50\" y1=\"60\" x2=\"50\" y2=\"60\""),
+            "{svg}"
+        );
+    }
+
+    #[test]
+    fn canvas_background_image_is_emitted_between_color_and_layers() {
+        let mut document =
+            Document::new(&mut assemblash_core::SequentialIdSource::new(), 80.0, 60.0);
+        document.canvas.background = Some(Color::new("#ffffff"));
+        let asset = assemblash_core::Asset {
+            id: assemblash_core::AssetId::new("asset_00000000000000000000000001"),
+            path: "background.png".to_owned(),
+            hash: format!("sha256:{}", "0".repeat(64)),
+            media_type: "image/png".to_owned(),
+            width: Some(4),
+            height: Some(3),
+            extra: assemblash_core::document::Extras::new(),
+        };
+        let asset_id = asset.id.clone();
+        document.assets.push(asset);
+        document.canvas.background_image = Some(assemblash_core::document::BackgroundImage {
+            asset: asset_id.clone(),
+            fit: ImageFit::Contain,
+            extra: assemblash_core::document::Extras::new(),
+        });
+        document.layers.push(Layer::new(
+            LayerId::new("layer_00000000000000000000000001"),
+            Transform::new(1.0, 2.0, 3.0, 4.0),
+            LayerKind::Shape(ShapeLayer {
+                shape: rect_kind(),
+                fill: Some(Color::new("#000000")),
+                stroke: None,
+                extra: assemblash_core::document::Extras::new(),
+            }),
+        ));
+        let href = "data:image/png;base64,AAAA".to_owned();
+        let hrefs = AssetHrefs::from([(asset_id, href.clone())]);
+        let svg = doc_to_svg(&document, &FontSet::unchecked(), &hrefs).unwrap();
+        let background = svg.find(&format!("<image x=\"0\" y=\"0\" width=\"80\" height=\"60\" preserveAspectRatio=\"xMidYMid meet\" href=\"{href}\"/>")).unwrap();
+        let color = svg
+            .find("<rect x=\"0\" y=\"0\" width=\"80\" height=\"60\" fill=\"#ffffff\"/>")
+            .unwrap();
+        let layer = svg
+            .find("<rect x=\"1\" y=\"2\" width=\"3\" height=\"4\"")
+            .unwrap();
+        assert!(color < background && background < layer, "{svg}");
     }
 }

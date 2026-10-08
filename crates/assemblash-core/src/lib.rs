@@ -39,9 +39,11 @@ pub mod workspace;
 /// Nothing about `assemblash_core::liveness::*` changed when it moved.
 pub use assemblash_liveness as liveness;
 pub use document::{
-    Asset, BlendMode, Canvas, Color, Document, Extras, FontStyle, GroupLayer, ImageFit, ImageLayer,
-    Layer, LayerKind, LineCap, LineJoin, LineMarker, ShapeKind, ShapeLayer, Stroke, SvgLayer,
-    TextAlign, TextLayer, Transform, VerticalAlign, MAX_DASH_ENTRIES,
+    Asset, BackgroundImage, BlendMode, Canvas, Color, Document, Extras, FontStyle, GradientCenter,
+    GradientStop, GroupLayer, ImageFit, ImageLayer, Layer, LayerKind, LineCap, LineJoin,
+    LineMarker, LinearGradient, LinearTag, RadialGradient, RadialTag, ShapeKind, ShapeLayer,
+    SolidColor, Stroke, SvgLayer, TextAlign, TextLayer, Transform, UnknownGradient, VerticalAlign,
+    MAX_DASH_ENTRIES, MAX_GRADIENT_STOPS,
 };
 pub use error::{ValidationError, ValidationErrors};
 pub use history::{Actor, ActorKind, History, HistoryError};

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { FORMATS, RESOLUTIONS, dimensionsFor, downloadTargetFor } from "./dist/export.js";
+import { FORMATS, RESOLUTIONS, dimensionsFor, downloadTargetFor } from "./.test-dist/export.js";
 
 function resolution(id) {
   const found = RESOLUTIONS.find((one) => one.id === id);

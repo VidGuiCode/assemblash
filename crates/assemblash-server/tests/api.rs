@@ -392,6 +392,58 @@ fn first_run_creates_a_valid_workspace() {
 }
 
 #[test]
+fn unsupported_creation_paints_and_image_shape_fills_are_refused_without_writes() {
+    let harness = Harness::start();
+    for (id, width, background) in [
+        ("invalid-dimension", -1, "#ffffff"),
+        ("invalid-color", 40, "#invalid"),
+    ] {
+        let refused = http::post_json(
+            &harness.url("/api/projects"),
+            &json!({ "id": id, "width": width, "height": 20, "background": background }),
+        );
+        assert_eq!(refused.status, 422, "{}", refused.json());
+        assert_eq!(error_code(&refused), "invalidDocument");
+        assert!(!harness.root().join(PROJECTS_DIR).join(id).exists());
+    }
+    let refused = http::post_json(
+        &harness.url("/api/projects"),
+        &json!({ "id": "invalid", "width": 40, "height": 20, "background": { "kind": "conic" } }),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.json());
+    assert_eq!(error_code(&refused), "operationRefused");
+    assert!(!harness.root().join(PROJECTS_DIR).join("invalid").exists());
+
+    create_project(&harness, "poster");
+    let path = harness
+        .root()
+        .join(PROJECTS_DIR)
+        .join("poster")
+        .join("document.json");
+    let before = std::fs::read(&path).unwrap();
+    for fill in [
+        json!("asset_background"),
+        json!({ "kind": "image", "asset": "asset_background" }),
+    ] {
+        let refused = http::post_json(
+            &harness.url("/api/projects/poster/operations"),
+            &json!({ "expectedVersion": 0, "operation": {
+                "op": "create", "position": { "at": "root" },
+                "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+                "type": "shape", "shape": { "kind": "rect" }, "fill": fill
+            }}),
+        );
+        assert_eq!(refused.status, 422, "{}", refused.json());
+        assert_eq!(error_code(&refused), "operationRefused");
+        assert!(refused.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("image layer and clip"));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+}
+
+#[test]
 fn a_project_round_trips_through_the_api() {
     let harness = Harness::start();
 
@@ -859,6 +911,37 @@ fn preview_filters_support_the_editors_local_drag_compositor() {
     assert_eq!(selected.status, 200);
     assert_ne!(normal.body, base.body);
     assert_ne!(normal.body, selected.body);
+
+    let upload = http::post_bytes(
+        &harness.url("/api/projects/poster/assets?filename=preview-background.png"),
+        "image/png",
+        &solid_png(),
+    );
+    assert_eq!(upload.status, 201, "{}", upload.json());
+    let asset = upload.json()["asset"]["id"].as_str().unwrap().to_owned();
+    let set_background = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({"operation": {
+            "op": "updateCanvas",
+            "backgroundImage": {"asset": asset}
+        }}),
+    );
+    assert_eq!(set_background.status, 200, "{}", set_background.json());
+
+    let normal_with_image = http::get(&harness.url("/api/projects/poster/preview.png"));
+    let base_with_image =
+        http::get(&harness.url(&format!("/api/projects/poster/preview.png?exclude={layer}")));
+    let selected_with_image =
+        http::get(&harness.url(&format!("/api/projects/poster/preview.png?only={layer}")));
+    assert_eq!(normal_with_image.status, 200);
+    assert_eq!(base_with_image.status, 200);
+    assert_eq!(selected_with_image.status, 200);
+    assert_ne!(normal.body, normal_with_image.body);
+    assert_ne!(base.body, base_with_image.body);
+    assert_eq!(
+        selected_with_image.body, selected.body,
+        "the `only` preview must omit canvas backgrounds, including images"
+    );
 
     let layout = http::get(&harness.url(&format!(
         "/api/projects/poster/text-layout?id={layer}&width=90"
@@ -1536,6 +1619,107 @@ fn update_canvas_clears_background_and_undoes_over_http() {
     assert_eq!(
         http::get(&harness.url("/api/projects/poster/document")).body,
         before
+    );
+}
+
+#[test]
+fn project_creation_accepts_a_gradient_background() {
+    let harness = Harness::start();
+    let gradient = json!({
+        "kind": "linear",
+        "angle": 0.0,
+        "stops": [
+            { "offset": 0.0, "color": "#112233", "alpha": 1.0 },
+            { "offset": 1.0, "color": "#ddeeff", "alpha": 1.0 }
+        ]
+    });
+    let created = http::post_json(
+        &harness.url("/api/projects"),
+        &json!({
+            "id": "gradient",
+            "width": 200.0,
+            "height": 100.0,
+            "background": gradient
+        }),
+    );
+    assert_eq!(created.status, 201, "{}", created.json());
+    let document = http::get(&harness.url("/api/projects/gradient/document")).json();
+    assert_eq!(document["canvas"]["background"], gradient);
+}
+
+#[test]
+fn background_images_are_typed_reversible_and_checked_over_http() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let upload = http::post_bytes(
+        &harness.url("/api/projects/poster/assets?filename=swatch.png"),
+        "image/png",
+        &solid_png(),
+    );
+    assert_eq!(upload.status, 201, "{}", upload.json());
+    let asset = upload.json()["asset"]["id"].as_str().unwrap().to_owned();
+    let before = document_and_history_bytes(&harness, "poster");
+
+    let set = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": {
+            "op": "updateCanvas",
+            "backgroundImage": { "asset": asset, "fit": "contain" }
+        }}),
+    );
+    assert_eq!(set.status, 200, "{}", set.json());
+    let with_image = document_and_history_bytes(&harness, "poster");
+    let document = http::get(&harness.url("/api/projects/poster/document")).json();
+    assert_eq!(document["canvas"]["backgroundImage"]["asset"], asset);
+    assert_eq!(document["canvas"]["backgroundImage"]["fit"], "contain");
+
+    let refused = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": {
+            "op": "updateCanvas",
+            "backgroundImage": { "asset": asset, "fit": "cover" },
+            "clearBackgroundImage": true
+        }}),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.json());
+    assert_eq!(error_code(&refused), "operationRefused");
+    assert_eq!(document_and_history_bytes(&harness, "poster"), with_image);
+
+    let missing = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": {
+            "op": "updateCanvas",
+            "backgroundImage": { "asset": "asset_missing" }
+        }}),
+    );
+    assert_eq!(missing.status, 422, "{}", missing.json());
+    assert_eq!(error_code(&missing), "operationRefused");
+    assert_eq!(document_and_history_bytes(&harness, "poster"), with_image);
+
+    let dry_run = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({
+            "operation": { "op": "updateCanvas", "clearBackgroundImage": true },
+            "dryRun": true
+        }),
+    );
+    assert_eq!(dry_run.status, 200, "{}", dry_run.json());
+    assert_eq!(dry_run.json()["dryRun"], true);
+    assert_eq!(document_and_history_bytes(&harness, "poster"), with_image);
+
+    let clear = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": { "op": "updateCanvas", "clearBackgroundImage": true } }),
+    );
+    assert_eq!(clear.status, 200, "{}", clear.json());
+    for _ in 0..2 {
+        let undo = http::post_json(&harness.url("/api/projects/poster/undo"), &json!({}));
+        assert_eq!(undo.status, 200, "{}", undo.json());
+    }
+    assert_eq!(
+        http::get(&harness.url("/api/projects/poster/document")).body,
+        before.0,
+        "two undos did not restore document bytes"
     );
 }
 

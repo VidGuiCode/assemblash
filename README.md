@@ -25,8 +25,8 @@ command-line interface, a local HTTP API, and an MCP server for AI agents.
 You and an AI agent can work on the same document at the same time. No cloud
 service and no account are necessary.
 
-**Current release: 1.10.0.** The document schema and the operation API are
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.10.0)
+**Current release: 1.11.0.** The document schema and the operation API are
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.11.0)
 or the [changelog](CHANGELOG.md).
 
 <p align="center">
@@ -44,8 +44,8 @@ You do not need a terminal for these steps.
 Go to [GitHub Releases](https://github.com/VidGuiCode/assemblash/releases/latest)
 and download the file for your computer:
 
-For example, the Windows file of release 1.10.0 is
-`assemblash-v1.10.0-windows-x86_64.exe`.
+For example, the Windows file of release 1.11.0 is
+`assemblash-v1.11.0-windows-x86_64.exe`.
 
 | Your computer | Download this file |
 | --- | --- |
@@ -207,7 +207,7 @@ files it installs. The formula is in `packaging/homebrew/`, but the tap is
 Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.10.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.11.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -678,6 +678,82 @@ Canvas editing needs 1.4.0 or newer. When a project history contains
 it cannot read that operation. Continue to use the newer executable, and do
 not edit the history files. The document schema stays at version 1.
 
+### Gradient paints and background images (1.11.0)
+
+Use a solid colour string or a gradient object for canvas backgrounds, text, shape fills, and strokes.
+Presets accept the same paints. Colour slot values remain solid colour strings.
+Gradient shadow colours are refused. Image shape fills are refused; use an image layer with a clip.
+
+A linear gradient has `kind`, `angle`, and `stops`. Angle `0` runs from left to right.
+A radial gradient has `kind`, `center`, `radius`, and `stops`.
+Its centre and radius use fractions of the painted box.
+The default centre is `{ "x": 0.5, "y": 0.5 }`. The default radius is `0.5`.
+
+Each stop has `offset`, a solid `color`, and optional `alpha`.
+Offsets must increase strictly within `0` to `1`. Alpha defaults to `1` and multiplies the colour alpha.
+Each gradient has 1 to 16 stops.
+Writes refuse empty stop lists, invalid numbers, and unsupported gradient kinds.
+Loads preserve unsupported gradient kinds. Edits and rendering refuse their use.
+
+Save this example as `paint.json`:
+
+```json
+{
+  "kind": "linear",
+  "angle": 30,
+  "stops": [
+    { "offset": 0, "color": "#102030" },
+    { "offset": 1, "color": "#ddeeff", "alpha": 0.7 }
+  ]
+}
+```
+
+CLI colour arguments accept hexadecimal colours, inline JSON, and `@file.json`:
+
+```sh
+assemblash canvas set ./poster --background @paint.json
+assemblash set ./poster --layer <LAYER_ID> --color @paint.json
+```
+
+Import an image asset before you use it as a canvas background.
+The canvas colour appears below the image. All layers appear above the image.
+Use `fill`, `contain`, or `cover`. The default fit is `fill`.
+
+```sh
+assemblash canvas set ./poster --background-image <ASSET_ID> --background-image-fit cover
+assemblash canvas set ./poster --clear-background-image
+assemblash undo ./poster
+```
+
+HTTP `updateCanvas` and MCP `update_canvas` accept `backgroundImage: { "asset": "<ASSET_ID>", "fit": "cover" }`.
+Set `clearBackgroundImage: true` to remove it. Omit both fields to preserve it.
+Writes refuse missing assets and a simultaneous set and clear.
+Asset pruning keeps assets used by the canvas background.
+
+Builds 1.0 to 1.10 refuse to load or export a document with gradient paints.
+They can also refuse a project whose journal contains gradient operations.
+Release 1.10.0 preserves `backgroundImage` when it loads a document, but its renderer ignores the image.
+The canvas colour remains visible in that build.
+Recovery with 1.10.0 can discard image metadata from a newer `updateCanvas` journal entry.
+Use 1.11.0 or newer to edit or recover these documents.
+
+### Reference interface (1.11.0)
+
+The reference interface uses React and Mantine for controls, menus, dialogs, font controls, and login.
+All browser assets ship inside the executable.
+The editor keeps its existing document controller and operation queue.
+The canvas keeps pointer handling and the Rust preview.
+
+Open Settings. Open the Application section. Set Appearance to Light, Dark, or System.
+System is the default. The browser stores this preference locally.
+The appearance preference does not change document colours.
+
+Paint controls accept solid colours and gradient JSON.
+For a canvas gradient, select Gradient JSON, enter the object, and select Use JSON paint.
+Select Apply changes to submit the canvas draft.
+The canvas image controls select or upload an image, set its fit, and remove it.
+English, French, and German include these controls.
+
 The **Shapes** row in the Add panel (1.6.0 and newer) adds a rectangle, an
 ellipse, or a line. The inspector of a shape then changes Fill, Stroke, Stroke
 width, and, for a rectangle, Corner radius. Each row is one change that you
@@ -707,6 +783,7 @@ The important limits:
   refuse the whole document and name `shape` as an unknown layer kind.
 - A path shape or a path clip is preserved by releases 1.6.0 to 1.9.x, but
   those releases refuse to draw it and refuse an update that touches it.
+- Gradient paints need 1.11.0. Builds 1.0 to 1.10 refuse gradient documents and can refuse gradient journals.
 - Unknown fields survive load and save at every level of the document,
   including inside `clip`, `crop`, `stroke`, `shape`, and the effect stack
   (1.10.0).
@@ -757,6 +834,18 @@ npm run check
 
 `ui/dist/` is committed because the Rust binary embeds it. After you change
 the interface, `npm run build` must leave that directory up to date.
+
+After the interface build, run these commands from the repository root:
+
+```sh
+python scripts/ui_assets.py
+python scripts/ui_notices.py
+python scripts/ui_assets.py --check
+python scripts/ui_notices.py --check
+```
+
+The asset list embeds every browser file. Its login list includes only local login dependencies.
+The notices include the locked runtime packages and the icon font.
 
 Before you propose a change, please read [CONTRIBUTING.md](CONTRIBUTING.md).
 It explains the stability rules, testing expectations, and the line between

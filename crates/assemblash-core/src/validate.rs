@@ -6,7 +6,9 @@
 
 use std::collections::HashSet;
 
-use crate::document::{Clip, Color, Document, Effect, Layer, LayerKind, ShapeKind, ShapeLayer};
+use crate::document::{
+    Clip, Color, Document, Effect, GradientStop, Layer, LayerKind, ShapeKind, ShapeLayer,
+};
 use crate::error::{ValidationError, ValidationErrors};
 use crate::ids::AssetId;
 use crate::SCHEMA_VERSION;
@@ -70,6 +72,17 @@ fn check_canvas(document: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(background) = &document.canvas.background {
         check_color(background, "canvas background", errors);
     }
+    if let Some(background) = &document.canvas.background_image {
+        if !document
+            .assets
+            .iter()
+            .any(|asset| asset.id == background.asset)
+        {
+            errors.push(ValidationError::DanglingCanvasBackgroundAsset {
+                asset: background.asset.clone(),
+            });
+        }
+    }
 }
 
 fn check_assets(document: &Document, errors: &mut Vec<ValidationError>) {
@@ -114,6 +127,30 @@ fn check_presets(document: &Document, errors: &mut Vec<ValidationError>) {
             errors.push(ValidationError::DuplicatePreset {
                 name: preset.name.clone(),
             });
+        }
+        let context = format!("preset {:?}", preset.name);
+        for (field, paint) in [
+            ("color", preset.properties.color.as_ref()),
+            ("fill", preset.properties.fill.as_ref()),
+            (
+                "stroke.color",
+                preset
+                    .properties
+                    .stroke
+                    .as_ref()
+                    .map(|stroke| &stroke.color),
+            ),
+        ] {
+            if let Some(paint) = paint {
+                check_color(paint, &format!("{context} {field}"), errors);
+            }
+        }
+        if let Some(effects) = &preset.properties.effects {
+            for effect in effects {
+                if let Effect::DropShadow { color, .. } = effect {
+                    check_color(color, &format!("{context} dropShadow.color"), errors);
+                }
+            }
         }
     }
 }
@@ -471,11 +508,128 @@ fn check_dash_array(
 }
 
 fn check_color(color: &Color, context: &str, errors: &mut Vec<ValidationError>) {
-    if !color.is_valid() {
-        errors.push(ValidationError::InvalidColor {
+    match color {
+        Color::Solid(solid) => {
+            if !solid.is_valid() {
+                errors.push(ValidationError::InvalidColor {
+                    context: context.to_owned(),
+                    value: solid.as_str().to_owned(),
+                });
+            }
+        }
+        Color::Linear(gradient) => {
+            if !gradient.angle.is_finite() {
+                errors.push(ValidationError::InvalidGradient {
+                    context: context.to_owned(),
+                    reason: format!("angle must be a finite number, got {}", gradient.angle),
+                });
+            }
+            check_gradient(context, &gradient.stops, errors);
+        }
+        Color::Radial(gradient) => {
+            if !gradient.radius.is_finite() || gradient.radius <= 0.0 {
+                errors.push(ValidationError::InvalidGradient {
+                    context: context.to_owned(),
+                    reason: format!(
+                        "radius must be a finite number greater than 0, got {}",
+                        gradient.radius
+                    ),
+                });
+            }
+            for (axis, value) in [("x", gradient.center.x), ("y", gradient.center.y)] {
+                if !value.is_finite() {
+                    errors.push(ValidationError::InvalidGradient {
+                        context: context.to_owned(),
+                        reason: format!("center {axis} must be a finite number, got {value}"),
+                    });
+                }
+            }
+            check_gradient(context, &gradient.stops, errors);
+        }
+        // An unknown kind this build does not render is preserved as written
+        // (D21). A recognized tag that failed its schema, or an empty tag, is
+        // malformed paint rather than a future gradient and must be refused.
+        Color::Other(unknown) => {
+            if unknown.kind.trim().is_empty()
+                || matches!(unknown.kind.as_str(), "linear" | "radial")
+            {
+                errors.push(ValidationError::InvalidGradient {
+                    context: context.to_owned(),
+                    reason: format!("kind {:?} has an invalid gradient object", unknown.kind),
+                });
+            }
+        }
+    }
+}
+
+/// Checks a gradient's stop list against the documented limits.
+///
+/// A stop list is non-empty, at most [`MAX_GRADIENT_STOPS`] entries, with
+/// offsets finite and strictly ascending within `0..=1`, alphas within
+/// `0..=1`, and solid well-formed stop colours. An unordered list is refused,
+/// never normalized: sorting stops would silently change what is drawn.
+fn check_gradient(context: &str, stops: &[GradientStop], errors: &mut Vec<ValidationError>) {
+    use crate::document::MAX_GRADIENT_STOPS;
+    if stops.is_empty() {
+        errors.push(ValidationError::InvalidGradient {
             context: context.to_owned(),
-            value: color.as_str().to_owned(),
+            reason: "the stop list is empty".to_owned(),
         });
+        return;
+    }
+    if stops.len() > MAX_GRADIENT_STOPS {
+        errors.push(ValidationError::InvalidGradient {
+            context: context.to_owned(),
+            reason: format!(
+                "the stop list has {} entries, more than the {MAX_GRADIENT_STOPS} stop limit",
+                stops.len()
+            ),
+        });
+        return;
+    }
+    let mut previous: Option<f64> = None;
+    for (index, stop) in stops.iter().enumerate() {
+        if !stop.offset.is_finite() || !(0.0..=1.0).contains(&stop.offset) {
+            errors.push(ValidationError::InvalidGradient {
+                context: context.to_owned(),
+                reason: format!(
+                    "stop {index} offset must be a finite number between 0 and 1, got {}",
+                    stop.offset
+                ),
+            });
+        }
+        if let Some(previous) = previous {
+            if stop.offset <= previous {
+                errors.push(ValidationError::InvalidGradient {
+                    context: context.to_owned(),
+                    reason: format!(
+                        "stop {index} offset {} must be greater than stop {} offset {previous}; \
+                         stops must be strictly ascending",
+                        stop.offset,
+                        index - 1
+                    ),
+                });
+            }
+        }
+        previous = Some(stop.offset);
+        if !stop.alpha.is_finite() || !(0.0..=1.0).contains(&stop.alpha) {
+            errors.push(ValidationError::InvalidGradient {
+                context: context.to_owned(),
+                reason: format!(
+                    "stop {index} alpha must be a finite number between 0 and 1, got {}",
+                    stop.alpha
+                ),
+            });
+        }
+        if !stop.color.is_valid() {
+            errors.push(ValidationError::InvalidGradient {
+                context: context.to_owned(),
+                reason: format!(
+                    "stop {index} color {} is not #rrggbb or #rrggbbaa",
+                    stop.color.as_str()
+                ),
+            });
+        }
     }
 }
 
@@ -581,6 +735,60 @@ mod tests {
 
         doc.assets.push(asset("asset_missing", "img/a.png"));
         assert!(validate(&doc).is_ok());
+    }
+
+    #[test]
+    fn dangling_canvas_background_asset_is_rejected_by_name() {
+        let mut doc = document();
+        doc.canvas.background_image = Some(crate::document::BackgroundImage {
+            asset: AssetId::new("asset_missing"),
+            fit: crate::document::ImageFit::Cover,
+            extra: Extras::new(),
+        });
+        assert!(matches!(
+            errors(&doc).as_slice(),
+            [ValidationError::DanglingCanvasBackgroundAsset { asset }]
+                if asset == &AssetId::new("asset_missing")
+        ));
+
+        doc.assets
+            .push(asset("asset_missing", "img/background.png"));
+        assert!(validate(&doc).is_ok());
+    }
+
+    #[test]
+    fn presets_validate_known_paints_and_preserve_unknown_kinds() {
+        let mut doc = document();
+        let malformed_known: Color = serde_json::from_value(serde_json::json!({
+            "kind": "linear",
+            "angle": "not-a-number",
+            "stops": []
+        }))
+        .unwrap();
+        doc.presets.push(crate::presets::Preset {
+            name: "bad".to_owned(),
+            description: None,
+            properties: crate::presets::PresetProperties {
+                fill: Some(malformed_known),
+                ..Default::default()
+            },
+            extra: Extras::new(),
+        });
+        assert!(errors(&doc).iter().any(
+            |error| matches!(error, ValidationError::InvalidGradient { context, .. }
+                if context == r#"preset "bad" fill"#)
+        ));
+
+        let unknown: Color = serde_json::from_value(serde_json::json!({
+            "kind": "conic",
+            "stops": []
+        }))
+        .unwrap();
+        doc.presets[0].properties.fill = Some(unknown);
+        assert!(
+            validate(&doc).is_ok(),
+            "an unknown tagged paint is preserved"
+        );
     }
 
     #[test]

@@ -314,7 +314,7 @@ pub fn import_asset_reporting(
     ))
 }
 
-/// Removes asset files under `assets/` that no layer refers to.
+/// Removes asset files under `assets/` that no layer or canvas background refers to.
 ///
 /// Returns the paths removed. Assets are copied in, so an orphan is a real
 /// waste of disk rather than someone else's file.
@@ -334,6 +334,9 @@ pub fn prune_unused_assets(
         // A shape draws itself; it has nothing in `assets/` to keep alive.
         LayerKind::Text(_) | LayerKind::Group(_) | LayerKind::Shape(_) => {}
     });
+    if let Some(background) = &document.canvas.background_image {
+        referenced.push(background.asset.clone());
+    }
 
     let mut removed = Vec::new();
     for asset in &document.assets {
@@ -628,5 +631,29 @@ mod tests {
         let removed = prune_unused_assets(&document, dir.path()).unwrap();
         assert!(removed.is_empty(), "nothing is unreferenced: {removed:?}");
         assert!(file.is_file(), "the layer still draws it");
+    }
+
+    #[test]
+    fn pruning_keeps_a_canvas_background_image_and_removes_it_after_clear() {
+        let (dir, mut document) = project();
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = write_source_image(source_dir.path(), "background.png", b"background");
+        let asset = import_asset(dir.path(), &source, &mut SequentialIdSource::new()).unwrap();
+        let file = asset_path(dir.path(), &asset);
+        document.canvas.background_image = Some(crate::document::BackgroundImage {
+            asset: asset.id.clone(),
+            fit: crate::document::ImageFit::Contain,
+            extra: Extras::new(),
+        });
+        document.assets.push(asset);
+
+        let removed = prune_unused_assets(&document, dir.path()).unwrap();
+        assert!(removed.is_empty(), "the canvas still draws the asset");
+        assert!(file.is_file());
+
+        document.canvas.background_image = None;
+        let removed = prune_unused_assets(&document, dir.path()).unwrap();
+        assert_eq!(removed, vec![file.clone()]);
+        assert!(!file.exists());
     }
 }

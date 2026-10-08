@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::document::Document;
 use crate::ids::{IdSource, TransactionId};
@@ -44,6 +45,10 @@ pub const JOURNAL_FILE: &str = "journal.jsonl";
 
 /// Directory of snapshots, inside [`HISTORY_DIR`].
 pub const SNAPSHOTS_DIR: &str = "snapshots";
+
+/// Index associating cache files with the operation state they contain.
+const SNAPSHOT_INDEX_FILE: &str = "cache-index.json";
+const SNAPSHOT_ASSOCIATION_SUFFIX: &str = ".association.json";
 
 /// How many operations may pass before a snapshot is written.
 ///
@@ -223,6 +228,24 @@ pub enum HistoryError {
         source: serde_json::Error,
     },
 
+    /// The cache index could not be read.
+    #[error("snapshot index {path} is corrupt: {source}")]
+    CorruptSnapshotIndex {
+        /// File involved.
+        path: PathBuf,
+        /// Underlying cause.
+        source: serde_json::Error,
+    },
+
+    /// A snapshot could belong to an abandoned branch without its metadata.
+    #[error("snapshot {path} at position {position} has no reliable journal association")]
+    UnassociatedSnapshot {
+        /// The document position represented by the snapshot.
+        position: u64,
+        /// The snapshot whose branch cannot be identified.
+        path: PathBuf,
+    },
+
     /// History refers to a position with no snapshot at or before it.
     #[error("cannot rebuild position {position}: no snapshot at or before it")]
     NoBaseSnapshot {
@@ -251,6 +274,19 @@ pub enum HistoryError {
     NothingToRedo,
 }
 
+/// Internal metadata for a derived snapshot file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotAssociation {
+    /// The applied transaction represented at this position, or `None` for
+    /// the base state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transaction: Option<TransactionId>,
+    /// Hash of the exact snapshot bytes. A mismatch means an older writer
+    /// replaced the file, so the association is treated as legacy.
+    sha256: String,
+}
+
 impl HistoryError {
     fn io(operation: &'static str, path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {
@@ -266,6 +302,8 @@ impl HistoryError {
 pub struct History {
     dir: PathBuf,
     entries: Vec<JournalEntry>,
+    /// Highest applied position in the journal, including abandoned redo tails.
+    max_applied_position: u64,
 }
 
 impl History {
@@ -276,7 +314,17 @@ impl History {
     pub fn open(project_dir: &Path) -> Result<Self, HistoryError> {
         let dir = project_dir.join(HISTORY_DIR);
         let entries = read_journal(&dir.join(JOURNAL_FILE))?;
-        Ok(Self { dir, entries })
+        let max_applied_position = entries
+            .iter()
+            .filter(|entry| entry.is_applied())
+            .map(|entry| entry.position)
+            .max()
+            .unwrap_or(0);
+        Ok(Self {
+            dir,
+            entries,
+            max_applied_position,
+        })
     }
 
     /// Every entry, in the order they were written.
@@ -347,6 +395,7 @@ impl History {
                 outcome: outcome.clone(),
             },
         };
+        self.associate_branch_snapshots(position)?;
         self.append(entry)?;
 
         // Snapshot on the interval, and always at position 1, so a rebuild
@@ -369,6 +418,7 @@ impl History {
     ) -> Result<TransactionId, HistoryError> {
         let position = self.position() + 1;
         let transaction = TransactionId::generate(ids);
+        self.associate_branch_snapshots(position)?;
         self.append(JournalEntry {
             transaction: transaction.clone(),
             position,
@@ -481,16 +531,16 @@ impl History {
 
     /// Rebuilds the document as it was at a position.
     pub fn rebuild(&self, position: u64) -> Result<Document, HistoryError> {
-        let snapshots = self.snapshots()?;
+        let snapshots = self.valid_snapshots(position)?;
         let (base_position, path) = snapshots
             .range(..=position)
             .next_back()
             .ok_or(HistoryError::NoBaseSnapshot { position })?;
 
-        let text = std::fs::read_to_string(path)
-            .map_err(|source| HistoryError::io("reading", path, source))?;
+        let bytes =
+            std::fs::read(path).map_err(|source| HistoryError::io("reading", path, source))?;
         let mut document: Document =
-            serde_json::from_str(&text).map_err(|source| HistoryError::CorruptSnapshot {
+            serde_json::from_slice(&bytes).map_err(|source| HistoryError::CorruptSnapshot {
                 path: path.clone(),
                 source,
             })?;
@@ -538,8 +588,132 @@ impl History {
         file.sync_all()
             .map_err(|source| HistoryError::io("flushing", &path, source))?;
 
+        if entry.is_applied() {
+            self.max_applied_position = self.max_applied_position.max(entry.position);
+        }
         self.entries.push(entry);
         Ok(())
+    }
+
+    /// Associates legacy cache files with the current branch before replacing
+    /// one of their positions. The cache files remain available if the append
+    /// fails. After a successful append, rebuild rejects a file when its
+    /// transaction no longer matches the journal's effective entry.
+    fn associate_branch_snapshots(&self, position: u64) -> Result<(), HistoryError> {
+        if self.max_applied_position < position {
+            return Ok(());
+        }
+
+        let snapshots = self.snapshots()?;
+        if snapshots.range(position..).next().is_none() {
+            return Ok(());
+        }
+
+        let mut index = self.read_snapshot_index()?;
+        let mut changed = false;
+        for (snapshot_position, path) in snapshots.range(position..) {
+            let bytes =
+                std::fs::read(path).map_err(|source| HistoryError::io("reading", path, source))?;
+            let sha256 = snapshot_hash(&bytes);
+            let association = self.snapshot_association(&index, *snapshot_position, &sha256)?;
+            if let Some(association) = association.filter(|value| value.sha256 == sha256) {
+                self.write_snapshot_association(*snapshot_position, &association)?;
+                if index.get(snapshot_position) != Some(&association) {
+                    index.insert(*snapshot_position, association);
+                    changed = true;
+                }
+                continue;
+            }
+            if !self.legacy_snapshot_is_unambiguous(*snapshot_position) {
+                return Err(HistoryError::UnassociatedSnapshot {
+                    position: *snapshot_position,
+                    path: path.clone(),
+                });
+            }
+
+            let transaction = self
+                .effective(*snapshot_position)
+                .map(|entry| entry.transaction.clone());
+            let association = SnapshotAssociation {
+                transaction,
+                sha256,
+            };
+            self.write_snapshot_association(*snapshot_position, &association)?;
+            index.insert(*snapshot_position, association);
+            changed = true;
+        }
+
+        if changed {
+            self.write_snapshot_index(&index)?;
+        }
+        Ok(())
+    }
+
+    fn read_snapshot_index(&self) -> Result<BTreeMap<u64, SnapshotAssociation>, HistoryError> {
+        let path = self.dir.join(SNAPSHOTS_DIR).join(SNAPSHOT_INDEX_FILE);
+        match std::fs::read(&path) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes).unwrap_or_default()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+            Err(source) => Err(HistoryError::io("reading", &path, source)),
+        }
+    }
+
+    fn snapshot_association(
+        &self,
+        index: &BTreeMap<u64, SnapshotAssociation>,
+        position: u64,
+        sha256: &str,
+    ) -> Result<Option<SnapshotAssociation>, HistoryError> {
+        let central = index.get(&position);
+        let current = self.effective(position).map(|entry| &entry.transaction);
+        if central
+            .is_some_and(|value| value.sha256 == sha256 && value.transaction.as_ref() == current)
+        {
+            return Ok(central.cloned());
+        }
+        let path = self
+            .dir
+            .join(SNAPSHOTS_DIR)
+            .join(format!("{position:012}{SNAPSHOT_ASSOCIATION_SUFFIX}"));
+        let sidecar = match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice::<SnapshotAssociation>(&bytes).ok(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(source) => return Err(HistoryError::io("reading", &path, source)),
+        };
+        // Prefer metadata that matches the actual file when sync delivers
+        // the combined index and individual files in a different order.
+        if sidecar.as_ref().is_some_and(|value| value.sha256 == sha256) {
+            return Ok(sidecar);
+        }
+        Ok(central.cloned().or(sidecar))
+    }
+
+    fn write_snapshot_association(
+        &self,
+        position: u64,
+        association: &SnapshotAssociation,
+    ) -> Result<(), HistoryError> {
+        let path = self
+            .dir
+            .join(SNAPSHOTS_DIR)
+            .join(format!("{position:012}{SNAPSHOT_ASSOCIATION_SUFFIX}"));
+        let json = serde_json::to_vec(association).unwrap_or_default();
+        if std::fs::read(&path).is_ok_and(|current| current == json) {
+            return Ok(());
+        }
+        write_snapshot_metadata(&path, &json)
+    }
+
+    fn write_snapshot_index(
+        &self,
+        index: &BTreeMap<u64, SnapshotAssociation>,
+    ) -> Result<(), HistoryError> {
+        let dir = self.dir.join(SNAPSHOTS_DIR);
+        std::fs::create_dir_all(&dir)
+            .map_err(|source| HistoryError::io("creating", &dir, source))?;
+        let path = dir.join(SNAPSHOT_INDEX_FILE);
+        let json = serde_json::to_vec(index).unwrap_or_default();
+        write_snapshot_metadata(&path, &json)
     }
 
     fn write_snapshot(&self, position: u64, document: &Document) -> Result<(), HistoryError> {
@@ -552,10 +726,29 @@ impl History {
         json.push('\n');
 
         let temporary = path.with_extension("json.tmp");
-        std::fs::write(&temporary, json)
+        std::fs::write(&temporary, &json)
             .map_err(|source| HistoryError::io("writing", &temporary, source))?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&temporary)
+            .and_then(|file| file.sync_all())
+            .map_err(|source| HistoryError::io("flushing", &temporary, source))?;
         std::fs::rename(&temporary, &path)
             .map_err(|source| HistoryError::io("replacing", &path, source))?;
+        sync_parent_directory(&path)
+            .map_err(|source| HistoryError::io("flushing directory for", &path, source))?;
+
+        let mut index = self.read_snapshot_index()?;
+        let transaction = self
+            .effective(position)
+            .map(|entry| entry.transaction.clone());
+        let association = SnapshotAssociation {
+            transaction,
+            sha256: snapshot_hash(json.as_bytes()),
+        };
+        self.write_snapshot_association(position, &association)?;
+        index.insert(position, association);
+        self.write_snapshot_index(&index)?;
         Ok(())
     }
 
@@ -583,6 +776,105 @@ impl History {
             found.insert(position, path);
         }
         Ok(found)
+    }
+
+    fn valid_snapshots(&self, at_or_before: u64) -> Result<BTreeMap<u64, PathBuf>, HistoryError> {
+        let snapshots = self.snapshots()?;
+        let index = self.read_snapshot_index()?;
+        let mut valid = BTreeMap::new();
+        let mut ambiguous = None;
+        for (position, path) in snapshots.range(..=at_or_before) {
+            let bytes =
+                std::fs::read(path).map_err(|source| HistoryError::io("reading", path, source))?;
+            let sha256 = snapshot_hash(&bytes);
+            let Some(association) = self.snapshot_association(&index, *position, &sha256)? else {
+                if self.legacy_snapshot_is_unambiguous(*position) {
+                    valid.insert(*position, path.clone());
+                } else {
+                    ambiguous = Some((*position, path.clone()));
+                }
+                continue;
+            };
+
+            if association.sha256 != sha256 {
+                if self.legacy_snapshot_is_unambiguous(*position) {
+                    valid.insert(*position, path.clone());
+                } else {
+                    ambiguous = Some((*position, path.clone()));
+                }
+                continue;
+            }
+
+            let current = self.effective(*position).map(|entry| &entry.transaction);
+            if association.transaction.as_ref() == current {
+                valid.insert(*position, path.clone());
+            }
+        }
+        if let Some((position, path)) = ambiguous {
+            // A later verified snapshot contains the state needed for replay.
+            // Otherwise replay could lose imported metadata or revive a branch.
+            if valid.range(position..).next().is_none() {
+                return Err(HistoryError::UnassociatedSnapshot { position, path });
+            }
+        }
+        Ok(valid)
+    }
+
+    fn legacy_snapshot_is_unambiguous(&self, position: u64) -> bool {
+        let mut seen = std::collections::BTreeSet::new();
+        for entry in self
+            .entries
+            .iter()
+            .filter(|entry| entry.is_applied() && entry.position <= position)
+        {
+            if !seen.insert(entry.position) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn write_snapshot_metadata(path: &Path, bytes: &[u8]) -> Result<(), HistoryError> {
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, bytes)
+        .map_err(|source| HistoryError::io("writing", &temporary, source))?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&temporary)
+        .and_then(|file| file.sync_all())
+        .map_err(|source| HistoryError::io("flushing", &temporary, source))?;
+    std::fs::rename(&temporary, path)
+        .map_err(|source| HistoryError::io("replacing", path, source))?;
+    sync_parent_directory(path)
+        .map_err(|source| HistoryError::io("flushing directory for", path, source))?;
+    Ok(())
+}
+
+fn snapshot_hash(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(7 + digest.len() * 2);
+    hex.push_str("sha256:");
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
+}
+
+/// Flushes the rename on filesystems that expose directory handles through
+/// the standard library. Windows keeps the atomic rename without opening a
+/// directory handle, which is not supported by `std` on that target.
+fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::File::open(parent)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
     }
 }
 

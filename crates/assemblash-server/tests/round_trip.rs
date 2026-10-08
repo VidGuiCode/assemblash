@@ -341,13 +341,20 @@ fn the_interface_opens_edits_and_exports_the_same_document() {
     assert_eq!(page.status, 200);
     assert!(page.content_type.starts_with("text/html"));
     let html = String::from_utf8_lossy(&page.body);
-    assert!(html.contains("app.js"), "the entry point is missing");
-    assert_eq!(harness.get("/app.js").status, 200);
-    assert_eq!(harness.get("/api.js").status, 200);
-    assert_eq!(harness.get("/export.js").status, 200);
-    assert_eq!(harness.get("/geometry.js").status, 200);
-    assert_eq!(harness.get("/templates.js").status, 200);
-    assert_eq!(harness.get("/style.css").status, 200);
+    assert!(html.contains("main.js"), "the entry point is missing");
+    for path in [
+        "/main.js",
+        "/chunk-main.js",
+        "/chunk-app.js",
+        "/chunk-mantine-root.js",
+        "/chunk-Title.js",
+        "/i18n.js",
+        "/phosphor.css",
+        "/ui.css",
+        "/studio.css",
+    ] {
+        assert_eq!(harness.get(path).status, 200, "{path}");
+    }
 
     // Something the API wrote, exactly as another client would have.
     let created = harness.post(
@@ -503,7 +510,7 @@ fn the_interface_serves_nothing_it_was_not_built_with() {
         "/../Cargo.toml",
         "/%2e%2e/%2e%2e/etc/passwd",
         "/document.json",
-        "/app.js/../../secret",
+        "/main.js/../../secret",
     ] {
         let response = harness.get(hostile);
         assert!(
@@ -737,36 +744,27 @@ fn a_wide_bind_needs_a_token_and_then_enforces_it() {
         401
     );
     assert_eq!(
-        http::request_with("GET", &format!("{base}/app.js"), None, &[]).status,
+        http::request_with("GET", &format!("{base}/main.js"), None, &[]).status,
         401
     );
 
-    // Except the login page, which is how a token gets into the browser.
-    assert_eq!(
-        http::request_with("GET", &format!("{base}/login.html"), None, &[]).status,
-        200
-    );
-    assert_eq!(
-        http::request_with("GET", &format!("{base}/login.js"), None, &[]).status,
-        200
-    );
-    // Every module imported by login must load before a token exists.
+    // Follow the actual HTML, JavaScript, and CSS references. This keeps the
+    // test aligned with bundled login chunks and font assets.
+    let login_assets = anonymous_login_asset_graph(&base);
+    assert!(login_assets.iter().any(|path| path.ends_with(".js")));
+    assert!(login_assets.iter().any(|path| path.ends_with(".css")));
+    // Exact paths only. A suffix, traversal-like path, editor asset, or API
+    // route does not inherit the login exception.
     for path in [
-        "style.css",
-        "token.js",
-        "i18n.js",
-        "locale-en.js",
-        "locale-fr.js",
-        "locale-de.js",
+        "login.js/",
+        "login.html/extra",
+        "../login.js",
+        "%2e%2e/login.js",
+        "main.js",
+        "chunk-main.js",
+        "api/projects",
+        "api/version",
     ] {
-        assert_eq!(
-            http::request_with("GET", &format!("{base}/{path}"), None, &[]).status,
-            200,
-            "{path} must load on the login page"
-        );
-    }
-    // The exception does not expose editor modules or API routes.
-    for path in ["app.js", "api.js", "templates.js", "api/projects"] {
         assert_eq!(
             http::request_with("GET", &format!("{base}/{path}"), None, &[]).status,
             401,
@@ -787,6 +785,228 @@ fn a_wide_bind_needs_a_token_and_then_enforces_it() {
     );
     assert_eq!(write.status, 401);
     assert!(!root.join("projects/sneaky").exists());
+}
+
+fn anonymous_login_asset_graph(base: &str) -> Vec<String> {
+    let mut pending = vec!["login.html".to_owned()];
+    let mut checked = Vec::new();
+
+    while let Some(path) = pending.pop() {
+        if checked.contains(&path) {
+            continue;
+        }
+        let response = http::request_with("GET", &format!("{base}/{path}"), None, &[]);
+        assert_eq!(
+            response.status, 200,
+            "login asset {path} must load anonymously"
+        );
+        checked.push(path.clone());
+
+        let content_type = response.content_type.to_ascii_lowercase();
+        let body = String::from_utf8_lossy(&response.body);
+        let references = if content_type.contains("text/html") {
+            html_asset_references(&body)
+        } else if content_type.contains("javascript") || path.ends_with(".js") {
+            quoted_asset_references(&body, &[".js", ".css", ".woff", ".woff2", ".ttf", ".svg"])
+        } else if content_type.contains("text/css") || path.ends_with(".css") {
+            css_asset_references(&body)
+        } else {
+            Vec::new()
+        };
+
+        for reference in references {
+            if let Some(resolved) = resolve_asset_path(&path, &reference) {
+                if !checked.contains(&resolved) && !pending.contains(&resolved) {
+                    pending.push(resolved);
+                }
+            }
+        }
+    }
+
+    checked
+}
+
+fn html_asset_references(source: &str) -> Vec<String> {
+    attribute_asset_references(source, "src")
+        .into_iter()
+        .chain(attribute_asset_references(source, "href"))
+        .collect()
+}
+
+fn attribute_asset_references(source: &str, attribute: &str) -> Vec<String> {
+    let lower = source.to_ascii_lowercase();
+    let needle = format!("{attribute}=");
+    let mut references = Vec::new();
+    let mut offset = 0;
+
+    while let Some(found) = lower[offset..].find(&needle) {
+        let start = offset + found;
+        let boundary = start == 0
+            || source.as_bytes()[start - 1].is_ascii_whitespace()
+            || source.as_bytes()[start - 1] == b'<';
+        offset = start + needle.len();
+        if !boundary {
+            continue;
+        }
+        let bytes = source.as_bytes();
+        let mut value_start = offset;
+        while bytes.get(value_start).is_some_and(u8::is_ascii_whitespace) {
+            value_start += 1;
+        }
+        let Some(&first) = bytes.get(value_start) else {
+            break;
+        };
+        let value_end = if first == b'\'' || first == b'"' {
+            bytes[value_start + 1..]
+                .iter()
+                .position(|byte| *byte == first)
+                .map(|index| value_start + 1 + index)
+        } else {
+            bytes[value_start..]
+                .iter()
+                .position(|byte| byte.is_ascii_whitespace() || *byte == b'>')
+                .map(|index| value_start + index)
+        };
+        let Some(value_end) = value_end else {
+            break;
+        };
+        let value_start = if first == b'\'' || first == b'"' {
+            value_start + 1
+        } else {
+            value_start
+        };
+        let value = source[value_start..value_end].trim();
+        if is_asset_reference(value) {
+            references.push(value.to_owned());
+        }
+        offset = value_end.saturating_add(1);
+    }
+
+    references
+}
+
+fn quoted_asset_references(source: &str, extensions: &[&str]) -> Vec<String> {
+    let bytes = source.as_bytes();
+    let mut references = Vec::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let quote = bytes[offset];
+        if quote != b'\'' && quote != b'"' {
+            offset += 1;
+            continue;
+        }
+        let start = offset + 1;
+        let mut end = start;
+        while end < bytes.len() {
+            if bytes[end] == b'\\' {
+                end = (end + 2).min(bytes.len());
+            } else if bytes[end] == quote {
+                break;
+            } else {
+                end += 1;
+            }
+        }
+        if end < bytes.len() {
+            let value = &source[start..end];
+            if is_asset_reference_with_extensions(value, extensions) {
+                references.push(value.to_owned());
+            }
+            offset = end + 1;
+        } else {
+            break;
+        }
+    }
+    references
+}
+
+fn css_asset_references(source: &str) -> Vec<String> {
+    let lower = source.to_ascii_lowercase();
+    let mut references = Vec::new();
+    let mut offset = 0;
+    while let Some(found) = lower[offset..].find("url(") {
+        let start = offset + found + 4;
+        let Some(close) = source[start..].find(')') else {
+            break;
+        };
+        let mut value = source[start..start + close].trim();
+        if value.len() >= 2
+            && ((value.starts_with('\'') && value.ends_with('\''))
+                || (value.starts_with('"') && value.ends_with('"')))
+        {
+            value = &value[1..value.len() - 1];
+        }
+        if is_asset_reference(value) {
+            references.push(value.to_owned());
+        }
+        offset = start + close + 1;
+    }
+    references.extend(quoted_asset_references(
+        source,
+        &[".css", ".woff", ".woff2", ".ttf", ".svg"],
+    ));
+    references
+}
+
+fn is_asset_reference(reference: &str) -> bool {
+    is_asset_reference_with_extensions(
+        reference,
+        &[
+            ".js", ".css", ".woff", ".woff2", ".ttf", ".otf", ".svg", ".png", ".ico",
+        ],
+    )
+}
+
+fn is_asset_reference_with_extensions(reference: &str, extensions: &[&str]) -> bool {
+    let reference = reference.trim();
+    if reference.is_empty()
+        || reference.starts_with('#')
+        || reference.starts_with("//")
+        || reference.starts_with("data:")
+        || reference.starts_with("blob:")
+        || reference.starts_with("http:")
+        || reference.starts_with("https:")
+    {
+        return false;
+    }
+    let path = reference.split(['?', '#']).next().unwrap_or_default();
+    extensions.iter().any(|extension| path.ends_with(extension))
+}
+
+fn resolve_asset_path(parent: &str, reference: &str) -> Option<String> {
+    let clean = reference.split(['?', '#']).next()?.trim();
+    if clean.is_empty()
+        || clean.starts_with("//")
+        || clean.starts_with("data:")
+        || clean.starts_with("blob:")
+        || clean.starts_with("http:")
+        || clean.starts_with("https:")
+    {
+        return None;
+    }
+    let relative = clean.trim_start_matches('/');
+    let mut segments = if clean.starts_with('/') {
+        Vec::new()
+    } else {
+        parent
+            .rsplit_once('/')
+            .map(|(directory, _)| {
+                directory
+                    .split('/')
+                    .filter(|part| !part.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for segment in relative.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            other => segments.push(other),
+        }
+    }
+    (!segments.is_empty()).then(|| segments.join("/"))
 }
 
 fn anonymous_body_mentions(body: &str, token: &str) -> bool {

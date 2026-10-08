@@ -56,7 +56,7 @@ enum Command {
         /// Canvas height in pixels.
         #[arg(long, default_value_t = 1080.0)]
         height: f64,
-        /// Canvas background, `#rrggbb` or `#rrggbbaa`. Transparent if unset.
+        /// Canvas background as a colour or gradient. Use @file.json for a file.
         #[arg(long)]
         background: Option<String>,
         /// Human-facing document name.
@@ -878,6 +878,20 @@ enum CanvasCommand {
         background: Option<String>,
         #[arg(long)]
         no_background: bool,
+        /// Existing asset id to use as the canvas background image.
+        #[arg(long, conflicts_with = "clear_background_image")]
+        background_image: Option<String>,
+        /// How the background image fits the canvas.
+        #[arg(
+            long,
+            value_enum,
+            requires = "background_image",
+            conflicts_with = "clear_background_image"
+        )]
+        background_image_fit: Option<Fit>,
+        /// Remove the canvas background image.
+        #[arg(long, conflicts_with_all = ["background_image", "background_image_fit"])]
+        clear_background_image: bool,
         #[arg(long, value_enum)]
         anchor: Option<CanvasAnchorArg>,
         #[command(flatten)]
@@ -1428,7 +1442,7 @@ impl LayerChange {
                 });
             }
         }
-        let fill = self.fill.map(optional_color);
+        let fill = self.fill.map(optional_color).transpose()?;
         let clip = if self.no_clip {
             Some(None)
         } else if self.clip_rect {
@@ -1473,7 +1487,7 @@ impl LayerChange {
             text: self.text,
             font_family: self.font,
             font_size: self.size,
-            color: self.color.map(optional_color),
+            color: self.color.map(optional_color).transpose()?,
             fill,
             stroke,
             corner_radius: self.corner_radius,
@@ -1544,7 +1558,7 @@ impl LayerChange {
                 let width = width
                     .or_else(|| current.as_ref().map(|stroke| stroke.width))
                     .unwrap_or(1.0);
-                Ok(Some(Some(self.finish_stroke(Color::new(color), width))))
+                Ok(Some(Some(self.finish_stroke(parse_paint(color)?, width))))
             }
             (None, None) => {
                 let Some(current) = current else {
@@ -1615,13 +1629,25 @@ fn blend_mode(raw: String) -> assemblash_core::BlendMode {
         .unwrap_or(assemblash_core::BlendMode::Other(raw))
 }
 
-/// Parses the CLI's nullable paint spelling. The operation layer receives a
-/// real `None` for the literal `none`, never a colour string it cannot draw.
-fn optional_color(raw: String) -> Option<Color> {
+/// Parses a solid colour or a JSON paint. Prefix a path with `@` to read JSON
+/// from a file. The operation layer receives the typed paint value.
+fn parse_paint(raw: &str) -> Result<Color, CliError> {
+    if let Some(path) = raw.strip_prefix('@') {
+        let text = read_text_file(Path::new(path))?;
+        return serde_json::from_str(&text).map_err(|source| CliError::PaintJson { source });
+    }
+    if raw.starts_with('#') || raw.starts_with("asset_") {
+        return Ok(Color::new(raw));
+    }
+    serde_json::from_str(raw).map_err(|source| CliError::PaintJson { source })
+}
+
+/// Parses the CLI's nullable paint spelling. `none` clears an optional paint.
+fn optional_color(raw: String) -> Result<Option<Color>, CliError> {
     if raw == "none" {
-        None
+        Ok(None)
     } else {
-        Some(Color::new(raw))
+        parse_paint(&raw).map(Some)
     }
 }
 
@@ -1803,6 +1829,8 @@ enum CliError {
     ProjectExists { path: PathBuf },
     #[error("serialising the document: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("parsing paint JSON: {source}")]
+    PaintJson { source: serde_json::Error },
     #[error(transparent)]
     Session(#[from] SessionError),
     #[error(transparent)]
@@ -1934,7 +1962,23 @@ fn run(command: Command) -> Result<(), CliError> {
             }
             let mut document = Document::new(&mut UlidIdSource, width, height);
             document.name = name;
-            document.canvas.background = background.map(Color::new);
+            assemblash_core::ops::apply(
+                &mut document,
+                &Operation::UpdateCanvas(UpdateCanvas {
+                    background: background.map(optional_color).transpose()?,
+                    ..UpdateCanvas::default()
+                }),
+                &mut UlidIdSource,
+            )
+            .map_err(|error| match error {
+                assemblash_core::ops::OpError::Invalid(source) => {
+                    SessionError::Storage(StorageError::InvalidDocument {
+                        path: project.join(storage::DOCUMENT_FILE),
+                        source,
+                    })
+                }
+                error => SessionError::Operation(error),
+            })?;
             let session = Session::create(&project, document, now_millis())?;
             println!("{}", session.document().id);
             Ok(())
@@ -1968,14 +2012,17 @@ fn run(command: Command) -> Result<(), CliError> {
                     text,
                     font_family: font,
                     font_size: size,
-                    color: optional_color(color),
+                    color: optional_color(color)?,
                     align: align.into(),
                     line_height,
                     font_weight: weight,
                     font_style: font_style.into(),
                     letter_spacing,
                     stroke: stroke
-                        .map(|color| plain_stroke(Color::new(color), stroke_width.unwrap_or(1.0))),
+                        .map(optional_color)
+                        .transpose()?
+                        .flatten()
+                        .map(|color| plain_stroke(color, stroke_width.unwrap_or(1.0))),
                     vertical_align: vertical_align.into(),
                 },
                 &box_,
@@ -2002,9 +2049,11 @@ fn run(command: Command) -> Result<(), CliError> {
                         corner_radius,
                         extra: Extras::new(),
                     },
-                    fill: optional_color(fill),
+                    fill: optional_color(fill)?,
                     stroke: stroke
-                        .and_then(optional_color)
+                        .map(optional_color)
+                        .transpose()?
+                        .flatten()
                         .map(|color| plain_stroke(color, stroke_width)),
                 },
                 &box_,
@@ -2029,9 +2078,11 @@ fn run(command: Command) -> Result<(), CliError> {
                     shape: ShapeKind::Ellipse {
                         extra: Extras::new(),
                     },
-                    fill: optional_color(fill),
+                    fill: optional_color(fill)?,
                     stroke: stroke
-                        .and_then(optional_color)
+                        .map(optional_color)
+                        .transpose()?
+                        .flatten()
                         .map(|color| plain_stroke(color, stroke_width)),
                 },
                 &box_,
@@ -2058,7 +2109,7 @@ fn run(command: Command) -> Result<(), CliError> {
                         extra: Extras::new(),
                     },
                     fill: None,
-                    stroke: optional_color(stroke).map(|color| plain_stroke(color, stroke_width)),
+                    stroke: optional_color(stroke)?.map(|color| plain_stroke(color, stroke_width)),
                 },
                 &box_,
                 &who,
@@ -2086,9 +2137,11 @@ fn run(command: Command) -> Result<(), CliError> {
                         d,
                         extra: Extras::new(),
                     },
-                    fill: optional_color(fill),
+                    fill: optional_color(fill)?,
                     stroke: stroke
-                        .and_then(optional_color)
+                        .map(optional_color)
+                        .transpose()?
+                        .flatten()
                         .map(|color| plain_stroke(color, stroke_width)),
                 },
                 &box_,
@@ -2628,6 +2681,9 @@ fn run(command: Command) -> Result<(), CliError> {
             height,
             background,
             no_background,
+            background_image,
+            background_image_fit,
+            clear_background_image,
             anchor,
             who,
         }) => {
@@ -2635,13 +2691,21 @@ fn run(command: Command) -> Result<(), CliError> {
             let background = if no_background {
                 Some(None)
             } else {
-                background.map(Color::new).map(Some)
+                background.map(optional_color).transpose()?
             };
+            let background_image =
+                background_image.map(|asset| assemblash_core::document::BackgroundImage {
+                    asset: assemblash_core::AssetId::new(asset),
+                    fit: background_image_fit.unwrap_or(Fit::Fill).into(),
+                    extra: Extras::new(),
+                });
             session.apply(
                 &Operation::UpdateCanvas(UpdateCanvas {
                     width,
                     height,
                     background,
+                    background_image,
+                    clear_background_image,
                     anchor: anchor.map(Into::into),
                 }),
                 &who.actor(),

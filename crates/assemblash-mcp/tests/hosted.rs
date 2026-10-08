@@ -487,7 +487,7 @@ fn the_endpoint_does_not_hide_the_interface() {
     let editor = Editor::start(None, Shutdown::Refused);
     let agent = agent();
 
-    for path in ["/", "/app.js", "/index.html"] {
+    for path in ["/", "/main.js", "/index.html"] {
         let response = agent.get(editor.url(path)).call().unwrap();
         assert_eq!(response.status().as_u16(), 200, "{path}");
     }

@@ -1058,7 +1058,12 @@ async fn create_project_makes_an_openable_project() {
     assert_eq!(document.canvas.width, 320.0);
     assert_eq!(document.canvas.height, 180.0);
     assert_eq!(
-        document.canvas.background.as_ref().map(Color::as_str),
+        document
+            .canvas
+            .background
+            .as_ref()
+            .and_then(Color::as_solid)
+            .map(assemblash_core::SolidColor::as_str),
         Some("#101820")
     );
 
@@ -1329,5 +1334,186 @@ async fn an_export_refuses_to_replace_a_file_unless_asked() {
             .unwrap(),
     );
     assert_eq!(replaced["replaced"], true);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn unsupported_creation_paints_and_image_shape_fills_are_refused_without_writes() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let client = connect(&root).await;
+    for (project, width, background) in [
+        ("invalid-dimension", -1, "#ffffff"),
+        ("invalid-color", 40, "#invalid"),
+    ] {
+        let refused = client
+            .call_tool(call(
+                "create_project",
+                args(json!({
+                    "project": project, "width": width, "height": 20, "background": background
+                })),
+            ))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{refused:?}").contains("invalidDocument"),
+            "{refused:?}"
+        );
+        assert!(!root.join("projects").join(project).exists());
+    }
+    let refused = client
+        .call_tool(call(
+            "create_project",
+            args(json!({
+                "project": "invalid", "width": 40, "height": 20, "background": { "kind": "conic" }
+            })),
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{refused:?}").contains("operationRefused"),
+        "{refused:?}"
+    );
+    assert!(!root.join("projects/invalid").exists());
+
+    let path = root.join("projects/poster/document.json");
+    let before = std::fs::read(&path).unwrap();
+    for fill in [
+        json!("asset_background"),
+        json!({ "kind": "image", "asset": "asset_background" }),
+    ] {
+        let refused = client
+            .call_tool(call(
+                "add_shape_layer",
+                args(json!({
+                    "project": "poster", "x": 0, "y": 0, "width": 10, "height": 10,
+                    "shape": "rect", "fill": fill
+                })),
+            ))
+            .await
+            .unwrap_err();
+        let message = format!("{refused:?}");
+        assert!(message.contains("operationRefused"), "{message}");
+        assert!(message.contains("image layer and clip"), "{message}");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn paint_tools_accept_gradient_objects_and_preserve_dry_run() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let client = connect(&root).await;
+    let gradient = json!({
+        "kind": "linear",
+        "angle": 0.0,
+        "stops": [
+            { "offset": 0.0, "color": "#112233", "alpha": 1.0 },
+            { "offset": 1.0, "color": "#ddeeff", "alpha": 1.0 }
+        ]
+    });
+
+    let created = structured(
+        &client
+            .call_tool(call(
+                "create_project",
+                args(json!({
+                    "project": "paint",
+                    "width": 200.0,
+                    "height": 120.0,
+                    "background": gradient
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(created["id"], "paint");
+    let directory = root.join("projects/paint");
+    let initial = std::fs::read(directory.join("document.json")).unwrap();
+
+    let dry_run = structured(
+        &client
+            .call_tool(call(
+                "update_canvas",
+                args(json!({
+                    "background": gradient,
+                    "dryRun": true,
+                    "expectedVersion": 0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(dry_run["dryRun"], true);
+    assert_eq!(dry_run["version"], 0);
+    assert_eq!(
+        std::fs::read(directory.join("document.json")).unwrap(),
+        initial
+    );
+
+    let updated = structured(
+        &client
+            .call_tool(call(
+                "update_canvas",
+                args(json!({ "background": gradient, "expectedVersion": 0 })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(updated["version"], 1);
+
+    let shape = structured(
+        &client
+            .call_tool(call(
+                "add_shape_layer",
+                args(json!({
+                    "shape": "rect",
+                    "x": 10.0,
+                    "y": 10.0,
+                    "width": 80.0,
+                    "height": 50.0,
+                    "fill": gradient,
+                    "stroke": { "color": gradient, "width": 2.0 },
+                    "expectedVersion": 1
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(shape["version"], 2);
+
+    let text = structured(
+        &client
+            .call_tool(call(
+                "add_text_layer",
+                args(json!({
+                    "x": 10.0,
+                    "y": 70.0,
+                    "width": 150.0,
+                    "height": 30.0,
+                    "text": "paint",
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 16.0,
+                    "color": gradient,
+                    "stroke": { "color": gradient, "width": 1.0 },
+                    "expectedVersion": 2
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(text["version"], 3);
+
+    let document = assemblash_core::storage::load(&directory).unwrap();
+    let json = serde_json::to_value(&document).unwrap();
+    assert_eq!(json["canvas"]["background"], gradient);
+    assert_eq!(json["layers"][0]["fill"], gradient);
+    assert_eq!(json["layers"][0]["stroke"]["color"], gradient);
+    assert_eq!(json["layers"][1]["color"], gradient);
+    assert_eq!(json["layers"][1]["stroke"]["color"], gradient);
+
     client.cancel().await.unwrap();
 }

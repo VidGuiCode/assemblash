@@ -7,7 +7,7 @@ import {
   resizedRotatedBounds,
   rotatedRectBounds,
   selectionBounds,
-} from "./dist/geometry.js";
+} from "./.test-dist/geometry.js";
 
 const closeTo = (actual, expected, epsilon = 1e-9) => {
   assert.ok(

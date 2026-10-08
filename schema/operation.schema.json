@@ -531,8 +531,217 @@
   ],
   "$defs": {
     "Color": {
-      "description": "An sRGB colour, `#rrggbb` or `#rrggbbaa`.\n\nStored as written so a document round-trips exactly; validation checks the\nshape and [`Color::to_rgba`] parses it.",
+      "description": "A paint in a colour position: a solid colour or a gradient (D13).\n\nThe bare `#rrggbb[aa]` string is the solid form, and the only form there\nwas before 1.11 — every document an older build wrote loads here\nunchanged. A gradient is an object tagged by `kind` in the same field;\nthere is no sibling fill field. A colour position accepts exactly these\nforms; anything else is refused when the document or the operation that\ncarries it is validated.\n\nThe cost is D1-class and named per release: a build from 1.0 to 1.10\nrefuses to load any document that contains a gradient, because its\n`Color` parses strings only. Documents without gradients are\nbyte-identical across the change.",
+      "anyOf": [
+        {
+          "description": "A solid sRGB colour, the string form.",
+          "$ref": "#/$defs/SolidColor"
+        },
+        {
+          "description": "A linear gradient.",
+          "$ref": "#/$defs/LinearGradient"
+        },
+        {
+          "description": "A radial gradient.",
+          "$ref": "#/$defs/RadialGradient"
+        },
+        {
+          "description": "A gradient kind this build does not render, preserved verbatim (D21).",
+          "$ref": "#/$defs/UnknownGradient"
+        }
+      ]
+    },
+    "SolidColor": {
+      "description": "A solid sRGB colour, `#rrggbb` or `#rrggbbaa`.\n\nStored as written so a document round-trips exactly; validation checks the\nshape and [`SolidColor::to_rgba`] parses it.",
       "type": "string"
+    },
+    "LinearGradient": {
+      "description": "A linear gradient.\n\nThe axis runs through the centre of the painted box. `angle` is degrees,\nmeasured from the positive x axis and turning clockwise as drawn, where y\ngrows downward: `0` paints left to right, `90` top to bottom, `200` up\nand to the left. The schema description carries the same convention.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The kind tag; only `linear` is accepted here.",
+          "$ref": "#/$defs/LinearTag"
+        },
+        "angle": {
+          "description": "Axis angle in degrees; must be finite.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "stops": {
+          "description": "Colour stops along the axis, from `0.0` at the axis start to `1.0` at\nits end.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GradientStop"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": true
+    },
+    "LinearTag": {
+      "description": "The `kind` tag of a linear gradient: only `linear` deserializes here.",
+      "oneOf": [
+        {
+          "description": "The tag every linear gradient carries.",
+          "type": "string",
+          "const": "linear"
+        }
+      ]
+    },
+    "GradientStop": {
+      "description": "One colour stop of a gradient.",
+      "type": "object",
+      "properties": {
+        "offset": {
+          "description": "Position along the gradient axis, `0.0` to `1.0`. Stops must be\nstrictly ascending; an unordered list is refused, never sorted.",
+          "type": "number",
+          "format": "double"
+        },
+        "color": {
+          "description": "The stop colour, `#rrggbb` or `#rrggbbaa`. A stop colour is solid —\na gradient of gradients is not a form this format has.",
+          "$ref": "#/$defs/SolidColor"
+        },
+        "alpha": {
+          "description": "Opacity at the stop, `0.0` to `1.0`; `1.0` when omitted. Multiplied\nwith the colour's own alpha when it carries one.",
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        }
+      },
+      "required": [
+        "offset",
+        "color"
+      ],
+      "additionalProperties": true
+    },
+    "RadialGradient": {
+      "description": "A radial gradient.\n\n`center` and `radius` are fractions of the painted box, emitted as SVG's\n`objectBoundingBox` units: the centre is a fraction across and down the\nbox, and the radius is a distance in those same units. On a non-square\nbox the rings are therefore elliptical, and a radius of `0.5` reaches the\nbox edge on both axes.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The kind tag; only `radial` is accepted here.",
+          "$ref": "#/$defs/RadialTag"
+        },
+        "center": {
+          "description": "Centre of the rings, as fractions of the box.",
+          "$ref": "#/$defs/GradientCenter",
+          "default": {
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        "radius": {
+          "description": "Radius in box fractions; must be finite and greater than 0.",
+          "type": "number",
+          "format": "double",
+          "default": 0.5
+        },
+        "stops": {
+          "description": "Colour stops from the centre outward.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GradientStop"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": true
+    },
+    "RadialTag": {
+      "description": "The `kind` tag of a radial gradient: only `radial` deserializes here.",
+      "oneOf": [
+        {
+          "description": "The tag every radial gradient carries.",
+          "type": "string",
+          "const": "radial"
+        }
+      ]
+    },
+    "GradientCenter": {
+      "description": "A position inside a box, as fractions of its width and height.",
+      "type": "object",
+      "properties": {
+        "x": {
+          "description": "Across the box: `0.0` is the left edge, `1.0` the right.",
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "description": "Down the box: `0.0` is the top edge, `1.0` the bottom.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "additionalProperties": true
+    },
+    "UnknownGradient": {
+      "description": "A gradient this build does not render — `conic`, a misspelling, or a kind\nfrom a newer build.\n\nPreserved verbatim on load (D21), refused when an operation tries to set\none, and refused when something tries to draw it — never guessed at,\nnever lost.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The `kind` tag as written. Unknown kinds must still identify themselves.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": true
+    },
+    "BackgroundImage": {
+      "description": "An imported image drawn across the canvas behind every layer.",
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "Id of an asset in the document's `assets` list.",
+          "$ref": "#/$defs/AssetId"
+        },
+        "fit": {
+          "description": "How the image fills the canvas.",
+          "$ref": "#/$defs/ImageFit",
+          "default": "fill"
+        }
+      },
+      "required": [
+        "asset"
+      ],
+      "additionalProperties": true
+    },
+    "AssetId": {
+      "description": "Identifier of an imported asset.",
+      "type": "string"
+    },
+    "ImageFit": {
+      "description": "How an image is scaled into its box.",
+      "oneOf": [
+        {
+          "description": "Stretch to the box, ignoring aspect ratio.",
+          "type": "string",
+          "const": "fill"
+        },
+        {
+          "description": "Scale down to fit inside the box, keeping aspect ratio.",
+          "type": "string",
+          "const": "contain"
+        },
+        {
+          "description": "Scale to cover the box, keeping aspect ratio, cropping the overflow.",
+          "type": "string",
+          "const": "cover"
+        }
+      ]
     },
     "CanvasAnchor": {
       "description": "The point of the old canvas that stays fixed when its dimensions change.",
@@ -577,6 +786,21 @@
               "type": "null"
             }
           ]
+        },
+        "backgroundImage": {
+          "description": "Sets the canvas background image. Omission preserves the current image.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BackgroundImage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clearBackgroundImage": {
+          "description": "Clears the canvas background image when true.",
+          "type": "boolean"
         },
         "anchor": {
           "anyOf": [
@@ -739,7 +963,7 @@
           "$ref": "#/$defs/Color"
         },
         "width": {
-          "description": "Width in document units; must be finite and 0 or more.\n\n**Painted inset** on a rect and an ellipse (D5): the stroke grows\ninward from the transform box, so the box is the visual box and\nnothing that reasons about layout has to know whether a shape is\nstroked. A line has no interior, so its stroke is centred on the\nsegment instead — half of it falls either side of the box's middle.\n\nOne caveat, measured rather than assumed: a width below one device\npixel is drawn as a *hairline* centred on the geometric edge, and a\nhairline occupies a whole pixel row. A 0.5-wide stroke therefore\nspills up to half a pixel outside the box on each side. It is\ndeterministic and identical on every target, so it is documented here\nrather than refused — but at that width the box is not quite the\nvisual box.",
+          "description": "Width in document units; must be finite and 0 or more.\n\n**Painted inset** on a rect and an ellipse (D5): the stroke grows\ninward from the transform box, so the box is the visual box and\nnothing that reasons about layout has to know whether a shape is\nstroked. A line has no interior, so its stroke is centred on the\nsegment instead — half of it falls either side of the box's middle.\n\nOne caveat, measured rather than assumed: a width below one device\npixel is drawn as a *hairline* centred on the geometric edge, and a\nhairline occupies a whole pixel row. A 0.5-wide stroke therefore\nspills up to half a pixel outside the box on each side. It is\ndeterministic and identical on every target, so it is documented here\nrather than refused — but at that width the box is not quite the\nvisual box.\n\nGradient strokes draw on every shape. A line uses its stroke envelope\nin local user space because its geometric box has no height. A\nzero-length line uses a square whose sides equal the stroke width.",
           "type": "number",
           "format": "double"
         },
@@ -846,30 +1070,6 @@
           "description": "The block's last line resting on the box bottom.",
           "type": "string",
           "const": "bottom"
-        }
-      ]
-    },
-    "AssetId": {
-      "description": "Identifier of an imported asset.",
-      "type": "string"
-    },
-    "ImageFit": {
-      "description": "How an image is scaled into its box.",
-      "oneOf": [
-        {
-          "description": "Stretch to the box, ignoring aspect ratio.",
-          "type": "string",
-          "const": "fill"
-        },
-        {
-          "description": "Scale down to fit inside the box, keeping aspect ratio.",
-          "type": "string",
-          "const": "contain"
-        },
-        {
-          "description": "Scale to cover the box, keeping aspect ratio, cropping the overflow.",
-          "type": "string",
-          "const": "cover"
         }
       ]
     },
@@ -1436,7 +1636,7 @@
               "format": "double"
             },
             "color": {
-              "description": "Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so\na shadow's strength is written where every other colour writes it.",
+              "description": "Shadow colour. An `#rrggbbaa` alpha becomes the flood opacity, so\na shadow's strength is written where every other colour writes it.\nSolid colours only: the flood filter has no gradient primitive, and\na gradient here is refused when an operation sets it and at render.",
               "$ref": "#/$defs/Color"
             },
             "type": {

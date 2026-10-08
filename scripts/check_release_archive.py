@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--target", required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--canvas", action="store_true", help="Also verify canvas editing (1.4.0 and newer)")
+    parser.add_argument("--paint", action="store_true", help="Also verify paints and canvas images (1.11.0 and newer)")
     parser.add_argument(
         "--no-terminal",
         action="store_true",
@@ -72,6 +73,12 @@ def main():
             subprocess.run(
                 [sys.executable, str(Path(__file__).with_name("no_terminal_smoke.py")),
                  "--binary", str(binary), "--workspace", str(root / "no-terminal-workspace")],
+                check=True, timeout=240,
+            )
+        if args.paint:
+            subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("paint_smoke.py")),
+                 "--binary", str(binary), "--workspace", str(root / "paint-workspace")],
                 check=True, timeout=240,
             )
 

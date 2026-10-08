@@ -5,11 +5,11 @@
 // has no second idea of what a document is, and no code path that edits one
 // locally and syncs later (PRD §7.2).
 
-import type { Asset, Document, ImageFit, Slot } from "../../schema/document.js";
+import type { Asset, BackgroundImage, Color, Document, ImageFit, Slot } from "../../schema/document.js";
 import type { Operation } from "../../schema/operation.js";
 import { goToLogin } from "./token.js";
 
-export type { Asset, Document, ImageFit, Operation, Slot };
+export type { Asset, BackgroundImage, Color, Document, ImageFit, Operation, Slot };
 
 /** A layer, as the document model defines it.
  *

@@ -138,12 +138,34 @@ pub enum ValidationError {
         value: String,
     },
 
+    /// A gradient carries stops it cannot be drawn with.
+    ///
+    /// The rules live where every colour limit lives, in [`crate::validate`]:
+    /// a non-empty stop list of at most
+    /// [`crate::document::MAX_GRADIENT_STOPS`], offsets finite and strictly
+    /// ascending within `0..=1`, alphas within `0..=1`, and solid stop
+    /// colours. An unordered list is refused, never sorted into order.
+    #[error("{context}: invalid gradient — {reason}")]
+    InvalidGradient {
+        /// Where the gradient was found, e.g. `canvas background` or a layer id.
+        context: String,
+        /// What exactly is wrong with the stop list.
+        reason: String,
+    },
+
     /// An image layer points at an asset the document does not contain.
     #[error("layer {layer} references unknown asset {asset}")]
     DanglingAssetRef {
         /// The layer at fault.
         layer: LayerId,
         /// The asset it wanted.
+        asset: AssetId,
+    },
+
+    /// The canvas background points at an asset the document does not contain.
+    #[error("canvas background references unknown asset {asset}")]
+    DanglingCanvasBackgroundAsset {
+        /// The asset the canvas background wanted.
         asset: AssetId,
     },
 

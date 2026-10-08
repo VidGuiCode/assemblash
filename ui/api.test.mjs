@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { pngUrl } from "./dist/api.js";
+import { pngUrl } from "./.test-dist/api.js";
 
 test("drag preview URLs keep layer filtering out of the operation API", () => {
   const selected = pngUrl("my project", 7, 1, { only: ["layer_one", "layer_two"] });
@@ -32,7 +32,7 @@ test("a write asks for the document it produced back in the same response", asyn
     );
   };
   try {
-    const { applyOperationBatch } = await import("./dist/api.js");
+    const { applyOperationBatch } = await import("./.test-dist/api.js");
     const result = await applyOperationBatch("p", "move", [{ op: "move", id: "a", dx: 1, dy: 2 }], 1);
 
     assert.equal(calls.length, 1);
@@ -58,7 +58,7 @@ test("a single write asks for the document back the same way", async () => {
     );
   };
   try {
-    const { applyOperation } = await import("./dist/api.js");
+    const { applyOperation } = await import("./.test-dist/api.js");
     await applyOperation("p", { op: "move", id: "a", dx: 1, dy: 2 }, 2);
 
     assert.equal(calls.length, 1);
@@ -79,7 +79,7 @@ test("the history read names a tail instead of reading the whole journal", async
     });
   };
   try {
-    const { getHistory } = await import("./dist/api.js");
+    const { getHistory } = await import("./.test-dist/api.js");
     await getHistory("p");
 
     assert.equal(calls.length, 1);

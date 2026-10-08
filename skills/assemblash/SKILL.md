@@ -133,6 +133,31 @@ After `updateCanvas` enters a project's journal, 1.3.1 refuses both `show` and
 `history`, including after undo. Keep using the newer binary and preserve the
 journal. The document schema version remains 1.
 
+## Gradient paints and canvas images (1.11.0 and newer)
+
+Check the running binary's version before you use gradient paints or canvas images.
+Paint inputs accept existing solid colour strings and gradient objects.
+Use `{ "kind": "linear", "angle": 0, "stops": [...] }` for a linear gradient.
+Use `{ "kind": "radial", "center": { "x": 0.5, "y": 0.5 }, "radius": 0.5, "stops": [...] }` for a radial gradient.
+Each stop has `offset`, a solid `color`, and optional `alpha`.
+Offsets must increase strictly within `0` to `1`. Alpha defaults to `1`.
+CLI colour arguments accept hexadecimal colours, inline JSON, and `@file.json`.
+Use these paints for backgrounds, text, shape fills, strokes, and presets.
+Keep colour slot values as solid strings. Gradient shadow colours are refused.
+Use an image layer with a clip for an image shape fill.
+
+Import an image asset before you set `backgroundImage: { "asset": "<ASSET_ID>", "fit": "cover" }`.
+Send that field through `updateCanvas` or MCP `update_canvas`.
+Use `fill`, `contain`, or `cover`. The default fit is `fill`.
+Set `clearBackgroundImage: true` to remove the image. Omit both fields to preserve it.
+Do not set and clear the image in one request.
+CLI uses `canvas set --background-image <ASSET_ID> --background-image-fit cover`.
+CLI uses `canvas set --clear-background-image` to remove it.
+The canvas colour appears below the image. All layers appear above it.
+Release 1.10.0 refuses documents with gradient paints.
+It preserves `backgroundImage` as an unknown field, but its renderer ignores the image.
+Use 1.11.0 or newer to edit these documents.
+
 ## Fonts (1.5.0 and newer)
 
 Check `GET /api/fonts` before you assume a family exists. It returns

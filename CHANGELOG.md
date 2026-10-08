@@ -10,9 +10,45 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
-**A faster interface path for edits.** The document schema stays at
-`schemaVersion` 1. The `Operation` union does not grow. Every change is
-additive, and every old client keeps working.
+## [1.11.0] — 2026-10-08
+
+No 1.10.1 was released: no defect was outstanding after 1.10.0.
+
+**Gradient paints, canvas background images, and the Mantine reference interface.**
+
+The document schema stays at `schemaVersion` 1. Existing operation names and solid colour strings stay unchanged.
+
+- Linear and radial gradients apply to backgrounds, text, shape fills, strokes, and presets.
+- Gradient stops support colour alpha and separate stop alpha. Writes validate stops and gradient geometry.
+- Loads preserve unknown gradient kinds. Edits and rendering refuse their use.
+- Line strokes use a nonzero reference box. Markers use separate gradients on their existing geometry.
+- Canvas background images support `fill`, `contain`, and `cover`. The canvas colour appears below the image.
+- `updateCanvas` sets or clears the background image. Validation and asset pruning include its asset reference.
+- CLI paint inputs accept hexadecimal colours, inline JSON, and `@file.json`.
+- HTTP and MCP paint inputs accept existing strings and gradient objects. Colour slot values remain strings.
+- Gradient shadow colours and image shape fills remain typed refusals.
+- Builds 1.0 to 1.10 refuse gradient documents and can refuse journals with gradient operations.
+- Release 1.10.0 preserves canvas image metadata during normal loading. Its renderer ignores the image.
+- Recovery with 1.10.0 can discard canvas image metadata from newer journal entries. Use 1.11.0 for editing and recovery.
+- Undo followed by a new edit keeps the correct history branch. Cached snapshots retain imported asset metadata.
+- A refused journal append keeps existing snapshots available. Read-only opening does not change cache association files.
+- Per-snapshot associations recover a missing or corrupt cache index. Ambiguous branch snapshots cause a refusal.
+- SVG definitions encode unusual layer IDs. Existing safe IDs keep the same output.
+- Project creation validates paints through the shared operation layer before it writes project files.
+- The reference interface uses one React root and Mantine provider for controls, menus, dialogs, font controls, and login.
+- The existing document controller, operation queue, canvas pointer handling, and Rust preview remain connected.
+- Appearance supports Light, Dark, and System. System is the default. The browser stores the preference locally.
+- Appearance changes do not change document colours. New controls include English, French, and German translations.
+- Paint controls support solid colours and gradient JSON. Canvas image controls support asset selection, upload, fit, and removal.
+- Generated asset lists embed every browser file and permit only login dependencies before authentication.
+- Bundled notices include the locked runtime UI packages and icon font.
+- The Mantine layer tree supports hierarchy, keyboard navigation, filtering, and pointer collapse controls.
+- Upload controls use Mantine Dropzone and send each accepted file through the existing asset command once.
+- Editing controls include ancestor guards. A locked layer still permits its own unlock command.
+- Geometry edits update canvas handles immediately. The authoritative response rebuilds the inspector once and starts rendering first.
+
+**Inline document responses for edits.** These response fields are optional.
+Existing clients can keep their current requests.
 
 - A write can return the document it produced. `POST …/operations` and
   `POST …/operation-batches` take `?includeDocument=true`. The response

@@ -8,9 +8,9 @@ Please also read the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Project status
 
-**Released at 1.4.0.** The engine is implemented and released for six targets;
-see [README.md](README.md) for what exists and [PRD.md](PRD.md) for what the
-project wants to be.
+**Released at 1.11.0.** Released binaries support six targets.
+See [README.md](README.md) for implemented features.
+See [PRD.md](PRD.md) for the product requirements.
 
 `1.0.0` makes the document schema (`schemaVersion` 1) and the operation API
 stable. A change that breaks either is a MAJOR release and ships a migration.

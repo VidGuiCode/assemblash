@@ -5,6 +5,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use assemblash_core::Color;
+
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_assemblash")
 }
@@ -58,6 +60,46 @@ fn history_entries(project: &Path) -> usize {
         .lines()
         .filter(|line| !line.starts_with("position "))
         .count()
+}
+
+#[test]
+fn unsupported_creation_paints_and_image_shape_fills_are_refused_without_writes() {
+    let scratch = tempfile::tempdir().unwrap();
+    let invalid = scratch.path().join("invalid");
+    let refused = run_failing(&[
+        "new",
+        invalid.to_str().unwrap(),
+        "--background",
+        r#"{"kind":"conic"}"#,
+    ]);
+    assert!(refused.contains("gradient kind"), "{refused}");
+    assert!(
+        !invalid.exists(),
+        "a refused project must not create its directory"
+    );
+
+    let project = project(scratch.path());
+    let project_arg = project.to_str().unwrap();
+    let layer = run(&["add-rect", project_arg]).trim().to_owned();
+    let before = std::fs::read(project.join("document.json")).unwrap();
+    let entries = history_entries(&project);
+    for fill in [
+        "asset_background",
+        r#"{"kind":"image","asset":"asset_background"}"#,
+    ] {
+        for args in [
+            vec!["add-rect", project_arg, "--fill", fill],
+            vec!["set", project_arg, "--layer", &layer, "--fill", fill],
+        ] {
+            let refused = run_failing(&args);
+            assert!(refused.contains("image layer and clip"), "{refused}");
+            assert_eq!(
+                std::fs::read(project.join("document.json")).unwrap(),
+                before
+            );
+            assert_eq!(history_entries(&project), entries);
+        }
+    }
 }
 
 #[test]
@@ -329,6 +371,73 @@ fn export_of_a_rect_project_succeeds() {
     run(&["export", project_arg, "--out", output.to_str().unwrap()]);
     let bytes = std::fs::read(output).unwrap();
     assert_eq!(&bytes[1..4], b"PNG");
+}
+
+#[test]
+fn paint_flags_accept_inline_json_and_json_files_without_partial_writes() {
+    let scratch = tempfile::tempdir().unwrap();
+    let project = scratch.path().join("gradient");
+    let project_arg = project.to_str().unwrap();
+    let gradient = r##"{"kind":"linear","angle":0,"stops":[{"offset":0,"color":"#112233"},{"offset":1,"color":"#ddeeff"}]}"##;
+
+    run(&[
+        "new",
+        project_arg,
+        "--width",
+        "200",
+        "--height",
+        "120",
+        "--background",
+        gradient,
+    ]);
+    let paint_file = scratch.path().join("paint.json");
+    std::fs::write(&paint_file, gradient).unwrap();
+    run(&[
+        "add-rect",
+        project_arg,
+        "--fill",
+        &format!("@{}", paint_file.display()),
+        "--stroke",
+        gradient,
+        "--x",
+        "10",
+        "--y",
+        "10",
+        "--width",
+        "80",
+        "--height",
+        "60",
+    ]);
+
+    let document = shown(&project);
+    let expected: Color = serde_json::from_str(gradient).unwrap();
+    let expected = serde_json::to_value(expected).unwrap();
+    assert_eq!(document["canvas"]["background"], expected);
+    assert_eq!(
+        document["layers"][0]["fill"],
+        document["canvas"]["background"]
+    );
+    assert_eq!(
+        document["layers"][0]["stroke"]["color"],
+        document["canvas"]["background"]
+    );
+
+    let before = std::fs::read(project.join("document.json")).unwrap();
+    let invalid_file = scratch.path().join("invalid.json");
+    std::fs::write(&invalid_file, "{\"kind\":").unwrap();
+    let refused = run_failing(&[
+        "set",
+        project_arg,
+        "--layer",
+        shown(&project)["layers"][0]["id"].as_str().unwrap(),
+        "--fill",
+        &format!("@{}", invalid_file.display()),
+    ]);
+    assert!(refused.contains("parsing paint JSON"), "{refused}");
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before
+    );
 }
 
 // --- 1.10.0: paths, and the dash/cap/join stroke flags ------------------------

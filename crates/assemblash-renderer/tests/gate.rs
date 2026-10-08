@@ -5,7 +5,7 @@
 //!
 //! * **G1** — does a document survive save, reload, and render with the same
 //!   pixels?
-//! * **G2** — are those pixels the same on Windows and Linux, x86_64 and
+//! * **G2** — are those SVG bytes and pixels the same on Windows and Linux, x86_64 and
 //!   aarch64? The golden hashes in `tests/gate/goldens.json` are committed,
 //!   and every CI target checks itself against them. A platform that differs
 //!   fails here.
@@ -28,14 +28,16 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use assemblash_core::document::{
-    Clip, Crop, Effect, Extras, GroupLayer, ImageFit, ImageLayer, ShapeKind, ShapeLayer, Stroke,
-    TextAlign, TextLayer, Transform,
+    BackgroundImage, Clip, Crop, Effect, Extras, GroupLayer, ImageFit, ImageLayer, ShapeKind,
+    ShapeLayer, Stroke, TextAlign, TextLayer, Transform,
 };
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::storage::{self, hash_bytes};
 use assemblash_core::{Color, Document, Layer, LayerKind};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
 use assemblash_renderer::{doc_to_svg, document_to_png, svg_to_pixmap, AssetHrefs};
+
+const FIXED_BACKGROUND_PNG: &[u8] = include_bytes!("../examples/fixtures/gradient-background.png");
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1380,6 +1382,327 @@ fn marker_document() -> (Document, AssetHrefs) {
     (document, hrefs)
 }
 
+/// A linear gradient paint from `(offset, colour, alpha)` triples.
+fn linear_paint(angle: f64, stops: &[(f64, &str, f64)]) -> Color {
+    Color::Linear(assemblash_core::LinearGradient {
+        kind: assemblash_core::LinearTag::Linear,
+        angle,
+        stops: stops
+            .iter()
+            .map(|(offset, color, alpha)| assemblash_core::GradientStop {
+                offset: *offset,
+                color: assemblash_core::SolidColor::new(*color),
+                alpha: *alpha,
+                extra: Extras::new(),
+            })
+            .collect(),
+        extra: Extras::new(),
+    })
+}
+
+/// A radial gradient paint from `(offset, colour, alpha)` triples.
+fn radial_paint(center: (f64, f64), radius: f64, stops: &[(f64, &str, f64)]) -> Color {
+    Color::Radial(assemblash_core::RadialGradient {
+        kind: assemblash_core::RadialTag::Radial,
+        center: assemblash_core::GradientCenter {
+            x: center.0,
+            y: center.1,
+            extra: Default::default(),
+        },
+        radius,
+        stops: stops
+            .iter()
+            .map(|(offset, color, alpha)| assemblash_core::GradientStop {
+                offset: *offset,
+                color: assemblash_core::SolidColor::new(*color),
+                alpha: *alpha,
+                extra: Extras::new(),
+            })
+            .collect(),
+        extra: Extras::new(),
+    })
+}
+
+/// The 1.11.0 linear gradient: a four-stop fill with alpha stops at a
+/// non-axis angle, a second linear as the stroke of a rounded rect, and a
+/// gradient text colour.
+fn gradient_linear_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 720.0, 400.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+
+    document.layers.push(Layer::new(
+        LayerId::new("layer_00000000000000000000000001"),
+        Transform::new(40.0, 40.0, 640.0, 200.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Rect {
+                corner_radius: 0.0,
+                extra: Extras::new(),
+            },
+            fill: Some(linear_paint(
+                37.0,
+                &[
+                    (0.0, "#112233", 1.0),
+                    (0.35, "#B98019", 0.85),
+                    (0.7, "#D99D28", 1.0),
+                    (1.0, "#101010", 0.6),
+                ],
+            )),
+            stroke: None,
+            extra: Extras::new(),
+        }),
+    ));
+    document.layers.push(Layer::new(
+        LayerId::new("layer_00000000000000000000000002"),
+        Transform::new(40.0, 270.0, 240.0, 90.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Rect {
+                corner_radius: 12.0,
+                extra: Extras::new(),
+            },
+            fill: Some(linear_paint(
+                90.0,
+                &[(0.0, "#F5D478", 1.0), (1.0, "#B98019", 1.0)],
+            )),
+            stroke: Some(Stroke {
+                color: linear_paint(
+                    200.0,
+                    &[
+                        (0.0, "#FFFFFF", 1.0),
+                        (0.5, "#D99D28", 0.7),
+                        (1.0, "#101010", 1.0),
+                    ],
+                ),
+                width: 8.0,
+                dash_array: None,
+                line_cap: Some(assemblash_core::LineCap::Round),
+                line_join: None,
+                extra: Extras::new(),
+            }),
+            extra: Extras::new(),
+        }),
+    ));
+    document.layers.push(Layer::new(
+        LayerId::new("layer_00000000000000000000000003"),
+        Transform::new(60.0, 230.0, 300.0, 50.0),
+        LayerKind::Text(TextLayer {
+            text: "Gradient".to_owned(),
+            font_family: "Noto Sans".to_owned(),
+            font_size: 36.0,
+            color: Some(linear_paint(
+                90.0,
+                &[(0.0, "#F5D478", 1.0), (1.0, "#B98019", 1.0)],
+            )),
+            align: TextAlign::Left,
+            line_height: 1.4,
+            font_weight: 400,
+            font_style: assemblash_core::FontStyle::Normal,
+            letter_spacing: 0.0,
+            stroke: None,
+            vertical_align: assemblash_core::VerticalAlign::Top,
+            runs: Vec::new(),
+            extra: Extras::new(),
+        }),
+    ));
+    (document, BTreeMap::new())
+}
+
+/// The 1.11.0 radial gradient: a canvas gradient background, a four-stop
+/// radial fill with alpha stops reused by two layers, and a rotated layer —
+/// the reference keeps its gradient through a turn.
+fn gradient_radial_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 720.0, 400.0);
+    document.canvas.background = Some(radial_paint(
+        (0.5, 0.5),
+        0.75,
+        &[
+            (0.0, "#FFFFFF", 1.0),
+            (0.55, "#D99D28", 1.0),
+            (1.0, "#101010", 1.0),
+        ],
+    ));
+
+    let shared = radial_paint(
+        (0.35, 0.6),
+        0.55,
+        &[
+            (0.0, "#FFFFFF", 1.0),
+            (0.4, "#D99D28", 0.9),
+            (0.75, "#B98019", 1.0),
+            (1.0, "#101010", 0.35),
+        ],
+    );
+    document.layers.push(Layer::new(
+        LayerId::new("layer_00000000000000000000000001"),
+        Transform::new(40.0, 40.0, 380.0, 320.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Rect {
+                corner_radius: 0.0,
+                extra: Extras::new(),
+            },
+            fill: Some(shared.clone()),
+            stroke: None,
+            extra: Extras::new(),
+        }),
+    ));
+    let mut rotated = Layer::new(
+        LayerId::new("layer_00000000000000000000000002"),
+        Transform::new(470.0, 290.0, 190.0, 80.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Rect {
+                corner_radius: 0.0,
+                extra: Extras::new(),
+            },
+            fill: Some(shared),
+            stroke: None,
+            extra: Extras::new(),
+        }),
+    );
+    rotated.transform.rotation = 17.0;
+    document.layers.push(rotated);
+    (document, BTreeMap::new())
+}
+
+/// Gradient strokes cover line caps, transforms, markers, and a zero-length
+/// segment. The two marker ends use their own marker-space gradient paints.
+fn gradient_line_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 720.0, 400.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+
+    let mut round = Transform::new(90.0, 52.0, 240.0, 0.0);
+    round.rotation = 64.0;
+    round.flip_horizontal = true;
+    document.layers.push(stroked_shape(
+        1,
+        round,
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::Arrow),
+            marker_end: Some(assemblash_core::LineMarker::Circle),
+            extra: Extras::new(),
+        },
+        None,
+        Stroke {
+            color: linear_paint(
+                27.0,
+                &[
+                    (0.0, "#e3263680", 0.9),
+                    (0.45, "#f5c542", 0.7),
+                    (1.0, "#1446a0", 1.0),
+                ],
+            ),
+            width: 12.0,
+            dash_array: None,
+            line_cap: Some(assemblash_core::LineCap::Round),
+            line_join: None,
+            extra: Extras::new(),
+        },
+    ));
+
+    let mut square = Transform::new(360.0, 110.0, 260.0, 0.0);
+    square.rotation = -31.0;
+    square.flip_vertical = true;
+    document.layers.push(stroked_shape(
+        2,
+        square,
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::Circle),
+            marker_end: Some(assemblash_core::LineMarker::Arrow),
+            extra: Extras::new(),
+        },
+        None,
+        Stroke {
+            color: radial_paint(
+                (0.3, 0.65),
+                0.8,
+                &[
+                    (0.0, "#ffffff", 1.0),
+                    (0.55, "#29a36a90", 0.8),
+                    (1.0, "#5727a3", 1.0),
+                ],
+            ),
+            width: 10.0,
+            dash_array: None,
+            line_cap: Some(assemblash_core::LineCap::Square),
+            line_join: None,
+            extra: Extras::new(),
+        },
+    ));
+
+    document.layers.push(stroked_shape(
+        3,
+        Transform::new(65.0, 310.0, 240.0, 0.0),
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::None),
+            marker_end: Some(assemblash_core::LineMarker::None),
+            extra: Extras::new(),
+        },
+        None,
+        Stroke {
+            color: linear_paint(f64::MAX, &[(0.0, "#f08a24", 1.0), (1.0, "#34206f80", 0.6)]),
+            width: 8.0,
+            dash_array: None,
+            line_cap: None,
+            line_join: None,
+            extra: Extras::new(),
+        },
+    ));
+
+    // A point line is still a valid stroke. Its paint box is stroke-width
+    // square, so its radial gradient remains defined at both output scales.
+    document.layers.push(stroked_shape(
+        4,
+        Transform::new(475.0, 300.0, 0.0, 0.0),
+        ShapeKind::Line {
+            marker_start: Some(assemblash_core::LineMarker::None),
+            marker_end: Some(assemblash_core::LineMarker::None),
+            extra: Extras::new(),
+        },
+        None,
+        Stroke {
+            color: radial_paint(
+                (0.5, 0.5),
+                0.7,
+                &[(0.0, "#ffffff", 1.0), (1.0, "#4a1e8a80", 0.75)],
+            ),
+            width: 18.0,
+            dash_array: None,
+            line_cap: Some(assemblash_core::LineCap::Round),
+            line_join: None,
+            extra: Extras::new(),
+        },
+    ));
+
+    (document, BTreeMap::new())
+}
+
+fn canvas_background_image_document(fit: ImageFit) -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 720.0, 400.0);
+    document.canvas.background = Some(Color::new("#252a34"));
+    let (asset, hrefs) = add_fixed_background_asset(&mut document);
+    document.canvas.background_image = Some(BackgroundImage {
+        asset,
+        fit,
+        extra: Extras::new(),
+    });
+    (document, hrefs)
+}
+
+fn add_fixed_background_asset(document: &mut Document) -> (AssetId, AssetHrefs) {
+    let (width, height, _) = decode(FIXED_BACKGROUND_PNG);
+    let asset_id = AssetId::new("asset_00000000000000000000000001");
+    document.assets.push(assemblash_core::Asset {
+        id: asset_id.clone(),
+        path: "gradient-background.png".to_owned(),
+        hash: hash_bytes(FIXED_BACKGROUND_PNG),
+        media_type: "image/png".to_owned(),
+        width: Some(width),
+        height: Some(height),
+        extra: Extras::new(),
+    });
+    let href = format!("data:image/png;base64,{}", base64(FIXED_BACKGROUND_PNG));
+    let hrefs = AssetHrefs::from([(asset_id.clone(), href)]);
+    (asset_id, hrefs)
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -1401,6 +1724,21 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("path", path_document()),
         ("dash", dash_document()),
         ("marker", marker_document()),
+        ("gradient-linear", gradient_linear_document()),
+        ("gradient-radial", gradient_radial_document()),
+        ("gradient-line", gradient_line_document()),
+        (
+            "canvas-background-fill",
+            canvas_background_image_document(ImageFit::Fill),
+        ),
+        (
+            "canvas-background-contain",
+            canvas_background_image_document(ImageFit::Contain),
+        ),
+        (
+            "canvas-background-cover",
+            canvas_background_image_document(ImageFit::Cover),
+        ),
     ] {
         out.push((name, document, hrefs));
     }
@@ -1420,7 +1758,24 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
 /// checked in a second pixel grid rather than only in the first.
 fn scaled_reference_documents() -> Vec<(&'static str, Document, AssetHrefs, f32)> {
     let (document, hrefs) = crop_document();
-    vec![("crop-scale2", document, hrefs, 2.0)]
+    let (gradient, gradient_hrefs) = gradient_linear_document();
+    let (radial, radial_hrefs) = gradient_radial_document();
+    let (line, line_hrefs) = gradient_line_document();
+    let mut scaled = vec![
+        ("crop-scale2", document, hrefs, 2.0),
+        ("gradient-linear-scale2", gradient, gradient_hrefs, 2.0),
+        ("gradient-radial-scale2", radial, radial_hrefs, 2.0),
+        ("gradient-line-scale2", line, line_hrefs, 2.0),
+    ];
+    for (name, fit) in [
+        ("canvas-background-fill-scale2", ImageFit::Fill),
+        ("canvas-background-contain-scale2", ImageFit::Contain),
+        ("canvas-background-cover-scale2", ImageFit::Cover),
+    ] {
+        let (document, hrefs) = canvas_background_image_document(fit);
+        scaled.push((name, document, hrefs, 2.0));
+    }
+    scaled
 }
 
 /// The two SVGs behind G4: a `screen` blend and a Gaussian blur. They are
@@ -1465,6 +1820,10 @@ fn goldens_path() -> PathBuf {
     manifest_dir().join("tests/gate/goldens.json")
 }
 
+fn hashes_path() -> PathBuf {
+    preview_dir().join("hashes.json")
+}
+
 fn read_goldens() -> BTreeMap<String, String> {
     let text = std::fs::read_to_string(goldens_path())
         .expect("tests/gate/goldens.json is committed; UPDATE_GATE=1 writes it");
@@ -1477,6 +1836,27 @@ fn write_goldens(goldens: &BTreeMap<String, String>) {
     let mut json = serde_json::to_string_pretty(goldens).unwrap();
     json.push('\n');
     std::fs::write(path, json).unwrap();
+}
+
+#[derive(serde::Serialize)]
+struct GateHashes<'a> {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    #[serde(rename = "rendererVersion")]
+    renderer_version: &'static str,
+    hashes: &'a BTreeMap<String, String>,
+}
+
+fn write_hashes(hashes: &BTreeMap<String, String>) {
+    std::fs::create_dir_all(preview_dir()).unwrap();
+    let table = GateHashes {
+        schema_version: assemblash_core::SCHEMA_VERSION,
+        renderer_version: "gate",
+        hashes,
+    };
+    let mut json = serde_json::to_string_pretty(&table).unwrap();
+    json.push('\n');
+    std::fs::write(hashes_path(), json).unwrap();
 }
 
 fn preview_dir() -> PathBuf {
@@ -1634,11 +2014,29 @@ fn g2_reference_documents_match_the_committed_hashes() {
     let fonts = fonts();
     let mut computed = BTreeMap::new();
 
-    if updating() {
-        std::fs::create_dir_all(preview_dir()).unwrap();
-    }
+    std::fs::create_dir_all(preview_dir()).unwrap();
+
+    let (fixture_width, fixture_height, fixture_pixels) = decode(FIXED_BACKGROUND_PNG);
+    let fixture_href = format!("data:image/png;base64,{}", base64(FIXED_BACKGROUND_PNG));
+    computed.insert(
+        "fixture.gradient-background.source".to_owned(),
+        hash_bytes(FIXED_BACKGROUND_PNG),
+    );
+    computed.insert(
+        "fixture.gradient-background.rgba".to_owned(),
+        hash_bytes(&fixture_pixels),
+    );
+    computed.insert(
+        "fixture.gradient-background.encoded".to_owned(),
+        hash_bytes(fixture_href.as_bytes()),
+    );
+    computed.insert(
+        "fixture.gradient-background.dimensions".to_owned(),
+        hash_bytes(format!("{fixture_width}x{fixture_height}").as_bytes()),
+    );
 
     for (name, document, hrefs) in reference_documents() {
+        let svg = doc_to_svg(&document, fonts.font_set(), &hrefs).unwrap();
         let png = document_to_png(
             &document,
             &fonts,
@@ -1649,6 +2047,7 @@ fn g2_reference_documents_match_the_committed_hashes() {
         .unwrap();
         let (_, _, pixels) = decode(&png);
 
+        computed.insert(format!("{name}.svg"), hash_bytes(svg.as_bytes()));
         computed.insert(format!("{name}.pixels"), hash_bytes(&pixels));
         computed.insert(format!("{name}.png"), hash_bytes(&png));
 
@@ -1660,6 +2059,7 @@ fn g2_reference_documents_match_the_committed_hashes() {
     // A crop at scale 2: the viewBox maps into twice the pixels, so the
     // placement is checked at a second scale rather than only at 1.
     for (name, document, hrefs, scale) in scaled_reference_documents() {
+        let svg = doc_to_svg(&document, fonts.font_set(), &hrefs).unwrap();
         let png = document_to_png(
             &document,
             &fonts,
@@ -1670,6 +2070,7 @@ fn g2_reference_documents_match_the_committed_hashes() {
         .unwrap();
         let (_, _, pixels) = decode(&png);
 
+        computed.insert(format!("{name}.svg"), hash_bytes(svg.as_bytes()));
         computed.insert(format!("{name}.pixels"), hash_bytes(&pixels));
         computed.insert(format!("{name}.png"), hash_bytes(&png));
 
@@ -1686,12 +2087,15 @@ fn g2_reference_documents_match_the_committed_hashes() {
         )
         .unwrap();
         let (_, _, pixels) = decode(&png);
+        computed.insert(format!("{name}.svg"), hash_bytes(svg.as_bytes()));
         computed.insert(format!("{name}.pixels"), hash_bytes(&pixels));
         computed.insert(format!("{name}.png"), hash_bytes(&png));
         if updating() {
             std::fs::write(preview_dir().join(format!("{name}.png")), &png).unwrap();
         }
     }
+
+    write_hashes(&computed);
 
     if updating() {
         write_goldens(&computed);
