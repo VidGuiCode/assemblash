@@ -363,6 +363,9 @@ pub struct TextLayer {
     /// Line height as a multiple of the font size.
     #[serde(default = "default_line_height")]
     pub line_height: f64,
+    /// Extra pixels between explicit paragraphs, including empty paragraphs.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub paragraph_spacing: f64,
     /// Font weight, 100 to 900 as CSS names them.
     ///
     /// Resolved against the caller's font set by exact face: a family whose
@@ -1558,6 +1561,7 @@ mod tests {
                 color: Some(Color::default()),
                 align: TextAlign::Left,
                 line_height: 1.2,
+                paragraph_spacing: 0.0,
                 font_weight: 400,
                 font_style: FontStyle::Normal,
                 letter_spacing: 0.0,

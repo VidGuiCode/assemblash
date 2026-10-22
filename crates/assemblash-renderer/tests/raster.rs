@@ -39,6 +39,7 @@ fn document_with_text(family: &str, body: &str, align: TextAlign) -> Document {
             color: Some(Color::new("#000000")),
             align,
             line_height: 1.4,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: assemblash_core::FontStyle::Normal,
             letter_spacing: 0.0,

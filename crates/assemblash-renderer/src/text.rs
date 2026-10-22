@@ -206,15 +206,11 @@ pub fn layout_text_layer(
         });
     }
     if text.runs.is_empty() {
-        let legacy = crate::layout_text(
-            &text.text,
-            width,
-            text.font_size,
-            text.line_height,
-            text.letter_spacing,
-            &text.font_family,
-            fonts,
-        );
+        let crate::svg::PlainTextLayout {
+            layout: legacy,
+            paragraph_starts,
+            ..
+        } = crate::svg::layout_plain_text(layer, text, width, fonts)?;
         let ascent = text.font_size * fonts.ascent_ratio(&text.font_family);
         let descent = text.font_size * fonts.descent_ratio(&text.font_family);
         let free = layer.transform.height - legacy.height;
@@ -245,7 +241,11 @@ pub fn layout_text_layer(
                     text: text_line,
                     width: measured,
                     x,
-                    baseline: shift + ascent + index as f64 * text.font_size * text.line_height,
+                    baseline: shift
+                        + ascent
+                        + index as f64 * text.font_size * text.line_height
+                        + paragraph_starts.partition_point(|start| *start <= index) as f64
+                            * text.paragraph_spacing,
                     ascent,
                     descent,
                 }

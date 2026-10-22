@@ -3,6 +3,14 @@ import assert from "node:assert/strict";
 
 import { pngUrl } from "./.test-dist/api.js";
 
+test("saved text styles include paragraph spacing and an explicit zero reset", async () => {
+  const { styleOf } = await import("./.test-dist/api.js");
+  const layer = { type: "text", fontFamily: "Noto Sans", fontSize: 32, runs: [{ text: "A", future: 7 }] };
+  assert.equal(styleOf(layer).paragraphSpacing, 0);
+  assert.equal(styleOf({ ...layer, paragraphSpacing: 17.25 }).paragraphSpacing, 17.25);
+  assert.equal(Object.hasOwn(styleOf(layer), "runs"), false);
+});
+
 test("drag preview URLs keep layer filtering out of the operation API", () => {
   const selected = pngUrl("my project", 7, 1, { only: ["layer_one", "layer_two"] });
   const base = pngUrl("my project", 7, 1, { exclude: ["layer_one"] });

@@ -55,6 +55,7 @@ fn text_layer(id: &str, transform: Transform, body: &str) -> Layer {
             color: Some(Color::new("#101820")),
             align: TextAlign::Left,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: assemblash_core::FontStyle::Normal,
             letter_spacing: 0.0,

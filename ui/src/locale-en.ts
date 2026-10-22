@@ -459,6 +459,7 @@ export const en = {
   "properties.opacity": "Opacity",
   "properties.fontSize": "Font size",
   "properties.lineHeight": "Line height",
+  "properties.paragraphSpacing": "Paragraph spacing (px)",
   "properties.weight": "Weight",
   "properties.letterSpacing": "Letter spacing",
   "properties.colour": "Colour",

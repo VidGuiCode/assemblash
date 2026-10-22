@@ -78,6 +78,19 @@ pub enum ValidationError {
         name: String,
     },
 
+    /// A stored preset has an invalid numeric property.
+    #[error("preset {name:?}: {field} must be {expected}, got {value}")]
+    InvalidPresetProperty {
+        /// The preset at fault.
+        name: String,
+        /// The invalid property.
+        field: &'static str,
+        /// The required value range.
+        expected: &'static str,
+        /// The stored value.
+        value: f64,
+    },
+
     /// An effect's parameter is out of range or not a number.
     #[error("layer {layer}: effect {effect} — {field} must be {expected}, got {value}")]
     InvalidEffect {

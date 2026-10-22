@@ -9820,7 +9820,7 @@ function Yy(e) {
     blendMode: e.blendMode ?? "normal",
     effects: e.effects ?? []
   };
-  return e.type === "text" && (t.fontFamily = e.fontFamily, t.fontSize = e.fontSize, t.color = e.color ?? "#000000", t.align = e.align ?? "left", t.lineHeight = e.lineHeight ?? 1.2), e.type === "shape" && (e.fill && (t.fill = e.fill), e.stroke && (t.stroke = e.stroke)), t;
+  return e.type === "text" && (t.fontFamily = e.fontFamily, t.fontSize = e.fontSize, t.color = e.color ?? "#000000", t.align = e.align ?? "left", t.lineHeight = e.lineHeight ?? 1.2, t.paragraphSpacing = e.paragraphSpacing ?? 0), e.type === "shape" && (e.fill && (t.fill = e.fill), e.stroke && (t.stroke = e.stroke)), t;
 }
 async function Gy(e) {
   return Ee(`/api/projects/${encodeURIComponent(e)}/slots`);
@@ -13798,7 +13798,7 @@ function Wx() {
     const z = document.createElement("label");
     z.className = "field", z.append(Zc("properties.font"));
     const _ = sl(o, u !== null);
-    z.append(_.root), e.append(z), f("properties.fontSize", String(o.fontSize), (P) => ({ op: "update", id: o.id, fontSize: Number(P) })), f("properties.lineHeight", String(o.lineHeight ?? 1.2), (P) => ({ op: "update", id: o.id, lineHeight: Number(P) }));
+    z.append(_.root), e.append(z), f("properties.fontSize", String(o.fontSize), (P) => ({ op: "update", id: o.id, fontSize: Number(P) })), f("properties.lineHeight", String(o.lineHeight ?? 1.2), (P) => ({ op: "update", id: o.id, lineHeight: Number(P) })), f("properties.paragraphSpacing", String(o.paragraphSpacing ?? 0), (P) => ({ op: "update", id: o.id, paragraphSpacing: Number(P) }));
     const F = cf(o.fontFamily, kn.faces);
     if (F.length) {
       const P = o.fontWeight ?? 400, B = o.fontStyle ?? "normal", W = [.../* @__PURE__ */ new Set([

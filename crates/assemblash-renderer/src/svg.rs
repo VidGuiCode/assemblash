@@ -254,15 +254,8 @@ fn write_layer(
                 TextAlign::Right => ("end", t.x + t.width),
             };
 
-            let layout = layout_text(
-                &text.text,
-                t.width,
-                text.font_size,
-                text.line_height,
-                text.letter_spacing,
-                &text.font_family,
-                fonts,
-            );
+            let plain = layout_plain_text(layer, text, t.width, fonts)?;
+            let layout = &plain.layout;
 
             // The first baseline sits one ascent below the text block's top,
             // and where the block's top sits depends on the vertical
@@ -330,6 +323,17 @@ fn write_layer(
             );
 
             for (index, line) in layout.lines.iter().enumerate() {
+                if let Some(baseline) = plain.cursor_baselines.get(index) {
+                    // Empty tspans do not advance usvg's cursor. Keep every line's f32 delta explicitly.
+                    let _ = write!(
+                        out,
+                        "<tspan x=\"{}\" y=\"{}\">{}</tspan>",
+                        number(x),
+                        number(f64::from(*baseline)),
+                        escape_text(line)
+                    );
+                    continue;
+                }
                 let dy = if index == 0 {
                     0.0
                 } else {
@@ -1489,6 +1493,127 @@ pub fn layout_text(
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct PlainTextLayout {
+    pub(crate) layout: TextLayout,
+    pub(crate) paragraph_starts: Vec<usize>,
+    // Empty for the untouched zero-spacing emitter. Otherwise, exact validated parent-space cursor positions.
+    pub(crate) cursor_baselines: Vec<f32>,
+}
+
+/// Keep the legacy wrapping and metrics. Add space only at explicit paragraph boundaries.
+pub(crate) fn layout_plain_text(
+    layer: &Layer,
+    text: &assemblash_core::TextLayer,
+    width: f64,
+    fonts: &FontSet,
+) -> Result<PlainTextLayout, RenderError> {
+    if text.paragraph_spacing != 0.0 && (!width.is_finite() || width <= 0.0) {
+        return Err(RenderError::InvalidTextWidth {
+            layer: layer.id.clone(),
+            width,
+        });
+    }
+    let mut lines = Vec::new();
+    let mut starts = Vec::new();
+    let mut broke_mid_word = false;
+    for (index, paragraph) in text.text.split('\n').enumerate() {
+        if index > 0 {
+            starts.push(lines.len());
+        }
+        let layout = layout_text(
+            paragraph,
+            width,
+            text.font_size,
+            text.line_height,
+            text.letter_spacing,
+            &text.font_family,
+            fonts,
+        );
+        broke_mid_word |= layout.broke_mid_word;
+        lines.extend(layout.lines);
+    }
+    let mut height = text_height(
+        lines.len(),
+        text.font_size,
+        text.line_height,
+        &text.font_family,
+        fonts,
+    );
+    let mut cursor_baselines = Vec::new();
+    if text.paragraph_spacing != 0.0 {
+        height += starts.len() as f64 * text.paragraph_spacing;
+        // Keep the zero-spacing path unchanged. New spacing must fit the f32 SVG renderer.
+        let shift = match text.vertical_align {
+            VerticalAlign::Top => 0.0,
+            VerticalAlign::Middle => (layer.transform.height - height) / 2.0,
+            VerticalAlign::Bottom => layer.transform.height - height,
+        };
+        let ascent = text.font_size * fonts.ascent_ratio(&text.font_family);
+        let origin = layer.transform.x
+            + match text.align {
+                TextAlign::Left => 0.0,
+                TextAlign::Center => width / 2.0,
+                TextAlign::Right => width,
+            };
+        let refusal = || RenderError::TextLayout {
+            layer: layer.id.clone(),
+            source: crate::TextLayoutError::Unsupported {
+                kind: crate::TextFailureKind::InvalidGeometry,
+                run_index: 0,
+                character_index: 0,
+                byte_index: 0,
+                reason: "paragraph spacing exceeds finite render coordinates".into(),
+            },
+        };
+        if !(text.paragraph_spacing.is_finite()
+            && text.paragraph_spacing >= 0.0
+            && [height, shift, origin]
+                .iter()
+                .all(|value| (*value as f32).is_finite()))
+        {
+            return Err(refusal());
+        }
+        // Use the renderer's exact parent-space grouping before rounding the first cursor.
+        let block_top = match text.vertical_align {
+            VerticalAlign::Top => layer.transform.y,
+            VerticalAlign::Middle => layer.transform.y + (layer.transform.height - height) / 2.0,
+            VerticalAlign::Bottom => layer.transform.y + layer.transform.height - height,
+        };
+        let mut cursor = text_cursor_coordinate(block_top + ascent);
+        for index in 0..lines.len() {
+            let baseline = shift
+                + ascent
+                + index as f64 * text.font_size * text.line_height
+                + starts.partition_point(|start| *start <= index) as f64 * text.paragraph_spacing;
+            let delta = if index == 0 {
+                0.0
+            } else {
+                text.font_size * text.line_height
+                    + if starts.binary_search(&index).is_ok() {
+                        text.paragraph_spacing
+                    } else {
+                        0.0
+                    }
+            };
+            cursor += text_cursor_coordinate(delta);
+            if !(baseline as f32).is_finite() || !cursor.is_finite() {
+                return Err(refusal());
+            }
+            cursor_baselines.push(cursor);
+        }
+    }
+    Ok(PlainTextLayout {
+        layout: TextLayout {
+            lines,
+            height,
+            broke_mid_word,
+        },
+        paragraph_starts: starts,
+        cursor_baselines,
+    })
+}
+
 fn text_height(
     line_count: usize,
     font_size: f64,
@@ -2420,6 +2545,10 @@ pub(crate) fn number(value: f64) -> String {
         text.pop();
     }
     text
+}
+
+fn text_cursor_coordinate(value: f64) -> f32 {
+    ((value * 1_000_000.0).round() / 1_000_000.0) as f32
 }
 
 fn escape_text(text: &str) -> String {

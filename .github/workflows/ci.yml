@@ -213,6 +213,12 @@ jobs:
       - name: Verify styled archive routing
         run: python -m unittest discover -s scripts -p test_styled_runs_smoke.py
 
+      - name: Verify paragraph spacing across CLI, HTTP and MCP
+        run: >-
+          python scripts/paragraph_spacing_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-paragraph-spacing-smoke"
+
   render-identity:
     name: Compare renderer bytes on all six targets
     needs: test
@@ -295,6 +301,11 @@ jobs:
           python scripts/styled_runs_smoke.py
           --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
           --workspace "${{ runner.temp }}/assemblash-candidate-styled-runs-smoke"
+      - name: Verify candidate paragraph spacing across CLI, HTTP and MCP
+        run: >-
+          python scripts/paragraph_spacing_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-candidate-paragraph-spacing-smoke"
       - uses: actions/setup-node@v4
         if: matrix.target-name == 'linux-x86_64'
         with:
@@ -317,6 +328,20 @@ jobs:
           --binary target/release/assemblash
           --workspace "${{ runner.temp }}/assemblash-candidate-runs-editor"
           --output "${{ runner.temp }}/assemblash-candidate-runs-editor-evidence/result.json"
+      - name: Verify candidate paragraph controls against the embedded server
+        if: matrix.target-name == 'linux-x86_64'
+        run: >-
+          node scripts/paragraph_spacing_browser.mjs
+          --binary target/release/assemblash
+          --workspace "${{ runner.temp }}/assemblash-candidate-paragraph-editor"
+          --output "${{ runner.temp }}/assemblash-candidate-paragraph-editor-evidence/result.json"
+      - name: Save paragraph editor evidence
+        if: matrix.target-name == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-paragraph-editor
+          path: ${{ runner.temp }}/assemblash-candidate-paragraph-editor-evidence/
+          if-no-files-found: error
       - name: Save the verified candidate binary
         uses: actions/upload-artifact@v4
         with:

@@ -112,6 +112,9 @@ pub struct AddTextArgs {
     /// Line height as a multiple of the font size.
     #[serde(default)]
     pub line_height: Option<f64>,
+    /// Extra pixels between explicit paragraphs, including empty paragraphs. Zero resets spacing.
+    #[serde(default)]
+    pub paragraph_spacing: Option<f64>,
     /// Font weight, 100–900; 400 is the regular face. A weight the font
     /// store has no face for is an error at render time, never a
     /// substitution.
@@ -303,6 +306,9 @@ pub struct UpdateArgs {
     /// New line height, as a multiple of the font size, for a text layer.
     #[serde(default)]
     pub line_height: Option<f64>,
+    /// Extra pixels between explicit paragraphs, including empty paragraphs. Zero resets spacing.
+    #[serde(default)]
+    pub paragraph_spacing: Option<f64>,
     /// New font weight, 100–900, for a text layer.
     #[serde(default)]
     pub font_weight: Option<u16>,
@@ -712,6 +718,7 @@ impl AssemblashMcp {
                 color: Some(args.color.clone().unwrap_or_else(Color::default)),
                 align: args.align.unwrap_or_default(),
                 line_height: args.line_height.unwrap_or(1.2),
+                paragraph_spacing: args.paragraph_spacing.unwrap_or(0.0),
                 font_weight: args.font_weight.unwrap_or(400),
                 font_style: args.font_style.unwrap_or_default(),
                 letter_spacing: args.letter_spacing.unwrap_or(0.0),
@@ -965,6 +972,7 @@ impl AssemblashMcp {
             color,
             align: args.align,
             line_height: args.line_height,
+            paragraph_spacing: args.paragraph_spacing,
             font_weight: args.font_weight,
             font_style: args.font_style,
             letter_spacing: args.letter_spacing,

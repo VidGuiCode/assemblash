@@ -395,6 +395,24 @@ properties panel; and over MCP with the `path` argument of
 `add_shape_layer` and the `shape`, `path`, and marker arguments of
 `update_layer`.
 
+### Paragraph spacing (1.12.0 development)
+
+`paragraphSpacing` sets extra pixels between explicit paragraphs. Its default is zero.
+The value must be finite and nonnegative. Leading, trailing, and empty paragraphs count.
+Automatic line wrapping adds no paragraph spacing. Plain text and styled runs support this property.
+Measurement, vertical alignment, overflow warnings, and automatic text height use the same paragraph spacing.
+
+Use `add-text --paragraph-spacing 12` or `set --paragraph-spacing 12` on the CLI.
+Use `paragraphSpacing` in HTTP operations and the MCP `add_text_layer` and `update_layer` tools.
+The Typography section has a Paragraph spacing field in pixels.
+Presets include this property. Set zero to remove an existing paragraph spacing value.
+Ordinary paragraph spacing updates preserve raw runs and unknown run properties.
+
+Older consumers can preserve the stored property but do not render paragraph spacing.
+Older history replay can discard paragraph spacing updates.
+Use a consumer with paragraph spacing support to edit these documents.
+The document schema stays at version 1. Version 1.12.0 is not published.
+
 ### Rendering and export
 
 Assemblash converts a document to SVG with a pure function. Then `resvg` and

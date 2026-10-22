@@ -92,7 +92,7 @@ class Client:
     def update(self, layer: str, values: dict, *, refuse=False, code=None, dry=False, version=None):
         if self.kind == "cli":
             args = ["set", str(self.project), "--layer", layer]
-            flags = {"fontSize": "size", "fontFamily": "font", "fontWeight": "weight"}
+            flags = {"fontSize": "size", "fontFamily": "font", "fontWeight": "weight", "paragraphSpacing": "paragraph-spacing"}
             for key, value in values.items():
                 if key == "runs":
                     path = self.workspace / f"{self.name}-runs.json"

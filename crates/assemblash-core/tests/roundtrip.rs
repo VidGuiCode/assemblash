@@ -101,6 +101,7 @@ fn text_kind() -> impl Strategy<Value = LayerKind> {
                     color: Some(color),
                     align,
                     line_height,
+                    paragraph_spacing: 0.0,
                     font_weight: 400,
                     font_style: FontStyle::Normal,
                     letter_spacing: 0.0,

@@ -460,6 +460,7 @@ export const fr: Record<keyof typeof en, string> = {
   "properties.opacity": "Opacité",
   "properties.fontSize": "Taille de police",
   "properties.lineHeight": "Interligne",
+  "properties.paragraphSpacing": "Espacement des paragraphes (px)",
   "properties.weight": "Graisse",
   "properties.letterSpacing": "Espacement des lettres",
   "properties.colour": "Couleur",

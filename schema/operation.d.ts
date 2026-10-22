@@ -276,6 +276,8 @@ export type CreateLayer = ({
   align?: TextAlign;
   /** Line height as a multiple of the font size. */
   lineHeight?: number;
+  /** Extra pixels between explicit paragraphs. Zero adds no space. */
+  paragraphSpacing?: number;
   /** Font weight, 100–900; 400 is the regular face. */
   fontWeight?: number;
   /** Upright or italic. */
@@ -473,6 +475,8 @@ export type UpdateLayer = {
   align?: TextAlign | null;
   /** Text layers: new line height. */
   lineHeight?: number | null;
+  /** Text layers: extra pixels between explicit paragraphs. Zero resets spacing. */
+  paragraphSpacing?: number | null;
   /** Text layers: new font weight, 100–900. */
   fontWeight?: number | null;
   /** Text layers: new font style. */
@@ -561,6 +565,8 @@ export type PresetProperties = {
   align?: TextAlign | null;
   /** Text layers: line height. */
   lineHeight?: number | null;
+  /** Text layers: extra pixels between explicit paragraphs. Zero resets spacing. */
+  paragraphSpacing?: number | null;
   /** Text layers: font weight, 100–900. */
   fontWeight?: number | null;
   /** Text layers: upright or italic. */

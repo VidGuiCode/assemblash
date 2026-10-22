@@ -1330,6 +1330,11 @@
               "format": "double",
               "default": 1.2
             },
+            "paragraphSpacing": {
+              "description": "Extra pixels between explicit paragraphs. Zero adds no space.",
+              "type": "number",
+              "format": "double"
+            },
             "fontWeight": {
               "description": "Font weight, 100–900; 400 is the regular face.",
               "type": "integer",
@@ -1960,6 +1965,14 @@
           ],
           "format": "double"
         },
+        "paragraphSpacing": {
+          "description": "Text layers: extra pixels between explicit paragraphs. Zero resets spacing.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "fontWeight": {
           "description": "Text layers: new font weight, 100–900.",
           "type": [
@@ -2300,6 +2313,14 @@
         },
         "lineHeight": {
           "description": "Text layers: line height.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "paragraphSpacing": {
+          "description": "Text layers: extra pixels between explicit paragraphs. Zero resets spacing.",
           "type": [
             "number",
             "null"

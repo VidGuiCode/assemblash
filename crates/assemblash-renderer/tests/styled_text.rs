@@ -31,6 +31,7 @@ fn document(body: &str) -> Document {
             color: Some(Color::new("#000000")),
             align: TextAlign::Left,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: FontStyle::Normal,
             letter_spacing: 0.0,
@@ -86,6 +87,201 @@ fn compare_pixels(expected: &str, actual: &str, fonts: &LoadedFonts, label: &str
         assert!(
             changed <= 2 && max <= 16 && total <= 96,
             "{label} @{scale}: changed={changed}, max={max}, total={total}"
+        );
+    }
+}
+
+#[test]
+fn paragraph_spacing_counts_explicit_empty_paragraphs_and_preserves_wrapping() {
+    let fonts = fonts();
+    for is_styled in [false, true] {
+        for body in ["\nA\n\nB\n", "\n\n", "A", ""] {
+            let mut doc = document(body);
+            if is_styled {
+                styled(&mut doc);
+            }
+            for align in [
+                VerticalAlign::Top,
+                VerticalAlign::Middle,
+                VerticalAlign::Bottom,
+            ] {
+                text(&mut doc).vertical_align = align;
+                text(&mut doc).paragraph_spacing = 0.0;
+                let before = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+                text(&mut doc).paragraph_spacing = 13.25;
+                let after = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+                let gaps = body.matches('\n').count();
+                let delta = gaps as f64 * 13.25;
+                assert!(
+                    (after.height - before.height - delta).abs() < 1e-9,
+                    "{body:?}, styled={is_styled}"
+                );
+                let shift = match align {
+                    VerticalAlign::Top => 0.0,
+                    VerticalAlign::Middle => -delta / 2.0,
+                    VerticalAlign::Bottom => -delta,
+                };
+                assert_eq!(after.lines.len(), before.lines.len());
+                for (index, (a, b)) in after.lines.iter().zip(&before.lines).enumerate() {
+                    assert_eq!(a.text, b.text);
+                    assert_eq!(a.width, b.width);
+                    assert!((a.baseline - b.baseline - shift - index as f64 * 13.25).abs() < 1e-9);
+                }
+            }
+        }
+        let mut doc = document("one two three four five six");
+        if is_styled {
+            styled(&mut doc);
+        }
+        let before = layout_text_layer(&doc.layers[0], 80.0, fonts.font_set()).unwrap();
+        assert!(before.lines.len() > 1);
+        text(&mut doc).paragraph_spacing = 99.0;
+        let after = layout_text_layer(&doc.layers[0], 80.0, fonts.font_set()).unwrap();
+        assert_eq!(before.lines, after.lines);
+        assert_eq!(before.height, after.height);
+    }
+}
+
+#[test]
+fn paragraph_spacing_mixed_metrics_rtl_marks_and_clipping_share_layout() {
+    let fonts = fonts();
+    let mut doc = document("A\nب\nA\u{301}");
+    text(&mut doc).runs = vec![
+        json!({"text":"A\n","fontSize":48}),
+        json!({"text":"ب","fontFamily":"Noto Sans Arabic","fontSize":40}),
+        json!({"text":"\nA\u{301}","fontSize":18}),
+    ];
+    doc.layers[0].transform.height = 20.0;
+    doc.layers[0].clip = Some(serde_json::from_value(json!({"shape":"rect"})).unwrap());
+    for align in [
+        VerticalAlign::Top,
+        VerticalAlign::Middle,
+        VerticalAlign::Bottom,
+    ] {
+        text(&mut doc).vertical_align = align;
+        text(&mut doc).paragraph_spacing = 0.0;
+        let before = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+        text(&mut doc).paragraph_spacing = 12.5;
+        let after = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+        assert!((after.height - before.height - 25.0).abs() < 1e-9);
+        assert!(after.overflow);
+        let warnings =
+            assemblash_renderer::export_warnings(&doc, fonts.font_set(), std::path::Path::new("."));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.code == "textOverflowsBox"));
+        let svg = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        assert!(svg.contains("clipPath"));
+        svg_to_pixmap(&svg, &fonts, 1.0).unwrap();
+    }
+}
+
+#[test]
+fn excessive_paragraph_spacing_refuses_shared_measurement_and_rendering() {
+    let fonts = fonts();
+    for is_styled in [false, true] {
+        for value in [1e308, 1e40] {
+            let mut doc = document("A\nB\nC");
+            if is_styled {
+                styled(&mut doc);
+            }
+            text(&mut doc).paragraph_spacing = value;
+            assert!(assemblash_core::validate(&doc).is_ok());
+            refuses(&doc, TextFailureKind::InvalidGeometry);
+            assert!(matches!(
+                doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()),
+                Err(RenderError::TextLayout {
+                    source: TextLayoutError::Unsupported {
+                        kind: TextFailureKind::InvalidGeometry,
+                        ..
+                    },
+                    ..
+                })
+            ));
+            let warnings = assemblash_renderer::export_warnings(
+                &doc,
+                fonts.font_set(),
+                std::path::Path::new("."),
+            );
+            assert!(warnings
+                .iter()
+                .any(|warning| warning.code == "cannotMeasureText"));
+        }
+    }
+}
+
+#[test]
+fn paragraph_spacing_validates_retained_cursor_additions_before_svg_emission() {
+    let fonts = fonts();
+    let body = std::iter::repeat_n("A", 11).collect::<Vec<_>>().join("\n");
+    let mut doc = document(&body);
+    let spacing = f64::from(f32::MAX) / 10.0;
+    let ideal = 10.0 * spacing;
+    assert!((ideal as f32).is_finite());
+    let rounded = ((spacing * 1_000_000.0).round() / 1_000_000.0) as f32;
+    let accumulated = (0..10).fold(0.0_f32, |cursor, _| cursor + rounded);
+    assert!(accumulated.is_infinite());
+    text(&mut doc).paragraph_spacing = spacing;
+    assert!(assemblash_core::validate(&doc).is_ok());
+    refuses(&doc, TextFailureKind::InvalidGeometry);
+    assert!(matches!(
+        doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()),
+        Err(RenderError::TextLayout {
+            source: TextLayoutError::Unsupported {
+                kind: TextFailureKind::InvalidGeometry,
+                ..
+            },
+            ..
+        })
+    ));
+    assert!(assemblash_renderer::export_warnings(
+        &doc,
+        fonts.font_set(),
+        std::path::Path::new(".")
+    )
+    .iter()
+    .any(|warning| warning.code == "cannotMeasureText"));
+}
+
+#[test]
+fn paragraph_spacing_uses_the_same_width_refusal_for_render_and_measurement() {
+    let fonts = fonts();
+    let mut doc = document("A\nB");
+    doc.layers[0].transform.width = 0.0;
+    text(&mut doc).paragraph_spacing = 12.0;
+    assert!(matches!(
+        layout_text_layer(&doc.layers[0], 0.0, fonts.font_set()),
+        Err(RenderError::InvalidTextWidth { .. })
+    ));
+    assert!(matches!(
+        doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()),
+        Err(RenderError::InvalidTextWidth { .. })
+    ));
+}
+
+#[test]
+fn paragraph_spacing_emission_retains_plain_svg_cursor_deltas() {
+    let fonts = fonts();
+    for align in [
+        VerticalAlign::Top,
+        VerticalAlign::Middle,
+        VerticalAlign::Bottom,
+    ] {
+        let mut doc = document("First line\n\nSecond line\n\nEnd\n");
+        doc.canvas.height = 540.0;
+        doc.layers[0].transform.x = 24.125;
+        doc.layers[0].transform.y = -8.375;
+        doc.layers[0].transform.height = 420.0;
+        text(&mut doc).paragraph_spacing = 13.35;
+        text(&mut doc).vertical_align = align;
+        let expected = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        styled(&mut doc);
+        let actual = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        compare_pixels(
+            &expected,
+            &actual,
+            &fonts,
+            &format!("paragraph spacing {align:?}"),
         );
     }
 }

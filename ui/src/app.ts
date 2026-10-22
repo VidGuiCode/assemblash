@@ -1726,6 +1726,7 @@ function drawInspectorContent(): void {
     pane.append(fontField);
     field("properties.fontSize", String(layer.fontSize), (next) => ({ op: "update", id: layer.id, fontSize: Number(next) }) as Operation);
     field("properties.lineHeight", String(layer.lineHeight ?? 1.2), (next) => ({ op: "update", id: layer.id, lineHeight: Number(next) }) as Operation);
+    field("properties.paragraphSpacing", String(layer.paragraphSpacing ?? 0), (next) => ({ op: "update", id: layer.id, paragraphSpacing: Number(next) }) as Operation);
     // Weight is offered as the faces the store actually holds for this family;
     // a weight the files lack is refused at render, so it is not offered here.
     // When the store records no faces for the family, the honest fallback is

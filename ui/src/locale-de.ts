@@ -461,6 +461,7 @@ export const de: Record<keyof typeof en, string> = {
   "properties.opacity": "Deckkraft",
   "properties.fontSize": "Schriftgröße",
   "properties.lineHeight": "Zeilenhöhe",
+  "properties.paragraphSpacing": "Absatzabstand (px)",
   "properties.weight": "Schriftschnitt",
   "properties.letterSpacing": "Zeichenabstand",
   "properties.colour": "Farbe",

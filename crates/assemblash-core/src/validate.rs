@@ -129,6 +129,16 @@ fn check_presets(document: &Document, errors: &mut Vec<ValidationError>) {
             });
         }
         let context = format!("preset {:?}", preset.name);
+        if let Some(value) = preset.properties.paragraph_spacing {
+            if !value.is_finite() || value < 0.0 {
+                errors.push(ValidationError::InvalidPresetProperty {
+                    name: preset.name.clone(),
+                    field: "paragraphSpacing",
+                    expected: "finite and nonnegative",
+                    value,
+                });
+            }
+        }
         for (field, paint) in [
             ("color", preset.properties.color.as_ref()),
             ("fill", preset.properties.fill.as_ref()),
@@ -234,6 +244,14 @@ fn check_layer(layer: &Layer, known_assets: &HashSet<&AssetId>, errors: &mut Vec
                 errors.push(ValidationError::InvalidLineHeight {
                     layer: layer.id.clone(),
                     value: text.line_height,
+                });
+            }
+            if !text.paragraph_spacing.is_finite() || text.paragraph_spacing < 0.0 {
+                errors.push(ValidationError::InvalidShape {
+                    layer: layer.id.clone(),
+                    field: "paragraphSpacing",
+                    expected: "finite and nonnegative",
+                    value: text.paragraph_spacing,
                 });
             }
             if !(100..=900).contains(&text.font_weight) {
@@ -849,6 +867,7 @@ mod tests {
                 color: Some(Color::new("nope")),
                 align: TextAlign::Left,
                 line_height: 1.2,
+                paragraph_spacing: 0.0,
                 font_weight: 400,
                 font_style: crate::document::FontStyle::Normal,
                 letter_spacing: 0.0,

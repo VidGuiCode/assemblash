@@ -637,6 +637,7 @@ export function styleOf(layer: Layer): Record<string, unknown> {
     properties["color"] = layer.color ?? "#000000";
     properties["align"] = layer.align ?? "left";
     properties["lineHeight"] = layer.lineHeight ?? 1.2;
+    properties["paragraphSpacing"] = layer.paragraphSpacing ?? 0;
   }
   if (layer.type === "shape") {
     // A preset cannot clear a paint, so a shape with no fill contributes no

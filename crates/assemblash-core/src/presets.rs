@@ -76,6 +76,9 @@ pub struct PresetProperties {
     /// Text layers: line height.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_height: Option<f64>,
+    /// Text layers: extra pixels between explicit paragraphs. Zero resets spacing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paragraph_spacing: Option<f64>,
     /// Text layers: font weight, 100–900.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_weight: Option<u16>,
@@ -128,6 +131,7 @@ impl PresetProperties {
             color: self.color.clone().map(Some),
             align: self.align,
             line_height: self.line_height,
+            paragraph_spacing: self.paragraph_spacing,
             font_weight: self.font_weight,
             font_style: self.font_style,
             letter_spacing: self.letter_spacing,
@@ -152,6 +156,7 @@ impl PresetProperties {
             && self.color.is_none()
             && self.align.is_none()
             && self.line_height.is_none()
+            && self.paragraph_spacing.is_none()
             && self.font_weight.is_none()
             && self.font_style.is_none()
             && self.letter_spacing.is_none()

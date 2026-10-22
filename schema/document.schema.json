@@ -1080,6 +1080,11 @@
           "format": "double",
           "default": 1.2
         },
+        "paragraphSpacing": {
+          "description": "Extra pixels between explicit paragraphs, including empty paragraphs.",
+          "type": "number",
+          "format": "double"
+        },
         "fontWeight": {
           "description": "Font weight, 100 to 900 as CSS names them.\n\nResolved against the caller's font set by exact face: a family whose\nbold face is not loaded is a typed refusal at render time, not a\nsilent nearest match. 400 is the regular face.",
           "type": "integer",
@@ -1447,6 +1452,14 @@
         },
         "lineHeight": {
           "description": "Text layers: line height.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "paragraphSpacing": {
+          "description": "Text layers: extra pixels between explicit paragraphs. Zero resets spacing.",
           "type": [
             "number",
             "null"

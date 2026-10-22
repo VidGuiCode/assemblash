@@ -3921,12 +3921,13 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     for (let i = 0; i < 20; i++) {
       await page.key("ArrowRight", { code: "ArrowRight" });
     }
-    await setFields([["Font size", "52"], ["Line height", "1.6"]]);
-    await waitForWrites(fixture, 22);
+    await setFields([["Font size", "52"], ["Line height", "1.6"], ["Paragraph spacing", "17.25"]]);
+    await waitForWrites(fixture, 23);
     await waitForSaved(page);
-    assert.equal(fixture.writes.length, 22, "different properties never replace each other");
+    assert.equal(fixture.writes.length, 23, "different properties never replace each other");
     assert.deepEqual(fixture.writes[20].body.operation, { op: "update", id: "layer_text", fontSize: 52 });
     assert.deepEqual(fixture.writes[21].body.operation, { op: "update", id: "layer_text", lineHeight: 1.6 });
+    assert.deepEqual(fixture.writes[22].body.operation, { op: "update", id: "layer_text", paragraphSpacing: 17.25 });
   });
 
   await t.test("a refused edit behind an accepted one leaves the page on the newest version", async () => {

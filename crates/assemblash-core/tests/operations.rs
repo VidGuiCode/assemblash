@@ -28,6 +28,7 @@ fn text_kind() -> NewLayerKind {
         color: Some(Color::new("#000000")),
         align: TextAlign::Left,
         line_height: 1.2,
+        paragraph_spacing: 0.0,
         font_weight: 400,
         font_style: assemblash_core::FontStyle::Normal,
         letter_spacing: 0.0,
@@ -75,6 +76,62 @@ impl Editor {
     fn layer(&self, id: &LayerId) -> &Layer {
         self.document.find_layer(id).expect("layer exists")
     }
+}
+
+#[test]
+fn paragraph_spacing_is_atomic_preserves_runs_and_resets_through_presets() {
+    use serde_json::json;
+    let mut editor = Editor::new();
+    let id = editor.add(0.0, 0.0, 200.0, 100.0);
+    let raw = vec![
+        json!({"text":"x","future":{"keep":[1,2]},"color":{"kind":"linear","angle":20,"futurePaint":7,"stops":[{"offset":0,"color":"#000000","futureStop":true},{"offset":1,"color":"#ffffff"}]}}),
+    ];
+    editor.apply(serde_json::from_value(json!({"op":"update","id":id,"runs":raw})).unwrap());
+    editor.apply(
+        serde_json::from_value(json!({"op":"update","id":id,"paragraphSpacing":16.25})).unwrap(),
+    );
+    let stored = serde_json::to_value(editor.layer(&id)).unwrap();
+    assert_eq!(stored["paragraphSpacing"], 16.25);
+    assert_eq!(stored["runs"], json!(raw));
+    for value in [-1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+        let before = editor.document.clone();
+        assert!(editor
+            .try_apply(Operation::Update(UpdateLayer {
+                paragraph_spacing: Some(value),
+                ..UpdateLayer::new(id.clone())
+            }))
+            .is_err());
+        assert_eq!(editor.document, before);
+        let preset = assemblash_core::Preset {
+            name: "invalid-spacing".into(),
+            description: None,
+            properties: assemblash_core::PresetProperties {
+                paragraph_spacing: Some(value),
+                ..Default::default()
+            },
+            extra: Extras::new(),
+        };
+        assert!(editor
+            .try_apply(Operation::DefinePreset {
+                preset: preset.clone()
+            })
+            .is_err());
+        assert_eq!(editor.document, before);
+        let mut invalid = before.clone();
+        invalid.presets.push(preset);
+        assert!(validate(&invalid).is_err());
+    }
+    editor.apply(serde_json::from_value(json!({"op":"definePreset","preset":{"name":"zero","properties":{"paragraphSpacing":0}}})).unwrap());
+    editor.apply(
+        serde_json::from_value(json!({"op":"applyPreset","id":id,"preset":"zero"})).unwrap(),
+    );
+    let stored = serde_json::to_value(editor.layer(&id)).unwrap();
+    assert!(stored.get("paragraphSpacing").is_none());
+    assert_eq!(stored["runs"], json!(raw));
+    assert!(!editor.document.presets[0].properties.is_empty());
+    let loaded: Document =
+        serde_json::from_value(serde_json::to_value(&editor.document).unwrap()).unwrap();
+    assert_eq!(loaded, editor.document);
 }
 
 #[test]

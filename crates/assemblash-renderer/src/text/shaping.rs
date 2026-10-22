@@ -461,6 +461,7 @@ struct Line {
     size: f64,
     baseline: f64,
     x: f64,
+    paragraph_last: bool,
 }
 
 fn line(chars: Vec<Character>, base: &Style, layer: &Layer) -> Result<Line, RenderError> {
@@ -485,6 +486,7 @@ fn line(chars: Vec<Character>, base: &Style, layer: &Layer) -> Result<Line, Rend
         size: f64::from(size),
         baseline: 0.0,
         x: 0.0,
+        paragraph_last: false,
     })
 }
 
@@ -496,6 +498,8 @@ pub(super) fn layout(
 ) -> Result<TextLayerLayout, RenderError> {
     if !text.line_height.is_finite()
         || text.line_height <= 0.0
+        || !text.paragraph_spacing.is_finite()
+        || text.paragraph_spacing < 0.0
         || !layer.transform.height.is_finite()
     {
         return Err(fail(
@@ -637,6 +641,9 @@ pub(super) fn layout(
         if !current.is_empty() || lines.len() == first_line {
             lines.push(line(current, &base, layer)?);
         }
+        if let Some(last) = lines.last_mut() {
+            last.paragraph_last = true;
+        }
     }
     let mut top = f64::INFINITY;
     let mut bottom = f64::NEG_INFINITY;
@@ -644,7 +651,13 @@ pub(super) fn layout(
         lines[index].baseline = if index == 0 {
             lines[index].ascent
         } else {
-            lines[index - 1].baseline + lines[index - 1].size * text.line_height
+            lines[index - 1].baseline
+                + lines[index - 1].size * text.line_height
+                + if lines[index - 1].paragraph_last {
+                    text.paragraph_spacing
+                } else {
+                    0.0
+                }
         };
         top = top.min(lines[index].baseline - lines[index].ascent);
         bottom = bottom.max(lines[index].baseline + lines[index].descent);
@@ -705,7 +718,14 @@ pub(super) fn layout(
             emitted_baseline = svg_coordinate(layer.transform.y + item.baseline);
             0.0
         } else {
-            svg_coordinate(lines[line_index - 1].size * text.line_height)
+            svg_coordinate(
+                lines[line_index - 1].size * text.line_height
+                    + if lines[line_index - 1].paragraph_last {
+                        text.paragraph_spacing
+                    } else {
+                        0.0
+                    },
+            )
         };
         let span = Transform::from_translate(layer.transform.x as f32 + origin, emitted_baseline);
         emitted_baseline += dy;

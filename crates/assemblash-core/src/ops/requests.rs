@@ -172,6 +172,9 @@ pub enum NewLayerKind {
         /// Line height as a multiple of the font size.
         #[serde(default = "default_line_height", alias = "line_height")]
         line_height: f64,
+        /// Extra pixels between explicit paragraphs. Zero adds no space.
+        #[serde(default, alias = "paragraph_spacing", skip_serializing_if = "is_zero")]
+        paragraph_spacing: f64,
         /// Font weight, 100–900; 400 is the regular face.
         #[serde(default = "default_font_weight", alias = "font_weight")]
         font_weight: u16,
@@ -232,6 +235,10 @@ pub enum NewLayerKind {
     },
 }
 
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
 fn default_line_height() -> f64 {
     1.2
 }
@@ -271,6 +278,7 @@ impl CreateLayer {
                 color,
                 align,
                 line_height,
+                paragraph_spacing,
                 font_weight,
                 font_style,
                 letter_spacing,
@@ -291,6 +299,7 @@ impl CreateLayer {
                     color: color.clone(),
                     align: *align,
                     line_height: *line_height,
+                    paragraph_spacing: *paragraph_spacing,
                     font_weight: *font_weight,
                     font_style: *font_style,
                     letter_spacing: *letter_spacing,
@@ -456,6 +465,9 @@ pub struct UpdateLayer {
     /// Text layers: new line height.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_height: Option<f64>,
+    /// Text layers: extra pixels between explicit paragraphs. Zero resets spacing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paragraph_spacing: Option<f64>,
     /// Text layers: new font weight, 100–900.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_weight: Option<u16>,
@@ -599,6 +611,7 @@ impl UpdateLayer {
             color: None,
             align: None,
             line_height: None,
+            paragraph_spacing: None,
             font_weight: None,
             font_style: None,
             letter_spacing: None,
@@ -764,6 +777,9 @@ impl UpdateLayer {
                 }
                 if let Some(value) = self.align {
                     text.align = value;
+                }
+                if let Some(value) = self.paragraph_spacing {
+                    text.paragraph_spacing = value;
                 }
                 if let Some(value) = self.line_height {
                     text.line_height = value;
@@ -963,6 +979,9 @@ impl UpdateLayer {
             self.color.is_some().then_some("color"),
             self.align.is_some().then_some("align"),
             self.line_height.is_some().then_some("lineHeight"),
+            self.paragraph_spacing
+                .is_some()
+                .then_some("paragraphSpacing"),
             self.font_weight.is_some().then_some("fontWeight"),
             self.font_style.is_some().then_some("fontStyle"),
             self.letter_spacing.is_some().then_some("letterSpacing"),
