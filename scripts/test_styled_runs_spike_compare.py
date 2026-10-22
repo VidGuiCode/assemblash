@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import styled_runs_spike_compare as comparator
 
@@ -23,7 +24,7 @@ class ComparatorTests(unittest.TestCase):
         fixture.mkdir()
         (fixture / 'layout').mkdir()
         report = {
-            'probeVersion': 2,
+            'probeVersion': 7,
             'italicFaceAvailable': True,
             'missingItalicDetected': True,
             'sameStyleComparisons': {
@@ -38,6 +39,20 @@ class ComparatorTests(unittest.TestCase):
             'styledLayout': {
                 'cases': {},
                 'missingFontRefusals': ['family', 'weight', 'italic'],
+                'readyForProductIntegration': True,
+                'mixedFontBodyAndDotVerified': True,
+                'trustedReferences': {},
+                'boundaryPolicy': 'effective styles must agree within one shaping cluster',
+                'spacingRefusals': {
+                    name: dict(zip(('runIndex', 'characterIndex', 'byteIndex'), indices),
+                               reason='applied letter spacing makes cluster advance nonpositive')
+                    for name, indices in comparator.SPACING_REFUSALS.items()
+                },
+                'boundaryRefusals': {
+                    name: {'runIndex': 1, 'characterIndex': 2, 'byteIndex': 2,
+                           'reason': 'effective styles differ inside one shaping cluster'}
+                    for name in comparator.BOUNDARY_REFUSALS
+                },
             },
         }
         for name in comparator.SHAPING_CASES:
@@ -53,12 +68,54 @@ class ComparatorTests(unittest.TestCase):
             name = 'layout_' + suffix
             svg = fixture / 'layout' / f'{name}.svg'
             svg.write_bytes(b'synthetic layout SVG')
-            case = {'svg': comparator.file_hash(svg), 'hashes': {}}
+            accepted = name not in comparator.DIAGNOSTIC_CASES
+            glyph = {'id': 66, 'text': 'a', 'family': 'Noto Sans',
+                     'sourceCharacterIndex': 0, 'sourceByteIndex': 0,
+                     'fontSha256': 'sha256:' + '1' * 64, 'fontFaceIndex': 0,
+                     'variationCoordinates': [], 'outlinePathSha256': 'sha256:' + '2' * 64}
+            glyphs = [] if name in comparator.EMPTY_LAYOUTS else [glyph]
+            if name == 'layout_natural_zero_mark':
+                glyphs = [dict(glyph, sourceXAdvance=0)]
+            if name == 'layout_bidi':
+                glyphs = [dict(glyph, id=glyph_id, family='Noto Sans Arabic',
+                               sourceCharacterIndex=7, sourceByteIndex=10)
+                          for glyph_id in (8, 44)]
+            case = {'svg': comparator.file_hash(svg), 'hashes': {},
+                    'accepted': accepted, 'diagnosticOnly': not accepted,
+                    'textPreserved': True, 'stylesVerified': accepted,
+                    'sourceIndexedStylesVerified': accepted, 'glyphs': glyphs}
             for scale in ('1', '2'):
                 png = fixture / 'layout' / f'{name}-{scale}.png'
                 png.write_bytes(b'synthetic layout PNG')
                 case['hashes'][scale] = {'png': comparator.file_hash(png)}
             report['styledLayout']['cases'][name] = case
+        for name in comparator.TRUSTED_REFERENCES:
+            svg = fixture / 'layout' / f'{name}-reference.svg'
+            svg.write_bytes(b'synthetic reference SVG')
+            reference = {'svg': comparator.file_hash(svg), 'glyphs': [{'id': 1}],
+                         'placementTolerancePx': 0.0001, 'scales': {}}
+            for scale in ('1', '2'):
+                png = fixture / 'layout' / f'{name}-reference-{scale}.png'
+                png.write_bytes(b'synthetic reference PNG')
+                reference['scales'][scale] = {
+                    'png': comparator.file_hash(png), 'maximumChannelDifference': 0,
+                    'totalChannelDifference': 0, 'changedPixels': 0, 'pixelCount': 1000}
+            reference['strokeComparisons'] = {}
+            for mode in ('stroke', 'stroke-first'):
+                stroke = {'scales': {}}
+                for suffix, key in (('', 'svg'), ('-reference', 'referenceSvg')):
+                    svg = fixture / 'layout' / f'{name}-{mode}{suffix}.svg'
+                    svg.write_bytes(b'synthetic stroke SVG')
+                    stroke[key] = comparator.file_hash(svg)
+                for scale in ('1', '2'):
+                    result = {'maximumChannelDifference': 0, 'totalChannelDifference': 0, 'changedPixels': 0}
+                    for suffix, key in (('', 'png'), ('-reference', 'referencePng')):
+                        png = fixture / 'layout' / f'{name}-{mode}{suffix}-{scale}.png'
+                        png.write_bytes(b'synthetic stroke PNG')
+                        result[key] = comparator.file_hash(png)
+                    stroke['scales'][scale] = result
+                reference['strokeComparisons'][mode] = stroke
+            report['styledLayout']['trustedReferences'][name] = reference
         self.report = report
         (fixture / 'report.json').write_text(json.dumps(report), encoding='utf-8')
         (fixture / 'source.txt').write_text(self.revision + '\n', encoding='utf-8')
@@ -102,6 +159,104 @@ class ComparatorTests(unittest.TestCase):
         for directory in self.directories:
             (directory / 'baseline-hashes.json').write_text(json.dumps(baseline), encoding='utf-8')
         with self.assertRaisesRegex(ValueError, 'committed 1.11.0 goldens'):
+            comparator.compare(self.root, self.revision)
+
+    def test_committed_legacy_tamper_refuses(self):
+        current = copy.deepcopy(self.baseline['hashes'])
+        current[next(iter(current))] = 'sha256:' + '0' * 64
+        path = self.root / 'goldens.json'
+        path.write_text(json.dumps(current), encoding='utf-8')
+        with patch.object(comparator, 'GOLDENS', path):
+            with self.assertRaisesRegex(ValueError, 'released 1.11.0 entry'):
+                comparator.compare(self.root, self.revision)
+
+    def test_appended_goldens_pass_without_changing_legacy(self):
+        baseline = copy.deepcopy(self.baseline)
+        baseline['hashes']['future-feature.svg'] = 'sha256:' + 'a' * 64
+        path = self.root / 'goldens.json'
+        path.write_text(json.dumps(baseline['hashes']), encoding='utf-8')
+        for directory in self.directories:
+            (directory / 'baseline-hashes.json').write_text(json.dumps(baseline), encoding='utf-8')
+        with patch.object(comparator, 'GOLDENS', path):
+            self.assertEqual(comparator.compare(self.root, self.revision), 6)
+
+    def test_missing_boundary_refusal_refuses(self):
+        report = copy.deepcopy(self.report)
+        del report['styledLayout']['boundaryRefusals']['marks_size']
+        self.write_report(self.directories[0], report)
+        with self.assertRaisesRegex(ValueError, 'refusal coverage missing'):
+            comparator.compare(self.root, self.revision)
+
+    def test_spacing_refusal_coverage_and_indices_are_required(self):
+        for alteration in ('missing', 'wrong_index', 'wrong_reason'):
+            with self.subTest(alteration=alteration):
+                report = copy.deepcopy(self.report)
+                refusals = report['styledLayout']['spacingRefusals']
+                if alteration == 'missing':
+                    del refusals['exact_zero']
+                elif alteration == 'wrong_index':
+                    refusals['indexed_extreme']['byteIndex'] = 1
+                else:
+                    refusals['negative']['reason'] = 'ignored glyph'
+                self.write_report(self.directories[0], report)
+                with self.assertRaisesRegex(ValueError, 'spacing'):
+                    comparator.compare(self.root, self.revision)
+
+    def test_natural_zero_mark_outline_is_required(self):
+        report = copy.deepcopy(self.report)
+        report['styledLayout']['cases']['layout_natural_zero_mark']['glyphs'][0]['sourceXAdvance'] = 1
+        self.write_report(self.directories[0], report)
+        with self.assertRaisesRegex(ValueError, 'zero-advance mark outline missing'):
+            comparator.compare(self.root, self.revision)
+
+    def test_diagnostic_image_cannot_count_as_acceptance(self):
+        report = copy.deepcopy(self.report)
+        report['styledLayout']['cases']['layout_paint_split']['accepted'] = True
+        self.write_report(self.directories[0], report)
+        with self.assertRaisesRegex(ValueError, 'incorrect acceptance status'):
+            comparator.compare(self.root, self.revision)
+
+    def test_source_indexed_glyph_proof_is_required(self):
+        report = copy.deepcopy(self.report)
+        report['styledLayout']['cases']['layout_regular']['glyphs'] = [{'sourceCharacterIndex': 0}]
+        self.write_report(self.directories[0], report)
+        with self.assertRaisesRegex(ValueError, 'source-indexed glyph correspondence missing'):
+            comparator.compare(self.root, self.revision)
+
+    def test_empty_visible_glyph_evidence_refuses(self):
+        report = copy.deepcopy(self.report)
+        report['styledLayout']['cases']['layout_regular']['glyphs'] = []
+        self.write_report(self.directories[0], report)
+        with self.assertRaisesRegex(ValueError, 'visible accepted control has no glyph evidence'):
+            comparator.compare(self.root, self.revision)
+
+    def test_trusted_raster_budgets_refuse_perturbations(self):
+        for key, value in (('maximumChannelDifference', 17), ('changedPixels', 3), ('totalChannelDifference', 97)):
+            with self.subTest(key=key):
+                report = copy.deepcopy(self.report)
+                report['styledLayout']['trustedReferences']['layout_regular']['scales']['1'][key] = value
+                self.write_report(self.directories[0], report)
+                with self.assertRaisesRegex(ValueError, 'trusted raster differs'):
+                    comparator.compare(self.root, self.revision)
+
+    def test_stroke_reference_coverage_and_budgets_are_required(self):
+        for alteration in ('missing', 'budget'):
+            with self.subTest(alteration=alteration):
+                report = copy.deepcopy(self.report)
+                strokes = report['styledLayout']['trustedReferences']['layout_gradient_resume_long']['strokeComparisons']
+                if alteration == 'missing':
+                    del strokes['stroke-first']
+                else:
+                    strokes['stroke']['scales']['2']['changedPixels'] = 3
+                self.write_report(self.directories[0], report)
+                with self.assertRaisesRegex(ValueError, 'stroke'):
+                    comparator.compare(self.root, self.revision)
+
+    def test_blocked_correctness_gate_refuses(self):
+        report = copy.deepcopy(self.report)
+        report['styledLayout']['readyForProductIntegration'] = False
+        self.write_report(self.directories[0], report)
+        with self.assertRaisesRegex(ValueError, 'correctness gate remains blocked'):
             comparator.compare(self.root, self.revision)
 
     def test_matching_failed_shaping_control_refuses(self):

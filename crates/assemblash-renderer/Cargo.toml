@@ -31,6 +31,10 @@ workspace = true
 [dev-dependencies]
 # Use the shaping version already selected by usvg for the isolated layout spike.
 harfrust = "0.12.0"
+# Match usvg's existing bidirectional segmentation in the isolated shaping probe.
+unicode-bidi = "0.3.18"
+# Match usvg's connected-script letter-spacing exclusions in the isolated probe.
+unicode-script = "0.5.8"
 png = "0.18.1"
 serde_json = "1.0.151"
 # The clip-composition spike inspects rendered pixels directly; pinned to the

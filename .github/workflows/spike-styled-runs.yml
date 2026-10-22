@@ -43,6 +43,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test exact-face measurement and existing renderer goldens
         run: cargo test --locked -p assemblash-renderer --test face_measurement --test gate
+      - name: Test source-indexed glyph verification
+        run: cargo test --locked -p assemblash-renderer --example styled_runs_spike
       - name: Render the isolated layout candidate
         shell: bash
         run: |
@@ -63,6 +65,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

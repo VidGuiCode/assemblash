@@ -185,12 +185,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert_eq!(a, combined);
     let storage_probe = storage_probe(&out)?;
     let styled_layout = styled_layout::run_spike(&out, &fonts, &options)?;
-    let report = json!({"probeVersion":2,"fonts":font_report,"missingItalicDetected":missing_italic,
+    let report = json!({"probeVersion":7,"fonts":font_report,"missingItalicDetected":missing_italic,
         "italicFaceAvailable":true,
         "renders":renders,"sameStyleComparisons":comparisons,"arabicColourBoundaryGeometryEqual":colour_geometry_equal,
         "legacyFamilyMeasurement":{"regularLines":a.lines,"boldLines":b.lines,
         "combinedUsesFirstFace":true},"storage":storage_probe,"styledLayout":styled_layout,
-        "unproved":["public model integration", "new typed run storage", "history replay with new operation fields", "six native targets"]});
+        "unproved":["public model integration", "new typed run storage", "history replay with new operation fields", "variable-font optical-size behavior", "six native targets"]});
     fs::write(
         out.join("report.json"),
         serde_json::to_string_pretty(&report)? + "\n",
