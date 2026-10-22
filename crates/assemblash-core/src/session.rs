@@ -442,7 +442,9 @@ impl Session {
         let position = history.position();
         if document.version < position {
             document = history.rebuild(position)?;
-            storage::save(&document, project_dir)?;
+            if lock.owned {
+                storage::save(&document, project_dir)?;
+            }
             recovered = true;
         } else if document.version > position {
             // History is shorter than the document claims — the history

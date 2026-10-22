@@ -1703,6 +1703,61 @@ fn add_fixed_background_asset(document: &mut Document) -> (AssetId, AssetHrefs) 
     (asset_id, hrefs)
 }
 
+fn styled_runs_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 640.0, 430.0);
+    let mut latin = text_layer(
+        "layer_styled_latin",
+        Transform::new(24.0, 24.0, 590.0, 120.0),
+        "Styled bold color\nSmall text",
+        "Noto Sans",
+        32.0,
+        TextAlign::Left,
+    );
+    if let LayerKind::Text(text) = &mut latin.kind {
+        text.color = Some(linear_paint(
+            20.0,
+            &[(0.0, "#b02050", 1.0), (1.0, "#102030", 1.0)],
+        ));
+        text.runs = vec![
+            serde_json::json!({"text":"Styled ","fontSize":48}),
+            serde_json::json!({"text":"bold ","fontWeight":700,"color":"#336699"}),
+            serde_json::json!({"text":"color\n"}),
+            serde_json::json!({"text":"Small text","fontSize":18}),
+        ];
+        text.stroke = Some(plain_stroke("#000000", 0.75));
+    }
+    document.layers.push(latin);
+    let mut arabic = text_layer(
+        "layer_styled_arabic",
+        Transform::new(24.0, 170.0, 590.0, 100.0),
+        "A ب B",
+        "Noto Sans",
+        48.0,
+        TextAlign::Left,
+    );
+    if let LayerKind::Text(text) = &mut arabic.kind {
+        text.runs = vec![
+            serde_json::json!({"text":"A "}),
+            serde_json::json!({"text":"ب","fontFamily":"Noto Sans Arabic","color":"#118844"}),
+            serde_json::json!({"text":" B"}),
+        ];
+    }
+    document.layers.push(arabic);
+    let mut optical = text_layer(
+        "layer_styled_optical",
+        Transform::new(24.0, 290.0, 590.0, 120.0),
+        "Optical A",
+        "Assemblash Optical Probe",
+        72.0,
+        TextAlign::Left,
+    );
+    if let LayerKind::Text(text) = &mut optical.kind {
+        text.runs = vec![serde_json::json!({"text":"Optical A"})];
+    }
+    document.layers.push(optical);
+    (document, AssetHrefs::new())
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -1717,6 +1772,7 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("text-stroke", text_stroke_document()),
         ("text-spacing", text_spacing_document()),
         ("text-valign", text_valign_document()),
+        ("styled-runs", styled_runs_document()),
         ("clip-rounded", clip_rounded_document()),
         ("clip-ellipse", clip_ellipse_document()),
         ("crop", crop_document()),
@@ -1762,6 +1818,10 @@ fn scaled_reference_documents() -> Vec<(&'static str, Document, AssetHrefs, f32)
     let (radial, radial_hrefs) = gradient_radial_document();
     let (line, line_hrefs) = gradient_line_document();
     let mut scaled = vec![
+        {
+            let (document, hrefs) = styled_runs_document();
+            ("styled-runs-scale2", document, hrefs, 2.0)
+        },
         ("crop-scale2", document, hrefs, 2.0),
         ("gradient-linear-scale2", gradient, gradient_hrefs, 2.0),
         ("gradient-radial-scale2", radial, radial_hrefs, 2.0),

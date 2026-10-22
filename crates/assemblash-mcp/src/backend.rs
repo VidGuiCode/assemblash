@@ -950,11 +950,13 @@ impl Backend {
         if let Root::Workspace(state) = &self.root {
             return state.fonts_for(document);
         }
-        let families = families_used(document);
+        let families = assemblash_renderer::text_font_families(document)?;
         if families.is_empty() {
             return Ok(LoadedFonts::from_bytes([]));
         }
-        Ok(self.fonts()?.load_families(&families)?)
+        let fonts = self.fonts()?.load_available_families(&families)?;
+        assemblash_renderer::check_text_fonts(document, fonts.font_set())?;
+        Ok(fonts)
     }
 
     /// The font store this server renders with.
@@ -1072,12 +1074,7 @@ impl Backend {
         let directory = session.project_dir().to_path_buf();
         drop(session);
 
-        let families = families_used(&document);
-        let fonts = if families.is_empty() {
-            LoadedFonts::from_bytes([])
-        } else {
-            self.fonts()?.load_families(&families)?
-        };
+        let fonts = self.fonts_for(&document)?;
         Ok(Loaded {
             document,
             directory,
@@ -1154,16 +1151,6 @@ fn collect(layers: &[Layer], parent: Option<&str>, depth: usize, out: &mut Vec<L
             collect(&group.children, Some(&id), depth + 1, out);
         }
     }
-}
-
-fn families_used(document: &Document) -> Vec<String> {
-    let mut families = std::collections::BTreeSet::new();
-    document.walk_layers(&mut |layer| {
-        if let LayerKind::Text(text) = &layer.kind {
-            families.insert(text.font_family.clone());
-        }
-    });
-    families.into_iter().collect()
 }
 
 /// The statuses `ApiError` is built from.

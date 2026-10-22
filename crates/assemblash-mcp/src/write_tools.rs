@@ -93,6 +93,11 @@ pub struct AddTextArgs {
     pub box_: BoxArgs,
     /// The text. A newline starts a new line.
     pub text: String,
+    /// Raw styled runs. Nonempty lists must concatenate exactly to text.
+    /// Omitted styles inherit. color:null removes fill. Other null styles inherit.
+    #[serde(default)]
+    #[schemars(with = "Vec<assemblash_core::TextRunInput>")]
+    pub runs: Vec<serde_json::Value>,
     /// Font family, spelled as the font store reports it. A family that is not
     /// installed is an error at render time, never a substitution.
     pub font_family: String,
@@ -278,6 +283,11 @@ pub struct UpdateArgs {
     /// New text, for a text layer.
     #[serde(default)]
     pub text: Option<String>,
+    /// Replace raw text runs. [] clears styling; null or omission keeps runs.
+    /// Text-only writes clear runs. Supply text and runs for an atomic replacement.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<assemblash_core::TextRunInput>>")]
+    pub runs: Option<Vec<serde_json::Value>>,
     /// New font family, for a text layer.
     #[serde(default)]
     pub font_family: Option<String>,
@@ -682,9 +692,10 @@ pub struct RenameProjectArgs {
 impl AssemblashMcp {
     /// Adds a text layer.
     #[tool(
-        description = "Add a text layer to a project. Fonts are not substituted: the family \
-                       must be one the font store has. Set dryRun to see what would happen \
-                       without doing it."
+        description = "Add a text layer. Optional runs must concatenate exactly to text. \
+                       Omitted run styles inherit; color:null removes fill. Other null styles inherit. \
+                       Writes validate structure. Rendering requires exact installed font faces and compatible shaping clusters. \
+                       Set dryRun to inspect the operation without saving."
     )]
     async fn add_text_layer(
         &self,
@@ -706,6 +717,7 @@ impl AssemblashMcp {
                 letter_spacing: args.letter_spacing.unwrap_or(0.0),
                 stroke: args.stroke.as_ref().map(StrokeArgs::to_stroke),
                 vertical_align: args.vertical_align.unwrap_or_default(),
+                runs: args.runs.clone(),
             },
         });
         self.write(&args.write, operation)
@@ -848,7 +860,9 @@ impl AssemblashMcp {
     /// Changes a layer's properties.
     #[tool(
         description = "Change properties of an existing layer. Only the fields you pass are \
-                       touched; omitting one leaves it alone. On a shape layer you may also \
+                       touched; omitting one leaves it alone. Text-only writes clear runs. \
+                       Supply text and runs for one atomic replacement. runs:[] clears styling; runs:null omits that field. \
+                       On a shape layer you may also \
                        replace the whole geometry with `shape` (rect, ellipse, line, or path; \
                        a path needs `path` data, and a bad d string is refused naming the \
                        command and byte), or set line markers with markerStart/markerEnd \
@@ -945,6 +959,7 @@ impl AssemblashMcp {
         let operation = Operation::Update(UpdateLayer {
             opacity: args.opacity,
             text: args.text.clone(),
+            runs: args.runs.clone(),
             font_family: args.font_family.clone(),
             font_size: args.font_size,
             color,

@@ -33,6 +33,7 @@ fn text_kind() -> NewLayerKind {
         letter_spacing: 0.0,
         stroke: None,
         vertical_align: assemblash_core::VerticalAlign::Top,
+        runs: Vec::new(),
     }
 }
 

@@ -58,6 +58,7 @@ impl Canvas {
                 letter_spacing: 0.0,
                 stroke: None,
                 vertical_align: assemblash_core::VerticalAlign::Top,
+                runs: Vec::new(),
             },
         });
         apply(&mut self.document, &operation, &mut self.ids)

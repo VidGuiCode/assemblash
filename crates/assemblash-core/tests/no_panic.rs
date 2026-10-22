@@ -43,6 +43,7 @@ fn seed_document() -> Document {
                     letter_spacing: 0.0,
                     stroke: None,
                     vertical_align: assemblash_core::VerticalAlign::Top,
+                    runs: Vec::new(),
                 },
             }),
             &mut ids,
@@ -137,6 +138,7 @@ fn hostile_operation() -> impl Strategy<Value = Operation> {
                         letter_spacing: 0.0,
                         stroke: None,
                         vertical_align: assemblash_core::VerticalAlign::Top,
+                        runs: Vec::new(),
                     },
                 })
             ),

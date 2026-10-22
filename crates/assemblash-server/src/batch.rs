@@ -127,6 +127,7 @@ fn insert_layer(
             letter_spacing: text.letter_spacing,
             stroke: text.stroke.clone(),
             vertical_align: text.vertical_align,
+            runs: text.runs.clone(),
         },
         LayerKind::Image(image) => NewLayerKind::Image {
             asset: image.asset.clone(),

@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use assemblash_core::session::SessionError;
-use assemblash_core::{Document, LayerKind};
+use assemblash_core::Document;
 use assemblash_renderer::raster::PngMetadata;
 use assemblash_renderer::{doc_to_svg, document_to_png, ExportWarning, FontStore, LoadedFonts};
 
@@ -59,11 +59,20 @@ pub struct Exported {
 }
 
 /// Every font family the document asks for, sorted and deduplicated.
+/// Lenient discovery preserves base families and nonempty string run references.
+/// Render consumers use strict typed requirements instead.
 pub fn families_used(document: &Document) -> Vec<String> {
     let mut families = std::collections::BTreeSet::new();
     document.walk_layers(&mut |layer| {
-        if let LayerKind::Text(text) = &layer.kind {
+        if let assemblash_core::LayerKind::Text(text) = &layer.kind {
             families.insert(text.font_family.clone());
+            families.extend(
+                text.runs
+                    .iter()
+                    .filter_map(|run| run.get("fontFamily").and_then(serde_json::Value::as_str))
+                    .filter(|family| !family.trim().is_empty())
+                    .map(str::to_owned),
+            );
         }
     });
     families.into_iter().collect()
@@ -71,11 +80,13 @@ pub fn families_used(document: &Document) -> Vec<String> {
 
 /// Loads exactly the fonts a document needs.
 pub fn fonts_for(document: &Document, store: &FontStore) -> Result<LoadedFonts, ApiError> {
-    let families = families_used(document);
+    let families = assemblash_renderer::text_font_families(document)?;
     if families.is_empty() {
         return Ok(LoadedFonts::from_bytes([]));
     }
-    Ok(store.load_families(&families)?)
+    let fonts = store.load_available_families(&families)?;
+    assemblash_renderer::check_text_fonts(document, fonts.font_set())?;
+    Ok(fonts)
 }
 
 /// How many projects the href cache keeps at once.
@@ -330,6 +341,28 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn lenient_discovery_keeps_base_and_known_run_families_with_legacy_values() {
+        let mut document = Document::new(
+            &mut assemblash_core::ids::SequentialIdSource::new(),
+            400.0,
+            200.0,
+        );
+        let text = serde_json::from_value(
+            serde_json::json!({"text":"A","fontFamily":"Noto Sans","fontSize":32,
+            "runs":[17,null,{"text":"A","fontFamily":"Other Face","future":{"keep":true}},
+                {"fontFamily":null},{"fontFamily":24},{"fontFamily":""}]}),
+        )
+        .unwrap();
+        document.layers.push(assemblash_core::Layer::new(
+            assemblash_core::LayerId::new("layer_discovery"),
+            assemblash_core::Transform::new(0.0, 0.0, 400.0, 200.0),
+            assemblash_core::LayerKind::Text(text),
+        ));
+        assert_eq!(families_used(&document), vec!["Noto Sans", "Other Face"]);
+        assert!(assemblash_renderer::text_font_families(&document).is_err());
+    }
 
     #[test]
     fn an_export_name_is_a_name_and_never_a_path() {

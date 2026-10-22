@@ -43,6 +43,9 @@ pub const HISTORY_DIR: &str = "history";
 /// The append-only journal file, inside [`HISTORY_DIR`].
 pub const JOURNAL_FILE: &str = "journal.jsonl";
 
+/// Replay semantics for new operations with authoritative text-run behavior.
+pub const STYLED_RUNS_SEMANTICS: &str = "styledRunsV1";
+
 /// Directory of snapshots, inside [`HISTORY_DIR`].
 pub const SNAPSHOTS_DIR: &str = "snapshots";
 
@@ -160,12 +163,26 @@ pub struct JournalEntry {
     /// can produce the same journal twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recorded_at: Option<u64>,
+    /// Operation behavior used by this writer. Omission selects legacy behavior.
+    /// Unsupported markers receive a typed error before replay or snapshot selection.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "read_semantics"
+    )]
+    pub operation_semantics: Option<serde_json::Value>,
     /// What happened.
     #[serde(flatten)]
     pub kind: EntryKind,
 }
 
 impl JournalEntry {
+    fn semantics(&self) -> Result<crate::ops::OperationSemantics, HistoryError> {
+        operation_semantics(
+            self.operation_semantics.as_ref(),
+            Some(self.transaction.clone()),
+        )
+    }
     /// The operation, if this entry applied one.
     pub fn operation(&self) -> Option<&Operation> {
         match &self.kind {
@@ -188,10 +205,50 @@ impl JournalEntry {
     }
 }
 
+fn read_semantics<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
+fn operation_semantics(
+    marker: Option<&serde_json::Value>,
+    transaction: Option<TransactionId>,
+) -> Result<crate::ops::OperationSemantics, HistoryError> {
+    match marker {
+        None => Ok(crate::ops::OperationSemantics::Legacy),
+        Some(serde_json::Value::String(marker)) if marker == STYLED_RUNS_SEMANTICS => {
+            Ok(crate::ops::OperationSemantics::StyledRunsV1)
+        }
+        Some(marker) => Err(HistoryError::UnsupportedOperationSemantics {
+            transaction,
+            marker: marker.clone(),
+        }),
+    }
+}
+
+fn transaction_prefix(transaction: &Option<TransactionId>) -> String {
+    transaction.as_ref().map_or_else(
+        || "journal entry ".into(),
+        |id| format!("transaction {id} "),
+    )
+}
+
 /// Something that went wrong reading or writing history.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HistoryError {
+    /// This build cannot replay the behavior named by a journal entry.
+    #[error(
+        "{}uses unsupported operation semantics {marker}",
+        transaction_prefix(transaction)
+    )]
+    UnsupportedOperationSemantics {
+        /// The entry that names the unsupported behavior, when its id is present.
+        transaction: Option<TransactionId>,
+        /// Exact marker supplied by the writer.
+        marker: serde_json::Value,
+    },
     /// A history file could not be read or written.
     #[error("{operation} {path}: {source}")]
     Io {
@@ -390,6 +447,7 @@ impl History {
             position,
             actor: actor.clone(),
             recorded_at,
+            operation_semantics: Some(serde_json::Value::String(STYLED_RUNS_SEMANTICS.into())),
             kind: EntryKind::Applied {
                 operation: Box::new(operation.clone()),
                 outcome: outcome.clone(),
@@ -424,6 +482,7 @@ impl History {
             position,
             actor: actor.clone(),
             recorded_at,
+            operation_semantics: Some(serde_json::Value::String(STYLED_RUNS_SEMANTICS.into())),
             kind: EntryKind::BatchApplied {
                 label: batch.0.to_owned(),
                 operations: batch.1.to_vec(),
@@ -492,6 +551,7 @@ impl History {
             position: target,
             actor: actor.clone(),
             recorded_at,
+            operation_semantics: None,
             kind: EntryKind::Undone { target: undone },
         })?;
         // Snapshot every undo and redo: it costs one small file and means a
@@ -523,6 +583,7 @@ impl History {
             position: target,
             actor: actor.clone(),
             recorded_at,
+            operation_semantics: None,
             kind: EntryKind::Redone { target: redone },
         })?;
         self.write_snapshot(target, &document)?;
@@ -553,13 +614,13 @@ impl History {
             // rebuilt document has to equal the original byte for byte, and
             // newly minted ids would defeat that before anything else did.
             let mut ids = ReplayIds::from_outcome(entry);
+            let semantics = entry.semantics()?;
             for operation in entry.operations() {
-                crate::ops::apply(&mut document, operation, &mut ids).map_err(|source| {
-                    HistoryError::ReplayFailed {
+                crate::ops::apply_with_semantics(&mut document, operation, &mut ids, semantics)
+                    .map_err(|source| HistoryError::ReplayFailed {
                         transaction: entry.transaction.clone(),
                         source,
-                    }
-                })?;
+                    })?;
             }
         }
 
@@ -936,8 +997,20 @@ fn read_journal(path: &Path) -> Result<Vec<JournalEntry>, HistoryError> {
         if line.trim().is_empty() {
             continue;
         }
+        // Validate explicit semantics before a future operation can fail typed parsing.
+        // A complete unknown-marker tail is not a partial append.
+        if let Ok(raw) = serde_json::from_str::<serde_json::Value>(line) {
+            let transaction = raw
+                .get("transaction")
+                .and_then(serde_json::Value::as_str)
+                .map(TransactionId::new);
+            operation_semantics(raw.get("operationSemantics"), transaction)?;
+        }
         match serde_json::from_str::<JournalEntry>(line) {
-            Ok(entry) => entries.push(entry),
+            Ok(entry) => {
+                entry.semantics()?;
+                entries.push(entry);
+            }
             Err(source) => {
                 let is_last = index + 1 == lines.len();
                 // A half-written last line is what a crash mid-append looks
@@ -994,6 +1067,7 @@ mod tests {
             position: 1,
             actor: Actor::new(ActorKind::Human),
             recorded_at: None,
+            operation_semantics: None,
             kind: EntryKind::Undone {
                 target: TransactionId::new("txn_0"),
             },

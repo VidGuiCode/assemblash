@@ -654,6 +654,75 @@ Then Assemblash refuses to open the project until the lock is cleared:
 - Every automatic clear is reported in the server log, in the editor, and as a
   `lockReclaimed` export warning.
 
+## Styled text runs in development builds
+
+The development build accepts styled runs through the reference interface, CLI, HTTP API, and MCP.
+Release 1.11.0 does not include these controls.
+
+Select one text layer. Open **Typography** in **Properties**, then select **Edit runs**.
+Use **Add run**, **Delete**, **Move up**, and **Move down** to arrange the rows.
+Edit the text and style overrides. Inherited values stay in the base style.
+The fill control distinguishes inherited fill, an override, and no fill.
+Select **Apply runs** to save all rows in one operation and one undo step.
+Select **Cancel** to discard the draft without a write.
+The layer box stays unchanged.
+
+Drafts retain unknown fields and untouched null values.
+Unsupported stored values and inconsistent run text stay read-only until an explicit clear or replacement.
+Apply uses the document version captured when the draft starts.
+A concurrent write can refuse Apply. The draft remains available.
+Use **Discard draft and load current runs** to replace the draft with current stored values.
+An uncertain response also requires this action before another Apply.
+
+Each run has a `text` string. Joining all run text must produce the layer's `text` exactly.
+These optional fields override the layer style:
+
+| Field | Supported value |
+| --- | --- |
+| `fontFamily` | Font family name |
+| `fontSize` | Positive size in pixels |
+| `color` | Solid colour, gradient object, or `null` for no fill |
+| `fontWeight` | Integer from 100 to 900 |
+| `fontStyle` | `normal` or `italic` |
+| `letterSpacing` | Finite spacing in pixels |
+
+Omitted fields inherit the layer style. Null fields also inherit, except `color: null`, which removes the fill.
+Unknown run properties remain unchanged during storage.
+
+Save this array as `runs.json`:
+
+```json
+[{"text":"Hello "},{"text":"world","fontWeight":700}]
+```
+
+Create a layer with matching text:
+
+```sh
+assemblash add-text ./poster --text "Hello world" --font "Noto Sans" --runs-file runs.json --x 24 --y 24 --width 500 --height 150
+assemblash set ./poster --layer <LAYER_ID> --runs-file runs.json
+```
+
+Use `--runs` for an inline JSON array. Do not combine `--runs` and `--runs-file`.
+An empty array clears styling. Outer update `null` omits the runs field. Creation refuses outer `null`.
+Supply `text` and `runs` together to replace both in one operation.
+The engine does not infer text from runs.
+A text-only write clears runs, even when the supplied text is unchanged.
+Ordinary base-style writes preserve runs. Text and Color slot fills clear them.
+
+HTTP uses the existing `create` and `update` operations at `POST /api/projects/{id}/operations`.
+MCP uses `add_text_layer` and `update_layer`. Both tools accept `runs` and retain their existing safeguards.
+
+Writes check structure without loading fonts. Rendering requires each exact font family, weight, and style.
+Rendering refuses incompatible styles within one shaping cluster and invalid spacing geometry.
+HTTP and MCP can return `cannotMeasureText` after a successful write. The operation remains saved.
+
+Version 1.11.0 loads stored raw runs but renders the base style.
+Its text-only writes can leave run text inconsistent.
+Cached snapshots can retain new runs during undo and redo.
+History replay from before a new run update can silently drop runs, despite a successful command.
+This development build preserves runs during recovery. Read-only history leaves project files unchanged.
+Use a styled-run build for projects with styled runs.
+
 ## Edit the canvas
 
 Click **Canvas** to open the Properties panel of the editor. Set the size, a
@@ -774,7 +843,6 @@ stay in the document when it is loaded and saved.
 
 The important limits:
 
-- Styled text runs are not implemented yet.
 - Assemblash contains no AI image generator or AI provider adapter. They are
   not part of the core.
 - Fourteen blend modes are supported. `color-dodge` and `color-burn` are

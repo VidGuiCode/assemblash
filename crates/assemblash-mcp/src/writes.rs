@@ -506,29 +506,21 @@ impl Backend {
         if touched.is_empty() {
             return Vec::new();
         }
-        let mut has_text = false;
-        document.walk_layers(&mut |layer| {
-            if touched.contains(&layer.id)
-                && matches!(layer.kind, assemblash_core::LayerKind::Text(_))
-            {
-                has_text = true;
-            }
-        });
-        if !has_text {
-            return Vec::new();
-        }
-        let Ok(fonts) = self.fonts_for(document) else {
-            return Vec::new();
-        };
-        assemblash_renderer::export_warnings(document, fonts.font_set(), directory)
-            .into_iter()
-            .filter(|warning| {
-                warning
-                    .layer_id
-                    .as_ref()
-                    .is_some_and(|id| touched.contains(id))
-            })
-            .collect()
+        assemblash_renderer::warnings::text_write_warnings(
+            document,
+            touched,
+            directory,
+            |isolated| {
+                self.fonts_for(isolated).map_err(|error| {
+                    format!(
+                        "{}: {} ({})",
+                        error.code(),
+                        error.message(),
+                        error.details()
+                    )
+                })
+            },
+        )
     }
 }
 

@@ -12,6 +12,36 @@ use assemblash_core::ValidationErrors;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum RenderError {
+    /// Full-layer text layout requires a text layer.
+    #[error("layer {layer} is not a text layer")]
+    NotTextLayer {
+        /// Requested layer.
+        layer: LayerId,
+    },
+    /// Requested measurement width has no finite positive extent.
+    #[error("layer {layer}: text width {width} must be finite and positive")]
+    InvalidTextWidth {
+        /// Requested layer.
+        layer: LayerId,
+        /// Requested width.
+        width: f64,
+    },
+    /// A full-layer text consumer refuses unsupported run values or shaping.
+    #[error("layer {layer}: {source}")]
+    TextLayout {
+        /// Requested layer.
+        layer: LayerId,
+        /// Indexed interpretation or shaping error.
+        source: crate::text::TextLayoutError,
+    },
+    /// A styled descendant requires an offline filter bound that cannot be measured.
+    #[error("layer {layer}: cannot measure styled filter bounds: {reason}")]
+    TextFilterBounds {
+        /// Filter owner.
+        layer: LayerId,
+        /// Missing in-memory resource or invalid geometry.
+        reason: String,
+    },
     /// The document is not valid, so there is nothing well-defined to draw.
     #[error("cannot render an invalid document: {0}")]
     InvalidDocument(#[from] ValidationErrors),

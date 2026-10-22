@@ -69,6 +69,7 @@ impl LoadedFonts {
         // it is not "missing font", and the baseline falls back rather than
         // the whole render failing.
         let mut faces = Vec::new();
+        let mut face_data = std::collections::BTreeMap::new();
         for face in database.faces() {
             let (metrics, advances) = database
                 .with_face_data(face.id, |data, index| {
@@ -78,6 +79,9 @@ impl LoadedFonts {
                     )
                 })
                 .unwrap_or((None, None));
+            let data = database.with_face_data(face.id, |bytes, index| {
+                Arc::new(crate::fonts::FontFaceData::new(bytes.to_vec(), index))
+            });
             // The weight and style come from the face's own name tables, the
             // same place fontdb matches from — so what the membership check
             // sees is exactly what the rasterizer would use.
@@ -88,12 +92,30 @@ impl LoadedFonts {
             );
             for (name, _) in &face.families {
                 faces.push((name.clone(), metrics, advances.clone(), weight, italic));
+                if let Some(data) = &data {
+                    // Exact weight/style are required. Within that key, match the pinned
+                    // normal-stretch and Italic-before-Oblique preferences. First ties win.
+                    let width = face.stretch.to_number();
+                    let stretch = if width <= 5 { 5 - width } else { 100 + width };
+                    let preference = u16::from(face.style == usvg::fontdb::Style::Oblique);
+                    let rank = (stretch, preference);
+                    let key = (name.clone(), weight, italic);
+                    let entry = face_data
+                        .entry(key)
+                        .or_insert_with(|| (rank, data.clone(), metrics, advances.clone()));
+                    if rank < entry.0 {
+                        *entry = (rank, data.clone(), metrics, advances.clone());
+                    }
+                }
             }
         }
-        Self {
-            database: Arc::new(database),
-            families: FontSet::measured_with_advances(faces),
+        let mut families = FontSet::measured_with_advances(faces);
+        for ((family, weight, italic), (_, data, metrics, advances)) in face_data {
+            families.set_exact_face(family, weight, italic, data, metrics, advances);
         }
+        let database = Arc::new(database);
+        families.set_database(database.clone());
+        Self { database, families }
     }
 
     /// The families these files provide, for checking a document before it is

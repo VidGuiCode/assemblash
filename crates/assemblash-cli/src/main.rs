@@ -72,6 +72,12 @@ enum Command {
         /// characters, not translated into a line break.
         #[arg(long)]
         text: String,
+        /// Raw styled runs as a JSON array. Their text must match --text.
+        #[arg(long, conflicts_with = "runs_file")]
+        runs: Option<String>,
+        /// Read the raw styled-run JSON array from this file.
+        #[arg(long, conflicts_with = "runs")]
+        runs_file: Option<PathBuf>,
         /// Font family, as named by one of the loaded font files.
         #[arg(long)]
         font: String,
@@ -625,6 +631,12 @@ enum Command {
         /// from a shell that will not pass one through.
         #[arg(long, conflicts_with = "text")]
         text_file: Option<PathBuf>,
+        /// Replace raw styled runs as JSON. [] clears styling; null omits the update.
+        #[arg(long, conflicts_with = "runs_file")]
+        runs: Option<String>,
+        /// Read replacement styled runs from this JSON file.
+        #[arg(long, conflicts_with = "runs")]
+        runs_file: Option<PathBuf>,
         /// Text layers: font family.
         #[arg(long)]
         font: Option<String>,
@@ -1363,6 +1375,7 @@ struct LayerChange {
     effects: Option<String>,
     /// The text, from `--text` or `--text-file`.
     text: Option<String>,
+    runs: Option<String>,
     font: Option<String>,
     size: Option<f64>,
     color: Option<String>,
@@ -1485,6 +1498,12 @@ impl LayerChange {
             blend_mode: self.blend.map(blend_mode),
             effects,
             text: self.text,
+            runs: self
+                .runs
+                .as_deref()
+                .map(serde_json::from_str::<Option<Vec<serde_json::Value>>>)
+                .transpose()?
+                .flatten(),
             font_family: self.font,
             font_size: self.size,
             color: self.color.map(optional_color).transpose()?,
@@ -1987,6 +2006,8 @@ fn run(command: Command) -> Result<(), CliError> {
         Command::AddText {
             project,
             text,
+            runs,
+            runs_file,
             font,
             size,
             color,
@@ -2024,6 +2045,11 @@ fn run(command: Command) -> Result<(), CliError> {
                         .flatten()
                         .map(|color| plain_stroke(color, stroke_width.unwrap_or(1.0))),
                     vertical_align: vertical_align.into(),
+                    runs: inline_or_file(runs, runs_file)?
+                        .as_deref()
+                        .map(serde_json::from_str::<Vec<serde_json::Value>>)
+                        .transpose()?
+                        .unwrap_or_default(),
                 },
                 &box_,
                 &who,
@@ -2757,6 +2783,8 @@ fn run(command: Command) -> Result<(), CliError> {
             effects_file,
             text,
             text_file,
+            runs,
+            runs_file,
             font,
             size,
             color,
@@ -2802,6 +2830,7 @@ fn run(command: Command) -> Result<(), CliError> {
                 blend,
                 effects: inline_or_file(effects, effects_file)?,
                 text: inline_or_file(text, text_file)?,
+                runs: inline_or_file(runs, runs_file)?,
                 font,
                 size,
                 color,
@@ -3195,27 +3224,17 @@ fn print_created(outcome: &OpOutcome) {
     }
 }
 
-/// Every font family the document asks for, sorted and deduplicated.
-fn families_used(document: &Document) -> Vec<String> {
-    let mut families = std::collections::BTreeSet::new();
-    document.walk_layers(&mut |layer| {
-        if let assemblash_core::document::LayerKind::Text(text) = &layer.kind {
-            families.insert(text.font_family.clone());
-        }
-    });
-    families.into_iter().collect()
-}
-
 /// Resolves the fonts a render may use, from files, directories, and a store.
 ///
 /// The store contributes exactly the families the document names: a render
 /// must not change because something unrelated was installed afterwards.
 fn load_fonts(args: &FontArgs, document: &Document) -> Result<LoadedFonts, CliError> {
+    let families = assemblash_renderer::text_font_families(document)?;
     // A document with text but no fonts named used to render anyway, placing
     // the first baseline one whole font size below the box top instead of one
     // ascent. Rather than have two placements depending on how the command was
     // called, a document that needs a font has to be told where it is.
-    if args.names_nothing() && !families_used(document).is_empty() {
+    if args.names_nothing() && !families.is_empty() {
         return Err(CliError::NoFonts);
     }
 
@@ -3223,36 +3242,44 @@ fn load_fonts(args: &FontArgs, document: &Document) -> Result<LoadedFonts, CliEr
     for directory in &args.font_dirs {
         paths.extend(font_files_in(directory)?);
     }
+    paths.sort();
+    paths.dedup();
 
     if let Some(directory) = &args.font_store {
         let store = FontStore::open(directory)?;
-        // Families already covered by an explicit file are not looked up, so
-        // naming a file for a family the store also has is not an error.
+        // Resolve absent exact faces. Load each needed family in full so legacy
+        // family-default measurements match the other transports. Explicit files stay first.
         let explicit = LoadedFonts::from_files(paths.clone())?;
-        let wanted: Vec<String> = families_used(document)
-            .into_iter()
-            .filter(|family| !explicit.font_set().contains(family))
-            .collect();
-        for family in &wanted {
-            if !store.has_family(family) {
-                return Err(CliError::FontStore(FontStoreError::UnknownFamily {
-                    family: family.clone(),
-                    path: directory.clone(),
-                }));
+        let wanted: std::collections::BTreeSet<_> =
+            assemblash_renderer::text_font_requirements(document)?
+                .into_iter()
+                .filter(|face| {
+                    !explicit
+                        .font_set()
+                        .contains_face(&face.family, face.weight, face.style)
+                })
+                .map(|face| face.family)
+                .collect();
+        let mut stored = Vec::new();
+        for record in store.records() {
+            if wanted.contains(&record.family) {
+                stored.push(store.file_path(&record.file));
             }
         }
-        for record in store.records() {
-            if wanted.iter().any(|family| family == &record.family) {
-                paths.push(store.file_path(&record.file));
+        stored.sort();
+        stored.dedup();
+        for path in stored {
+            if !paths.contains(&path) {
+                paths.push(path);
             }
         }
     }
 
     // Sorted, so font resolution — and therefore the pixels — does not depend
     // on the order the arguments happened to arrive in.
-    paths.sort();
-    paths.dedup();
-    Ok(LoadedFonts::from_files(paths)?)
+    let fonts = LoadedFonts::from_files(paths)?;
+    assemblash_renderer::check_text_fonts(document, fonts.font_set())?;
+    Ok(fonts)
 }
 
 /// Opens a workspace, at the given path or at this machine's default.
@@ -3459,4 +3486,169 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+#[cfg(test)]
+mod styled_font_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    #[test]
+    fn styled_run_flags_conflict_and_update_values_remain_raw() {
+        for args in [
+            vec![
+                "assemblash",
+                "add-text",
+                "project",
+                "--text",
+                "A",
+                "--font",
+                "Noto Sans",
+                "--runs",
+                "[]",
+                "--runs-file",
+                "runs.json",
+            ],
+            vec![
+                "assemblash",
+                "set",
+                "project",
+                "--layer",
+                "layer_text",
+                "--runs",
+                "[]",
+                "--runs-file",
+                "runs.json",
+            ],
+        ] {
+            assert_eq!(
+                Cli::try_parse_from(args).unwrap_err().kind(),
+                clap::error::ErrorKind::ArgumentConflict
+            );
+        }
+        let document = Document::new(
+            &mut assemblash_core::ids::SequentialIdSource::new(),
+            300.0,
+            100.0,
+        );
+        let raw =
+            serde_json::json!([{"text":"A","color":null,"fontSize":null,"future":{"keep":[1,2]}}]);
+        let change = LayerChange {
+            runs: Some(raw.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            change
+                .into_update(&document, "layer_text".into())
+                .unwrap()
+                .runs,
+            Some(raw.as_array().unwrap().clone())
+        );
+        let change = LayerChange {
+            runs: Some("null".into()),
+            ..Default::default()
+        };
+        assert!(change
+            .into_update(&document, "layer_text".into())
+            .unwrap()
+            .runs
+            .is_none());
+    }
+    #[test]
+    fn plain_bold_store_only_matches_http_family_defaults_and_png() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../assemblash-renderer/tests/fonts");
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = FontStore::open(directory.path()).unwrap();
+        for name in ["NotoSans-Subset.ttf", "NotoSans-Bold-Subset.ttf"] {
+            store.import_file(&fixture.join(name), None, None).unwrap();
+        }
+        let mut document = Document::new(
+            &mut assemblash_core::ids::SequentialIdSource::new(),
+            400.0,
+            200.0,
+        );
+        let text=serde_json::from_value(serde_json::json!({"text":"AVATAR highlight office","fontFamily":"Noto Sans","fontSize":40,"fontWeight":700,
+            "color":"#000000","align":"left","lineHeight":1.2,"runs":[]})).unwrap();
+        document.layers.push(assemblash_core::Layer::new(
+            assemblash_core::LayerId::new("layer_text"),
+            Transform::new(10.0, 10.0, 180.0, 180.0),
+            LayerKind::Text(text),
+        ));
+        let cli = load_fonts(
+            &FontArgs {
+                font_files: vec![],
+                font_dirs: vec![],
+                font_store: Some(directory.path().into()),
+            },
+            &document,
+        )
+        .unwrap();
+        let http = assemblash_server::render::fonts_for(&document, &store).unwrap();
+        let hrefs = assemblash_renderer::AssetHrefs::new();
+        assert_eq!(
+            doc_to_svg(&document, cli.font_set(), &hrefs).unwrap(),
+            doc_to_svg(&document, http.font_set(), &hrefs).unwrap()
+        );
+        let metadata = PngMetadata::for_document(&document);
+        assert_eq!(
+            assemblash_renderer::document_to_png(&document, &cli, &hrefs, 1.0, &metadata).unwrap(),
+            assemblash_renderer::document_to_png(&document, &http, &hrefs, 1.0, &metadata).unwrap()
+        );
+    }
+    #[test]
+    fn explicit_regular_and_store_bold_resolve_each_exact_run_face() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../assemblash-renderer/tests/fonts");
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = FontStore::open(directory.path()).unwrap();
+        store
+            .import_file(
+                &fixture.join("NotoSans-Subset.ttf"),
+                None,
+                Some("OFL-1.1".into()),
+            )
+            .unwrap();
+        store
+            .import_file(
+                &fixture.join("NotoSans-Bold-Subset.ttf"),
+                None,
+                Some("OFL-1.1".into()),
+            )
+            .unwrap();
+        let mut document = Document::new(
+            &mut assemblash_core::ids::SequentialIdSource::new(),
+            400.0,
+            100.0,
+        );
+        let text=serde_json::from_value(serde_json::json!({"text":"A B","fontFamily":"Noto Sans","fontSize":32,"color":"#000000",
+            "align":"left","lineHeight":1.2,"runs":[{"text":"A "},{"text":"B","fontWeight":700}]})).unwrap();
+        document.layers.push(assemblash_core::Layer::new(
+            assemblash_core::LayerId::new("layer_text"),
+            assemblash_core::Transform::new(0.0, 0.0, 400.0, 100.0),
+            assemblash_core::LayerKind::Text(text),
+        ));
+        let explicit = fixture.join("NotoSans-Subset.ttf");
+        let fonts = load_fonts(
+            &FontArgs {
+                font_files: vec![explicit.clone()],
+                font_dirs: vec![],
+                font_store: Some(directory.path().into()),
+            },
+            &document,
+        )
+        .unwrap();
+        assert!(fonts.font_set().contains_face(
+            "Noto Sans",
+            700,
+            assemblash_core::FontStyle::Normal
+        ));
+        assert_eq!(
+            fonts
+                .font_set()
+                .face_data("Noto Sans", 400, assemblash_core::FontStyle::Normal)
+                .unwrap()
+                .bytes(),
+            std::fs::read(explicit).unwrap()
+        );
+    }
 }

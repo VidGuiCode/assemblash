@@ -1483,27 +1483,21 @@ fn write_warnings(
     if touched.is_empty() {
         return Vec::new();
     }
-    let mut has_text = false;
-    document.walk_layers(&mut |layer| {
-        if touched.contains(&layer.id) && matches!(layer.kind, LayerKind::Text(_)) {
-            has_text = true;
-        }
-    });
-    if !has_text {
-        return Vec::new();
-    }
-    let Ok(fonts) = state.fonts_for(document) else {
-        return Vec::new();
-    };
-    assemblash_renderer::export_warnings(document, fonts.font_set(), std::path::Path::new(""))
-        .into_iter()
-        .filter(|warning| {
-            warning
-                .layer_id
-                .as_ref()
-                .is_some_and(|id| touched.contains(id))
-        })
-        .collect()
+    assemblash_renderer::warnings::text_write_warnings(
+        document,
+        touched,
+        std::path::Path::new(""),
+        |isolated| {
+            state.fonts_for(isolated).map_err(|error| {
+                format!(
+                    "{}: {} ({})",
+                    error.code(),
+                    error.message(),
+                    error.details()
+                )
+            })
+        },
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -2076,7 +2070,7 @@ async fn text_layout(
             format!("layer {} does not exist", query.id),
         )
     })?;
-    let LayerKind::Text(text) = &layer.kind else {
+    let LayerKind::Text(_) = &layer.kind else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "notTextLayer",
@@ -2084,15 +2078,7 @@ async fn text_layout(
         ));
     };
     let fonts = state.fonts_for(&document)?;
-    let layout = assemblash_renderer::layout_text(
-        &text.text,
-        query.width,
-        text.font_size,
-        text.line_height,
-        text.letter_spacing,
-        &text.font_family,
-        fonts.font_set(),
-    );
+    let layout = assemblash_renderer::layout_text_layer(layer, query.width, fonts.font_set())?;
     Ok(Json(TextLayoutResponse {
         line_count: layout.lines.len(),
         height: layout.height,

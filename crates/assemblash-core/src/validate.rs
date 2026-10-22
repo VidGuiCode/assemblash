@@ -507,7 +507,7 @@ fn check_dash_array(
     }
 }
 
-fn check_color(color: &Color, context: &str, errors: &mut Vec<ValidationError>) {
+pub(crate) fn check_color(color: &Color, context: &str, errors: &mut Vec<ValidationError>) {
     match color {
         Color::Solid(solid) => {
             if !solid.is_valid() {

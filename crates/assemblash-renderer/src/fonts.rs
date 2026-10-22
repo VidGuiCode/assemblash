@@ -19,6 +19,37 @@ type FaceKey = (u16, bool);
 
 type FaceMeasurements = (Option<FontMetrics>, Option<Arc<FontAdvances>>);
 
+/// Immutable bytes and collection index of one exact loaded face.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontFaceData {
+    bytes: Arc<Vec<u8>>,
+    index: u32,
+    sha256: String,
+}
+
+impl FontFaceData {
+    pub(crate) fn new(bytes: Vec<u8>, index: u32) -> Self {
+        Self {
+            sha256: assemblash_core::storage::hash_bytes(&bytes),
+            bytes: Arc::new(bytes),
+            index,
+        }
+    }
+
+    /// Exact font bytes. No file lookup occurs.
+    pub fn bytes(&self) -> &[u8] {
+        self.bytes.as_slice()
+    }
+    /// Index of the face in a font collection.
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+    /// Hash of the exact bytes, independent of family aliases.
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+}
+
 /// Vertical metrics of a face, in the font's own units.
 ///
 /// Kept unscaled so a change of `fontSize` is a multiplication rather than a
@@ -68,7 +99,7 @@ impl FontMetrics {
 pub const UNMEASURED_ASCENT_RATIO: f64 = 1.0;
 
 /// The font families available to a render, with their metrics when known.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct FontSet {
     families: BTreeMap<String, Option<FontMetrics>>,
     advances: BTreeMap<String, Arc<FontAdvances>>,
@@ -78,7 +109,34 @@ pub struct FontSet {
     /// in name-only sets, which never claimed to know faces at all.
     faces: BTreeMap<String, Vec<FaceKey>>,
     face_measurements: BTreeMap<(String, FaceKey), FaceMeasurements>,
+    face_data: BTreeMap<(String, FaceKey), Arc<FontFaceData>>,
+    database: Option<FontDatabase>,
     accept_any: bool,
+}
+
+#[derive(Clone)]
+struct FontDatabase(Arc<resvg::usvg::fontdb::Database>);
+
+impl std::fmt::Debug for FontDatabase {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FontDatabase")
+            .field("faces", &self.0.faces().count())
+            .finish()
+    }
+}
+
+// Equality retains the measured-set contract. The private raster database
+// preserves fallback inventory; it is not part of a selected measurement view.
+impl PartialEq for FontSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.families == other.families
+            && self.advances == other.advances
+            && self.faces == other.faces
+            && self.face_measurements == other.face_measurements
+            && self.face_data == other.face_data
+            && self.accept_any == other.accept_any
+    }
 }
 
 /// Horizontal advances for the default face of one family, expressed as
@@ -105,6 +163,8 @@ impl FontSet {
             advances: BTreeMap::new(),
             faces: BTreeMap::new(),
             face_measurements: BTreeMap::new(),
+            face_data: BTreeMap::new(),
+            database: None,
             accept_any: false,
         }
     }
@@ -146,6 +206,8 @@ impl FontSet {
             advances: BTreeMap::new(),
             faces: faces_by_family,
             face_measurements,
+            face_data: BTreeMap::new(),
+            database: None,
             accept_any: false,
         }
     }
@@ -185,6 +247,8 @@ impl FontSet {
             advances,
             faces: faces_by_family,
             face_measurements,
+            face_data: BTreeMap::new(),
+            database: None,
             accept_any: false,
         }
     }
@@ -201,6 +265,8 @@ impl FontSet {
             advances: BTreeMap::new(),
             faces: BTreeMap::new(),
             face_measurements: BTreeMap::new(),
+            face_data: BTreeMap::new(),
+            database: None,
             accept_any: true,
         }
     }
@@ -256,13 +322,52 @@ impl FontSet {
             faces: BTreeMap::from([(family.to_owned(), vec![key.1])]),
             ..Self::default()
         };
+        selected.database = self.database.clone();
         if let Some(widths) = widths {
             selected.advances.insert(family.to_owned(), widths.clone());
         }
         selected
             .face_measurements
-            .insert(key, (*metrics, widths.clone()));
+            .insert(key.clone(), (*metrics, widths.clone()));
+        if let Some(data) = self.face_data.get(&key) {
+            selected.face_data.insert(key, data.clone());
+        }
         Some(selected)
+    }
+
+    /// Exact loaded data for a face. Name-only and measured-only sets return none.
+    /// Exact weight and logical style select the same bytes as face measurements.
+    /// Selection uses normal stretch, then italic preference, then input order.
+    pub fn face_data(&self, family: &str, weight: u16, style: FontStyle) -> Option<&FontFaceData> {
+        self.face_data
+            .get(&(
+                family.to_owned(),
+                (weight, matches!(style, FontStyle::Italic)),
+            ))
+            .map(Arc::as_ref)
+    }
+
+    pub(crate) fn loaded_database(&self) -> Option<Arc<resvg::usvg::fontdb::Database>> {
+        self.database.as_ref().map(|database| database.0.clone())
+    }
+
+    pub(crate) fn set_database(&mut self, database: Arc<resvg::usvg::fontdb::Database>) {
+        self.database = Some(FontDatabase(database));
+    }
+
+    pub(crate) fn set_exact_face(
+        &mut self,
+        family: String,
+        weight: u16,
+        italic: bool,
+        data: Arc<FontFaceData>,
+        metrics: Option<FontMetrics>,
+        advances: Option<FontAdvances>,
+    ) {
+        let key = (family, (weight, italic));
+        self.face_data.insert(key.clone(), data);
+        self.face_measurements
+            .insert(key, (metrics, advances.map(Arc::new)));
     }
 
     /// Where a family's first baseline sits, as a multiple of the font size.

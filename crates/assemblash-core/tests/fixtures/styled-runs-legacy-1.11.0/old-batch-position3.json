@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "doc_01M5HHV458Y65K3CF8YE890CB3",
+  "version": 3,
+  "canvas": {
+    "width": 600.0,
+    "height": 400.0
+  },
+  "assets": [],
+  "layers": [
+    {
+      "id": "layer_01M5HHV46Q9S32TDXGHNY79ZAX",
+      "transform": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 100.0,
+        "height": 100.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "text",
+      "text": "batch third",
+      "fontFamily": "Inter",
+      "fontSize": 32.0,
+      "color": "#123456",
+      "align": "left",
+      "lineHeight": 1.2,
+      "runs": [
+        17,
+        null,
+        {
+          "legacy": {
+            "keep": [
+              1,
+              2,
+              3
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

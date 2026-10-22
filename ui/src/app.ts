@@ -41,6 +41,8 @@ import { mountProjectPicker } from "./project-picker-mantine.js";
 import { mountTemplates } from "./templates-mantine.js";
 import { mountStructurePanel, type DockView, type ReorderPosition, type StructureSnapshot } from "./structure-mantine.js";
 import { mountPaintInput } from "./paint-input.js";
+import { mountRunsEditor, type RunsSubmit } from "./text-runs-mantine.js";
+import { runsKey, runsOperation, startRuns, type RunsCapture, type RunsDraft } from "./text-runs.js";
 import { mountCanvasImageInput } from "./canvas-image-input.js";
 import { mountCanvasAnchorPicker, type CanvasAnchor } from "./canvas-anchor-mantine.js";
 import { batchMantinePortals, registerLocaleRefresh } from "./mantine-root.js";
@@ -131,6 +133,8 @@ const state: State = {
 // property of the same layer may replace one that has not run yet.
 
 const queue = new ActionQueue();
+// Drafts survive inspector remounts and remain tied to their original document.
+const runsDrafts = new Map<string, RunsDraft>();
 
 /** One measured interaction, for the `?perf` overlay and the exit test. */
 interface PerfRecord {
@@ -1758,6 +1762,27 @@ function drawInspectorContent(): void {
       (next) => ({ op: "update", id: layer.id, stroke: { color: next, width: layer.stroke?.width ?? 1 } }) as Operation,
       { className: "text-stroke-none", disabled: !layer.stroke, onClear: () => void send("clear text stroke", { op: "update", id: layer.id, stroke: null } as Operation) });
     field("properties.strokeWidth", String(layer.stroke?.width ?? 1), (next) => ({ op: "update", id: layer.id, stroke: { color: layer.stroke?.color ?? "#000000", width: Number(next) } }) as Operation);
+    if (state.project && state.document) {
+      const capture = runsCapture(state.project, state.document, layer);
+      const target = document.createElement("div");
+      pane.append(target);
+      mountedInspectorWidgets.push(mountRunsEditor(target, {
+        capture, layer, drafts: runsDrafts, disabled: why !== null,
+        fonts: { store: () => fontStore }, submit: submitRuns,
+        reload: async () => {
+          const outcome = await queue.outcome("reload runs", async () => {
+            if (state.project !== capture.project || state.document?.id !== capture.document) throw new Error(translate("runs.notSent"));
+            const doc = await api.getDocument(capture.project);
+            if (state.project !== capture.project || state.document?.id !== capture.document) throw new Error(translate("runs.notSent"));
+            const current = api.flatten(api.layersOf(doc)).find((entry) => entry.layer.id === capture.layer)?.layer;
+            if (!current || current.type !== "text") throw new Error(translate("runs.notSent"));
+            runsDrafts.set(runsKey(capture), startRuns(runsCapture(capture.project, doc, current)));
+            applyDocument(doc);
+          });
+          return outcome.status === "refused" ? String(outcome.error) : null;
+        },
+      }));
+    }
   }
 
   beginSection("Transform");
@@ -2689,6 +2714,33 @@ function snapshotForEcho(): () => void {
  * refusal, so a typed error can be shown beside the field that caused it. It
  * never replaces the status-bar report; it adds the control-side message.
  */
+function runsCapture(project: string, doc: Document, layer: Extract<Layer, { type: "text" }>): RunsCapture {
+  return { project, document: doc.id, layer: layer.id, version: api.versionOf(doc), text: layer.text, runs: layer.runs ?? [] };
+}
+
+async function submitRuns(draft: RunsDraft): Promise<RunsSubmit> {
+  const operation = runsOperation(draft);
+  if (!operation) return { status: "applied" };
+  let acknowledged = false;
+  const outcome = await queue.outcome("apply runs", async () => {
+    const capture = draft.capture;
+    if (state.project !== capture.project || state.document?.id !== capture.document || state.selection.length !== 1 || state.selection[0] !== capture.layer) throw new Error(translate("runs.notSent"));
+    const layer = api.flatten(api.layersOf(state.document)).find((entry) => entry.layer.id === capture.layer)?.layer;
+    if (!layer || layerGuardReason(layer)) throw new Error(translate("runs.notSent"));
+    const result = await api.applyOperation(capture.project, operation, capture.version);
+    acknowledged = true;
+    const doc = result.document ?? await api.getDocument(capture.project);
+    if (state.project !== capture.project || state.document?.id !== capture.document) throw new Error(translate("runs.notSent"));
+    // Clear before rendering the authoritative response, which remounts the inspector.
+    runsDrafts.delete(runsKey(capture));
+    applyDocument(doc);
+    say(translate("status.editDone", { version: result.version }));
+  });
+  if (outcome.status === "applied") return { status: "applied" };
+  report("apply runs", outcome.error);
+  return { status: acknowledged ? "committed" : outcome.error instanceof api.ApiError ? "refused" : "unknown", error: acknowledged ? translate("runs.committed") : outcome.error instanceof api.ApiError ? apiErrorMessage(outcome.error) : `${translate("runs.failed")} ${String(outcome.error)}` };
+}
+
 async function send(
   what: string,
   operation: Operation,

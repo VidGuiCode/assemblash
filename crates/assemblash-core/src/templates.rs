@@ -260,6 +260,7 @@ pub fn fill_operations(
                 } else {
                     UpdateLayer {
                         color: Some(Some(Color::new(value.clone()))),
+                        runs: Some(Vec::new()),
                         ..UpdateLayer::new(slot.layer.clone())
                     }
                 }

@@ -1041,7 +1041,7 @@
       ]
     },
     "TextLayer": {
-      "description": "Text content and its single style. Per-run styling arrives in v2.0.",
+      "description": "Text content, base style, and raw run overrides.",
       "type": "object",
       "properties": {
         "text": {
@@ -1112,7 +1112,7 @@
           "$ref": "#/$defs/VerticalAlign"
         },
         "runs": {
-          "description": "Reserved (v2.0 styled runs): preserved verbatim, never interpreted.",
+          "description": "Raw run values, preserved during loading and ordinary validation.\nUse [`TextLayer::interpreted_runs`] for a typed view with inherited properties.",
           "type": "array",
           "items": true,
           "default": []

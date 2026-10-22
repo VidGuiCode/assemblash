@@ -27,6 +27,7 @@ pub mod session;
 pub mod storage;
 pub mod svg_import;
 pub mod templates;
+pub mod text_runs;
 pub mod typescript;
 pub mod validate;
 pub mod workspace;
@@ -56,6 +57,7 @@ pub use presets::{Preset, PresetProperties};
 pub use session::{Session, SessionError};
 pub use storage::{load, save, StorageError};
 pub use templates::{Slot, SlotKind, SlotValues, TemplateError};
+pub use text_runs::{TextRun, TextRunError, TextRunInput};
 pub use validate::validate;
 pub use workspace::{ProjectId, Workspace, WorkspaceError};
 

@@ -2175,6 +2175,44 @@ fn an_overflowing_text_write_reports_warnings_over_http() {
         response.json()
     );
 }
+
+#[test]
+fn missing_run_face_warns_after_commit_and_render_reports_full_face_details() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let mut store = assemblash_renderer::FontStore::open(harness.root().join(FONTS_DIR)).unwrap();
+    store
+        .import_file(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../assemblash-renderer/tests/fonts/NotoSans-Subset.ttf"),
+            None,
+            None,
+        )
+        .unwrap();
+    let response = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({"operation":{
+            "op":"create","position":{"at":"root"},"transform":{"x":0,"y":0,"width":300,"height":100},
+            "type":"text","text":"A B","fontFamily":"Noto Sans","fontSize":32,
+            "runs":[{"text":"A "},{"text":"B","fontFamily":"Missing Run Face","fontWeight":700}]
+        }}),
+    );
+    assert_eq!(response.status, 200, "{}", response.json());
+    let warnings = response.json()["warnings"].as_array().cloned().unwrap();
+    assert_eq!(warnings[0]["code"], "cannotMeasureText");
+    assert!(warnings[0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Missing Run Face"));
+    let rendered = http::get(&harness.url("/api/projects/poster/preview.svg"));
+    assert_eq!(rendered.status, 422, "{}", rendered.json());
+    assert_eq!(rendered.json()["error"]["code"], "missingFont");
+    let details = &rendered.json()["error"]["details"];
+    assert_eq!(details["family"], "Missing Run Face");
+    assert_eq!(details["weight"], 700);
+    assert_eq!(details["style"], "normal");
+    assert!(details["layer"].as_str().unwrap().starts_with("layer_"));
+}
 #[test]
 fn font_specimen_uses_the_exact_stored_face_without_writing_the_workspace() {
     let harness = Harness::start();

@@ -1,3 +1,4 @@
+import { startBrowser } from "./browser-harness.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -177,6 +178,7 @@ function applyMockOperation(document, operation, created) {
   if (operation.op === "update" && layer) {
     const { op, id, cornerRadius, markerStart, markerEnd, ...rest } = operation;
     Object.assign(layer, rest);
+    if (Object.hasOwn(operation, "text") && !Object.hasOwn(operation, "runs")) layer.runs = [];
     // A corner radius belongs to the rect geometry, not to the layer: the
     // engine writes it inside `shape`, and the inspector reads it back from
     // there, so the mock has to put it in the same place.
@@ -744,6 +746,11 @@ async function startFixtureServer() {
     setSessionAccepted(value) { acceptSession = value; },
     // The document as the engine holds it, for reading values back.
     documentJson: () => JSON.stringify(document),
+    useStyledRuns() {
+      const layer = findLayer(document, "layer_text");
+      layer.text = "Aب";
+      layer.runs = [{ text: "A", fontSize: null, future: { keep: 1 } }, { text: "ب", color: null }];
+    },
     useGroupedLayers() {
       const group = (id, children, locked = false) => ({
         id, name: id, type: "group", children, opacity: 1, visible: true,
@@ -812,202 +819,6 @@ async function startFixtureServer() {
       );
     },
   };
-}
-
-function browserExecutable() {
-  const configured = process.env.ASSEMBLASH_TEST_BROWSER;
-  const candidates = process.platform === "win32"
-    ? [
-        configured,
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-      ]
-    : process.platform === "darwin"
-      ? [configured, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
-      : [configured, "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
-  return candidates.find((candidate) => candidate && existsSync(candidate)) ?? null;
-}
-
-class CdpPage {
-  constructor(socket) {
-    this.socket = socket;
-    this.nextId = 1;
-    this.pending = new Map();
-    this.events = [];
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data);
-      if (!message.id) {
-        if (message.method === "Runtime.exceptionThrown") {
-          this.events.push(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
-        }
-        if (message.method === "Runtime.consoleAPICalled") {
-          this.events.push(message.params.args.map((arg) => arg.value ?? arg.description).join(" "));
-        }
-        return;
-      }
-      const pending = this.pending.get(message.id);
-      if (!pending) return;
-      this.pending.delete(message.id);
-      if (message.error) pending.reject(new Error(message.error.message));
-      else pending.resolve(message.result);
-    });
-  }
-
-  // A command whose answer never arrives — a browser that died, a socket that
-  // closed under us, an `awaitPromise` on a promise the page never settles —
-  // used to leave an entry in `pending` that nothing would ever resolve.
-  send(method, params = {}) {
-    const id = this.nextId++;
-    const answer = new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params }));
-    });
-    return withTimeout(answer, `the browser to answer ${method}`, COMMAND_MS)
-      .catch((error) => {
-        this.pending.delete(id);
-        throw error;
-      });
-  }
-
-  async evaluate(expression) {
-    const result = await this.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-      userGesture: true,
-    });
-    if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
-    }
-    return result.result.value;
-  }
-
-  async waitFor(expression, description, timeoutMs = WAIT_MS) {
-    try {
-      await waitFor(() => this.evaluate(`Boolean(${expression})`), description, timeoutMs);
-    } catch (error) {
-      const page = await this.evaluate(`({
-        url: location.href,
-        ready: document.readyState,
-        status: document.querySelector("#status")?.textContent,
-        save: document.querySelector("#save-state")?.textContent
-      })`).catch((reason) => ({ unreachable: reason.message }));
-      throw new Error(`${error.message}: ${JSON.stringify(page)} ${this.events.join(" | ")}`);
-    }
-  }
-
-  click(selector) {
-    return this.evaluate(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); if (!node) throw new Error(${JSON.stringify(`missing ${selector}`)}); node.click(); return true; })()`);
-  }
-
-
-
-  key(key, options = {}) {
-    return this.evaluate(`(() => {
-      const target = document.activeElement instanceof Element ? document.activeElement : document.body;
-      target.dispatchEvent(new KeyboardEvent("keydown", ${JSON.stringify({ key, code: options.code ?? key, bubbles: true, ...options })}));
-      return true;
-    })()`);
-  }
-}
-
-async function startBrowser(url, width = 1400, height = 900) {
-  const executable = browserExecutable();
-  if (!executable) return null;
-  const profile = mkdtempSync(join(tmpdir(), "assemblash-ui-test-"));
-  const child = spawn(executable, [
-    "--headless=new",
-    "--disable-gpu",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--remote-debugging-port=0",
-    `--user-data-dir=${profile}`,
-    "about:blank",
-  ], { stdio: "ignore" });
-  let childError;
-  child.on("error", (error) => { childError = error; });
-  let socket;
-  let stopped = false;
-  const stop = async () => {
-    if (stopped) return;
-    stopped = true;
-    try {
-      socket?.close();
-    } catch (error) {
-      console.warn(`could not close the DevTools socket: ${error.message}`);
-    }
-    if (child.exitCode === null && child.signalCode === null && !childError) {
-      const exited = new Promise((resolve) => child.once("exit", resolve));
-      child.kill();
-      try {
-        await withTimeout(exited, "the browser to exit", STARTUP_MS);
-      } catch {
-        child.kill("SIGKILL");
-        try {
-          await withTimeout(exited, "the browser to exit after forced termination", WAIT_MS);
-        } catch (error) {
-          // A referenced ChildProcess can keep Node alive even after the test
-          // has finished. The job timeout remains the final bound if the OS
-          // refuses both termination requests.
-          child.unref();
-          console.warn(error.message);
-        }
-      }
-    }
-    try {
-      rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
-    } catch (error) {
-      console.warn(`could not remove the browser profile ${profile}: ${error.message}`);
-    }
-  };
-
-  try {
-    const portFile = join(profile, "DevToolsActivePort");
-    await waitFor(async () => {
-      if (childError) throw new Error(`browser failed to start: ${childError.message}`);
-      if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error(`browser exited with ${child.exitCode ?? child.signalCode}`);
-      }
-      return existsSync(portFile);
-    }, "the browser to write its DevTools port file", STARTUP_MS);
-    const [port] = readFileSync(portFile, "utf8").trim().split(/\r?\n/);
-    const targetController = new AbortController();
-    let targets;
-    try {
-      targets = await withTimeout(
-        fetch(`http://127.0.0.1:${port}/json/list`, {
-          signal: targetController.signal,
-        }).then((response) => response.json()),
-        "the browser target list to be fetched and read",
-        STARTUP_MS,
-      );
-    } catch (error) {
-      targetController.abort();
-      throw error;
-    }
-    const target = targets.find((one) => one.type === "page");
-    assert.ok(target?.webSocketDebuggerUrl, "headless browser did not create a page target");
-    socket = new WebSocket(target.webSocketDebuggerUrl);
-    await withTimeout(
-      new Promise((resolve, reject) => {
-        socket.addEventListener("open", resolve, { once: true });
-        socket.addEventListener("error", reject, { once: true });
-      }),
-      "the DevTools socket to open",
-      STARTUP_MS,
-    );
-    const page = new CdpPage(socket);
-    await page.send("Runtime.enable");
-    await page.send("Page.enable");
-    await page.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
-    await page.send("Page.navigate", { url });
-    await page.waitFor(`document.readyState === "complete" && document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`, "editor startup", STARTUP_MS);
-    return { page, child, profile, close: stop };
-  } catch (error) {
-    await stop();
-    throw error;
-  }
 }
 
 async function openProject(page) {
@@ -1419,6 +1230,57 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     await t.test("responsive layout keeps recents, panels, toolbar, and canvas reachable", { only: true }, runResponsiveLayoutJourney);
     return;
   }
+
+  await t.test("Runs drafts retain raw values through remounts, refusal, row actions and one atomic Apply", async () => {
+    fixture.reset();
+    fixture.useStyledRuns();
+    await openProject(page);
+    await selectLayer(page, "layer_text");
+    await page.click("#runs-edit");
+    await page.waitFor(`document.querySelectorAll("[data-run-row]").length === 2`, "run rows");
+    assert.equal(await page.evaluate(`document.querySelector("#runs-apply").disabled`), true);
+    await page.evaluate(`(() => { const input = document.querySelector("textarea[data-run-text]"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, "AB"); input.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await page.waitFor(`!document.querySelector("#runs-apply").disabled`, "changed draft");
+    await selectLayer(page, "layer_protected");
+    await selectLayer(page, "layer_text");
+    assert.equal(await page.evaluate(`document.querySelector("textarea[data-run-text]").value`), "AB");
+    fixture.armWriteRefusal("versionConflict", "The document changed");
+    await page.click("#runs-apply");
+    await page.waitFor(`document.querySelector("#runs-error")`, "retained refused draft");
+    assert.equal(await page.evaluate(`document.querySelector("textarea[data-run-text]").value`), "AB");
+    assert.equal(fixture.writes.length, 0);
+    await page.click("#runs-apply");
+    await waitForWrites(fixture);
+    await page.waitFor(`document.querySelector("#runs-edit")`, "authoritative Apply");
+    const write = fixture.writes[0].body;
+    assert.equal(write.operation.text, "ABب");
+    assert.equal(write.operation.runs[0].fontSize, null);
+    assert.deepEqual(write.operation.runs[0].future, { keep: 1 });
+    assert.equal(write.operation.runs[1].color, null);
+    assert.equal(write.expectedVersion, 1);
+    assert.equal(fixture.writes.length, 1);
+    await page.click("#runs-edit");
+    await page.click('[data-run-row]:first-child [data-run-move="1"]');
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll("textarea[data-run-text]")].map((input) => input.value)`), ["ب", "AB"]);
+    await page.click("#runs-add");
+    await page.waitFor(`document.querySelectorAll("[data-run-row]").length === 3`, "added row");
+    await page.click('[data-run-row]:last-child [data-run-delete]');
+    await page.click("#runs-cancel");
+    assert.equal(fixture.writes.length, 1);
+    await page.click("#runs-edit");
+    await page.click("#runs-clear");
+    await page.evaluate(`new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))`);
+    await page.evaluate(`document.querySelector('#runs-apply').focus()`);
+    assert.equal(await page.evaluate(`document.activeElement.id`), "runs-apply");
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await waitForWrites(fixture, 2);
+    assert.deepEqual(fixture.writes[1].body.operation, { op: "update", id: "layer_text", runs: [] });
+    await waitForSaved(page);
+    fixture.reset();
+    await page.send("Page.navigate", { url: fixture.url });
+    await page.waitFor(`document.querySelector("#status")?.textContent?.toLowerCase().includes("ready")`, "reset after Runs journey");
+  });
 
   await t.test("the Mantine structure panel owns one copy of each controller hook", async () => {
     const duplicateIds = await page.evaluate(`(() => {
