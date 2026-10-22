@@ -223,7 +223,7 @@ jobs:
 
   candidate:
     name: Candidate binary (${{ matrix.target-name }})
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.11.0'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.12.0'
     needs: [hygiene, lint, ui, deny, test, render-identity]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90

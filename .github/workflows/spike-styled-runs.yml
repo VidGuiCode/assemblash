@@ -1,0 +1,75 @@
+name: Styled runs renderer spike
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/spike-styled-runs.yml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/assemblash-renderer/**
+      - scripts/styled_runs_spike_compare.py
+      - scripts/test_styled_runs_spike_compare.py
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: Render styled runs (${{ matrix.target-name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target-name: linux-aarch64
+          - os: windows-latest
+            target-name: windows-x86_64
+          - os: windows-11-arm
+            target-name: windows-aarch64
+          - os: macos-15-intel
+            target-name: macos-x86_64
+          - os: macos-14
+            target-name: macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+      - name: Test exact-face measurement and existing renderer goldens
+        run: cargo test --locked -p assemblash-renderer --test face_measurement --test gate
+      - name: Render the isolated layout candidate
+        shell: bash
+        run: |
+          cargo run --locked -p assemblash-renderer --example styled_runs_spike -- "$RUNNER_TEMP/styled-runs-spike"
+          cp target/gate/hashes.json "$RUNNER_TEMP/styled-runs-spike/baseline-hashes.json"
+          git rev-parse HEAD > "$RUNNER_TEMP/styled-runs-spike/source.txt"
+          rustc -vV > "$RUNNER_TEMP/styled-runs-spike/toolchain.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: styled-runs-spike-${{ matrix.target-name }}
+          path: ${{ runner.temp }}/styled-runs-spike
+          if-no-files-found: error
+
+  compare:
+    name: Compare styled runs on all six targets
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: styled-runs-spike-*
+          path: reports
+      - name: Test the strict comparator
+        run: python -O -m unittest discover -s scripts -p test_styled_runs_spike_compare.py
+      - run: python scripts/styled_runs_spike_compare.py reports

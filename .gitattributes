@@ -47,6 +47,7 @@
 /.editorconfig  export-ignore
 
 # Preserve upstream font licenses, including source trailing spaces.
+crates/assemblash-renderer/examples/fixtures/NotoSans-Italic-OFL.txt -whitespace
 ui/src/catalogue-specimens/licenses/*.txt -whitespace
 ui/dist/catalogue-specimens/licenses/*.txt -whitespace
 
