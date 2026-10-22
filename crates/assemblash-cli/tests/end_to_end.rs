@@ -552,6 +552,8 @@ fn the_font_store_is_driven_from_the_command_line() {
     ]);
     assert!(error.contains("Helvetica Neue"), "{error}");
     assert!(error.contains("font store"), "{error}");
+    assert!(error.contains(store_arg), "{error}");
+    assert!(error.contains("weight 400 normal"), "{error}");
 
     // Removing takes the file with it.
     assert_eq!(

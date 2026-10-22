@@ -1831,6 +1831,12 @@ enum CliError {
     Storage(#[from] StorageError),
     #[error(transparent)]
     Render(#[from] assemblash_renderer::RenderError),
+    #[error("{source}; font store at {store}")]
+    RenderFontStore {
+        store: PathBuf,
+        #[source]
+        source: assemblash_renderer::RenderError,
+    },
     #[error("writing {path}: {source}")]
     Write {
         path: PathBuf,
@@ -3278,7 +3284,17 @@ fn load_fonts(args: &FontArgs, document: &Document) -> Result<LoadedFonts, CliEr
     // Sorted, so font resolution — and therefore the pixels — does not depend
     // on the order the arguments happened to arrive in.
     let fonts = LoadedFonts::from_files(paths)?;
-    assemblash_renderer::check_text_fonts(document, fonts.font_set())?;
+    assemblash_renderer::check_text_fonts(document, fonts.font_set()).map_err(|source| {
+        match (&source, &args.font_store) {
+            (assemblash_renderer::RenderError::MissingFont { .. }, Some(store)) => {
+                CliError::RenderFontStore {
+                    store: store.clone(),
+                    source,
+                }
+            }
+            _ => source.into(),
+        }
+    })?;
     Ok(fonts)
 }
 
@@ -3594,6 +3610,74 @@ mod styled_font_tests {
             assemblash_renderer::document_to_png(&document, &cli, &hrefs, 1.0, &metadata).unwrap(),
             assemblash_renderer::document_to_png(&document, &http, &hrefs, 1.0, &metadata).unwrap()
         );
+    }
+    #[test]
+    fn missing_exact_faces_keep_the_renderer_error_and_cli_store_context() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../assemblash-renderer/tests/fonts");
+        let regular = fixture.join("NotoSans-Subset.ttf");
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = FontStore::open(directory.path()).unwrap();
+        store.import_file(&regular, None, None).unwrap();
+        for (family, weight, style) in [
+            ("Helvetica Neue", 400, "normal"),
+            ("Noto Sans", 700, "normal"),
+            ("Noto Sans", 400, "italic"),
+        ] {
+            let mut document = Document::new(
+                &mut assemblash_core::ids::SequentialIdSource::new(),
+                400.0,
+                100.0,
+            );
+            let text = serde_json::from_value(serde_json::json!({
+                "text":"AB", "fontFamily":"Noto Sans", "fontSize":32,
+                "color":"#000000", "align":"left", "lineHeight":1.2,
+                "runs":[{"text":"A"}, {"text":"B", "fontFamily":family,
+                    "fontWeight":weight, "fontStyle":style}]
+            }))
+            .unwrap();
+            document.layers.push(assemblash_core::Layer::new(
+                assemblash_core::LayerId::new("layer_text"),
+                Transform::new(0.0, 0.0, 400.0, 100.0),
+                LayerKind::Text(text),
+            ));
+            for font_store in [None, Some(directory.path().to_path_buf())] {
+                let error = load_fonts(
+                    &FontArgs {
+                        font_files: vec![regular.clone()],
+                        font_dirs: vec![],
+                        font_store: font_store.clone(),
+                    },
+                    &document,
+                )
+                .unwrap_err();
+                let message = error.to_string();
+                let source = match error {
+                    CliError::RenderFontStore { store, source } => {
+                        assert_eq!(Some(store), font_store);
+                        assert!(message.contains("font store at"), "{message}");
+                        assert!(
+                            message.contains(&directory.path().display().to_string()),
+                            "{message}"
+                        );
+                        Some(source)
+                    }
+                    CliError::Render(source) => {
+                        assert!(font_store.is_none());
+                        assert!(!message.contains("font store"), "{message}");
+                        Some(source)
+                    }
+                    _ => None,
+                }
+                .unwrap();
+                assert!(
+                    matches!(source, assemblash_renderer::RenderError::MissingFont {
+                    layer, family: actual_family, weight: actual_weight, style: actual_style
+                } if layer.as_str() == "layer_text" && actual_family == family
+                    && actual_weight == weight && actual_style == style)
+                );
+            }
+        }
     }
     #[test]
     fn explicit_regular_and_store_bold_resolve_each_exact_run_face() {
