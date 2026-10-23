@@ -2271,6 +2271,12 @@ function drawInspectorContent(): void {
   pane.append(flags);
 }
 
+function effectLabel(type: string): string {
+  if (type === "hueRotate") return translate("effects.hueRotate");
+  if (type === "invert") return translate("effects.invert");
+  return type.replace(/([A-Z])/g, " $1").replace(/^./, (one) => one.toUpperCase());
+}
+
 /**
  * The effect stack, as rows with one number each.
  *
@@ -2296,7 +2302,7 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
 
     const label = document.createElement("span");
     label.className = "effect-name";
-    label.textContent = effect.type.replace(/([A-Z])/g, " $1").replace(/^./, (one) => one.toUpperCase());
+    label.textContent = effectLabel(effect.type);
     row.append(label);
 
     // Most effects have one number worth editing; grain's seed is deliberately
@@ -2311,10 +2317,11 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
       const id = `effect-${layer.id}-${index}-${field.name}`;
       mountedInspectorWidgets.push(mountInspectorField(host, {
         id,
-        label: `${label.textContent} ${field.name}`,
+        label: `${label.textContent} ${field.name === "degrees" ? translate("effects.degrees")
+          : effect.type === "invert" && field.name === "amount" ? translate("effects.amount") : field.name}`,
         value: String(field.value),
         type: field.kind === "color" ? "text" : "number",
-        step: field.kind === "number" ? "0.05" : undefined,
+        step: field.kind === "number" ? (field.name === "degrees" ? "1" : "0.05") : undefined,
         disabled: guarded,
         onMount: (input) => { input.dataset["field"] = field.name; },
         onCommit: (raw) => {
@@ -2387,7 +2394,7 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
     value: chosenEffect,
     className: "effect-chooser",
     disabled: guarded,
-    options: api.EFFECT_TYPES.map((type) => ({ value: type, label: type.replace(/([A-Z])/g, " $1").replace(/^./, (one) => one.toUpperCase()) })),
+    options: api.EFFECT_TYPES.map((type) => ({ value: type, label: effectLabel(type) })),
     onCommit: (value) => { chosenEffect = value as typeof chosenEffect; },
   }));
   const addButton = document.createElement("span");

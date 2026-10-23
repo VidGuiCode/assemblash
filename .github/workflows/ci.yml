@@ -242,7 +242,7 @@ jobs:
 
   candidate:
     name: Candidate binary (${{ matrix.target-name }})
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.12.0'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.13.0'
     needs: [hygiene, lint, ui, deny, test, render-identity]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -390,7 +390,7 @@ jobs:
         shell: bash
         run: |
           set -eu
-          name="assemblash-v1.12.0-${{ matrix.target-name }}"
+          name="assemblash-v1.13.0-${{ matrix.target-name }}"
           mkdir -p "candidate-dist/$name"
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp target/release/assemblash.exe "candidate-dist/$name/"
@@ -412,7 +412,7 @@ jobs:
         shell: bash
         run: |
           set -eu
-          name="assemblash-v1.12.0-${{ matrix.target-name }}"
+          name="assemblash-v1.13.0-${{ matrix.target-name }}"
           cd candidate-dist
           python -c 'import hashlib,pathlib; digest,name=pathlib.Path("SHA256SUMS").read_text().split(); assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==digest, "candidate archive checksum mismatch"'
           mkdir extracted
@@ -428,7 +428,7 @@ jobs:
           python scripts/release_smoke.py \
             --binary "candidate-dist/extracted/$name/$binary" \
             --workspace "${{ runner.temp }}/assemblash-candidate-extracted-smoke" \
-            --expected-version 1.12.0
+            --expected-version 1.13.0
       - name: Install cargo-deb for candidate packaging
         if: runner.os == 'Linux'
         run: cargo install cargo-deb --version 3.8.0 --locked
@@ -442,13 +442,13 @@ jobs:
             linux-aarch64) arch=arm64 ;;
             *) exit 1 ;;
           esac
-          package="target/debian/assemblash_1.12.0-1_$arch.deb"
+          package="target/debian/assemblash_1.13.0-1_$arch.deb"
           test "$(dpkg-deb -f "$package" Package)" = assemblash
-          test "$(dpkg-deb -f "$package" Version)" = 1.12.0-1
+          test "$(dpkg-deb -f "$package" Version)" = 1.13.0-1
           test "$(dpkg-deb -f "$package" Architecture)" = "$arch"
           cp "$package" candidate-dist/
           sudo apt-get install -y "./$package"
-          test "$(/usr/bin/assemblash --version)" = 'assemblash 1.12.0'
+          test "$(/usr/bin/assemblash --version)" = 'assemblash 1.13.0'
           cmp target/release/assemblash /usr/bin/assemblash
           cmp packaging/linux/assemblash.desktop /usr/share/applications/assemblash.desktop
           cmp assets/assemblash-mark.svg /usr/share/icons/hicolor/scalable/apps/assemblash.svg

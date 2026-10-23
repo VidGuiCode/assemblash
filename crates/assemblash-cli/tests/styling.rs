@@ -459,6 +459,8 @@ fn the_styles_command_lists_only_what_this_build_renders() {
     use assemblash_core::document::Effect;
     for effect in Effect::rendered_examples() {
         let name = match &effect {
+            Effect::Invert { .. } => "invert",
+            Effect::HueRotate { .. } => "hueRotate",
             Effect::Brightness { .. } => "brightness",
             Effect::Contrast { .. } => "contrast",
             Effect::Saturation { .. } => "saturation",
@@ -501,6 +503,8 @@ fn the_styles_json_is_the_canonical_capability_listing() {
     // to compile until the canonical listing can name it.
     for effect in Effect::rendered_examples() {
         let name = match &effect {
+            Effect::Invert { .. } => "invert",
+            Effect::HueRotate { .. } => "hueRotate",
             Effect::Brightness { .. } => "brightness",
             Effect::Contrast { .. } => "contrast",
             Effect::Saturation { .. } => "saturation",

@@ -468,12 +468,135 @@ def undo_mcp(mcp: Mcp) -> None:
         mcp.tool("undo", {"project": PROJECT_ID})
 
 
+def color_effect_checks(binary: Path, workspace: Path, project: Path, layer: str, guard: str,
+                        baseline_binary: Path | None) -> dict[str, object]:
+    """Check effect writes through the existing paint transport paths."""
+    run(binary, "set", str(project), "--layer", layer, "--fill", "#4080c080")
+    cases = {
+        "hue": [{"type": "hueRotate", "degrees": 90.0}],
+        "invert": [{"type": "invert", "amount": 0.75}],
+        "color-stack": [{"type": "hueRotate", "degrees": -90.0},
+                        {"type": "brightness", "amount": 2.0},
+                        {"type": "invert", "amount": 0.75}],
+    }
+    evidence = {}
+    if baseline_binary is not None and run(baseline_binary, "--version").strip() != "assemblash 1.12.0":
+        raise SmokeFailure("effect compatibility requires released 1.12.0")
+    capabilities = json.loads(run(binary, "styles", "--json"))
+    for label, effects in cases.items():
+        before = document_files(project)[0]
+        version = json.loads(before)["version"]
+        effect_file = workspace / f"{label}-effects.json"
+        effect_file.write_text(json.dumps(effects), encoding="utf-8")
+        run(binary, "set", str(project), "--layer", layer, "--effects-file", str(effect_file))
+        written = document_files(project)[0]
+        stored = next(item for item in json.loads(written)["layers"] if item["id"] == layer)["effects"]
+        if stored != effects:
+            raise SmokeFailure(f"CLI changed the {label} effect values")
+        cli_svg, cli_png = export_cli(binary, project, workspace, f"cli-{label}")
+        current = document_files(project)
+        invalid_file = workspace / "invalid-invert.json"
+        invalid_file.write_text('[{"type":"invert","amount":1.01}]', encoding="utf-8")
+        fail_run(binary, "set", str(project), "--layer", layer, "--effects-file", str(invalid_file))
+        fail_run(binary, "set", str(project), "--layer", guard, "--effects-file", str(effect_file))
+        if document_files(project) != current:
+            raise SmokeFailure("a refused CLI effect write changed project bytes")
+        # Restore the pre-operation document in a copy. Journal replay must recover the effect.
+        recovery = workspace / f"{label}-recovery"
+        shutil.copytree(project, recovery)
+        (recovery / "document.json").write_bytes(before)
+        recovered = json.loads(run(binary, "show", str(recovery)))
+        if next(item for item in recovered["layers"] if item["id"] == layer)["effects"] != effects:
+            raise SmokeFailure(f"recovery lost the {label} effects")
+        if baseline_binary is not None:
+            older = workspace / f"{label}-older"
+            shutil.copytree(project, older)
+            run(baseline_binary, "set", str(older), "--layer", layer, "--name", "older reader")
+            old_doc = json.loads(run(baseline_binary, "show", str(older)))
+            if next(item for item in old_doc["layers"] if item["id"] == layer)["effects"] != effects:
+                raise SmokeFailure("1.12.0 lost an unknown effect during save and load")
+            fail_run(baseline_binary, "export", str(older), str(workspace / f"old-{label}.png"))
+            server = Server.start(baseline_binary, workspace)
+            try:
+                status, refused = json_request(server.base, "GET", f"/api/projects/{PROJECT_ID}/preview.svg")
+                if status != 422 or refused.get("error", {}).get("code") != "renderFailed":
+                    raise SmokeFailure(f"1.12.0 did not return a typed render refusal: {status} {refused!r}")
+            finally:
+                server.close()
+        run(binary, "undo", str(project))
+        if document_files(project)[0] != before:
+            raise SmokeFailure("CLI effect undo did not restore document bytes")
+        server = Server.start(binary, workspace)
+        try:
+            status, actual_capabilities = json_request(server.base, "GET", "/api/capabilities")
+            if status != 200 or actual_capabilities != capabilities:
+                raise SmokeFailure("HTTP effect capabilities differ from CLI")
+            payload = {"operation": {"op": "update", "id": layer, "effects": effects},
+                       "expectedVersion": version}
+            current = document_files(project)
+            status, dry = json_request(server.base, "POST", f"/api/projects/{PROJECT_ID}/operations",
+                                       {**payload, "dryRun": True})
+            if status != 200 or dry.get("dryRun") is not True or document_files(project) != current:
+                raise SmokeFailure("HTTP effect dry run changed project bytes")
+            assert_http_refused(server, {"op": "update", "id": guard, "effects": effects})
+            assert_http_refused(server, {"op": "update", "id": layer,
+                                         "effects": [{"type": "invert", "amount": 1.01}]})
+            status, stale = json_request(server.base, "POST", f"/api/projects/{PROJECT_ID}/operations",
+                                         {**payload, "expectedVersion": version - 1})
+            if status != 409 or stale.get("error", {}).get("code") != "versionConflict":
+                raise SmokeFailure("HTTP effect write did not refuse a stale version")
+            if document_files(project) != current:
+                raise SmokeFailure("a refused HTTP effect write changed project bytes")
+            status, body = json_request(server.base, "POST", f"/api/projects/{PROJECT_ID}/operations", payload)
+            if status != 200 or document_files(project)[0] != written:
+                raise SmokeFailure(f"HTTP effect write differs from CLI: {status} {body!r}")
+            http_svg, http_png = export_http(server, f"http-{label}")
+            status, _ = json_request(server.base, "POST", f"/api/projects/{PROJECT_ID}/undo", {})
+            if status != 200 or document_files(project)[0] != before:
+                raise SmokeFailure("HTTP effect undo did not restore document bytes")
+        finally:
+            server.close()
+        mcp = Mcp.start(binary, workspace)
+        try:
+            if mcp.tool("list_capabilities", {}) != capabilities:
+                raise SmokeFailure("MCP effect capabilities differ from CLI")
+            arguments = {"project": PROJECT_ID, "layerId": layer, "effects": effects, "expectedVersion": version}
+            current = document_files(project)
+            dry = mcp.tool("update_layer", {**arguments, "dryRun": True})
+            if dry.get("dryRun") is not True or document_files(project) != current:
+                raise SmokeFailure("MCP effect dry run changed project bytes")
+            assert_mcp_refused(mcp, "update_layer", {**arguments, "layerId": guard})
+            assert_mcp_refused(mcp, "update_layer", {**arguments, "effects": [{"type": "invert", "amount": -0.01}]})
+            assert_mcp_refused(mcp, "update_layer", {**arguments, "expectedVersion": version - 1},
+                               expected_code="versionConflict")
+            if document_files(project) != current:
+                raise SmokeFailure("a refused MCP effect write changed project bytes")
+            mcp.tool("update_layer", arguments)
+            if document_files(project)[0] != written:
+                raise SmokeFailure("MCP effect write differs from CLI")
+            mcp_svg, mcp_png = export_mcp(mcp, project, f"mcp-{label}")
+            mcp.tool("undo", {"project": PROJECT_ID})
+            if document_files(project)[0] != before:
+                raise SmokeFailure("MCP effect undo did not restore document bytes")
+        finally:
+            mcp.close()
+        if not (cli_svg == http_svg == mcp_svg and cli_png == http_png == mcp_png):
+            raise SmokeFailure(f"{label} rendering differs across transports")
+        evidence[label] = {"equalAcrossTransports": True, "undoRestoredBytes": True,
+                           "recoveryPreservedEffects": True, "refusalsPreservedBytes": True,
+                           "baselinePreservedEffects": baseline_binary is not None,
+                           "baselineTypedRenderRefusal": baseline_binary is not None,
+                           "pngSha256": hashlib.sha256(cli_png).hexdigest()}
+    return evidence
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--workspace", required=True, type=Path)
     parser.add_argument("--font", type=Path, help="accepted for parity with the other smoke scripts")
     parser.add_argument("--baseline-binary", type=Path)
+    parser.add_argument("--effects-baseline-binary", type=Path, help="released 1.12.0 binary for effect compatibility")
     args = parser.parse_args()
     binary = args.binary.resolve()
     workspace = args.workspace.resolve()
@@ -706,6 +829,16 @@ def main() -> int:
                 original_document["assets"],
                 project,
             )
+
+        version = run(binary, "--version").strip().removeprefix("assemblash ")
+        version_numbers = tuple(int(part) for part in version.split("-", 1)[0].split("."))
+        if version_numbers >= (1, 13, 0):
+            evidence["colorEffects"] = color_effect_checks(
+                binary, workspace, project, layer, guard,
+                args.effects_baseline_binary.resolve() if args.effects_baseline_binary else None,
+            )
+        elif args.effects_baseline_binary:
+            raise SmokeFailure("effect compatibility checks require a candidate binary at 1.13.0 or newer")
 
         if not (cli_svg == http_svg == mcp_svg):
             raise SmokeFailure("CLI, HTTP, and MCP SVG bytes differ")

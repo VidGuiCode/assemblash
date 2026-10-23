@@ -129,6 +129,156 @@ fn middle(pixels: &[u8]) -> [u8; 3] {
 }
 
 #[test]
+fn hue_rotation_uses_degrees_and_wraps_complete_turns() {
+    let rotated = |degrees| {
+        render(vec![Effect::HueRotate {
+            degrees,
+            extra: Extras::new(),
+        }])
+    };
+    assert_eq!(rotated(0.0), render(vec![]));
+    assert_eq!(rotated(360.0), rotated(0.0));
+    assert_eq!(rotated(-90.0), rotated(270.0));
+    assert_eq!(rotated(450.0), rotated(90.0));
+    assert_eq!(rotated(f64::MAX), rotated(f64::MAX.rem_euclid(360.0)));
+    // The SVG hue matrix applied to RGB (64, 128, 192), with resvg byte truncation.
+    assert_eq!(middle(&rotated(90.0)), [192, 91, 173]);
+}
+
+#[test]
+fn hue_rotation_preserves_source_alpha() {
+    for alpha in [0, 1, 128, 255] {
+        let pixels = |degrees: Option<f64>| {
+            let effects = degrees
+                .into_iter()
+                .map(|degrees| Effect::HueRotate {
+                    degrees,
+                    extra: Extras::new(),
+                })
+                .collect();
+            let (mut doc, mut hrefs) = document(effects);
+            doc.canvas.background = None;
+            hrefs.insert(
+                doc.assets[0].id.clone(),
+                format!(
+                    "data:image/png;base64,{}",
+                    base64(&solid_png(&Color::new(format!("#4080c0{alpha:02x}"))))
+                ),
+            );
+            decode(
+                &document_to_png(
+                    &doc,
+                    &fonts(),
+                    &hrefs,
+                    1.0,
+                    &PngMetadata::for_document(&doc),
+                )
+                .unwrap(),
+            )
+            .2
+        };
+        assert_eq!(pixels(Some(0.0)), pixels(None));
+        for degrees in [0.0, 90.0, -450.0] {
+            assert!(pixels(Some(degrees))
+                .chunks_exact(4)
+                .all(|pixel| pixel[3] == alpha));
+        }
+    }
+}
+
+#[test]
+fn hue_rotation_respects_stack_order_with_clamping() {
+    let hue = Effect::HueRotate {
+        degrees: 90.0,
+        extra: Extras::new(),
+    };
+    let brightness = Effect::Brightness {
+        amount: 2.0,
+        extra: Extras::new(),
+    };
+    assert_ne!(
+        render(vec![hue.clone(), brightness.clone()]),
+        render(vec![brightness, hue])
+    );
+}
+
+#[test]
+fn invert_interpolates_rgb_and_preserves_neutral_output() {
+    let inverted = |amount| {
+        render(vec![Effect::Invert {
+            amount,
+            extra: Extras::new(),
+        }])
+    };
+    assert_eq!(inverted(0.0), render(vec![]));
+    // Component transfer uses sRGB channels and the pinned renderer's byte truncation.
+    assert_eq!(middle(&inverted(0.25)), [95, 127, 159]);
+    assert_eq!(middle(&inverted(0.5)), [127, 127, 127]);
+    assert_eq!(middle(&inverted(1.0)), [191, 126, 62]);
+}
+
+#[test]
+fn invert_preserves_source_alpha_and_neutral_transparent_pixels() {
+    for alpha in [0, 1, 128, 255] {
+        let pixels = |amount: Option<f64>| {
+            let effects = amount
+                .into_iter()
+                .map(|amount| Effect::Invert {
+                    amount,
+                    extra: Extras::new(),
+                })
+                .collect();
+            let (mut doc, mut hrefs) = document(effects);
+            doc.canvas.background = None;
+            hrefs.insert(
+                doc.assets[0].id.clone(),
+                format!(
+                    "data:image/png;base64,{}",
+                    base64(&solid_png(&Color::new(format!("#4080c0{alpha:02x}"))))
+                ),
+            );
+            decode(
+                &document_to_png(
+                    &doc,
+                    &fonts(),
+                    &hrefs,
+                    1.0,
+                    &PngMetadata::for_document(&doc),
+                )
+                .unwrap(),
+            )
+            .2
+        };
+        assert_eq!(pixels(Some(0.0)), pixels(None));
+        for amount in [0.0, 0.25, 0.5, 1.0] {
+            assert!(pixels(Some(amount))
+                .chunks_exact(4)
+                .all(|pixel| pixel[3] == alpha));
+        }
+    }
+}
+
+#[test]
+fn invert_composes_in_stack_order() {
+    let hue = Effect::HueRotate {
+        degrees: 90.0,
+        extra: Extras::new(),
+    };
+    let invert = Effect::Invert {
+        amount: 0.75,
+        extra: Extras::new(),
+    };
+    let brightness = Effect::Brightness {
+        amount: 2.0,
+        extra: Extras::new(),
+    };
+    assert_ne!(
+        render(vec![hue.clone(), brightness.clone(), invert.clone()]),
+        render(vec![invert, brightness, hue])
+    );
+}
+
+#[test]
 fn each_effect_does_what_its_name_says() {
     // #4080c0 is (64, 128, 192). The expectations are the arithmetic done in
     // sRGB, which is why the filters declare that space: in SVG's default

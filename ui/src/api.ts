@@ -516,6 +516,8 @@ export const EFFECT_TYPES = [
   "blur",
   "grain",
   "dropShadow",
+  "hueRotate",
+  "invert",
 ] as const;
 
 /** One editable field of an effect: what it is called, and what it holds. */
@@ -539,7 +541,10 @@ export function effectFields(effect: Effect): EffectField[] {
     return typeof value === "number" ? [{ name, value, kind: "number" }] : [];
   };
   switch (effect.type) {
+    case "hueRotate":
+      return number("degrees");
     case "brightness":
+    case "invert":
     case "contrast":
     case "saturation":
     case "grain":
@@ -579,6 +584,10 @@ export function effectFields(effect: Effect): EffectField[] {
  */
 export function newEffect(type: string): Effect {
   switch (type) {
+    case "invert":
+      return { type: "invert", amount: 0 } as Effect;
+    case "hueRotate":
+      return { type: "hueRotate", degrees: 0 } as Effect;
     case "blur":
       return { type: "blur", radius: 0 } as Effect;
     case "grain":

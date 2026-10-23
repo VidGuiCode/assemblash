@@ -498,6 +498,42 @@ Name a loaded family in the asset, or convert the text to outlines before you
 import the asset. The 1.3.0 warning code `svgAssetTextWithoutFont` still
 exists, but this case now gives the error instead.
 
+### Colour effects in 1.13.0 source builds
+
+Hue rotation and invert use the existing layer effect stack.
+Both effects preserve alpha and run in stored stack order.
+
+| Effect type | Parameter | Neutral value |
+| --- | --- | --- |
+| `hueRotate` | Any finite `degrees` value | `0`, or any complete turn |
+| `invert` | `amount` from `0` to `1` | `0` |
+
+Hue rotation uses the SVG hue matrix in sRGB. Negative angles rotate in reverse.
+Invert interpolates each RGB channel toward its inverse. An amount of `1` gives full inversion.
+
+Save this array as `effects.json`:
+
+```json
+[
+  { "type": "hueRotate", "degrees": 90 },
+  { "type": "invert", "amount": 0.75 }
+]
+```
+
+Apply the array with one reversible operation:
+
+```sh
+assemblash set ./project --layer layer_id --effects-file effects.json
+```
+
+HTTP accepts the same array in `operation.effects` on an `update` operation.
+MCP accepts it in `update_layer.effects`. The reference interface provides both effects in its Effects control.
+Use `assemblash styles --json`, `GET /api/capabilities`, or MCP `list_capabilities` to inspect support.
+
+Released 1.12.0 preserves these unknown effects during load and unrelated edits.
+Its renderer refuses them. HTTP returns `422 renderFailed`.
+The document schema stays at version 1. No migration is needed.
+
 ### History and safety
 
 Every change uses the same transactional operation layer. A refused

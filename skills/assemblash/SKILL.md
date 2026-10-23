@@ -121,6 +121,18 @@ kits, customer assets, or downstream workflow data.
 For exact arguments, payloads, and supported properties, use
 `assemblash --help` and the committed schemas. Do not guess.
 
+## Colour effects (1.13.0 source builds)
+
+Check `list_capabilities`, `GET /api/capabilities`, or `assemblash styles --json` before using these effects.
+
+- `hueRotate` takes finite `degrees`. Zero and complete turns are neutral. Negative angles rotate in reverse.
+- `invert` takes `amount` from zero to one. Zero is neutral. One gives full inversion.
+- Both effects preserve alpha and run in stored stack order.
+- Pass the array through CLI `--effects-file`, HTTP `update.effects`, or MCP `update_layer.effects`.
+- Released 1.12.0 preserves these unknown effects during unrelated edits. Its renderer refuses them.
+
+The document schema stays at version 1. Use the existing operation checks and undo.
+
 ## Text and resize controls (1.12.0 and newer)
 
 Check the running binary version before you use these properties.

@@ -1731,6 +1731,18 @@ fn filter_for(layer: &Layer) -> Result<String, RenderError> {
     for (index, effect) in layer.effects.iter().enumerate() {
         let result = format!("e{index}");
         match effect {
+            Effect::Invert { amount, .. } => {
+                // (1 - amount) * channel + amount * (1 - channel).
+                component_transfer(&mut body, &input, &result, 1.0 - 2.0 * amount, *amount);
+            }
+            Effect::HueRotate { degrees, .. } => {
+                // Normalize before SVG converts the angle to f32.
+                let _ = writeln!(
+                    body,
+                    "      <feColorMatrix in=\"{input}\" result=\"{result}\" type=\"hueRotate\" values=\"{}\"/>",
+                    number(degrees.rem_euclid(360.0))
+                );
+            }
             Effect::Brightness { amount, .. } => {
                 component_transfer(&mut body, &input, &result, *amount, 0.0);
             }
