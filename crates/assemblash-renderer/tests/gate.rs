@@ -93,6 +93,7 @@ fn text_layer(
             color: Some(Color::new("#101820")),
             align,
             line_height: 1.4,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: assemblash_core::FontStyle::Normal,
             letter_spacing: 0.0,
@@ -657,6 +658,7 @@ fn typography_layer(
             color: Some(Color::new("#101820")),
             align: TextAlign::Left,
             line_height: 1.4,
+            paragraph_spacing: 0.0,
             font_weight: weight,
             font_style: style,
             letter_spacing: spacing,
@@ -1494,6 +1496,7 @@ fn gradient_linear_document() -> (Document, AssetHrefs) {
             )),
             align: TextAlign::Left,
             line_height: 1.4,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: assemblash_core::FontStyle::Normal,
             letter_spacing: 0.0,
@@ -1758,6 +1761,86 @@ fn styled_runs_document() -> (Document, AssetHrefs) {
     (document, AssetHrefs::new())
 }
 
+fn paragraph_spacing_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 640.0, 460.0);
+    let mut plain = text_layer(
+        "layer_paragraph_plain",
+        Transform::new(24.0, 24.0, 260.0, 360.0),
+        "\nPlain text wraps onto another line\n\nLast\n",
+        "Noto Sans",
+        32.0,
+        TextAlign::Left,
+    );
+    if let LayerKind::Text(text) = &mut plain.kind {
+        text.paragraph_spacing = 12.5;
+        text.vertical_align = assemblash_core::VerticalAlign::Middle;
+    }
+    plain.clip =
+        Some(serde_json::from_value(serde_json::json!({"shape":"rect","cornerRadius":5})).unwrap());
+    document.layers.push(plain);
+    let mut styled = text_layer(
+        "layer_paragraph_styled",
+        Transform::new(320.0, 24.0, 290.0, 400.0),
+        "A bold\n\nب\nÁ\n",
+        "Noto Sans",
+        32.0,
+        TextAlign::Right,
+    );
+    if let LayerKind::Text(text) = &mut styled.kind {
+        text.paragraph_spacing = 18.75;
+        text.vertical_align = assemblash_core::VerticalAlign::Bottom;
+        text.runs = vec![
+            serde_json::json!({"text":"A ","fontSize":48}),
+            serde_json::json!({"text":"bold\n\n","fontWeight":700,"color":"#336699"}),
+            serde_json::json!({"text":"ب","fontFamily":"Noto Sans Arabic","fontSize":40}),
+            serde_json::json!({"text":"\nÁ\n","fontSize":18}),
+        ];
+    }
+    document.layers.push(styled);
+    (document, AssetHrefs::new())
+}
+
+fn justified_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 640.0, 460.0);
+    let mut plain = text_layer(
+        "layer_justify_plain",
+        Transform::new(24.25, 24.75, 265.5, 400.0),
+        "   A  B C D E F G H I J K L\n\nHandglovesHandglovesHandgloves\nFinal words",
+        "Noto Sans",
+        32.0,
+        TextAlign::Justify,
+    );
+    if let LayerKind::Text(text) = &mut plain.kind {
+        text.paragraph_spacing = 7.25;
+        text.vertical_align = assemblash_core::VerticalAlign::Middle;
+    }
+    plain.clip =
+        Some(serde_json::from_value(serde_json::json!({"shape":"rect","cornerRadius":5})).unwrap());
+    document.layers.push(plain);
+    let mut rich = text_layer(
+        "layer_justify_rich",
+        Transform::new(330.5, 24.25, 265.75, 400.0),
+        "A bold words across runs and Á marks\nب ب ب ب ب ب ب ب ب ب\nLast",
+        "Noto Sans",
+        32.0,
+        TextAlign::Justify,
+    );
+    rich.transform.rotation = 2.0;
+    if let LayerKind::Text(text) = &mut rich.kind {
+        text.paragraph_spacing = 12.5;
+        text.vertical_align = assemblash_core::VerticalAlign::Bottom;
+        text.runs = vec![
+            serde_json::json!({"text":"A ","fontSize":36}),
+            serde_json::json!({"text":"bold words across ","fontWeight":700,"color":"#336699"}),
+            serde_json::json!({"text":"runs and Á marks\n","letterSpacing":0.5}),
+            serde_json::json!({"text":"ب ب ب ب ب ب ب ب ب ب","fontFamily":"Noto Sans Arabic","fontSize":32}),
+            serde_json::json!({"text":"\nLast","fontSize":18}),
+        ];
+    }
+    document.layers.push(rich);
+    (document, AssetHrefs::new())
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -1773,6 +1856,8 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("text-spacing", text_spacing_document()),
         ("text-valign", text_valign_document()),
         ("styled-runs", styled_runs_document()),
+        ("paragraph-spacing", paragraph_spacing_document()),
+        ("justified", justified_document()),
         ("clip-rounded", clip_rounded_document()),
         ("clip-ellipse", clip_ellipse_document()),
         ("crop", crop_document()),
@@ -1818,6 +1903,14 @@ fn scaled_reference_documents() -> Vec<(&'static str, Document, AssetHrefs, f32)
     let (radial, radial_hrefs) = gradient_radial_document();
     let (line, line_hrefs) = gradient_line_document();
     let mut scaled = vec![
+        {
+            let (document, hrefs) = justified_document();
+            ("justified-scale2", document, hrefs, 2.0)
+        },
+        {
+            let (document, hrefs) = paragraph_spacing_document();
+            ("paragraph-spacing-scale2", document, hrefs, 2.0)
+        },
         {
             let (document, hrefs) = styled_runs_document();
             ("styled-runs-scale2", document, hrefs, 2.0)

@@ -536,6 +536,7 @@ async fn font_specimen(
             color: Some(Color::new("#171717")),
             align: TextAlign::Left,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
             font_weight: query.weight,
             font_style: style,
             letter_spacing: 0.0,

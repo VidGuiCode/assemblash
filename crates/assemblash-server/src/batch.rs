@@ -122,6 +122,7 @@ fn insert_layer(
             color: text.color.clone(),
             align: text.align,
             line_height: text.line_height,
+            paragraph_spacing: text.paragraph_spacing,
             font_weight: text.font_weight,
             font_style: text.font_style,
             letter_spacing: text.letter_spacing,

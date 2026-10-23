@@ -453,6 +453,55 @@ fn measure(chars: &[Character], layer: &Layer) -> Result<f64, RenderError> {
     Ok(f64::from(advance))
 }
 
+fn fitted_advances(chars: &[Character], shaped: &[Cluster]) -> (Vec<f32>, usize) {
+    let trailing = chars
+        .iter()
+        .rposition(|ch| !ch.ch.is_whitespace())
+        .map_or(0, |index| chars[index].source.character + 1);
+    // Keep visual order. Logical tail whitespace can appear first in an RTL line.
+    let last = shaped
+        .iter()
+        .rposition(|cluster| cluster.glyphs[0].character.source.character < trailing);
+    let advances = shaped
+        .iter()
+        .enumerate()
+        .map(|(index, cluster)| {
+            if cluster.glyphs[0].character.source.character >= trailing {
+                0.0
+            } else if Some(index) == last {
+                // Repeat clusters' exact per-glyph f32 multiply/add order. The last
+                // retained cluster has no following cluster to receive letter spacing.
+                cluster.glyphs.iter().fold(0.0_f32, |advance, glyph| {
+                    advance
+                        + glyph.glyph.advance as f32
+                            * (glyph.character.style.size / glyph.character.style.units)
+                })
+            } else {
+                cluster.advance
+            }
+        })
+        .collect();
+    (advances, trailing)
+}
+
+fn measure_fit(chars: &[Character], layer: &Layer, justify: bool) -> Result<f64, RenderError> {
+    if !justify {
+        return measure(chars, layer);
+    }
+    let shaped = clusters(chars, layer)?;
+    let (advances, _) = fitted_advances(chars, &shaped);
+    let advance = advances.iter().sum::<f32>();
+    if !advance.is_finite() {
+        return Err(fail(
+            layer,
+            chars.first().map_or(Source::default(), |ch| ch.source),
+            Kind::InvalidGeometry,
+            "fitted line advance exceeds finite render coordinates",
+        ));
+    }
+    Ok(f64::from(advance))
+}
+
 struct Line {
     chars: Vec<Character>,
     width: f64,
@@ -461,6 +510,14 @@ struct Line {
     size: f64,
     baseline: f64,
     x: f64,
+    paragraph_last: bool,
+    positions: Option<Vec<ClusterPosition>>,
+}
+
+struct ClusterPosition {
+    x: f32,
+    advance: f32,
+    metric: bool,
 }
 
 fn line(chars: Vec<Character>, base: &Style, layer: &Layer) -> Result<Line, RenderError> {
@@ -485,7 +542,130 @@ fn line(chars: Vec<Character>, base: &Style, layer: &Layer) -> Result<Line, Rend
         size: f64::from(size),
         baseline: 0.0,
         x: 0.0,
+        paragraph_last: false,
+        positions: None,
     })
+}
+
+// Space groups come from source characters. A style or bidi run adds no gap.
+fn justify_line(
+    item: &Line,
+    width: f64,
+    layer: &Layer,
+) -> Result<(Vec<ClusterPosition>, f64), RenderError> {
+    let shaped = clusters(&item.chars, layer)?;
+    let mut groups = std::collections::BTreeMap::new();
+    let first_word = item.chars.iter().position(|ch| !ch.ch.is_whitespace());
+    let last_word = item.chars.iter().rposition(|ch| !ch.ch.is_whitespace());
+    let mut count = 0;
+    let mut index = 0;
+    while index < item.chars.len() {
+        if item.chars[index].ch != ' ' {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < item.chars.len() && item.chars[index].ch == ' ' {
+            index += 1;
+        }
+        if first_word.is_some_and(|first| first < start)
+            && last_word.is_some_and(|last| last >= index)
+        {
+            for ch in &item.chars[start..index] {
+                groups.insert(ch.source.character, count);
+            }
+            count += 1;
+        }
+    }
+    let mut last = std::collections::BTreeMap::new();
+    for (index, cluster) in shaped.iter().enumerate() {
+        if let Some(group) = groups.get(&cluster.glyphs[0].character.source.character) {
+            last.insert(*group, index);
+        }
+    }
+    let gaps = last.into_values().collect::<BTreeSet<_>>();
+    let (advances, trailing) = fitted_advances(&item.chars, &shaped);
+    let natural = advances.iter().sum::<f32>();
+    let target = width as f32;
+    let wrapped_fit = !item.paragraph_last
+        && !gaps.is_empty()
+        && natural <= target
+        && natural.is_finite()
+        && target.is_finite()
+        && f64::from(natural) <= width;
+    let final_width = |extra: f32| {
+        advances
+            .iter()
+            .enumerate()
+            .fold(0.0_f32, |mut cursor, (index, advance)| {
+                cursor += advance;
+                if gaps.contains(&index) {
+                    cursor += extra;
+                }
+                cursor
+            })
+    };
+    let extra = if wrapped_fit && natural < target && f64::from(natural) < width {
+        // Search positive f32 values. The retained additions must fit the actual box.
+        // This also avoids cumulative rounding past the target on many-gap lines.
+        let mut low = 0_u32;
+        let mut high = target.to_bits();
+        while low < high {
+            let middle = low + (high - low).div_ceil(2);
+            let cursor = final_width(f32::from_bits(middle));
+            if cursor.is_finite() && f64::from(cursor) <= width {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        f32::from_bits(low)
+    } else {
+        0.0
+    };
+    let origin = layer.transform.x as f32;
+    let mut cursor = 0.0_f32;
+    let mut positions = Vec::new();
+    for (index, cluster) in shaped.iter().enumerate() {
+        let x = cursor;
+        // A fitted wrapped row excludes its terminal space even when no extra fits.
+        let advance = if wrapped_fit {
+            advances[index]
+        } else {
+            cluster.advance
+        };
+        cursor += advance;
+        if wrapped_fit && gaps.contains(&index) {
+            cursor += extra;
+        }
+        if !origin.is_finite()
+            || !cursor.is_finite()
+            || !(origin + x).is_finite()
+            || !(origin + cursor).is_finite()
+            || !(cursor - x).is_finite()
+        {
+            return Err(fail(
+                layer,
+                cluster.glyphs[0].character.source,
+                Kind::InvalidGeometry,
+                "justified horizontal cursor exceeds finite render coordinates",
+            ));
+        }
+        positions.push(ClusterPosition {
+            x,
+            advance: cursor - x,
+            metric: !wrapped_fit || cluster.glyphs[0].character.source.character < trailing,
+        });
+    }
+    if !origin.is_finite() {
+        return Err(fail(
+            layer,
+            Source::default(),
+            Kind::InvalidGeometry,
+            "justified origin exceeds finite render coordinates",
+        ));
+    }
+    Ok((positions, f64::from(cursor)))
 }
 
 pub(super) fn layout(
@@ -496,6 +676,8 @@ pub(super) fn layout(
 ) -> Result<TextLayerLayout, RenderError> {
     if !text.line_height.is_finite()
         || text.line_height <= 0.0
+        || !text.paragraph_spacing.is_finite()
+        || text.paragraph_spacing < 0.0
         || !layer.transform.height.is_finite()
     {
         return Err(fail(
@@ -523,6 +705,22 @@ pub(super) fn layout(
         text.color.clone(),
     )?;
     let mut chars = Vec::new();
+    if text.runs.is_empty() {
+        chars.extend(
+            text.text
+                .char_indices()
+                .enumerate()
+                .map(|(character, (byte, ch))| Character {
+                    ch,
+                    style: base.clone(),
+                    source: Source {
+                        run: 0,
+                        character,
+                        byte,
+                    },
+                }),
+        );
+    }
     for run in runs {
         if run.text.is_empty() {
             continue;
@@ -583,14 +781,14 @@ pub(super) fn layout(
         for (word_start, word) in words {
             let mut candidate = current.clone();
             candidate.extend_from_slice(&word);
-            if measure(&candidate, layer)? <= width {
+            if measure_fit(&candidate, layer, text.align == TextAlign::Justify)? <= width {
                 current = candidate;
                 continue;
             }
             if !current.is_empty() {
                 lines.push(line(std::mem::take(&mut current), &base, layer)?);
             }
-            if measure(&word, layer)? <= width {
+            if measure_fit(&word, layer, text.align == TextAlign::Justify)? <= width {
                 current = word;
                 continue;
             }
@@ -605,7 +803,12 @@ pub(super) fn layout(
             while start < word.len() {
                 let mut end = start;
                 for candidate in breaks.iter().copied().filter(|end| *end > start) {
-                    if measure(&word[start..candidate], layer)? <= width {
+                    if measure_fit(
+                        &word[start..candidate],
+                        layer,
+                        text.align == TextAlign::Justify,
+                    )? <= width
+                    {
                         end = candidate;
                     } else {
                         break;
@@ -637,20 +840,34 @@ pub(super) fn layout(
         if !current.is_empty() || lines.len() == first_line {
             lines.push(line(current, &base, layer)?);
         }
+        if let Some(last) = lines.last_mut() {
+            last.paragraph_last = true;
+        }
     }
     let mut top = f64::INFINITY;
     let mut bottom = f64::NEG_INFINITY;
     for index in 0..lines.len() {
+        if text.align == TextAlign::Justify {
+            let (positions, advance) = justify_line(&lines[index], width, layer)?;
+            lines[index].positions = Some(positions);
+            lines[index].width = advance;
+        }
         lines[index].baseline = if index == 0 {
             lines[index].ascent
         } else {
-            lines[index - 1].baseline + lines[index - 1].size * text.line_height
+            lines[index - 1].baseline
+                + lines[index - 1].size * text.line_height
+                + if lines[index - 1].paragraph_last {
+                    text.paragraph_spacing
+                } else {
+                    0.0
+                }
         };
         top = top.min(lines[index].baseline - lines[index].ascent);
         bottom = bottom.max(lines[index].baseline + lines[index].descent);
         let free = width - lines[index].width;
         lines[index].x = match text.align {
-            TextAlign::Left => 0.0,
+            TextAlign::Left | TextAlign::Justify => 0.0,
             TextAlign::Center => free / 2.0,
             TextAlign::Right => free,
         };
@@ -705,50 +922,67 @@ pub(super) fn layout(
             emitted_baseline = svg_coordinate(layer.transform.y + item.baseline);
             0.0
         } else {
-            svg_coordinate(lines[line_index - 1].size * text.line_height)
+            svg_coordinate(
+                lines[line_index - 1].size * text.line_height
+                    + if lines[line_index - 1].paragraph_last {
+                        text.paragraph_spacing
+                    } else {
+                        0.0
+                    },
+            )
         };
         let span = Transform::from_translate(layer.transform.x as f32 + origin, emitted_baseline);
         emitted_baseline += dy;
         emission.lines.push(TextEmissionLine { span, dy });
         let mut metric_path = PathBuilder::new();
         let mut x = 0.0_f32;
-        for cluster in clusters(&item.chars, layer)? {
+        for (cluster_index, cluster) in clusters(&item.chars, layer)?.into_iter().enumerate() {
+            let position = item
+                .positions
+                .as_ref()
+                .map(|positions| &positions[cluster_index]);
+            if let Some(position) = position {
+                x = position.x;
+            }
+            let cluster_advance = position.map_or(cluster.advance, |position| position.advance);
             let first = &cluster.glyphs[0].character;
-            let rect = (
-                origin + x,
-                baseline - first.style.ascent,
-                origin
-                    + x
-                    + if cluster.advance > 0.0 {
-                        cluster.advance
+            if position.is_none_or(|position| position.metric) {
+                let rect = (
+                    origin + x,
+                    baseline - first.style.ascent,
+                    origin
+                        + x
+                        + if cluster_advance > 0.0 {
+                            cluster_advance
+                        } else {
+                            1.0
+                        },
+                    baseline + first.style.descent,
+                );
+                union_bounds(&mut metric_bounds, rect);
+                // Match usvg: construct the font-metric rectangle, transform the
+                // cluster, append its rectangle, then transform the complete span.
+                let metric = NonZeroRect::from_xywh(
+                    0.0,
+                    -first.style.ascent,
+                    if cluster_advance > 0.0 {
+                        cluster_advance
                     } else {
                         1.0
                     },
-                baseline + first.style.descent,
-            );
-            union_bounds(&mut metric_bounds, rect);
-            // Match usvg: construct the font-metric rectangle, transform the
-            // cluster, append its rectangle, then transform the complete span.
-            let metric = NonZeroRect::from_xywh(
-                0.0,
-                -first.style.ascent,
-                if cluster.advance > 0.0 {
-                    cluster.advance
-                } else {
-                    1.0
-                },
-                first.style.ascent + first.style.descent,
-            )
-            .and_then(|rect| rect.transform(Transform::from_translate(x, dy)))
-            .ok_or_else(|| {
-                fail(
-                    layer,
-                    first.source,
-                    Kind::InvalidGeometry,
-                    "text metric rectangle exceeds finite render coordinates",
+                    first.style.ascent + first.style.descent,
                 )
-            })?;
-            metric_path.push_rect(metric.to_rect());
+                .and_then(|rect| rect.transform(Transform::from_translate(x, dy)))
+                .ok_or_else(|| {
+                    fail(
+                        layer,
+                        first.source,
+                        Kind::InvalidGeometry,
+                        "text metric rectangle exceeds finite render coordinates",
+                    )
+                })?;
+                metric_path.push_rect(metric.to_rect());
+            }
             let mut advance = 0.0_f32;
             for selected in cluster.glyphs {
                 let character = selected.character;
@@ -802,7 +1036,9 @@ pub(super) fn layout(
                     paint_span,
                 });
             }
-            x += cluster.advance;
+            if position.is_none() {
+                x += cluster.advance;
+            }
         }
         if let Some(path) = metric_path.finish() {
             let bounds = path

@@ -86,7 +86,8 @@ fn text_kind() -> impl Strategy<Value = LayerKind> {
         prop_oneof![
             Just(TextAlign::Left),
             Just(TextAlign::Center),
-            Just(TextAlign::Right)
+            Just(TextAlign::Right),
+            Just(TextAlign::Justify)
         ],
         0.5f64..3.0,
         prop::collection::vec(unknown_value(), 0..2),
@@ -101,6 +102,7 @@ fn text_kind() -> impl Strategy<Value = LayerKind> {
                     color: Some(color),
                     align,
                     line_height,
+                    paragraph_spacing: 0.0,
                     font_weight: 400,
                     font_style: FontStyle::Normal,
                     letter_spacing: 0.0,

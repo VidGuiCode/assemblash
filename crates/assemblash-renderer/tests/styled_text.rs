@@ -31,6 +31,7 @@ fn document(body: &str) -> Document {
             color: Some(Color::new("#000000")),
             align: TextAlign::Left,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: FontStyle::Normal,
             letter_spacing: 0.0,
@@ -86,6 +87,618 @@ fn compare_pixels(expected: &str, actual: &str, fonts: &LoadedFonts, label: &str
         assert!(
             changed <= 2 && max <= 16 && total <= 96,
             "{label} @{scale}: changed={changed}, max={max}, total={total}"
+        );
+    }
+}
+
+#[test]
+fn justification_stretches_only_wrapped_interword_gaps() {
+    let fonts = fonts();
+    let mut doc = document("A B C D E F G H\nI J\n\nK");
+    doc.layers[0].transform.width = 120.0;
+    styled(&mut doc);
+    text(&mut doc).paragraph_spacing = 9.25;
+    text(&mut doc).vertical_align = VerticalAlign::Middle;
+    let natural = layout_text_layer(&doc.layers[0], 120.0, fonts.font_set()).unwrap();
+    text(&mut doc).align = TextAlign::Justify;
+    let justified = layout_text_layer(&doc.layers[0], 120.0, fonts.font_set()).unwrap();
+    assert_eq!(natural.height, justified.height);
+    assert_eq!(natural.lines.len(), justified.lines.len());
+    let mut stretched = 0;
+    for (left, actual) in natural.lines.iter().zip(&justified.lines) {
+        assert_eq!(left.text, actual.text);
+        assert_eq!(left.baseline, actual.baseline);
+        if actual.text.ends_with(' ') && actual.text.split_whitespace().count() > 1 {
+            assert!(actual.width.unwrap() <= 120.0);
+            assert!(actual.width.unwrap() > 119.999);
+            stretched += 1;
+        } else {
+            assert_eq!(left.width, actual.width);
+            for glyph in justified
+                .glyphs()
+                .iter()
+                .filter(|glyph| glyph.y == actual.baseline as f32)
+            {
+                let original = natural
+                    .glyphs()
+                    .iter()
+                    .find(|original| {
+                        original.character_index == glyph.character_index
+                            && original.glyph_id == glyph.glyph_id
+                    })
+                    .unwrap();
+                assert_eq!(original.x, glyph.x);
+            }
+        }
+    }
+    assert!(stretched > 0);
+}
+
+#[test]
+fn justification_uses_space_groups_and_preserves_run_boundary_pixels() {
+    let fonts = fonts();
+    let mut plain = document("   A  B C D E F G H");
+    plain.layers[0].transform.width = 150.0;
+    text(&mut plain).align = TextAlign::Justify;
+    let layout = layout_text_layer(&plain.layers[0], 150.0, fonts.font_set()).unwrap();
+    let mut rich = plain.clone();
+    text(&mut rich).runs = vec![
+        json!({"text":"   A ","future":{"keep":true}}),
+        json!({"text":" "}),
+        json!({"text":"B"}),
+        json!({"text":" C D E F G H"}),
+    ];
+    let actual = layout_text_layer(&rich.layers[0], 150.0, fonts.font_set()).unwrap();
+    assert_eq!(actual.lines, layout.lines);
+    let a = doc_to_svg(&plain, fonts.font_set(), &AssetHrefs::new()).unwrap();
+    let b = doc_to_svg(&rich, fonts.font_set(), &AssetHrefs::new()).unwrap();
+    compare_pixels(&a, &b, &fonts, "justify run boundaries");
+    text(&mut rich).align = TextAlign::Left;
+    let natural = layout_text_layer(&rich.layers[0], 150.0, fonts.font_set()).unwrap();
+    let delta = |character| {
+        let x = |layout: &assemblash_renderer::TextLayerLayout| {
+            layout
+                .glyphs()
+                .iter()
+                .find(|glyph| glyph.character_index == character)
+                .unwrap()
+                .x
+        };
+        x(&actual) - x(&natural)
+    };
+    assert_eq!(delta(3), 0.0, "leading spaces stretch");
+    assert!(delta(6) > 0.0);
+    assert!(
+        (delta(8) - 2.0 * delta(6)).abs() < 0.0001,
+        "two spaces form one word gap"
+    );
+}
+
+#[test]
+fn justification_keeps_single_words_forced_breaks_and_paragraph_finals_natural() {
+    let fonts = fonts();
+    for body in ["HandglovesHandgloves\nA B", "\n\n", "A B", ""] {
+        let mut doc = document(body);
+        doc.layers[0].transform.width = 30.0;
+        styled(&mut doc);
+        let natural = layout_text_layer(&doc.layers[0], 30.0, fonts.font_set()).unwrap();
+        text(&mut doc).align = TextAlign::Justify;
+        let actual = layout_text_layer(&doc.layers[0], 30.0, fonts.font_set()).unwrap();
+        assert_eq!(natural.lines, actual.lines, "{body:?}");
+        assert_eq!(
+            natural
+                .glyphs()
+                .iter()
+                .map(|glyph| (glyph.x, glyph.y))
+                .collect::<Vec<_>>(),
+            actual
+                .glyphs()
+                .iter()
+                .map(|glyph| (glyph.x, glyph.y))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn justified_horizontal_geometry_refuses_actual_parent_cursor_overflow() {
+    let fonts = fonts();
+    let mut doc = document(&"A B ".repeat(300));
+    text(&mut doc).align = TextAlign::Justify;
+    text(&mut doc).font_size = 1e36;
+    doc.layers[0].transform.width = f64::from(f32::MAX) * 0.8;
+    doc.layers[0].transform.x = f64::from(f32::MAX) / 3.0;
+    let width = doc.layers[0].transform.width;
+    assert!(matches!(
+        layout_text_layer(&doc.layers[0], width, fonts.font_set()),
+        Err(RenderError::TextLayout {
+            source: TextLayoutError::Unsupported {
+                kind: TextFailureKind::InvalidGeometry,
+                ..
+            },
+            ..
+        })
+    ));
+    assert!(doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).is_err());
+    let mut empty = document("");
+    text(&mut empty).align = TextAlign::Justify;
+    empty.layers[0].transform.x = 1e308;
+    assert!(layout_text_layer(&empty.layers[0], 450.0, fonts.font_set()).is_err());
+}
+
+#[test]
+fn justified_exact_fit_wrapped_row_keeps_visible_width_without_overflow() {
+    check_justified_exact_fit(0.0);
+}
+
+#[test]
+fn justified_exact_fit_positive_letter_spacing() {
+    check_justified_exact_fit(1.0);
+}
+
+#[test]
+fn justified_exact_fit_negative_letter_spacing() {
+    check_justified_exact_fit(-1.0);
+}
+
+fn check_justified_exact_fit(spacing: f64) {
+    let fonts = fonts();
+    let mut pair = document("A B");
+    text(&mut pair).letter_spacing = spacing;
+    styled(&mut pair);
+    let pair_layout = layout_text_layer(&pair.layers[0], 450.0, fonts.font_set()).unwrap();
+    let width = pair_layout.lines[0].width.unwrap();
+    for split in [false, true] {
+        let mut doc = document("A B C");
+        doc.layers[0].transform.width = width;
+        text(&mut doc).align = TextAlign::Justify;
+        text(&mut doc).letter_spacing = spacing;
+        if split {
+            text(&mut doc).runs = vec![
+                json!({"text":"A "}),
+                json!({"text":"B"}),
+                json!({"text":" C"}),
+            ];
+        }
+        let actual = layout_text_layer(&doc.layers[0], width, fonts.font_set()).unwrap();
+        println!(
+            "exact-fit spacing={spacing}, split={split}, target={width}, rows={:?}, overflow={}",
+            actual.lines, actual.overflow
+        );
+        assert_eq!(
+            actual
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            ["A B ", "C"]
+        );
+        assert_eq!(actual.lines[0].width, Some(width));
+        assert!(!actual.overflow);
+        assert!(!actual.broke_mid_word);
+        let mut reference = doc.clone();
+        text(&mut reference).text = "A B\nC".into();
+        text(&mut reference).runs.clear();
+        let expected_layout =
+            layout_text_layer(&reference.layers[0], width, fonts.font_set()).unwrap();
+        let positions = |layout: &assemblash_renderer::TextLayerLayout| {
+            layout
+                .glyphs()
+                .iter()
+                .filter(|glyph| glyph.character_index != 3)
+                .map(|glyph| (glyph.glyph_id, glyph.character_index, glyph.x, glyph.y))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(positions(&actual), positions(&expected_layout));
+        if spacing < 0.0 {
+            assert!(matches!(
+                doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()),
+                Err(RenderError::InvalidDocument(_))
+            ));
+            continue;
+        }
+        let expected = doc_to_svg(&reference, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        let rendered = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        compare_pixels(&expected, &rendered, &fonts, "justified exact fit");
+        let warnings =
+            assemblash_renderer::export_warnings(&doc, fonts.font_set(), std::path::Path::new("."));
+        assert!(!warnings.iter().any(|warning| {
+            warning.code == assemblash_renderer::warnings::TEXT_OVERFLOWS_BOX
+                || warning.code == assemblash_renderer::warnings::WORD_BROKEN_MID_WORD
+        }));
+    }
+}
+
+#[test]
+fn justified_final_whitespace_stays_natural_without_forcing_an_extra_line() {
+    let fonts = fonts();
+    let mut doc = document("   A\nB   ");
+    doc.layers[0].transform.width = 30.0;
+    text(&mut doc).align = TextAlign::Justify;
+    let layout = layout_text_layer(&doc.layers[0], 30.0, fonts.font_set()).unwrap();
+    assert_eq!(
+        layout
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>(),
+        ["   ", "A", "B   "]
+    );
+    assert_eq!(layout.lines[2].width, Some(45.76000213623047));
+    assert!(layout.lines.iter().all(|line| line.x == Some(0.0)));
+    assert!(
+        layout.overflow,
+        "an oversized natural final line keeps its advance"
+    );
+    assert!(!layout.broke_mid_word);
+    assert!(doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).is_ok());
+    let warnings =
+        assemblash_renderer::export_warnings(&doc, fonts.font_set(), std::path::Path::new("."));
+    assert!(!warnings
+        .iter()
+        .any(|warning| warning.code == assemblash_renderer::warnings::WORD_BROKEN_MID_WORD));
+}
+
+#[test]
+fn justification_plain_boundary_widths_keep_natural_lines_and_height() {
+    let fonts = fonts();
+    for body in ["A B C D E F G H", "AA BB CC DD EE FF", "\nA B C\n\nD E F\n"] {
+        for width in [63.0, 64.0, 95.5, 96.0, 120.0, 150.25, 240.0] {
+            let mut doc = document(body);
+            doc.layers[0].transform.width = width;
+            text(&mut doc).paragraph_spacing = 8.5;
+            let natural = layout_text_layer(&doc.layers[0], width, fonts.font_set()).unwrap();
+            text(&mut doc).align = TextAlign::Justify;
+            let actual = layout_text_layer(&doc.layers[0], width, fonts.font_set()).unwrap();
+            assert_eq!(natural.broke_mid_word, actual.broke_mid_word);
+            assert!(!actual.broke_mid_word);
+            assert!(doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).is_ok());
+            assert_eq!(
+                natural
+                    .lines
+                    .iter()
+                    .map(|line| line.text.trim_end())
+                    .collect::<Vec<_>>(),
+                actual
+                    .lines
+                    .iter()
+                    .map(|line| line.text.trim_end())
+                    .collect::<Vec<_>>(),
+                "{body:?} at {width}"
+            );
+            assert!(
+                (natural.height - actual.height).abs() < 0.0001,
+                "{body:?} at {width}: {} {}",
+                natural.height,
+                actual.height
+            );
+        }
+    }
+}
+
+#[test]
+fn justified_rtl_spaces_match_independently_positioned_word_pixels() {
+    let fonts = fonts();
+    let mut doc = document("ب ب ب ب ب ب ب ب ب");
+    text(&mut doc).font_family = "Noto Sans Arabic".into();
+    doc.layers[0].transform.width = 120.0;
+    styled(&mut doc);
+    let mut word = document("ب");
+    text(&mut word).font_family = "Noto Sans Arabic".into();
+    styled(&mut word);
+    let word_width = layout_text_layer(&word.layers[0], 450.0, fonts.font_set())
+        .unwrap()
+        .lines[0]
+        .width
+        .unwrap();
+    let mut pair = word.clone();
+    text(&mut pair).text = "ب ب".into();
+    styled(&mut pair);
+    let gap = layout_text_layer(&pair.layers[0], 450.0, fonts.font_set())
+        .unwrap()
+        .lines[0]
+        .width
+        .unwrap()
+        - 2.0 * word_width;
+    let mut reference = doc.clone();
+    reference.layers.clear();
+    // Independently fit visible words. A following wrap space consumes no width.
+    let per_line = ((120.0 + gap) / (word_width + gap)).floor() as usize;
+    let line_count = 9_usize.div_ceil(per_line);
+    for index in 0..line_count {
+        let count = per_line.min(9 - index * per_line);
+        let spacing = if index + 1 < line_count && count > 1 {
+            (120.0 - count as f64 * word_width) / (count - 1) as f64
+        } else {
+            gap
+        };
+        for number in 0..count {
+            let mut layer = word.layers[0].clone();
+            layer.id = LayerId::new(format!("layer_word_{index}_{number}"));
+            layer.transform.x = 24.0 + number as f64 * (word_width + spacing);
+            layer.transform.y = 24.0 + index as f64 * 32.0 * 1.2;
+            if let LayerKind::Text(text) = &mut layer.kind {
+                text.runs.clear();
+            }
+            reference.layers.push(layer);
+        }
+    }
+    text(&mut doc).align = TextAlign::Justify;
+    let expected = doc_to_svg(&reference, fonts.font_set(), &AssetHrefs::new()).unwrap();
+    let actual = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+    compare_pixels(&expected, &actual, &fonts, "justified RTL word positions");
+}
+
+#[test]
+fn justification_keeps_mixed_bidi_word_shapes_and_cluster_refusals() {
+    let fonts = fonts();
+    let mut doc = document("A ب B ب C D E F G H\nFinal Á");
+    doc.layers[0].transform.width = 160.0;
+    text(&mut doc).runs = vec![
+        json!({"text":"A ","fontSize":36}),
+        json!({"text":"ب","fontFamily":"Noto Sans Arabic","color":"#336699"}),
+        json!({"text":" B ","fontWeight":700}),
+        json!({"text":"ب","fontFamily":"Noto Sans Arabic"}),
+        json!({"text":" C D E F G H\nFinal Á","letterSpacing":0.25}),
+    ];
+    text(&mut doc).paragraph_spacing = 11.5;
+    text(&mut doc).vertical_align = VerticalAlign::Bottom;
+    let natural = layout_text_layer(&doc.layers[0], 160.0, fonts.font_set()).unwrap();
+    text(&mut doc).align = TextAlign::Justify;
+    let actual = layout_text_layer(&doc.layers[0], 160.0, fonts.font_set()).unwrap();
+    assert_eq!(natural.height, actual.height);
+    assert_eq!(natural.lines.len(), actual.lines.len());
+    assert_eq!(natural.glyphs().len(), actual.glyphs().len());
+    for (left, right) in natural.glyphs().iter().zip(actual.glyphs()) {
+        assert_eq!(
+            (
+                left.glyph_id,
+                left.character_index,
+                left.byte_index,
+                left.run_index,
+                left.source_advance
+            ),
+            (
+                right.glyph_id,
+                right.character_index,
+                right.byte_index,
+                right.run_index,
+                right.source_advance
+            )
+        );
+        assert_eq!(left.y, right.y);
+        assert_eq!(left.face().sha256(), right.face().sha256());
+    }
+    let mut visual = actual
+        .glyphs()
+        .iter()
+        .filter(|glyph| glyph.y == actual.lines[0].baseline as f32 && glyph.outline().is_some())
+        .collect::<Vec<_>>();
+    visual.sort_by(|a, b| a.x.total_cmp(&b.x));
+    let mut deltas = Vec::new();
+    for glyph in visual {
+        let original = natural
+            .glyphs()
+            .iter()
+            .find(|left| {
+                left.character_index == glyph.character_index && left.glyph_id == glyph.glyph_id
+            })
+            .unwrap();
+        deltas.push(glyph.x - original.x);
+    }
+    assert!(deltas.len() > 2);
+    assert_eq!(deltas[0], 0.0);
+    assert!(deltas.windows(2).all(|pair| pair[1] >= pair[0]));
+    assert!(deltas.last().unwrap() > &0.0);
+    doc.layers[0].clip =
+        Some(serde_json::from_value(json!({"shape":"rect","cornerRadius":5})).unwrap());
+    doc.layers[0].transform.rotation = 12.0;
+    assert!(doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).is_ok());
+    let mut cluster = document("office");
+    text(&mut cluster).align = TextAlign::Justify;
+    text(&mut cluster).runs = vec![
+        json!({"text":"of"}),
+        json!({"text":"fice","fontWeight":700}),
+    ];
+    refuses(&cluster, TextFailureKind::IncompatibleCluster);
+    text(&mut cluster).font_weight = 900;
+    assert!(matches!(
+        layout_text_layer(&cluster.layers[0], 450.0, fonts.font_set()),
+        Err(RenderError::MissingFont { weight: 900, .. })
+    ));
+}
+
+#[test]
+fn paragraph_spacing_counts_explicit_empty_paragraphs_and_preserves_wrapping() {
+    let fonts = fonts();
+    for is_styled in [false, true] {
+        for body in ["\nA\n\nB\n", "\n\n", "A", ""] {
+            let mut doc = document(body);
+            if is_styled {
+                styled(&mut doc);
+            }
+            for align in [
+                VerticalAlign::Top,
+                VerticalAlign::Middle,
+                VerticalAlign::Bottom,
+            ] {
+                text(&mut doc).vertical_align = align;
+                text(&mut doc).paragraph_spacing = 0.0;
+                let before = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+                text(&mut doc).paragraph_spacing = 13.25;
+                let after = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+                let gaps = body.matches('\n').count();
+                let delta = gaps as f64 * 13.25;
+                assert!(
+                    (after.height - before.height - delta).abs() < 1e-9,
+                    "{body:?}, styled={is_styled}"
+                );
+                let shift = match align {
+                    VerticalAlign::Top => 0.0,
+                    VerticalAlign::Middle => -delta / 2.0,
+                    VerticalAlign::Bottom => -delta,
+                };
+                assert_eq!(after.lines.len(), before.lines.len());
+                for (index, (a, b)) in after.lines.iter().zip(&before.lines).enumerate() {
+                    assert_eq!(a.text, b.text);
+                    assert_eq!(a.width, b.width);
+                    assert!((a.baseline - b.baseline - shift - index as f64 * 13.25).abs() < 1e-9);
+                }
+            }
+        }
+        let mut doc = document("one two three four five six");
+        if is_styled {
+            styled(&mut doc);
+        }
+        let before = layout_text_layer(&doc.layers[0], 80.0, fonts.font_set()).unwrap();
+        assert!(before.lines.len() > 1);
+        text(&mut doc).paragraph_spacing = 99.0;
+        let after = layout_text_layer(&doc.layers[0], 80.0, fonts.font_set()).unwrap();
+        assert_eq!(before.lines, after.lines);
+        assert_eq!(before.height, after.height);
+    }
+}
+
+#[test]
+fn paragraph_spacing_mixed_metrics_rtl_marks_and_clipping_share_layout() {
+    let fonts = fonts();
+    let mut doc = document("A\nب\nA\u{301}");
+    text(&mut doc).runs = vec![
+        json!({"text":"A\n","fontSize":48}),
+        json!({"text":"ب","fontFamily":"Noto Sans Arabic","fontSize":40}),
+        json!({"text":"\nA\u{301}","fontSize":18}),
+    ];
+    doc.layers[0].transform.height = 20.0;
+    doc.layers[0].clip = Some(serde_json::from_value(json!({"shape":"rect"})).unwrap());
+    for align in [
+        VerticalAlign::Top,
+        VerticalAlign::Middle,
+        VerticalAlign::Bottom,
+    ] {
+        text(&mut doc).vertical_align = align;
+        text(&mut doc).paragraph_spacing = 0.0;
+        let before = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+        text(&mut doc).paragraph_spacing = 12.5;
+        let after = layout_text_layer(&doc.layers[0], 450.0, fonts.font_set()).unwrap();
+        assert!((after.height - before.height - 25.0).abs() < 1e-9);
+        assert!(after.overflow);
+        let warnings =
+            assemblash_renderer::export_warnings(&doc, fonts.font_set(), std::path::Path::new("."));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.code == "textOverflowsBox"));
+        let svg = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        assert!(svg.contains("clipPath"));
+        svg_to_pixmap(&svg, &fonts, 1.0).unwrap();
+    }
+}
+
+#[test]
+fn excessive_paragraph_spacing_refuses_shared_measurement_and_rendering() {
+    let fonts = fonts();
+    for is_styled in [false, true] {
+        for value in [1e308, 1e40] {
+            let mut doc = document("A\nB\nC");
+            if is_styled {
+                styled(&mut doc);
+            }
+            text(&mut doc).paragraph_spacing = value;
+            assert!(assemblash_core::validate(&doc).is_ok());
+            refuses(&doc, TextFailureKind::InvalidGeometry);
+            assert!(matches!(
+                doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()),
+                Err(RenderError::TextLayout {
+                    source: TextLayoutError::Unsupported {
+                        kind: TextFailureKind::InvalidGeometry,
+                        ..
+                    },
+                    ..
+                })
+            ));
+            let warnings = assemblash_renderer::export_warnings(
+                &doc,
+                fonts.font_set(),
+                std::path::Path::new("."),
+            );
+            assert!(warnings
+                .iter()
+                .any(|warning| warning.code == "cannotMeasureText"));
+        }
+    }
+}
+
+#[test]
+fn paragraph_spacing_validates_retained_cursor_additions_before_svg_emission() {
+    let fonts = fonts();
+    let body = std::iter::repeat_n("A", 11).collect::<Vec<_>>().join("\n");
+    let mut doc = document(&body);
+    let spacing = f64::from(f32::MAX) / 10.0;
+    let ideal = 10.0 * spacing;
+    assert!((ideal as f32).is_finite());
+    let rounded = ((spacing * 1_000_000.0).round() / 1_000_000.0) as f32;
+    let accumulated = (0..10).fold(0.0_f32, |cursor, _| cursor + rounded);
+    assert!(accumulated.is_infinite());
+    text(&mut doc).paragraph_spacing = spacing;
+    assert!(assemblash_core::validate(&doc).is_ok());
+    refuses(&doc, TextFailureKind::InvalidGeometry);
+    assert!(matches!(
+        doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()),
+        Err(RenderError::TextLayout {
+            source: TextLayoutError::Unsupported {
+                kind: TextFailureKind::InvalidGeometry,
+                ..
+            },
+            ..
+        })
+    ));
+    assert!(assemblash_renderer::export_warnings(
+        &doc,
+        fonts.font_set(),
+        std::path::Path::new(".")
+    )
+    .iter()
+    .any(|warning| warning.code == "cannotMeasureText"));
+}
+
+#[test]
+fn paragraph_spacing_uses_the_same_width_refusal_for_render_and_measurement() {
+    let fonts = fonts();
+    let mut doc = document("A\nB");
+    doc.layers[0].transform.width = 0.0;
+    text(&mut doc).paragraph_spacing = 12.0;
+    assert!(matches!(
+        layout_text_layer(&doc.layers[0], 0.0, fonts.font_set()),
+        Err(RenderError::InvalidTextWidth { .. })
+    ));
+    assert!(matches!(
+        doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()),
+        Err(RenderError::InvalidTextWidth { .. })
+    ));
+}
+
+#[test]
+fn paragraph_spacing_emission_retains_plain_svg_cursor_deltas() {
+    let fonts = fonts();
+    for align in [
+        VerticalAlign::Top,
+        VerticalAlign::Middle,
+        VerticalAlign::Bottom,
+    ] {
+        let mut doc = document("First line\n\nSecond line\n\nEnd\n");
+        doc.canvas.height = 540.0;
+        doc.layers[0].transform.x = 24.125;
+        doc.layers[0].transform.y = -8.375;
+        doc.layers[0].transform.height = 420.0;
+        text(&mut doc).paragraph_spacing = 13.35;
+        text(&mut doc).vertical_align = align;
+        let expected = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        styled(&mut doc);
+        let actual = doc_to_svg(&doc, fonts.font_set(), &AssetHrefs::new()).unwrap();
+        compare_pixels(
+            &expected,
+            &actual,
+            &fonts,
+            &format!("paragraph spacing {align:?}"),
         );
     }
 }

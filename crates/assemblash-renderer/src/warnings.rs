@@ -127,7 +127,10 @@ pub fn export_warnings(
     let mut warnings = Vec::new();
     document.walk_layers(&mut |layer| match &layer.kind {
         LayerKind::Text(text) => {
-            let (broke_mid_word, height) = if text.runs.is_empty() {
+            let (broke_mid_word, height) = if text.runs.is_empty()
+                && text.paragraph_spacing == 0.0
+                && text.align != assemblash_core::TextAlign::Justify
+            {
                 let layout = crate::layout_text(
                     &text.text,
                     layer.transform.width,
@@ -358,6 +361,7 @@ mod covered_tests {
                 color: Some(Color::new("#101820")),
                 align: TextAlign::Center,
                 line_height: 1.2,
+                paragraph_spacing: 0.0,
                 font_weight: 400,
                 font_style: assemblash_core::FontStyle::Normal,
                 letter_spacing: 0.0,

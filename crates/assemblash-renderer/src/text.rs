@@ -187,7 +187,8 @@ impl TextLayerLayout {
 }
 
 /// Measure a text layer at a requested width without reading font files.
-/// Empty runs retain the existing `layout_text` behavior and name-only font support.
+/// Empty runs retain the existing `layout_text` behavior unless alignment is `justify`.
+/// Justified text and styled runs require exact loaded font bytes.
 /// Styled runs require exact loaded bytes. Unsupported styles receive indexed errors.
 pub fn layout_text_layer(
     layer: &Layer,
@@ -205,16 +206,12 @@ pub fn layout_text_layer(
             width,
         });
     }
-    if text.runs.is_empty() {
-        let legacy = crate::layout_text(
-            &text.text,
-            width,
-            text.font_size,
-            text.line_height,
-            text.letter_spacing,
-            &text.font_family,
-            fonts,
-        );
+    if text.runs.is_empty() && text.align != assemblash_core::TextAlign::Justify {
+        let crate::svg::PlainTextLayout {
+            layout: legacy,
+            paragraph_starts,
+            ..
+        } = crate::svg::layout_plain_text(layer, text, width, fonts)?;
         let ascent = text.font_size * fonts.ascent_ratio(&text.font_family);
         let descent = text.font_size * fonts.descent_ratio(&text.font_family);
         let free = layer.transform.height - legacy.height;
@@ -237,7 +234,7 @@ pub fn layout_text_layer(
                                     * text_line.chars().count().saturating_sub(1) as f64
                         });
                 let x = measured.map(|measured| match text.align {
-                    assemblash_core::TextAlign::Left => 0.0,
+                    assemblash_core::TextAlign::Left | assemblash_core::TextAlign::Justify => 0.0,
                     assemblash_core::TextAlign::Center => (width - measured) / 2.0,
                     assemblash_core::TextAlign::Right => width - measured,
                 });
@@ -245,7 +242,11 @@ pub fn layout_text_layer(
                     text: text_line,
                     width: measured,
                     x,
-                    baseline: shift + ascent + index as f64 * text.font_size * text.line_height,
+                    baseline: shift
+                        + ascent
+                        + index as f64 * text.font_size * text.line_height
+                        + paragraph_starts.partition_point(|start| *start <= index) as f64
+                            * text.paragraph_spacing,
                     ascent,
                     descent,
                 }

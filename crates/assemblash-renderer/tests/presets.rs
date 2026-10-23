@@ -39,6 +39,7 @@ fn document() -> Document {
             color: Some(Color::new("#000000")),
             align: TextAlign::Left,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: assemblash_core::FontStyle::Normal,
             letter_spacing: 0.0,
@@ -58,6 +59,7 @@ fn properties() -> PresetProperties {
         color: Some(Color::new("#a8442a")),
         align: Some(TextAlign::Center),
         line_height: Some(1.5),
+        paragraph_spacing: None,
         opacity: Some(0.8),
         blend_mode: Some(BlendMode::Multiply),
         effects: Some(vec![
@@ -125,6 +127,7 @@ fn a_preset_renders_identically_to_the_same_properties_set_by_hand() {
             color: properties.color.clone().map(Some),
             align: properties.align,
             line_height: properties.line_height,
+            paragraph_spacing: properties.paragraph_spacing,
             opacity: properties.opacity,
             blend_mode: properties.blend_mode.clone(),
             effects: properties.effects.clone(),

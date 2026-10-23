@@ -93,6 +93,9 @@ enum Command {
         /// Line height, as a multiple of the font size.
         #[arg(long, default_value_t = 1.2)]
         line_height: f64,
+        /// Extra pixels between explicit paragraphs, including empty paragraphs.
+        #[arg(long, default_value_t = 0.0)]
+        paragraph_spacing: f64,
         /// Font weight, 100-900; 400 is the regular face.
         #[arg(long, default_value_t = 400)]
         weight: u16,
@@ -696,6 +699,9 @@ enum Command {
         /// Text layers: line height, as a multiple of the font size.
         #[arg(long)]
         line_height: Option<f64>,
+        /// Extra pixels between explicit paragraphs. Zero resets spacing.
+        #[arg(long)]
+        paragraph_spacing: Option<f64>,
         /// Text layers: font weight, 100-900. A weight the font store has no
         /// face for is refused at render time, never substituted.
         #[arg(long)]
@@ -1293,6 +1299,8 @@ enum Align {
     Left,
     Center,
     Right,
+    /// Expand regular word spaces on wrapped lines. Keep paragraph-final lines natural.
+    Justify,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1308,6 +1316,7 @@ impl From<Align> for TextAlign {
             Align::Left => Self::Left,
             Align::Center => Self::Center,
             Align::Right => Self::Right,
+            Align::Justify => Self::Justify,
         }
     }
 }
@@ -1391,6 +1400,7 @@ struct LayerChange {
     marker_end: Option<String>,
     align: Option<Align>,
     line_height: Option<f64>,
+    paragraph_spacing: Option<f64>,
     weight: Option<u16>,
     font_style: Option<FontStyleArg>,
     letter_spacing: Option<f64>,
@@ -1515,6 +1525,7 @@ impl LayerChange {
             marker_end,
             align: self.align.map(Into::into),
             line_height: self.line_height,
+            paragraph_spacing: self.paragraph_spacing,
             font_weight: self.weight,
             font_style: self.font_style.map(Into::into),
             letter_spacing: self.letter_spacing,
@@ -2019,6 +2030,7 @@ fn run(command: Command) -> Result<(), CliError> {
             color,
             align,
             line_height,
+            paragraph_spacing,
             weight,
             font_style,
             letter_spacing,
@@ -2042,6 +2054,7 @@ fn run(command: Command) -> Result<(), CliError> {
                     color: optional_color(color)?,
                     align: align.into(),
                     line_height,
+                    paragraph_spacing,
                     font_weight: weight,
                     font_style: font_style.into(),
                     letter_spacing,
@@ -2806,6 +2819,7 @@ fn run(command: Command) -> Result<(), CliError> {
             marker_end,
             align,
             line_height,
+            paragraph_spacing,
             weight,
             font_style,
             letter_spacing,
@@ -2852,6 +2866,7 @@ fn run(command: Command) -> Result<(), CliError> {
                 marker_end,
                 align,
                 line_height,
+                paragraph_spacing,
                 weight,
                 font_style,
                 letter_spacing,

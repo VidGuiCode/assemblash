@@ -521,9 +521,14 @@ fn operation_keys(op: &str) -> std::collections::BTreeSet<String> {
 /// Spellings `NewLayerKind::Text` accepts as aliases, which the schema
 /// therefore does not name (`requests.rs:63-75`).
 ///
-/// They were the wire format before 0.6.0 and are still read, so a journal
-/// written by an older build replays through this check unchanged.
-const TEXT_ALIASES: &[&str] = &["font_family", "font_size", "line_height"];
+/// Existing aliases keep journals from before 0.6.0 compatible.
+/// New text properties accept the same naming convention during creation.
+const TEXT_ALIASES: &[&str] = &[
+    "font_family",
+    "font_size",
+    "line_height",
+    "paragraph_spacing",
+];
 
 /// Top-level keys an `update` may carry.
 fn update_keys() -> &'static std::collections::BTreeSet<String> {
@@ -849,6 +854,16 @@ fn define_preset(
         });
     }
     check_preset_paints(preset)?;
+    if preset
+        .properties
+        .paragraph_spacing
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+    {
+        return Err(OpError::InvalidPreset {
+            name: preset.name.clone(),
+            reason: "paragraphSpacing must be finite and nonnegative",
+        });
+    }
     // The same checks setting these properties directly would face, so a
     // preset cannot be a way to smuggle in a blend mode or an effect that
     // nothing can draw.
@@ -1024,6 +1039,7 @@ mod tests {
             color: Some(Color::new("#000000")),
             align: TextAlign::Left,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: FontStyle::Normal,
             letter_spacing: 0.0,
@@ -1451,6 +1467,7 @@ mod tests {
                 color: Some(Color::new("#000000")),
                 align: TextAlign::Left,
                 line_height: 1.2,
+                paragraph_spacing: 0.0,
                 font_weight: 400,
                 font_style: FontStyle::Normal,
                 letter_spacing: 0.0,
@@ -1984,6 +2001,7 @@ mod tests {
                 color: Some(Some(Color::new("#ffffff"))),
                 align: Some(TextAlign::Center),
                 line_height: Some(1.5),
+                paragraph_spacing: None,
                 fit: Some(crate::document::ImageFit::Cover),
                 asset: Some(asset),
                 allow_locked: true,

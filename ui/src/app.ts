@@ -1527,16 +1527,21 @@ function drawInspectorContent(): void {
       ["left", "ph-text-align-left"],
       ["center", "ph-text-align-center"],
       ["right", "ph-text-align-right"],
+      ["justify", "ph-text-align-justify"],
     ] as const) {
       const alignKey = {
         left: "editor.alignLeft",
         center: "editor.alignCenter",
         right: "editor.alignRight",
+        justify: "editor.alignJustify",
       }[value] as MessageKey;
       const host = action(alignKey, icon, () => {
         void send(`align text ${value}`, { op: "update", id: layer.id, align: value } as Operation);
       }, guarded, "icon-button toolbar-icon", (button) => {
-        button.classList.toggle("selected", (layer.align ?? "left") === value);
+        const selected = (layer.align ?? "left") === value;
+        button.dataset["textAlign"] = value;
+        button.classList.toggle("selected", selected);
+        button.setAttribute("aria-pressed", String(selected));
       }, true);
       dom.inspector.append(host);
     }
@@ -1726,6 +1731,7 @@ function drawInspectorContent(): void {
     pane.append(fontField);
     field("properties.fontSize", String(layer.fontSize), (next) => ({ op: "update", id: layer.id, fontSize: Number(next) }) as Operation);
     field("properties.lineHeight", String(layer.lineHeight ?? 1.2), (next) => ({ op: "update", id: layer.id, lineHeight: Number(next) }) as Operation);
+    field("properties.paragraphSpacing", String(layer.paragraphSpacing ?? 0), (next) => ({ op: "update", id: layer.id, paragraphSpacing: Number(next) }) as Operation);
     // Weight is offered as the faces the store actually holds for this family;
     // a weight the files lack is refused at render, so it is not offered here.
     // When the store records no faces for the family, the honest fallback is
@@ -4445,6 +4451,11 @@ function typingInAField(target: EventTarget | null): boolean {
 window.addEventListener("keydown", (event) => {
   // Never steal a key from someone editing a value.
   if (typingInAField(event.target)) return;
+  if (
+    event.target instanceof Element &&
+    event.target.closest("button[data-text-align]") &&
+    (event.key === "Enter" || event.code === "Space")
+  ) return;
 
   const control = event.ctrlKey || event.metaKey;
   if (event.code === "Space") {

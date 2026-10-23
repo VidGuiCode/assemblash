@@ -936,6 +936,11 @@
           "description": "Aligned to the right edge.",
           "type": "string",
           "const": "right"
+        },
+        {
+          "description": "Expand groups of regular spaces (U+0020) between words on wrapped lines.\nKeep paragraph-final lines at natural width.\nLeading and trailing whitespace receive no extra width.",
+          "type": "string",
+          "const": "justify"
         }
       ]
     },
@@ -1329,6 +1334,11 @@
               "type": "number",
               "format": "double",
               "default": 1.2
+            },
+            "paragraphSpacing": {
+              "description": "Extra pixels between explicit paragraphs. Zero adds no space.",
+              "type": "number",
+              "format": "double"
             },
             "fontWeight": {
               "description": "Font weight, 100–900; 400 is the regular face.",
@@ -1960,6 +1970,14 @@
           ],
           "format": "double"
         },
+        "paragraphSpacing": {
+          "description": "Text layers: extra pixels between explicit paragraphs. Zero resets spacing.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "fontWeight": {
           "description": "Text layers: new font weight, 100–900.",
           "type": [
@@ -2300,6 +2318,14 @@
         },
         "lineHeight": {
           "description": "Text layers: line height.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "paragraphSpacing": {
+          "description": "Text layers: extra pixels between explicit paragraphs. Zero resets spacing.",
           "type": [
             "number",
             "null"

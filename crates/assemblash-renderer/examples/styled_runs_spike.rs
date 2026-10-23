@@ -252,6 +252,7 @@ fn storage_probe(out: &std::path::Path) -> Result<Value, Box<dyn Error>> {
             color: Some(Color::new("#102030")),
             align: TextAlign::Left,
             line_height: 1.4,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: FontStyle::Normal,
             letter_spacing: 0.0,

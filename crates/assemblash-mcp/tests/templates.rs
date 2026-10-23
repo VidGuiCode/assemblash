@@ -48,6 +48,7 @@ fn text(id: &str, y: f64, body: &str, size: f64) -> Layer {
             color: Some(Color::new("#101820")),
             align: TextAlign::Left,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
             font_weight: 400,
             font_style: assemblash_core::FontStyle::Normal,
             letter_spacing: 0.0,
