@@ -10,9 +10,11 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
-**1.12.0 candidate: styled text, paragraph spacing, justified alignment, and modifier resizing.**
+## [1.12.0] — 2026-10-23
 
-Version 1.12.0 is not published. The document schema stays at `schemaVersion` 1.
+**Styled text, paragraph spacing, justified alignment, and modifier resizing.**
+
+The document schema stays at `schemaVersion` 1.
 
 - Styled text runs support exact font faces and retain unknown nested values during ordinary style updates.
 - Paragraph spacing adds finite, nonnegative pixels between explicit paragraphs. The default is zero.
@@ -24,6 +26,7 @@ Version 1.12.0 is not published. The document schema stays at `schemaVersion` 1.
 - A resize uses one undo transaction. Text keeps its font sizes and raw runs.
 - Text and unsupported preview combinations keep the authoritative image while the resize outline moves.
 - Zero-size boxes, unsupported ancestor transforms, and parent-with-child selections omit canvas resize handles.
+- Tokio 1.53.3 fixes RUSTSEC-2026-0386. The dependency inventory includes the patched version.
 
 ## [1.11.0] — 2026-10-08
 

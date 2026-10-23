@@ -25,8 +25,8 @@ command-line interface, a local HTTP API, and an MCP server for AI agents.
 You and an AI agent can work on the same document at the same time. No cloud
 service and no account are necessary.
 
-**Current release: 1.11.0.** The document schema and the operation API are
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.11.0)
+**Current release: 1.12.0.** The document schema and the operation API are
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.12.0)
 or the [changelog](CHANGELOG.md).
 
 <p align="center">
@@ -44,8 +44,8 @@ You do not need a terminal for these steps.
 Go to [GitHub Releases](https://github.com/VidGuiCode/assemblash/releases/latest)
 and download the file for your computer:
 
-For example, the Windows file of release 1.11.0 is
-`assemblash-v1.11.0-windows-x86_64.exe`.
+For example, the Windows file of release 1.12.0 is
+`assemblash-v1.12.0-windows-x86_64.exe`.
 
 | Your computer | Download this file |
 | --- | --- |
@@ -207,7 +207,7 @@ files it installs. The formula is in `packaging/homebrew/`, but the tap is
 Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.11.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.12.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -395,7 +395,7 @@ properties panel; and over MCP with the `path` argument of
 `add_shape_layer` and the `shape`, `path`, and marker arguments of
 `update_layer`.
 
-### Paragraph spacing (1.12.0 development)
+### Paragraph spacing (1.12.0)
 
 `paragraphSpacing` sets extra pixels between explicit paragraphs. Its default is zero.
 The value must be finite and nonnegative. Leading, trailing, and empty paragraphs count.
@@ -411,9 +411,9 @@ Ordinary paragraph spacing updates preserve raw runs and unknown run properties.
 Older consumers can preserve the stored property but do not render paragraph spacing.
 Older history replay can discard paragraph spacing updates.
 Use a consumer with paragraph spacing support to edit these documents.
-The document schema stays at version 1. Version 1.12.0 is not published.
+The document schema stays at version 1.
 
-### Justified alignment (1.12.0 development)
+### Justified alignment (1.12.0)
 
 Set `align` to `justify` for text layers.
 Only groups of regular spaces (U+0020) between words receive extra width.
@@ -438,9 +438,9 @@ Versions 1.0.0, 1.10.0, and 1.11.0 refuse snapshots with `justify` in text layer
 Undo can restore an earlier alignment while the journal still contains a `justify` update.
 These older consumers also refuse that journal.
 Use a consumer with justified alignment support to open or edit these documents.
-The document schema stays at version 1. Version 1.12.0 is not published.
+The document schema stays at version 1.
 
-### Layer resizing (1.12.0 development)
+### Layer resizing (1.12.0)
 
 Drag a canvas resize handle to change the selected layer boxes.
 Hold Shift to preserve the ratio. On an edge, Shift changes both dimensions.
@@ -461,7 +461,7 @@ Canvas resize handles are unavailable for zero-size boxes and parent-with-child 
 Children of rotated or flipped groups also omit these handles.
 A mixed selection with an unsupported item omits all resize handles.
 Use Position and size for supported inspector edits. Existing document dimensions remain valid.
-The document schema stays at version 1. Version 1.12.0 is not published.
+The document schema stays at version 1.
 
 ### Rendering and export
 
@@ -722,10 +722,9 @@ Then Assemblash refuses to open the project until the lock is cleared:
 - Every automatic clear is reported in the server log, in the editor, and as a
   `lockReclaimed` export warning.
 
-## Styled text runs in development builds
+## Styled text runs (1.12.0)
 
-The development build accepts styled runs through the reference interface, CLI, HTTP API, and MCP.
-Release 1.11.0 does not include these controls.
+Assemblash 1.12.0 accepts styled runs through the reference interface, CLI, HTTP API, and MCP.
 
 Select one text layer. Open **Typography** in **Properties**, then select **Edit runs**.
 Use **Add run**, **Delete**, **Move up**, and **Move down** to arrange the rows.
@@ -788,7 +787,7 @@ Version 1.11.0 loads stored raw runs but renders the base style.
 Its text-only writes can leave run text inconsistent.
 Cached snapshots can retain new runs during undo and redo.
 History replay from before a new run update can silently drop runs, despite a successful command.
-This development build preserves runs during recovery. Read-only history leaves project files unchanged.
+Assemblash 1.12.0 preserves runs during recovery. Read-only history leaves project files unchanged.
 Use a styled-run build for projects with styled runs.
 
 ## Edit the canvas
