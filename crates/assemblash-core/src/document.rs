@@ -5,11 +5,9 @@
 //! * **Round-trip fidelity.** Unknown JSON keys are captured in `extra` maps
 //!   and written back untouched, so a document written by a newer build does
 //!   not lose data when an older build opens it.
-//! * **Reserved slots.** `blendMode`, `effects`, `constraints`, and text
-//!   `runs` exist in the schema now, with defaults, even though nothing reads
-//!   them yet. Adding them later would be a breaking schema change; adding
-//!   them now costs nothing. Fields documented as reserved are stored as raw
-//!   JSON on purpose: this build preserves them, it does not interpret them.
+//! * **Raw reserved values.** Fields can retain arbitrary JSON for compatibility.
+//!   Text runs remain raw in storage. Interpretation uses an explicit typed view.
+//!   Unknown keys and nested values remain unchanged during that interpretation.
 
 use std::collections::BTreeMap;
 
@@ -341,7 +339,7 @@ pub enum LayerKind {
     Shape(ShapeLayer),
 }
 
-/// Text content and its single style. Per-run styling arrives in v2.0.
+/// Text content, base style, and raw run overrides.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TextLayer {
@@ -397,7 +395,8 @@ pub struct TextLayer {
     /// documents render pixel-identically (D19).
     #[serde(default, skip_serializing_if = "VerticalAlign::is_top")]
     pub vertical_align: VerticalAlign,
-    /// Reserved (v2.0 styled runs): preserved verbatim, never interpreted.
+    /// Raw run values, preserved during loading and ordinary validation.
+    /// Use [`TextLayer::interpreted_runs`] for a typed view with inherited properties.
     #[serde(default)]
     pub runs: Vec<serde_json::Value>,
     /// Keys this build does not know about, preserved verbatim.

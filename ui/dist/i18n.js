@@ -552,7 +552,34 @@ const i = {
   "properties.style": "Style",
   "properties.fit": "Fit",
   "properties.verticalAlign": "Vertical align",
-  "properties.dashPattern": "Dash pattern"
+  "properties.dashPattern": "Dash pattern",
+  "runs.title": "Runs",
+  "runs.help": "Edit run text and overrides. Apply saves all rows in one step.",
+  "runs.edit": "Edit runs",
+  "runs.row": "Run {number}",
+  "runs.mode": "Mode",
+  "runs.inherit": "Inherit",
+  "runs.override": "Override",
+  "runs.normal": "Normal",
+  "runs.italic": "Italic",
+  "runs.up": "Move up",
+  "runs.down": "Move down",
+  "runs.delete": "Delete",
+  "runs.unsupported": "This raw run is unsupported. Clear or replace it to edit supported runs.",
+  "runs.raw": "Stored run",
+  "runs.text": "Text",
+  "runs.fillMode": "Fill mode",
+  "runs.noFill": "No fill",
+  "runs.add": "Add run",
+  "runs.clear": "Clear runs",
+  "runs.replace": "Replace with base text",
+  "runs.apply": "Apply runs",
+  "runs.cancel": "Cancel",
+  "runs.conflict": "The document changed after this draft started. Apply keeps the captured version and can refuse.",
+  "runs.reload": "Discard draft and load current runs",
+  "runs.notSent": "The project or selection changed. The draft was not sent.",
+  "runs.committed": "The change is saved, but the document could not reload. Load current runs before another edit.",
+  "runs.failed": "The change could not be confirmed. Keep this draft or load current runs."
 }, v = {
   "app.description": "Assemblash — composition visuelle structurée avec des modifications précises et réversibles.",
   "app.homeLabel": "Accueil Assemblash",
@@ -1107,7 +1134,34 @@ const i = {
   "properties.style": "Style",
   "properties.fit": "Ajuster",
   "properties.verticalAlign": "Alignement vertical",
-  "properties.dashPattern": "Motif de tirets"
+  "properties.dashPattern": "Motif de tirets",
+  "runs.title": "Segments",
+  "runs.help": "Modifiez le texte et les propriétés des segments. Appliquer enregistre toutes les lignes en une étape.",
+  "runs.edit": "Modifier les segments",
+  "runs.row": "Segment {number}",
+  "runs.mode": "Mode",
+  "runs.inherit": "Hériter",
+  "runs.override": "Remplacer",
+  "runs.normal": "Normal",
+  "runs.italic": "Italique",
+  "runs.up": "Monter",
+  "runs.down": "Descendre",
+  "runs.delete": "Supprimer",
+  "runs.unsupported": "Ce segment brut est incompatible. Effacez-le ou remplacez-le pour modifier des segments compatibles.",
+  "runs.raw": "Segment enregistré",
+  "runs.text": "Texte",
+  "runs.fillMode": "Mode de remplissage",
+  "runs.noFill": "Sans remplissage",
+  "runs.add": "Ajouter un segment",
+  "runs.clear": "Effacer les segments",
+  "runs.replace": "Remplacer par le texte de base",
+  "runs.apply": "Appliquer les segments",
+  "runs.cancel": "Annuler",
+  "runs.conflict": "Le document a changé depuis le début du brouillon. Appliquer utilise la version capturée et peut refuser.",
+  "runs.reload": "Abandonner le brouillon et charger les segments actuels",
+  "runs.notSent": "Le projet ou la sélection a changé. Le brouillon n’a pas été envoyé.",
+  "runs.committed": "La modification est enregistrée, mais le document ne se recharge pas. Chargez les segments actuels avant une autre modification.",
+  "runs.failed": "La modification ne peut pas être confirmée. Conservez ce brouillon ou chargez les segments actuels."
 }, b = {
   "app.description": "Assemblash — strukturierte visuelle Gestaltung mit präzisen, umkehrbaren Änderungen.",
   "app.homeLabel": "Assemblash-Startseite",
@@ -1662,7 +1716,34 @@ const i = {
   "properties.style": "Stil",
   "properties.fit": "Anpassen",
   "properties.verticalAlign": "Vertikale Ausrichtung",
-  "properties.dashPattern": "Strichmuster"
+  "properties.dashPattern": "Strichmuster",
+  "runs.title": "Textabschnitte",
+  "runs.help": "Bearbeiten Sie Text und Eigenschaften der Abschnitte. Anwenden speichert alle Zeilen in einem Schritt.",
+  "runs.edit": "Abschnitte bearbeiten",
+  "runs.row": "Abschnitt {number}",
+  "runs.mode": "Modus",
+  "runs.inherit": "Übernehmen",
+  "runs.override": "Überschreiben",
+  "runs.normal": "Normal",
+  "runs.italic": "Kursiv",
+  "runs.up": "Nach oben",
+  "runs.down": "Nach unten",
+  "runs.delete": "Löschen",
+  "runs.unsupported": "Dieser Rohabschnitt wird nicht unterstützt. Leeren oder ersetzen Sie ihn, um unterstützte Abschnitte zu bearbeiten.",
+  "runs.raw": "Gespeicherter Abschnitt",
+  "runs.text": "Text",
+  "runs.fillMode": "Füllmodus",
+  "runs.noFill": "Keine Füllung",
+  "runs.add": "Abschnitt hinzufügen",
+  "runs.clear": "Abschnitte leeren",
+  "runs.replace": "Durch Basistext ersetzen",
+  "runs.apply": "Abschnitte anwenden",
+  "runs.cancel": "Abbrechen",
+  "runs.conflict": "Das Dokument hat sich seit Beginn des Entwurfs geändert. Anwenden verwendet die erfasste Version und kann scheitern.",
+  "runs.reload": "Entwurf verwerfen und aktuelle Abschnitte laden",
+  "runs.notSent": "Projekt oder Auswahl hat sich geändert. Der Entwurf wurde nicht gesendet.",
+  "runs.committed": "Die Änderung ist gespeichert, aber das Dokument konnte nicht neu laden. Laden Sie vor einer weiteren Änderung die aktuellen Abschnitte.",
+  "runs.failed": "Die Änderung konnte nicht bestätigt werden. Behalten Sie den Entwurf oder laden Sie die aktuellen Abschnitte."
 }, g = "assemblash.language", k = {
   en: i,
   fr: v,
@@ -1697,36 +1778,36 @@ function S(e) {
   )}⟧`;
 }
 function p(e, t = {}) {
-  const r = (n === "pseudo" ? i[e] : k[n][e]) ?? i[e] ?? `[${e}]`;
-  return (n === "pseudo" ? S(r) : r).replace(
+  const o = (n === "pseudo" ? i[e] : k[n][e]) ?? i[e] ?? `[${e}]`;
+  return (n === "pseudo" ? S(o) : o).replace(
     /\{([a-zA-Z][a-zA-Z0-9]*)\}/g,
     (a, s) => Object.hasOwn(t, s) ? String(t[s]) : a
   );
 }
-function x(e) {
+function w(e) {
   return new Intl.NumberFormat(n === "pseudo" ? "en" : n).format(e);
 }
-function w(e, t, o = {}) {
-  const r = new Intl.PluralRules(n === "pseudo" ? "en" : n).select(t), a = `${e}.${r}`, s = `${e}.other`, l = Object.hasOwn(i, a) ? a : s;
-  return p(l, { ...o, count: x(t) });
+function x(e, t, r = {}) {
+  const o = new Intl.PluralRules(n === "pseudo" ? "en" : n).select(t), a = `${e}.${o}`, s = `${e}.other`, l = Object.hasOwn(i, a) ? a : s;
+  return p(l, { ...r, count: w(t) });
 }
 const j = /* @__PURE__ */ new Set(["title", "placeholder", "aria-label", "aria-description", "alt"]);
 function u(e = document) {
   document.documentElement.lang = n === "pseudo" ? "en" : n;
   const t = [];
   e instanceof Element && t.push(e), t.push(...e.querySelectorAll("[data-i18n], [data-i18n-attr], [data-i18n-count]"));
-  for (const o of t) {
-    const r = o.getAttribute("data-i18n");
-    r && Object.hasOwn(i, r) && (o.textContent = p(r));
-    const a = o.getAttribute("data-i18n-count"), s = Number(o.getAttribute("data-count"));
-    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (o.textContent = w(a, s));
-    const l = o.getAttribute("data-i18n-attr");
+  for (const r of t) {
+    const o = r.getAttribute("data-i18n");
+    o && Object.hasOwn(i, o) && (r.textContent = p(o));
+    const a = r.getAttribute("data-i18n-count"), s = Number(r.getAttribute("data-count"));
+    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = x(a, s));
+    const l = r.getAttribute("data-i18n-attr");
     if (l)
       for (const c of l.split(";")) {
         const d = c.indexOf(":");
         if (d < 0) continue;
         const m = c.slice(0, d).trim(), h = c.slice(d + 1).trim();
-        j.has(m) && Object.hasOwn(i, h) && o.setAttribute(m, p(h));
+        j.has(m) && Object.hasOwn(i, h) && r.setAttribute(m, p(h));
       }
   }
 }
@@ -1734,17 +1815,17 @@ if (typeof document < "u") {
   document.documentElement.lang = n === "pseudo" ? "en" : n;
   const e = () => {
     u(), new MutationObserver((t) => {
-      for (const o of t)
-        for (const r of o.addedNodes)
-          r instanceof Element && u(r);
+      for (const r of t)
+        for (const o of r.addedNodes)
+          o instanceof Element && u(o);
     }).observe(document.body, { childList: !0, subtree: !0 });
   };
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", e, { once: !0 }) : e();
 }
 export {
   u as bindTranslations,
-  w as formatCount,
-  x as formatNumber,
+  x as formatCount,
+  w as formatNumber,
   C as getLocale,
   A as setLocale,
   p as t

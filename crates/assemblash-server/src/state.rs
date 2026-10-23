@@ -345,7 +345,7 @@ impl AppState {
     /// Loads the exact fonts a document names, reusing their parsed database
     /// and measured advances across previews, exports, and text layout calls.
     pub fn fonts_for(&self, document: &Document) -> Result<LoadedFonts, ApiError> {
-        let families = crate::render::families_used(document);
+        let families = assemblash_renderer::text_font_families(document)?;
         if families.is_empty() {
             return Ok(LoadedFonts::from_bytes([]));
         }
@@ -379,10 +379,12 @@ impl AppState {
             )
         })?;
         if let Some(fonts) = cache.get(&key) {
+            assemblash_renderer::check_text_fonts(document, fonts.font_set())?;
             return Ok(fonts.clone());
         }
 
-        let fonts = store.load_families(&families)?;
+        let fonts = store.load_available_families(&families)?;
+        assemblash_renderer::check_text_fonts(document, fonts.font_set())?;
         cache.insert(key, fonts.clone());
         Ok(fonts)
     }

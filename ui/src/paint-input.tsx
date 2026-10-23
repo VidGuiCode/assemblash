@@ -40,7 +40,7 @@ function samePaint(left: Color, right: Color): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-function PaintInput({ id, label, value, className, compact = false, disabled = false, onCommit, clear }: PaintInputProps) {
+export function PaintInput({ id, label, value, className, compact = false, disabled = false, onCommit, clear }: PaintInputProps) {
   const localeRevision = useLocaleRevision();
   const initialSolid = typeof value === "string" ? value : "#000000";
   const [mode, setMode] = useState<"solid" | "json">(typeof value === "string" ? "solid" : "json");

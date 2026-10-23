@@ -1073,6 +1073,76 @@
         }
       ]
     },
+    "TextRunInput": {
+      "description": "Supported properties for newly supplied runs. Storage remains arbitrary JSON.\nOmitted properties inherit. Null color removes fill; other optional null properties inherit.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "Required text. Nonempty run lists concatenate exactly to the authoritative text.",
+          "type": "string"
+        },
+        "fontFamily": {
+          "description": "Family override. Omission or null inherits the base family.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontSize": {
+          "description": "Positive finite size in pixels. Omission or null inherits the base size.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "exclusiveMinimum": 0
+        },
+        "color": {
+          "description": "Fill override. Omission inherits; explicit null means no fill.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Color"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fontWeight": {
+          "description": "Integer weight from 100 through 900. Omission or null inherits.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 100,
+          "maximum": 900
+        },
+        "fontStyle": {
+          "description": "Normal or italic. Omission or null inherits the base style.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FontStyle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "letterSpacing": {
+          "description": "Finite spacing in pixels, including negative values. Omission or null inherits.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": true
+    },
     "ShapeKind": {
       "description": "The geometry of a [`ShapeLayer`], tagged by `\"kind\"` in JSON.\n\nEvery known variant also carries a `#[serde(flatten)]` capture map (D27):\na key this build does not know rides along verbatim instead of being\ndropped. The unit variants became struct variants holding only the map,\nwhich leaves their serialized form byte-identical (the D27 spike measured\nit: `{\"kind\":\"ellipse\"}` stays `{\"kind\":\"ellipse\"}`).",
       "anyOf": [
@@ -1295,6 +1365,13 @@
               "description": "Where the block sits vertically in the box.",
               "$ref": "#/$defs/VerticalAlign",
               "default": "top"
+            },
+            "runs": {
+              "description": "Raw text runs. Nonempty lists must concatenate exactly to text.\nKnown values must support typed interpretation. Unknown properties remain unchanged.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TextRunInput"
+              }
             },
             "type": {
               "type": "string",
@@ -1822,11 +1899,21 @@
           }
         },
         "text": {
-          "description": "Text layers: new text.",
+          "description": "Text layers: new text. Clear runs when this request omits runs.\nSupplying the existing text also clears runs.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "runs": {
+          "description": "Text layers: replace raw runs. Empty lists clear styling and preserve text.\nNonempty lists must agree with the final text and support interpretation.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/TextRunInput"
+          }
         },
         "fontFamily": {
           "description": "Text layers: new font family.",

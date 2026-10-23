@@ -345,7 +345,7 @@ export type LineJoin = "miter" | "round" | "bevel" | unknown;
 /// Where the text block sits vertically in the layer box.
 export type VerticalAlign = "top" | "middle" | "bottom";
 
-/// Text content and its single style. Per-run styling arrives in v2.0.
+/// Text content, base style, and raw run overrides.
 export type TextLayer = {
   /** The text. `\n` starts a new line. */
   text: string;
@@ -369,7 +369,7 @@ export type TextLayer = {
   stroke?: Stroke | null;
   /** Where the text block sits vertically in the layer box. */
   verticalAlign?: VerticalAlign;
-  /** Reserved (v2.0 styled runs): preserved verbatim, never interpreted. */
+  /** Raw run values, preserved during loading and ordinary validation. */
   runs?: unknown[];
   [key: string]: unknown;
 };

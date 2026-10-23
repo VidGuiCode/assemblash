@@ -45,6 +45,7 @@ fn new_text(text: &str) -> Operation {
             letter_spacing: 0.0,
             stroke: None,
             vertical_align: assemblash_core::VerticalAlign::Top,
+            runs: Vec::new(),
         },
     })
 }

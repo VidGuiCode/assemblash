@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "doc_01M5HHT92HN2017BN7YY8BY8WS",
+  "version": 5,
+  "canvas": {
+    "width": 600.0,
+    "height": 400.0
+  },
+  "assets": [],
+  "layers": [
+    {
+      "id": "layer_01M5HHT941HV1F3S8T6PJ915EA",
+      "transform": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 100.0,
+        "height": 100.0,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "text",
+      "text": "first fill",
+      "fontFamily": "Inter",
+      "fontSize": 32.0,
+      "color": "#abcdef",
+      "align": "left",
+      "lineHeight": 1.2,
+      "runs": [
+        17,
+        null,
+        {
+          "legacy": {
+            "keep": [
+              1,
+              2,
+              3
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "slots": [
+    {
+      "name": "textslot",
+      "layer": "layer_01M5HHT941HV1F3S8T6PJ915EA",
+      "kind": "text",
+      "required": false
+    },
+    {
+      "name": "colorslot",
+      "layer": "layer_01M5HHT941HV1F3S8T6PJ915EA",
+      "kind": "color",
+      "required": false
+    }
+  ]
+}

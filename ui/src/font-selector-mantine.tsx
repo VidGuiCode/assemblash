@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   Combobox,
@@ -13,6 +13,7 @@ import { formatNumber, t } from "./i18n.js";
 import type { FontRecord, FontStoreListing } from "./api.js";
 
 interface FontSelectorActions {
+  label?: string;
   initialFamily: string;
   initialDisabled: boolean;
   setFamily?: (family: string) => void;
@@ -20,6 +21,16 @@ interface FontSelectorActions {
 }
 
 let nextSelectorId = 0;
+
+/** Reuse the installed-family selector inside another Mantine control. */
+export function FontFamilyControl({ host, value, disabled, label, onCommit }: {
+  host: FontSelectorHost; value: string; disabled: boolean; label: string; onCommit: (family: string) => void;
+}) {
+  const actions = useMemo<FontSelectorActions>(() => ({ initialFamily: value, initialDisabled: disabled }), []);
+  useEffect(() => { actions.setFamily?.(value); actions.setDisabled?.(disabled); }, [actions, value, disabled]);
+  actions.label = label;
+  return <span className="font-selector"><FontSelectorView host={host} actions={actions} onCommit={onCommit} /></span>;
+}
 
 let fontSelectorSerial = 0;
 
@@ -213,7 +224,7 @@ function FontSelectorView({
             disabled={disabled}
             role="combobox"
             aria-autocomplete="list"
-            aria-label={t("editor.fontFamily")}
+            aria-label={actions.label ?? t("editor.fontFamily")}
             aria-expanded={combobox.dropdownOpened}
             aria-controls={optionsId}
             aria-activedescendant={activeIndex >= 0 ? `${optionsId}-${activeIndex}` : undefined}

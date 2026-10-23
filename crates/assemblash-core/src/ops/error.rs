@@ -13,6 +13,15 @@ use crate::ValidationErrors;
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum OpError {
+    /// Newly supplied text runs cannot be interpreted.
+    #[error("{}text runs: {error}", layer_prefix(id))]
+    TextRuns {
+        /// Layer being updated. Creation has no layer id yet.
+        id: Option<LayerId>,
+        /// Run index, source indices, property, and refusal reason.
+        #[source]
+        error: crate::TextRunError,
+    },
     /// No layer with that id exists in the document.
     #[error("no layer {id} in this document")]
     NoSuchLayer {

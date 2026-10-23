@@ -56,6 +56,9 @@ export interface QueueSettlement {
   ranMs: number | null;
 }
 
+/** Explicit outcomes for controls that retain a draft after a refused write. */
+export type ActionOutcome<T> = { status: "applied"; value: T } | { status: "refused"; error: unknown };
+
 /** An action waiting in the queue, with its settlement and its timestamp. */
 interface PendingEntry {
   action: QueuedAction;
@@ -86,6 +89,17 @@ export class ActionQueue {
   /** How many actions are waiting. Exposed for diagnostics, not decisions. */
   get size(): number {
     return this.pending.length;
+  }
+
+  /** Use the same queue without coalescing or treating refusal as success. */
+  async outcome<T>(label: string, run: () => Promise<T>): Promise<ActionOutcome<T>> {
+    let outcome: ActionOutcome<T> | undefined;
+    await this.enqueue({
+      label, coalesceKey: null,
+      run: async () => { outcome = { status: "applied", value: await run() }; },
+      onError: (error) => { outcome = { status: "refused", error }; },
+    });
+    return outcome!;
   }
 
   /**

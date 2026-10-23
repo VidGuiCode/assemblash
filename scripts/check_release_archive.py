@@ -2,12 +2,35 @@
 
 import argparse
 import hashlib
+import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
+
+
+def supports_styled_runs(tag: str) -> bool:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", tag)
+    if not match:
+        raise ValueError(f"invalid release version: {tag}")
+    return tuple(map(int, match.groups())) >= (1, 12, 0)
+
+
+def check_styled_runs(binary: Path, workspace: Path) -> dict:
+    completed = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("styled_runs_smoke.py")),
+         "--binary", str(binary), "--workspace", str(workspace)],
+        capture_output=True, text=True, encoding="utf-8", check=False, timeout=240,
+    )
+    if completed.returncode:
+        raise RuntimeError(f"styled-run archive check failed: {completed.stdout.strip()} {completed.stderr.strip()}")
+    result = json.loads(completed.stdout)
+    if result.get("ok") is not True or result.get("executed") is not True:
+        raise RuntimeError(f"styled-run archive check did not execute: {result!r}")
+    return result
 
 
 def main():
@@ -17,6 +40,7 @@ def main():
     parser.add_argument("--repo", required=True)
     parser.add_argument("--canvas", action="store_true", help="Also verify canvas editing (1.4.0 and newer)")
     parser.add_argument("--paint", action="store_true", help="Also verify paints and canvas images (1.11.0 and newer)")
+    parser.add_argument("--styled-runs", action="store_true", help="Force styled-run checks. Tags 1.12.0 and newer run them automatically.")
     parser.add_argument(
         "--no-terminal",
         action="store_true",
@@ -81,6 +105,12 @@ def main():
                  "--binary", str(binary), "--workspace", str(root / "paint-workspace")],
                 check=True, timeout=240,
             )
+        styled = {"executed": False, "reason": "release predates 1.12.0"}
+        if args.styled_runs or supports_styled_runs(args.tag):
+            styled = check_styled_runs(binary, root / "styled-runs-workspace")
+        print(json.dumps({"ok": True, "archive": archive_name, "sha256": digest,
+            "checks": {"release": True, "canvas": args.canvas, "paint": args.paint,
+                       "noTerminal": args.no_terminal, "styledRuns": styled}}, separators=(",", ":")))
 
 
 if __name__ == "__main__":

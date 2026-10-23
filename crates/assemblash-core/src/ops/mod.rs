@@ -290,11 +290,27 @@ pub fn apply(
     operation: &Operation,
     ids: &mut dyn IdSource,
 ) -> Result<OpOutcome, OpError> {
+    apply_with_semantics(document, operation, ids, OperationSemantics::StyledRunsV1)
+}
+
+/// Historical entries keep the behavior that their writer used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OperationSemantics {
+    Legacy,
+    StyledRunsV1,
+}
+
+pub(crate) fn apply_with_semantics(
+    document: &mut Document,
+    operation: &Operation,
+    ids: &mut dyn IdSource,
+    semantics: OperationSemantics,
+) -> Result<OpOutcome, OpError> {
     let mut candidate = document.clone();
     let outcome = match operation {
         Operation::UpdateCanvas(request) => update_canvas(&mut candidate, request),
         Operation::Create(request) => create(&mut candidate, request, ids),
-        Operation::Update(request) => update(&mut candidate, request),
+        Operation::Update(request) => update(&mut candidate, request, semantics),
         Operation::Delete { id } => delete(&mut candidate, id),
         Operation::Duplicate { id } => edits::duplicate(&mut candidate, id, ids),
         Operation::Move { id, dx, dy } => edits::transform(&mut candidate, id, |t| {
@@ -322,6 +338,7 @@ pub fn apply(
                 visible: Some(*visible),
                 ..UpdateLayer::new(id.clone())
             },
+            semantics,
         ),
         Operation::SetLocked { id, locked } => update(
             &mut candidate,
@@ -332,6 +349,7 @@ pub fn apply(
                 allow_locked: true,
                 ..UpdateLayer::new(id.clone())
             },
+            semantics,
         ),
         Operation::DefineSlot { slot } => define_slot(&mut candidate, slot, None),
         Operation::UpdateSlot { name, slot } => define_slot(&mut candidate, slot, Some(name)),
@@ -353,8 +371,8 @@ pub fn apply(
                     name: preset.clone(),
                     available: crate::presets::names(&candidate).join(", "),
                 })?;
-            let update = found.properties.update_for(id.clone(), *allow_locked);
-            update_layer(&mut candidate, &update)
+            let request = found.properties.update_for(id.clone(), *allow_locked);
+            update(&mut candidate, &request, semantics)
         }
         Operation::Align { ids: members, edge } => {
             layout_ops::align(&mut candidate, members, *edge)
@@ -372,6 +390,7 @@ pub fn apply(
                 name: Some(name.clone()),
                 ..UpdateLayer::new(id.clone())
             },
+            semantics,
         ),
     }?;
 
@@ -910,11 +929,11 @@ fn delete_preset(document: &mut Document, name: &str) -> Result<OpOutcome, OpErr
     Ok(OpOutcome::nothing())
 }
 
-fn update_layer(document: &mut Document, request: &UpdateLayer) -> Result<OpOutcome, OpError> {
-    update(document, request)
-}
-
-fn update(document: &mut Document, request: &UpdateLayer) -> Result<OpOutcome, OpError> {
+fn update(
+    document: &mut Document,
+    request: &UpdateLayer,
+    semantics: OperationSemantics,
+) -> Result<OpOutcome, OpError> {
     ensure_mutable(document, &request.id, request.allow_locked)?;
 
     // A crop is a rectangle in the source's own pixels, so the numbers only
@@ -943,7 +962,7 @@ fn update(document: &mut Document, request: &UpdateLayer) -> Result<OpOutcome, O
     let layer = tree::find_mut(document, &request.id).ok_or_else(|| OpError::NoSuchLayer {
         id: request.id.clone(),
     })?;
-    request.apply_to(layer)?;
+    request.apply_to(layer, semantics)?;
     Ok(OpOutcome::changed(request.id.clone()))
 }
 
@@ -1010,6 +1029,7 @@ mod tests {
             letter_spacing: 0.0,
             stroke: None,
             vertical_align: VerticalAlign::Top,
+            runs: Vec::new(),
         }
     }
 
@@ -1958,6 +1978,7 @@ mod tests {
                 blend_mode: Some(crate::document::BlendMode::Multiply),
                 effects: Some(Vec::new()),
                 text: Some("changed".to_owned()),
+                runs: Some(Vec::new()),
                 font_family: Some("Inter".to_owned()),
                 font_size: Some(12.0),
                 color: Some(Some(Color::new("#ffffff"))),

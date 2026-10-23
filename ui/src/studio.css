@@ -529,6 +529,11 @@ ol#history li.undone { opacity: 0.5; text-decoration: line-through; }
     grid-template-columns: var(--toolrail-width) 0 minmax(0, 1fr) var(--structure-width);
   }
 }
+.runs-editor { min-width: 0; padding-top: var(--space-3); }
+.runs-editor .font-selector { min-width: 0; max-width: 100%; }
+.runs-editor input, .runs-editor textarea { min-width: 0; max-width: 100%; }
+.runs-editor button { white-space: normal; height: auto; min-height: 1.8rem; }
+.runs-editor button .mantine-Button-label { white-space: normal; overflow-wrap: anywhere; }
 @media (pointer: coarse) {
   .resize-handle::before, .rotation-handle::before { content: ""; position: absolute; inset: -1rem; }
 }

@@ -10,6 +10,10 @@ authors.workspace = true
 
 [dependencies]
 assemblash-core.workspace = true
+# Use the exact shaping and Unicode versions already selected by the renderer.
+harfrust = "0.12.0"
+unicode-bidi = "0.3.18"
+unicode-script = "0.5.8"
 png = "0.18.1"
 resvg = "0.48.1"
 serde = { version = "1.0.229", features = ["derive"] }

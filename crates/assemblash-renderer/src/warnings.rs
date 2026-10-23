@@ -27,7 +27,46 @@ use assemblash_core::ids::LayerId;
 use assemblash_core::{storage, svg_import, Document};
 
 use crate::fonts::FontSet;
-use crate::svg::{families_in, layout_text, number};
+use crate::svg::{families_in, number};
+
+/// A successful write cannot measure its text with the available interpretation or fonts.
+pub const CANNOT_MEASURE_TEXT: &str = "cannotMeasureText";
+
+/// A measurement failure does not change a completed operation.
+pub fn cannot_measure_text(layer: LayerId, reason: impl std::fmt::Display) -> ExportWarning {
+    ExportWarning {
+        code: CANNOT_MEASURE_TEXT,
+        message: format!("layer {layer}: cannot measure text: {reason}"),
+        layer_id: Some(layer),
+    }
+}
+
+/// Measure touched text layers independently after a successful write.
+/// A failure on another layer cannot suppress the touched layer's warnings.
+pub fn text_write_warnings<E: std::fmt::Display>(
+    document: &Document,
+    touched: &[LayerId],
+    project_dir: &Path,
+    mut load: impl FnMut(&Document) -> Result<crate::LoadedFonts, E>,
+) -> Vec<ExportWarning> {
+    let mut warnings = Vec::new();
+    document.walk_layers(&mut |layer| {
+        if !touched.contains(&layer.id) || !matches!(layer.kind, LayerKind::Text(_)) {
+            return;
+        }
+        let mut isolated = document.clone();
+        isolated.layers = vec![layer.clone()];
+        match load(&isolated) {
+            Err(error) => warnings.push(cannot_measure_text(layer.id.clone(), error)),
+            Ok(fonts) => warnings.extend(
+                export_warnings(document, fonts.font_set(), project_dir)
+                    .into_iter()
+                    .filter(|warning| warning.layer_id.as_ref() == Some(&layer.id)),
+            ),
+        }
+    });
+    warnings
+}
 
 /// A word was wider than its box and was split at a character boundary.
 pub const WORD_BROKEN_MID_WORD: &str = "wordBrokenMidWord";
@@ -59,8 +98,8 @@ pub const SVG_ASSET_TEXT_WITHOUT_FONT: &str = "svgAssetTextWithoutFont";
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportWarning {
-    /// Stable machine-readable code — one of the three constants in this
-    /// module. A caller switches on this; the message is for a person.
+    /// Stable machine-readable code. A caller switches on this code.
+    /// The message is for a person.
     pub code: &'static str,
     /// What happened, in the voice the operation layer refuses in.
     pub message: String,
@@ -88,16 +127,27 @@ pub fn export_warnings(
     let mut warnings = Vec::new();
     document.walk_layers(&mut |layer| match &layer.kind {
         LayerKind::Text(text) => {
-            let layout = layout_text(
-                &text.text,
-                layer.transform.width,
-                text.font_size,
-                text.line_height,
-                text.letter_spacing,
-                &text.font_family,
-                fonts,
-            );
-            if layout.broke_mid_word {
+            let (broke_mid_word, height) = if text.runs.is_empty() {
+                let layout = crate::layout_text(
+                    &text.text,
+                    layer.transform.width,
+                    text.font_size,
+                    text.line_height,
+                    text.letter_spacing,
+                    &text.font_family,
+                    fonts,
+                );
+                (layout.broke_mid_word, layout.height)
+            } else {
+                match crate::layout_text_layer(layer, layer.transform.width, fonts) {
+                    Ok(layout) => (layout.broke_mid_word, layout.height),
+                    Err(error) => {
+                        warnings.push(cannot_measure_text(layer.id.clone(), error));
+                        return;
+                    }
+                }
+            };
+            if broke_mid_word {
                 warnings.push(ExportWarning {
                     code: WORD_BROKEN_MID_WORD,
                     message: format!(
@@ -108,14 +158,14 @@ pub fn export_warnings(
                     layer_id: Some(layer.id.clone()),
                 });
             }
-            if rounded(layout.height) > rounded(layer.transform.height) {
+            if rounded(height) > rounded(layer.transform.height) {
                 warnings.push(ExportWarning {
                     code: TEXT_OVERFLOWS_BOX,
                     message: format!(
                         "layer {}: the text needs {} pixels of height and its box is {}, \
                          so it spills past the bottom",
                         layer.id,
-                        number(layout.height),
+                        number(height),
                         number(layer.transform.height)
                     ),
                     layer_id: Some(layer.id.clone()),

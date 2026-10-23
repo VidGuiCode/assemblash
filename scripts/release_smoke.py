@@ -32,7 +32,7 @@ class SmokeFailure(RuntimeError):
 
 def run(binary: Path, *args: str, timeout: int = TIMEOUT) -> str:
     completed = subprocess.run(
-        [str(binary), *map(str, args)], capture_output=True, text=True,
+        [str(binary), *map(str, args)], capture_output=True, text=True, encoding="utf-8",
         timeout=timeout, check=False,
     )
     if completed.returncode:
@@ -69,7 +69,7 @@ class Server:
         self.process = subprocess.Popen(
             [str(binary), "serve", "--workspace", str(workspace), "--port", str(self.port), "--friendly"],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            text=True, creationflags=flags,
+            text=True, encoding="utf-8", creationflags=flags,
         )
         self.base = f"http://127.0.0.1:{self.port}"
         deadline = time.monotonic() + TIMEOUT
@@ -114,7 +114,7 @@ class Mcp:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self.process = subprocess.Popen(
             [str(binary), "mcp", "--workspace", str(workspace)], stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", bufsize=1,
             creationflags=flags,
         )
         assert self.process.stdout and self.process.stdin

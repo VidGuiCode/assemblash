@@ -187,6 +187,11 @@ pub enum NewLayerKind {
         /// Where the block sits vertically in the box.
         #[serde(default)]
         vertical_align: VerticalAlign,
+        /// Raw text runs. Nonempty lists must concatenate exactly to text.
+        /// Known values must support typed interpretation. Unknown properties remain unchanged.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[schemars(with = "Vec<crate::TextRunInput>")]
+        runs: Vec<serde_json::Value>,
     },
     /// An image layer referencing an asset already in the document.
     Image {
@@ -271,6 +276,7 @@ impl CreateLayer {
                 letter_spacing,
                 stroke,
                 vertical_align,
+                runs,
             } => {
                 if let Some(paint) = color {
                     check_paint(None, paint)?;
@@ -278,7 +284,7 @@ impl CreateLayer {
                 if let Some(stroke) = stroke {
                     check_paint(None, &stroke.color)?;
                 }
-                LayerKind::Text(TextLayer {
+                let layer = TextLayer {
                     text: text.clone(),
                     font_family: font_family.clone(),
                     font_size: *font_size,
@@ -290,9 +296,13 @@ impl CreateLayer {
                     letter_spacing: *letter_spacing,
                     stroke: stroke.clone(),
                     vertical_align: *vertical_align,
-                    runs: Vec::new(),
+                    runs: runs.clone(),
                     extra: Extras::new(),
-                })
+                };
+                layer
+                    .interpreted_runs()
+                    .map_err(|error| OpError::TextRuns { id: None, error })?;
+                LayerKind::Text(layer)
             }
             NewLayerKind::Image { asset, fit } => {
                 // Checked here rather than left to validation so the error
@@ -413,9 +423,15 @@ pub struct UpdateLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Vec<Effect>>,
 
-    /// Text layers: new text.
+    /// Text layers: new text. Clear runs when this request omits runs.
+    /// Supplying the existing text also clears runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Text layers: replace raw runs. Empty lists clear styling and preserve text.
+    /// Nonempty lists must agree with the final text and support interpretation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<Vec<crate::TextRunInput>>")]
+    pub runs: Option<Vec<serde_json::Value>>,
     /// Text layers: new font family.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -577,6 +593,7 @@ impl UpdateLayer {
             blend_mode: None,
             effects: None,
             text: None,
+            runs: None,
             font_family: None,
             font_size: None,
             color: None,
@@ -602,7 +619,11 @@ impl UpdateLayer {
         }
     }
 
-    pub(super) fn apply_to(&self, layer: &mut Layer) -> Result<(), OpError> {
+    pub(super) fn apply_to(
+        &self,
+        layer: &mut Layer,
+        semantics: super::OperationSemantics,
+    ) -> Result<(), OpError> {
         if let Some(name) = &self.name {
             layer.name = name.clone();
         }
@@ -725,6 +746,9 @@ impl UpdateLayer {
                 }
                 if let Some(value) = &self.text {
                     text.text = value.clone();
+                    if self.runs.is_none() && semantics == super::OperationSemantics::StyledRunsV1 {
+                        text.runs.clear();
+                    }
                 }
                 if let Some(value) = &self.font_family {
                     text.font_family = value.clone();
@@ -761,6 +785,13 @@ impl UpdateLayer {
                 }
                 if let Some(value) = self.vertical_align {
                     text.vertical_align = value;
+                }
+                if let Some(runs) = &self.runs {
+                    text.runs = runs.clone();
+                    text.interpreted_runs().map_err(|error| OpError::TextRuns {
+                        id: Some(layer.id.clone()),
+                        error,
+                    })?;
                 }
             }
             LayerKind::Image(image) => {
@@ -926,6 +957,7 @@ impl UpdateLayer {
     fn first_text_property(&self) -> Option<&'static str> {
         [
             self.text.is_some().then_some("text"),
+            self.runs.is_some().then_some("runs"),
             self.font_family.is_some().then_some("fontFamily"),
             self.font_size.is_some().then_some("fontSize"),
             self.color.is_some().then_some("color"),

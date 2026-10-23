@@ -227,6 +227,52 @@ impl From<RenderError> for ApiError {
             } => Self::new(StatusCode::UNPROCESSABLE_ENTITY, "missingFont", message).with_details(
                 json!({ "layer": layer, "family": family, "weight": weight, "style": style }),
             ),
+            RenderError::NotTextLayer { layer } => {
+                Self::new(StatusCode::BAD_REQUEST, "notTextLayer", message)
+                    .with_details(json!({"layer":layer}))
+            }
+            RenderError::InvalidTextWidth { layer, width } => {
+                Self::new(StatusCode::BAD_REQUEST, "invalidTextWidth", message)
+                    .with_details(json!({"layer":layer,"width":width}))
+            }
+            RenderError::TextLayout { layer, source } => {
+                use assemblash_renderer::{TextFailureKind, TextLayoutError};
+                let (code, details) = match source {
+                    TextLayoutError::InvalidRuns(error) => (
+                        "unsupportedTextRuns",
+                        json!({"layer":layer,"runIndex":error.run_index,
+                        "characterIndex":error.character_index,"byteIndex":error.byte_index,"field":error.field,"reason":error.reason}),
+                    ),
+                    TextLayoutError::Unsupported {
+                        kind,
+                        run_index,
+                        character_index,
+                        byte_index,
+                        reason,
+                    } => {
+                        let code = match kind {
+                            TextFailureKind::FontDataUnavailable => "textFontDataUnavailable",
+                            TextFailureKind::InvalidFontData => "invalidTextFontData",
+                            TextFailureKind::MissingGlyph => "missingTextGlyph",
+                            TextFailureKind::IncompatibleCluster => "incompatibleTextCluster",
+                            TextFailureKind::InvalidSpacing => "invalidTextSpacing",
+                            TextFailureKind::InvalidGeometry => "invalidTextGeometry",
+                        };
+                        (
+                            code,
+                            json!({"layer":layer,"runIndex":run_index,"characterIndex":character_index,"byteIndex":byte_index,"reason":reason}),
+                        )
+                    }
+                    _ => ("textLayoutFailed", json!({"layer":layer})),
+                };
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message).with_details(details)
+            }
+            RenderError::TextFilterBounds { layer, reason } => Self::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "textFilterBounds",
+                message,
+            )
+            .with_details(json!({"layer":layer,"reason":reason})),
             RenderError::InvalidDocument(_) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalidDocument", message)
             }
@@ -300,6 +346,36 @@ mod tests {
 
     use super::*;
     use assemblash_core::ids::LayerId;
+
+    #[test]
+    fn styled_layout_errors_keep_codes_and_original_indices() {
+        use assemblash_renderer::{TextFailureKind, TextLayoutError};
+        let error = ApiError::from(RenderError::TextLayout {
+            layer: LayerId::new("layer_text"),
+            source: TextLayoutError::Unsupported {
+                kind: TextFailureKind::IncompatibleCluster,
+                run_index: 2,
+                character_index: 4,
+                byte_index: 7,
+                reason: "incompatible effective styles".into(),
+            },
+        });
+        assert_eq!(error.code(), "incompatibleTextCluster");
+        assert_eq!(error.details()["runIndex"], 2);
+        assert_eq!(error.details()["characterIndex"], 4);
+        assert_eq!(error.details()["byteIndex"], 7);
+        assert_eq!(error.details()["layer"], "layer_text");
+        let error = ApiError::from(RenderError::TextFilterBounds {
+            layer: LayerId::new("layer_parent"),
+            reason: "an in-memory image cannot provide filter bounds".into(),
+        });
+        assert_eq!(error.code(), "textFilterBounds");
+        assert_eq!(error.details()["layer"], "layer_parent");
+        assert_eq!(
+            error.details()["reason"],
+            "an in-memory image cannot provide filter bounds"
+        );
+    }
 
     /// Agents act on error text. A `projectLocked` that told them to delete
     /// the lock file would let one break the editor's lock while it is alive.

@@ -205,6 +205,26 @@ export type LineJoin = "miter" | "round" | "bevel" | unknown;
 /// Where the text block sits vertically in the layer box.
 export type VerticalAlign = "top" | "middle" | "bottom";
 
+/// Supported properties for newly supplied runs. Storage remains arbitrary JSON.
+/// Omitted properties inherit. Null color removes fill; other optional null properties inherit.
+export type TextRunInput = {
+  /** Required text. Nonempty run lists concatenate exactly to the authoritative text. */
+  text: string;
+  /** Family override. Omission or null inherits the base family. */
+  fontFamily?: string | null;
+  /** Positive finite size in pixels. Omission or null inherits the base size. */
+  fontSize?: number | null;
+  /** Fill override. Omission inherits; explicit null means no fill. */
+  color?: Color | null;
+  /** Integer weight from 100 through 900. Omission or null inherits. */
+  fontWeight?: number | null;
+  /** Normal or italic. Omission or null inherits the base style. */
+  fontStyle?: FontStyle | null;
+  /** Finite spacing in pixels, including negative values. Omission or null inherits. */
+  letterSpacing?: number | null;
+  [key: string]: unknown;
+};
+
 /// The geometry of a [`ShapeLayer`], tagged by `"kind"` in JSON.
 ///
 /// Every known variant also carries a `#[serde(flatten)]` capture map (D27):
@@ -266,6 +286,8 @@ export type CreateLayer = ({
   stroke?: Stroke | null;
   /** Where the block sits vertically in the box. */
   verticalAlign?: VerticalAlign;
+  /** Raw text runs. Nonempty lists must concatenate exactly to text. */
+  runs?: TextRunInput[];
   type: "text";
   [key: string]: unknown;
 } | {
@@ -437,8 +459,10 @@ export type UpdateLayer = {
   blendMode?: BlendMode | null;
   /** Replace the whole effect stack. */
   effects?: Effect[] | null;
-  /** Text layers: new text. */
+  /** Text layers: new text. Clear runs when this request omits runs. */
   text?: string | null;
+  /** Text layers: replace raw runs. Empty lists clear styling and preserve text. */
+  runs?: TextRunInput[] | null;
   /** Text layers: new font family. */
   fontFamily?: string | null;
   /** Text layers: new font size. */

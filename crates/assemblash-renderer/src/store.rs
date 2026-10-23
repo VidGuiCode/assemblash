@@ -487,6 +487,15 @@ impl FontStore {
         })
     }
 
+    /// Load available document families. The caller checks exact face requirements.
+    /// Missing families do not prevent a layer-indexed renderer refusal.
+    pub fn load_available_families(
+        &self,
+        families: &[String],
+    ) -> Result<LoadedFonts, FontStoreError> {
+        self.load_families(families.iter().filter(|family| self.has_family(family)))
+    }
+
     /// Writes `index.json`, sorted and with a trailing newline.
     fn write_index(&mut self) -> Result<(), FontStoreError> {
         self.index.fonts.sort_by(|a, b| {

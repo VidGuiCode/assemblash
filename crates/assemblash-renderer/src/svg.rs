@@ -17,6 +17,8 @@ use assemblash_core::{svg_import, validate, Color, Document, GradientStop, Solid
 use crate::error::RenderError;
 use crate::fonts::FontSet;
 
+mod filter_bounds;
+
 /// Where each asset's bytes can be found, from the SVG's point of view.
 ///
 /// Values are used verbatim as the `href` of an `<image>`: a `data:` URI for
@@ -139,12 +141,13 @@ pub fn doc_to_svg(
         );
     }
 
+    let mut bounds = filter_bounds::BoundsPass::default();
     for layer in &document.layers {
-        write_layer(&mut out, layer, fonts, assets, document, 1)?;
+        write_layer(&mut out, layer, fonts, assets, document, 1, &mut bounds)?;
     }
 
     out.push_str("</svg>\n");
-    Ok(out)
+    bounds.resolve(out, document, fonts, assets)
 }
 
 fn write_layer(
@@ -154,6 +157,7 @@ fn write_layer(
     assets: &AssetHrefs,
     document: &Document,
     depth: usize,
+    bounds: &mut filter_bounds::BoundsPass,
 ) -> Result<(), RenderError> {
     // An invisible layer contributes nothing, and leaving it out keeps the
     // output as small as what it draws.
@@ -225,6 +229,15 @@ fn write_layer(
     };
 
     match &layer.kind {
+        LayerKind::Text(text) if !text.runs.is_empty() => {
+            let layout = crate::layout_text_layer(layer, t.width, fonts)?;
+            let content = crate::text::svg::render(layer, text, &layout)?;
+            let _ = write!(out, "{content_pad}<g{attributes}>");
+            let start = out.len();
+            out.push_str(&content);
+            bounds.styled_content(start..out.len(), &layout, text, layer);
+            out.push_str("</g>\n");
+        }
         LayerKind::Text(text) => {
             if !fonts.contains_face(&text.font_family, text.font_weight, text.font_style) {
                 return Err(RenderError::MissingFont {
@@ -494,7 +507,7 @@ fn write_layer(
                 // and blend; the clip group masks the whole subtree, with the
                 // children keeping their own local coordinates.
                 for child in &group.children {
-                    write_layer(out, child, fonts, assets, document, content_depth)?;
+                    write_layer(out, child, fonts, assets, document, content_depth, bounds)?;
                 }
             } else if t.flip_horizontal || t.flip_vertical {
                 // A mirrored group composes the mirror about its local centre,
@@ -511,7 +524,15 @@ fn write_layer(
                     style = group_style(layer, group)?,
                 );
                 for child in &group.children {
-                    write_layer(out, child, fonts, assets, document, content_depth + 1)?;
+                    write_layer(
+                        out,
+                        child,
+                        fonts,
+                        assets,
+                        document,
+                        content_depth + 1,
+                        bounds,
+                    )?;
                 }
                 let _ = writeln!(out, "{pad}</g>", pad = content_pad);
             } else {
@@ -547,6 +568,7 @@ fn write_layer(
                         assets,
                         document,
                         content_depth + if rotated { 2 } else { 1 },
+                        bounds,
                     )?;
                 }
                 if rotated {
@@ -2068,7 +2090,11 @@ fn inverse_transform(transform: &Transform, cx: f64, cy: f64) -> Option<String> 
 /// layer and field. The id spelling must match [`gradient_defs_for`] — the
 /// attribute references a definition that pass emits, and a drifted id would
 /// reference nothing.
-fn paint_value(paint: &Color, def_id: &str, layer: &LayerId) -> Result<String, RenderError> {
+pub(crate) fn paint_value(
+    paint: &Color,
+    def_id: &str,
+    layer: &LayerId,
+) -> Result<String, RenderError> {
     match paint {
         Color::Solid(solid) => color(solid),
         Color::Linear(_) | Color::Radial(_) => Ok(format!("url(#{})", svg_id(def_id))),
@@ -2099,7 +2125,7 @@ fn gradient_defs_for(layer: &Layer) -> Result<String, RenderError> {
             Ok(())
         };
         match &layer.kind {
-            LayerKind::Text(text) => {
+            LayerKind::Text(text) if text.runs.is_empty() => {
                 if let Some(paint) = &text.color {
                     push("color", paint)?;
                 }
@@ -2132,7 +2158,7 @@ fn gradient_defs_for(layer: &Layer) -> Result<String, RenderError> {
                     }
                 }
             }
-            LayerKind::Group(_) | LayerKind::Image(_) | LayerKind::Svg(_) => {}
+            LayerKind::Text(_) | LayerKind::Group(_) | LayerKind::Image(_) | LayerKind::Svg(_) => {}
         }
     }
     Ok(defs)
@@ -2142,7 +2168,7 @@ fn gradient_defs_for(layer: &Layer) -> Result<String, RenderError> {
 /// spike measured byte-identical on all six targets: `objectBoundingBox`
 /// units, a linear axis through the box centre at the documented angle, and
 /// stops carrying a separate `stop-opacity`.
-fn gradient_def(
+pub(crate) fn gradient_def(
     def_id: &str,
     paint: &Color,
     layer: Option<&LayerId>,

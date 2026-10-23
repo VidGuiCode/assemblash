@@ -205,6 +205,14 @@ jobs:
           path: target/gate/hashes.json
           if-no-files-found: error
 
+      - name: Verify styled runs across CLI, HTTP and MCP
+        run: >-
+          python scripts/styled_runs_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-styled-runs-smoke"
+      - name: Verify styled archive routing
+        run: python -m unittest discover -s scripts -p test_styled_runs_smoke.py
+
   render-identity:
     name: Compare renderer bytes on all six targets
     needs: test
@@ -223,7 +231,7 @@ jobs:
 
   candidate:
     name: Candidate binary (${{ matrix.target-name }})
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.11.0'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.12.0'
     needs: [hygiene, lint, ui, deny, test, render-identity]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -282,6 +290,11 @@ jobs:
           python scripts/paint_smoke.py
           --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
           --workspace "${{ runner.temp }}/assemblash-candidate-paint-smoke"
+      - name: Verify candidate styled runs across CLI, HTTP and MCP
+        run: >-
+          python scripts/styled_runs_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-candidate-styled-runs-smoke"
       - uses: actions/setup-node@v4
         if: matrix.target-name == 'linux-x86_64'
         with:
@@ -297,6 +310,13 @@ jobs:
           --login-check true
           --samples 5
           --label candidate-auth-offline
+      - name: Verify candidate Runs table against the embedded server
+        if: matrix.target-name == 'linux-x86_64'
+        run: >-
+          node scripts/styled_runs_browser.mjs
+          --binary target/release/assemblash
+          --workspace "${{ runner.temp }}/assemblash-candidate-runs-editor"
+          --output "${{ runner.temp }}/assemblash-candidate-runs-editor-evidence/result.json"
       - name: Save the verified candidate binary
         uses: actions/upload-artifact@v4
         with:
