@@ -3910,6 +3910,20 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.deepEqual(fixture.writes[0].body.operation.effects, [
       ...previous.slice(0, -1), { type: "invert", amount: 0.75 }, previous.at(-1),
     ]);
+    for (const [locale, hue, invert, degrees, amount] of [
+      ["fr", "Rotation de teinte", "Inverser", "Degrés", "Intensité"],
+      ["de", "Farbton drehen", "Invertieren", "Grad", "Stärke"],
+      ["en", "Hue rotation", "Invert", "Degrees", "Amount"],
+    ]) {
+      await page.evaluate(`import('/i18n.js').then(module => module.setLocale('${locale}'))`);
+      await page.waitFor(`document.querySelector('.effect-row[data-effect="hueRotate"] .effect-name').textContent === ${JSON.stringify(hue)}
+        && document.querySelector('.effect-row[data-effect="invert"] .effect-name').textContent === ${JSON.stringify(invert)}
+        && document.querySelector('.effect-chooser option[value="hueRotate"]').textContent === ${JSON.stringify(hue)}
+        && document.querySelector('.effect-chooser option[value="invert"]').textContent === ${JSON.stringify(invert)}
+        && document.querySelector('.effect-row[data-effect="hueRotate"] input').getAttribute('aria-label').includes(${JSON.stringify(degrees)})
+        && document.querySelector('.effect-row[data-effect="invert"] input').getAttribute('aria-label').includes(${JSON.stringify(amount)})`, "localized colour effect controls");
+      assert.equal(await page.evaluate(`document.querySelector('.effect-row[data-effect="invert"] input').value`), "0.75");
+    }
   });
 
   await t.test("a rapid burst of edits is never dropped, and the journal matches", async () => {

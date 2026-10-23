@@ -2303,6 +2303,7 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
     const label = document.createElement("span");
     label.className = "effect-name";
     label.textContent = effectLabel(effect.type);
+    if (effect.type === "hueRotate" || effect.type === "invert") label.dataset["i18n"] = `effects.${effect.type}`;
     row.append(label);
 
     // Most effects have one number worth editing; grain's seed is deliberately
@@ -2317,7 +2318,7 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
       const id = `effect-${layer.id}-${index}-${field.name}`;
       mountedInspectorWidgets.push(mountInspectorField(host, {
         id,
-        label: `${label.textContent} ${field.name === "degrees" ? translate("effects.degrees")
+        label: () => `${effectLabel(effect.type)} ${field.name === "degrees" ? translate("effects.degrees")
           : effect.type === "invert" && field.name === "amount" ? translate("effects.amount") : field.name}`,
         value: String(field.value),
         type: field.kind === "color" ? "text" : "number",
@@ -2394,7 +2395,7 @@ function drawEffects(target: HTMLElement, layer: Layer, guarded: boolean): void 
     value: chosenEffect,
     className: "effect-chooser",
     disabled: guarded,
-    options: api.EFFECT_TYPES.map((type) => ({ value: type, label: effectLabel(type) })),
+    options: api.EFFECT_TYPES.map((type) => ({ value: type, label: () => effectLabel(type) })),
     onCommit: (value) => { chosenEffect = value as typeof chosenEffect; },
   }));
   const addButton = document.createElement("span");
