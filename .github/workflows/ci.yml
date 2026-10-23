@@ -429,6 +429,46 @@ jobs:
             --binary "candidate-dist/extracted/$name/$binary" \
             --workspace "${{ runner.temp }}/assemblash-candidate-extracted-smoke" \
             --expected-version 1.12.0
+      - name: Install cargo-deb for candidate packaging
+        if: runner.os == 'Linux'
+        run: cargo install cargo-deb --version 3.8.0 --locked
+      - name: Build and install-check the candidate Debian package
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          cargo deb --package assemblash-cli --no-build --no-strip
+          case "${{ matrix.target-name }}" in
+            linux-x86_64) arch=amd64 ;;
+            linux-aarch64) arch=arm64 ;;
+            *) exit 1 ;;
+          esac
+          package="target/debian/assemblash_1.12.0-1_$arch.deb"
+          test "$(dpkg-deb -f "$package" Package)" = assemblash
+          test "$(dpkg-deb -f "$package" Version)" = 1.12.0-1
+          test "$(dpkg-deb -f "$package" Architecture)" = "$arch"
+          cp "$package" candidate-dist/
+          sudo apt-get install -y "./$package"
+          test "$(/usr/bin/assemblash --version)" = 'assemblash 1.12.0'
+          cmp target/release/assemblash /usr/bin/assemblash
+          cmp packaging/linux/assemblash.desktop /usr/share/applications/assemblash.desktop
+          cmp assets/assemblash-mark.svg /usr/share/icons/hicolor/scalable/apps/assemblash.svg
+          cmp NOTICE /usr/share/doc/assemblash/NOTICE
+          cmp THIRD_PARTY_LICENSES.md /usr/share/doc/assemblash/THIRD_PARTY_LICENSES.md
+          sudo apt-get remove -y assemblash
+      - name: Checksum the candidate Debian package
+        if: runner.os == 'Linux'
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root = Path('candidate-dist')
+          packages = list(root.glob('*.deb'))
+          if len(packages) != 1:
+              raise RuntimeError('expected exactly one candidate Debian package')
+          with (root / 'SHA256SUMS').open('a', encoding='utf-8') as output:
+              for package in packages:
+                  output.write(hashlib.sha256(package.read_bytes()).hexdigest() + '  ' + package.name + '\n')
+          PY
       - name: Save the unpublished candidate archive
         uses: actions/upload-artifact@v4
         with:
@@ -436,6 +476,7 @@ jobs:
           path: |
             candidate-dist/*.zip
             candidate-dist/*.tar.gz
+            candidate-dist/*.deb
             candidate-dist/SHA256SUMS
           if-no-files-found: error
       - name: Save the candidate renderer identity report

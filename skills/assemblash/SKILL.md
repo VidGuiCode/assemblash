@@ -121,9 +121,9 @@ kits, customer assets, or downstream workflow data.
 For exact arguments, payloads, and supported properties, use
 `assemblash --help` and the committed schemas. Do not guess.
 
-## Text and resize controls (1.12.0 candidate)
+## Text and resize controls (1.12.0 and newer)
 
-Version 1.12.0 is not published. Check the running binary before you use these properties.
+Check the running binary version before you use these properties.
 
 - `runs` stores inline text styles. Run text must join to the layer text exactly.
   Use `--runs-file` for CLI JSON. Rendering requires each exact font face.
