@@ -135,6 +135,51 @@ fn paragraph_spacing_is_atomic_preserves_runs_and_resets_through_presets() {
 }
 
 #[test]
+fn justified_alignment_uses_existing_operations_and_preserves_raw_runs() {
+    use serde_json::json;
+    let mut editor = Editor::new();
+    let create = json!({"op":"create","type":"text","text":"A B C","fontFamily":"Inter","fontSize":12,"align":"justify","transform":{"x":0,"y":0,"width":100,"height":100}});
+    assemblash_core::ops::check_properties(&create).unwrap();
+    let id = editor
+        .apply(serde_json::from_value(create).unwrap())
+        .created[0]
+        .clone();
+    let raw = json!([{"text":"A","future":{"keep":[1,2]}},{"text":" B C","color":null}]);
+    editor.apply(serde_json::from_value(json!({"op":"update","id":id,"runs":raw})).unwrap());
+    for align in ["left", "center", "right", "justify"] {
+        let update = json!({"op":"update","id":id,"align":align});
+        assemblash_core::ops::check_properties(&update).unwrap();
+        editor.apply(serde_json::from_value(update).unwrap());
+        let stored = serde_json::to_value(editor.layer(&id)).unwrap();
+        assert_eq!(stored["align"], align);
+        assert_eq!(stored["runs"], raw);
+    }
+    editor.apply(serde_json::from_value(json!({"op":"definePreset","preset":{"name":"justify","properties":{"align":"justify"}}})).unwrap());
+    editor.apply(serde_json::from_value(json!({"op":"update","id":id,"align":"left"})).unwrap());
+    editor.apply(
+        serde_json::from_value(json!({"op":"applyPreset","id":id,"preset":"justify"})).unwrap(),
+    );
+    let stored = serde_json::to_value(editor.layer(&id)).unwrap();
+    assert_eq!(stored["align"], "justify");
+    assert_eq!(stored["runs"], raw);
+    assert_eq!(
+        serde_json::from_value::<Document>(serde_json::to_value(&editor.document).unwrap())
+            .unwrap(),
+        editor.document
+    );
+    for value in [json!("spread"), json!(4), json!(true)] {
+        assert!(
+            serde_json::from_value::<Operation>(json!({"op":"update","id":id,"align":value}))
+                .is_err()
+        );
+        assert!(serde_json::from_value::<Operation>(
+            json!({"op":"definePreset","preset":{"name":"bad","properties":{"align":value}}})
+        )
+        .is_err());
+    }
+}
+
+#[test]
 fn move_shifts_by_a_distance() {
     let mut editor = Editor::new();
     let id = editor.add(10.0, 20.0, 30.0, 40.0);

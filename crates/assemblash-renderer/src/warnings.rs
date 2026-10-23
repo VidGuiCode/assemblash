@@ -127,7 +127,9 @@ pub fn export_warnings(
     let mut warnings = Vec::new();
     document.walk_layers(&mut |layer| match &layer.kind {
         LayerKind::Text(text) => {
-            let (broke_mid_word, height) = if text.runs.is_empty() && text.paragraph_spacing == 0.0
+            let (broke_mid_word, height) = if text.runs.is_empty()
+                && text.paragraph_spacing == 0.0
+                && text.align != assemblash_core::TextAlign::Justify
             {
                 let layout = crate::layout_text(
                     &text.text,

@@ -433,6 +433,7 @@ export const fr: Record<keyof typeof en, string> = {
   "editor.alignLeft": "Aligner à gauche",
   "editor.alignCenter": "Aligner au centre",
   "editor.alignRight": "Aligner à droite",
+  "editor.alignJustify": "Justifier le texte",
   "editor.layerGeneric": "Calque",
   "canvas.anchorCenter": "Centre",
   "errors.unauthorized": "Un jeton d’accès est requis.",

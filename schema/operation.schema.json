@@ -936,6 +936,11 @@
           "description": "Aligned to the right edge.",
           "type": "string",
           "const": "right"
+        },
+        {
+          "description": "Expand groups of regular spaces (U+0020) between words on wrapped lines.\nKeep paragraph-final lines at natural width.\nLeading and trailing whitespace receive no extra width.",
+          "type": "string",
+          "const": "justify"
         }
       ]
     },

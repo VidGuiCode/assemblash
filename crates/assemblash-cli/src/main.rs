@@ -1299,6 +1299,8 @@ enum Align {
     Left,
     Center,
     Right,
+    /// Expand regular word spaces on wrapped lines. Keep paragraph-final lines natural.
+    Justify,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1314,6 +1316,7 @@ impl From<Align> for TextAlign {
             Align::Left => Self::Left,
             Align::Center => Self::Center,
             Align::Right => Self::Right,
+            Align::Justify => Self::Justify,
         }
     }
 }

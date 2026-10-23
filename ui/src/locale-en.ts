@@ -432,6 +432,7 @@ export const en = {
   "editor.alignLeft": "Align left",
   "editor.alignCenter": "Align centre",
   "editor.alignRight": "Align right",
+  "editor.alignJustify": "Justify text",
   "editor.layerGeneric": "Layer",
   "canvas.anchorCenter": "Center",
   "errors.unauthorized": "Access token required.",

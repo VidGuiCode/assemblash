@@ -229,7 +229,7 @@ fn write_layer(
     };
 
     match &layer.kind {
-        LayerKind::Text(text) if !text.runs.is_empty() => {
+        LayerKind::Text(text) if !text.runs.is_empty() || text.align == TextAlign::Justify => {
             let layout = crate::layout_text_layer(layer, t.width, fonts)?;
             let content = crate::text::svg::render(layer, text, &layout)?;
             let _ = write!(out, "{content_pad}<g{attributes}>");
@@ -249,7 +249,7 @@ fn write_layer(
             }
 
             let (anchor, x) = match text.align {
-                TextAlign::Left => ("start", t.x),
+                TextAlign::Left | TextAlign::Justify => ("start", t.x),
                 TextAlign::Center => ("middle", t.x + t.width / 2.0),
                 TextAlign::Right => ("end", t.x + t.width),
             };
@@ -1552,7 +1552,7 @@ pub(crate) fn layout_plain_text(
         let ascent = text.font_size * fonts.ascent_ratio(&text.font_family);
         let origin = layer.transform.x
             + match text.align {
-                TextAlign::Left => 0.0,
+                TextAlign::Left | TextAlign::Justify => 0.0,
                 TextAlign::Center => width / 2.0,
                 TextAlign::Right => width,
             };
@@ -2250,7 +2250,7 @@ fn gradient_defs_for(layer: &Layer) -> Result<String, RenderError> {
             Ok(())
         };
         match &layer.kind {
-            LayerKind::Text(text) if text.runs.is_empty() => {
+            LayerKind::Text(text) if text.runs.is_empty() && text.align != TextAlign::Justify => {
                 if let Some(paint) = &text.color {
                     push("color", paint)?;
                 }

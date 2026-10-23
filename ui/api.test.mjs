@@ -9,6 +9,7 @@ test("saved text styles include paragraph spacing and an explicit zero reset", a
   assert.equal(styleOf(layer).paragraphSpacing, 0);
   assert.equal(styleOf({ ...layer, paragraphSpacing: 17.25 }).paragraphSpacing, 17.25);
   assert.equal(Object.hasOwn(styleOf(layer), "runs"), false);
+  assert.equal(styleOf({ ...layer, align: "justify" }).align, "justify");
 });
 
 test("drag preview URLs keep layer filtering out of the operation API", () => {

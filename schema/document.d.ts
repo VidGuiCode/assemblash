@@ -306,7 +306,7 @@ export type Clip = {
 } | unknown;
 
 /// Horizontal text alignment inside the layer box.
-export type TextAlign = "left" | "center" | "right";
+export type TextAlign = "left" | "center" | "right" | "justify";
 
 /// Whether glyphs stand upright or slant.
 export type FontStyle = "normal" | "italic";

@@ -218,6 +218,11 @@ jobs:
           python scripts/paragraph_spacing_smoke.py
           --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
           --workspace "${{ runner.temp }}/assemblash-paragraph-spacing-smoke"
+      - name: Verify justified alignment across CLI, HTTP and MCP
+        run: >-
+          python scripts/justification_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/debug/assemblash.exe' || 'target/debug/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-justification-smoke"
 
   render-identity:
     name: Compare renderer bytes on all six targets
@@ -306,6 +311,11 @@ jobs:
           python scripts/paragraph_spacing_smoke.py
           --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
           --workspace "${{ runner.temp }}/assemblash-candidate-paragraph-spacing-smoke"
+      - name: Verify candidate justified alignment across CLI, HTTP and MCP
+        run: >-
+          python scripts/justification_smoke.py
+          --binary "${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}"
+          --workspace "${{ runner.temp }}/assemblash-candidate-justification-smoke"
       - uses: actions/setup-node@v4
         if: matrix.target-name == 'linux-x86_64'
         with:
@@ -341,6 +351,20 @@ jobs:
         with:
           name: candidate-paragraph-editor
           path: ${{ runner.temp }}/assemblash-candidate-paragraph-editor-evidence/
+          if-no-files-found: error
+      - name: Verify candidate justify controls against the embedded server
+        if: matrix.target-name == 'linux-x86_64'
+        run: >-
+          node scripts/justification_browser.mjs
+          --binary target/release/assemblash
+          --workspace "${{ runner.temp }}/assemblash-candidate-justify-editor"
+          --output "${{ runner.temp }}/assemblash-candidate-justify-editor-evidence/result.json"
+      - name: Save justify editor evidence
+        if: matrix.target-name == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-justify-editor
+          path: ${{ runner.temp }}/assemblash-candidate-justify-editor-evidence/
           if-no-files-found: error
       - name: Save the verified candidate binary
         uses: actions/upload-artifact@v4

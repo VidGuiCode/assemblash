@@ -1800,6 +1800,47 @@ fn paragraph_spacing_document() -> (Document, AssetHrefs) {
     (document, AssetHrefs::new())
 }
 
+fn justified_document() -> (Document, AssetHrefs) {
+    let mut document = Document::new(&mut SequentialIdSource::new(), 640.0, 460.0);
+    let mut plain = text_layer(
+        "layer_justify_plain",
+        Transform::new(24.25, 24.75, 265.5, 400.0),
+        "   A  B C D E F G H I J K L\n\nHandglovesHandglovesHandgloves\nFinal words",
+        "Noto Sans",
+        32.0,
+        TextAlign::Justify,
+    );
+    if let LayerKind::Text(text) = &mut plain.kind {
+        text.paragraph_spacing = 7.25;
+        text.vertical_align = assemblash_core::VerticalAlign::Middle;
+    }
+    plain.clip =
+        Some(serde_json::from_value(serde_json::json!({"shape":"rect","cornerRadius":5})).unwrap());
+    document.layers.push(plain);
+    let mut rich = text_layer(
+        "layer_justify_rich",
+        Transform::new(330.5, 24.25, 265.75, 400.0),
+        "A bold words across runs and Á marks\nب ب ب ب ب ب ب ب ب ب\nLast",
+        "Noto Sans",
+        32.0,
+        TextAlign::Justify,
+    );
+    rich.transform.rotation = 2.0;
+    if let LayerKind::Text(text) = &mut rich.kind {
+        text.paragraph_spacing = 12.5;
+        text.vertical_align = assemblash_core::VerticalAlign::Bottom;
+        text.runs = vec![
+            serde_json::json!({"text":"A ","fontSize":36}),
+            serde_json::json!({"text":"bold words across ","fontWeight":700,"color":"#336699"}),
+            serde_json::json!({"text":"runs and Á marks\n","letterSpacing":0.5}),
+            serde_json::json!({"text":"ب ب ب ب ب ب ب ب ب ب","fontFamily":"Noto Sans Arabic","fontSize":32}),
+            serde_json::json!({"text":"\nLast","fontSize":18}),
+        ];
+    }
+    document.layers.push(rich);
+    (document, AssetHrefs::new())
+}
+
 fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
     let mut out = Vec::new();
     for (name, (document, hrefs)) in [
@@ -1816,6 +1857,7 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("text-valign", text_valign_document()),
         ("styled-runs", styled_runs_document()),
         ("paragraph-spacing", paragraph_spacing_document()),
+        ("justified", justified_document()),
         ("clip-rounded", clip_rounded_document()),
         ("clip-ellipse", clip_ellipse_document()),
         ("crop", crop_document()),
@@ -1861,6 +1903,10 @@ fn scaled_reference_documents() -> Vec<(&'static str, Document, AssetHrefs, f32)
     let (radial, radial_hrefs) = gradient_radial_document();
     let (line, line_hrefs) = gradient_line_document();
     let mut scaled = vec![
+        {
+            let (document, hrefs) = justified_document();
+            ("justified-scale2", document, hrefs, 2.0)
+        },
         {
             let (document, hrefs) = paragraph_spacing_document();
             ("paragraph-spacing-scale2", document, hrefs, 2.0)

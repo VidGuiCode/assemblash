@@ -1259,6 +1259,10 @@ pub enum TextAlign {
     Center,
     /// Aligned to the right edge.
     Right,
+    /// Expand groups of regular spaces (U+0020) between words on wrapped lines.
+    /// Keep paragraph-final lines at natural width.
+    /// Leading and trailing whitespace receive no extra width.
+    Justify,
 }
 
 /// How an image is scaled into its box.

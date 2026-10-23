@@ -413,6 +413,33 @@ Older history replay can discard paragraph spacing updates.
 Use a consumer with paragraph spacing support to edit these documents.
 The document schema stays at version 1. Version 1.12.0 is not published.
 
+### Justified alignment (1.12.0 development)
+
+Set `align` to `justify` for text layers.
+Only groups of regular spaces (U+0020) between words receive extra width.
+Leading and trailing whitespace receive no extra width. A run boundary adds no word gap.
+Eligible automatically wrapped lines fill the box width.
+Each explicit paragraph's final line keeps its natural width.
+Single-word lines, lines without word gaps, and oversized natural lines stay unstretched.
+The fit check excludes trailing whitespace. Stored text and raw runs stay unchanged.
+Unstretched final lines retain natural whitespace advances. Their measured width can exceed the box width.
+
+Justified text requires exact loaded font bytes and uses exact shaping for wrapping.
+Existing alignment modes keep their previous behavior.
+Rendering, measurement, overflow, clipping, and automatic text height use the same layout.
+
+Use `--align justify` with CLI `add-text` and `set`.
+Set `align` to `justify` in HTTP create and update operations.
+Use the same value with MCP `add_text_layer` and `update_layer`.
+Choose Justify text on the existing alignment toolbar. Presets store this alignment value.
+Ordinary alignment updates preserve text, raw runs, and unknown nested values.
+
+Versions 1.0.0, 1.10.0, and 1.11.0 refuse snapshots with `justify` in text layers or presets.
+Undo can restore an earlier alignment while the journal still contains a `justify` update.
+These older consumers also refuse that journal.
+Use a consumer with justified alignment support to open or edit these documents.
+The document schema stays at version 1. Version 1.12.0 is not published.
+
 ### Rendering and export
 
 Assemblash converts a document to SVG with a pure function. Then `resvg` and

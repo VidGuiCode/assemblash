@@ -86,7 +86,8 @@ fn text_kind() -> impl Strategy<Value = LayerKind> {
         prop_oneof![
             Just(TextAlign::Left),
             Just(TextAlign::Center),
-            Just(TextAlign::Right)
+            Just(TextAlign::Right),
+            Just(TextAlign::Justify)
         ],
         0.5f64..3.0,
         prop::collection::vec(unknown_value(), 0..2),

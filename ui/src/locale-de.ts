@@ -434,6 +434,7 @@ export const de: Record<keyof typeof en, string> = {
   "editor.alignLeft": "Links ausrichten",
   "editor.alignCenter": "Mittig ausrichten",
   "editor.alignRight": "Rechts ausrichten",
+  "editor.alignJustify": "Text im Blocksatz",
   "editor.layerGeneric": "Ebene",
   "canvas.anchorCenter": "Mitte",
   "errors.unauthorized": "Zugriffstoken erforderlich.",

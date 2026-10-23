@@ -106,7 +106,9 @@ pub struct AddTextArgs {
     /// Solid colour as a hex string, or a linear/radial gradient object.
     #[serde(default)]
     pub color: Option<Color>,
-    /// `left`, `center`, or `right`.
+    /// `left`, `center`, `right`, or `justify`.
+    /// Justify expands regular spaces (U+0020) between words on wrapped lines.
+    /// Paragraph-final lines and leading or trailing whitespace receive no extra width.
     #[serde(default)]
     pub align: Option<TextAlign>,
     /// Line height as a multiple of the font size.

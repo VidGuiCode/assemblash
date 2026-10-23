@@ -3930,6 +3930,65 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.deepEqual(fixture.writes[22].body.operation, { op: "update", id: "layer_text", paragraphSpacing: 17.25 });
   });
 
+  await t.test("justified alignment uses the shared toolbar and preserves text", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    await selectLayer(page, "layer_text");
+    fixture.writes.length = 0;
+    await page.evaluate(`document.querySelector('button[data-text-align="justify"]').focus()`);
+    assert.equal(await page.evaluate(`document.activeElement.dataset.textAlign`), "justify");
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await waitForWrites(fixture, 1);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation, { op: "update", id: "layer_text", align: "justify" });
+    assert.equal(await page.evaluate(`document.querySelector('button[title="Justify text"]').classList.contains('selected')`), true);
+    assert.equal(await page.evaluate(`!!document.querySelector('.inline-text-editor')`), false);
+    await page.click('button[data-text-align="center"] i');
+    await waitForWrites(fixture, 2);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[1].body.operation, { op: "update", id: "layer_text", align: "center" });
+    await page.evaluate(`document.querySelector('button[data-text-align="left"]').focus()`);
+    assert.equal(await page.evaluate(`document.activeElement.dataset.textAlign`), "left");
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " ", unmodifiedText: " " });
+    assert.equal(await page.evaluate(`document.querySelector('#stage-viewport').classList.contains('pan-ready')`), false);
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32 });
+    await waitForWrites(fixture, 3);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[2].body.operation, { op: "update", id: "layer_text", align: "left" });
+    assert.equal(await page.evaluate(`document.querySelector('#stage-viewport').classList.contains('pan-ready')`), false);
+    assert.equal(await page.evaluate(`!!document.querySelector('.inline-text-editor')`), false);
+    await selectLayer(page, "layer_protected");
+    assert.equal(await page.evaluate(`document.querySelector('button[title="Justify text"]').disabled`), true);
+  });
+
+  await t.test("canvas Enter, F2, and Space keep their existing shortcuts", async () => {
+    fixture.reset();
+    await openProject(page);
+    await waitForSaved(page);
+    await selectLayer(page, "layer_text");
+    fixture.writes.length = 0;
+    for (const [key, code, virtualKey] of [["Enter", "Enter", 13], ["F2", "F2", 113]]) {
+      await page.evaluate(`document.querySelector('#canvas').focus()`);
+      assert.equal(await page.evaluate(`document.activeElement.id`), "canvas");
+      await page.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: virtualKey });
+      await page.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: virtualKey });
+      await page.waitFor(`!!document.querySelector('.inline-text-editor')`, `${key} opens canvas text editing`);
+      await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await page.waitFor(`!document.querySelector('.inline-text-editor')`, "canvas text editing cancels");
+    }
+    await page.evaluate(`document.querySelector('#canvas').focus()`);
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " ", unmodifiedText: " " });
+    assert.equal(await page.evaluate(`document.querySelector('#stage-viewport').classList.contains('pan-ready')`), true);
+    // Release after focus moves to a button. The canvas pan flag must still clear.
+    await page.evaluate(`document.querySelector('button[data-text-align="left"]').focus()`);
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32 });
+    assert.equal(await page.evaluate(`document.querySelector('#stage-viewport').classList.contains('pan-ready')`), false);
+    assert.equal(fixture.writes.length, 0);
+  });
+
   await t.test("a refused edit behind an accepted one leaves the page on the newest version", async () => {
     fixture.reset();
     await openProject(page);
