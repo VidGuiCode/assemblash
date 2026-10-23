@@ -366,11 +366,77 @@ jobs:
           name: candidate-justify-editor
           path: ${{ runner.temp }}/assemblash-candidate-justify-editor-evidence/
           if-no-files-found: error
+      - name: Verify candidate modifier resizing against the embedded server
+        if: matrix.target-name == 'linux-x86_64'
+        run: >-
+          node scripts/resize_browser.mjs
+          --binary target/release/assemblash
+          --workspace "${{ runner.temp }}/assemblash-candidate-resize-editor"
+          --output "${{ runner.temp }}/assemblash-candidate-resize-editor-evidence/result.json"
+      - name: Save resize editor evidence
+        if: always() && matrix.target-name == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-resize-editor
+          path: ${{ runner.temp }}/assemblash-candidate-resize-editor-evidence/
+          if-no-files-found: error
       - name: Save the verified candidate binary
         uses: actions/upload-artifact@v4
         with:
           name: candidate-${{ matrix.target-name }}
           path: ${{ runner.os == 'Windows' && 'target/release/assemblash.exe' || 'target/release/assemblash' }}
+          if-no-files-found: error
+      - name: Package the unpublished candidate
+        shell: bash
+        run: |
+          set -eu
+          name="assemblash-v1.12.0-${{ matrix.target-name }}"
+          mkdir -p "candidate-dist/$name"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/assemblash.exe "candidate-dist/$name/"
+          else
+            cp target/release/assemblash "candidate-dist/$name/"
+          fi
+          cp LICENSE NOTICE THIRD_PARTY_LICENSES.md README.md CHANGELOG.md "candidate-dist/$name/"
+          cp -R assets "candidate-dist/$name/"
+          cd candidate-dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "$name" >/dev/null
+            archive="$name.zip"
+          else
+            tar -czf "$name.tar.gz" "$name"
+            archive="$name.tar.gz"
+          fi
+          python -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); pathlib.Path("SHA256SUMS").write_text(hashlib.sha256(p.read_bytes()).hexdigest()+"  "+p.name+"\n")' "$archive"
+      - name: Verify the extracted candidate executable
+        shell: bash
+        run: |
+          set -eu
+          name="assemblash-v1.12.0-${{ matrix.target-name }}"
+          cd candidate-dist
+          python -c 'import hashlib,pathlib; digest,name=pathlib.Path("SHA256SUMS").read_text().split(); assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==digest, "candidate archive checksum mismatch"'
+          mkdir extracted
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z x "$name.zip" -oextracted >/dev/null
+            binary="assemblash.exe"
+          else
+            tar -xzf "$name.tar.gz" -C extracted
+            binary="assemblash"
+          fi
+          cd ..
+          python -c 'import hashlib,pathlib,sys; hashes=[hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sys.argv[1:]]; assert len(hashes)==2 and hashes[0]==hashes[1], "extracted candidate executable differs"' "target/release/$binary" "candidate-dist/extracted/$name/$binary"
+          python scripts/release_smoke.py \
+            --binary "candidate-dist/extracted/$name/$binary" \
+            --workspace "${{ runner.temp }}/assemblash-candidate-extracted-smoke" \
+            --expected-version 1.12.0
+      - name: Save the unpublished candidate archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-package-${{ matrix.target-name }}
+          path: |
+            candidate-dist/*.zip
+            candidate-dist/*.tar.gz
+            candidate-dist/SHA256SUMS
           if-no-files-found: error
       - name: Save the candidate renderer identity report
         uses: actions/upload-artifact@v4

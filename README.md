@@ -440,6 +440,29 @@ These older consumers also refuse that journal.
 Use a consumer with justified alignment support to open or edit these documents.
 The document schema stays at version 1. Version 1.12.0 is not published.
 
+### Layer resizing (1.12.0 development)
+
+Drag a canvas resize handle to change the selected layer boxes.
+Hold Shift to preserve the ratio. On an edge, Shift changes both dimensions.
+Image corners preserve the ratio by default. Hold Shift to resize an image corner freely.
+Hold Alt to preserve the centre. Combine Alt with Shift when necessary.
+Press or release these keys during a drag to update the outline without pointer movement.
+Press Escape to cancel. A completed resize uses one undo transaction.
+
+Text keeps its font sizes and raw runs. A free horizontal text resize measures the required height.
+Ratio resizing keeps the scaled box height. A stale height response cannot replace that height.
+Positive subpixel boxes retain their dimensions when the pointer does not move.
+
+Text selections keep the authoritative canvas image while the outline moves.
+Scaled previews, groups, clips, effects, and interleaved selections can use the same outline-only fallback.
+The engine renders the committed document after the drag ends.
+
+Canvas resize handles are unavailable for zero-size boxes and parent-with-child selections.
+Children of rotated or flipped groups also omit these handles.
+A mixed selection with an unsupported item omits all resize handles.
+Use Position and size for supported inspector edits. Existing document dimensions remain valid.
+The document schema stays at version 1. Version 1.12.0 is not published.
+
 ### Rendering and export
 
 Assemblash converts a document to SVG with a pure function. Then `resvg` and

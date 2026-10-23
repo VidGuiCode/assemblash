@@ -498,6 +498,8 @@ export const de: Record<keyof typeof en, string> = {
   "slots.kind": "Feldtyp",
   "slots.layerId": "Feld-Ebenen-ID",
   "canvas.resizeHandle": "{handle} skalieren",
+  "canvas.resizeUnavailable": "Verwenden Sie Position und Größe für Nullgrößen, verschachtelte Auswahlen oder transformierte übergeordnete Gruppen.",
+  "canvas.resizeHelp": "Umschalt: Verhältnis beibehalten oder Bildecken frei skalieren. Alt: Mittelpunkt beibehalten. Umschalt an einer Kante skaliert beide Achsen.",
   "common.apply": "Übernehmen",
   "common.edit": "Bearbeiten",
   "common.remove": "Entfernen",

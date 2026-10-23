@@ -496,6 +496,8 @@ const i = {
   "slots.kind": "Slot kind",
   "slots.layerId": "Slot layer id",
   "canvas.resizeHandle": "Resize {handle}",
+  "canvas.resizeUnavailable": "Use Position and size for zero-size boxes, nested selections, or transformed parent groups.",
+  "canvas.resizeHelp": "Shift: keep the ratio, or resize image corners freely. Alt: keep the centre. Shift on an edge scales both axes.",
   "common.apply": "Apply",
   "common.edit": "Edit",
   "common.remove": "Remove",
@@ -1079,6 +1081,8 @@ const i = {
   "slots.kind": "Type de champ",
   "slots.layerId": "Identifiant du calque du champ",
   "canvas.resizeHandle": "Redimensionner {handle}",
+  "canvas.resizeUnavailable": "Utilisez Position et taille pour les dimensions nulles, les sélections imbriquées ou les groupes parents transformés.",
+  "canvas.resizeHelp": "Maj : conserver le rapport, ou redimensionner librement les coins des images. Alt : conserver le centre. Maj sur un bord redimensionne les deux axes.",
   "common.apply": "Appliquer",
   "common.edit": "Modifier",
   "common.remove": "Supprimer",
@@ -1664,6 +1668,8 @@ const i = {
   "slots.kind": "Feldtyp",
   "slots.layerId": "Feld-Ebenen-ID",
   "canvas.resizeHandle": "{handle} skalieren",
+  "canvas.resizeUnavailable": "Verwenden Sie Position und Größe für Nullgrößen, verschachtelte Auswahlen oder transformierte übergeordnete Gruppen.",
+  "canvas.resizeHelp": "Umschalt: Verhältnis beibehalten oder Bildecken frei skalieren. Alt: Mittelpunkt beibehalten. Umschalt an einer Kante skaliert beide Achsen.",
   "common.apply": "Übernehmen",
   "common.edit": "Bearbeiten",
   "common.remove": "Entfernen",
@@ -1766,10 +1772,10 @@ function y() {
   }
 }
 let n = typeof window > "u" ? "en" : y();
-function C() {
+function A() {
   return n;
 }
-function A(e) {
+function C(e) {
   n = f(e);
   try {
     window.localStorage.setItem(g, n);
@@ -1790,12 +1796,12 @@ function p(e, t = {}) {
     (a, s) => Object.hasOwn(t, s) ? String(t[s]) : a
   );
 }
-function w(e) {
+function x(e) {
   return new Intl.NumberFormat(n === "pseudo" ? "en" : n).format(e);
 }
-function x(e, t, r = {}) {
+function w(e, t, r = {}) {
   const o = new Intl.PluralRules(n === "pseudo" ? "en" : n).select(t), a = `${e}.${o}`, s = `${e}.other`, l = Object.hasOwn(i, a) ? a : s;
-  return p(l, { ...r, count: w(t) });
+  return p(l, { ...r, count: x(t) });
 }
 const j = /* @__PURE__ */ new Set(["title", "placeholder", "aria-label", "aria-description", "alt"]);
 function u(e = document) {
@@ -1806,7 +1812,7 @@ function u(e = document) {
     const o = r.getAttribute("data-i18n");
     o && Object.hasOwn(i, o) && (r.textContent = p(o));
     const a = r.getAttribute("data-i18n-count"), s = Number(r.getAttribute("data-count"));
-    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = x(a, s));
+    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = w(a, s));
     const l = r.getAttribute("data-i18n-attr");
     if (l)
       for (const c of l.split(";")) {
@@ -1830,9 +1836,9 @@ if (typeof document < "u") {
 }
 export {
   u as bindTranslations,
-  x as formatCount,
-  w as formatNumber,
-  C as getLocale,
-  A as setLocale,
+  w as formatCount,
+  x as formatNumber,
+  A as getLocale,
+  C as setLocale,
   p as t
 };

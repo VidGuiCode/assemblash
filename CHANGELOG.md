@@ -10,6 +10,21 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+**1.12.0 candidate: styled text, paragraph spacing, justified alignment, and modifier resizing.**
+
+Version 1.12.0 is not published. The document schema stays at `schemaVersion` 1.
+
+- Styled text runs support exact font faces and retain unknown nested values during ordinary style updates.
+- Paragraph spacing adds finite, nonnegative pixels between explicit paragraphs. The default is zero.
+- Justified alignment expands regular spaces between words on eligible wrapped lines. Paragraph-final lines keep their natural width.
+- CLI, HTTP, MCP, presets, and the reference interface expose the new text properties.
+- Older consumers can ignore paragraph spacing and styled runs. Versions 1.0.0, 1.10.0, and 1.11.0 refuse justified alignment.
+- Shift preserves the resize ratio. Image corners preserve the ratio by default and resize freely with Shift.
+- Alt preserves the centre. Modifier changes update an active resize without pointer movement.
+- A resize uses one undo transaction. Text keeps its font sizes and raw runs.
+- Text and unsupported preview combinations keep the authoritative image while the resize outline moves.
+- Zero-size boxes, unsupported ancestor transforms, and parent-with-child selections omit canvas resize handles.
+
 ## [1.11.0] — 2026-10-08
 
 No 1.10.1 was released: no defect was outstanding after 1.10.0.

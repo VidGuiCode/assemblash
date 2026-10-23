@@ -75,7 +75,8 @@ kits, customer assets, or downstream workflow data.
   `--width`, `--height`, `--rotation`, `--opacity`, `--visible`, `--locked`,
   `--blend`, `--effects`, `--effects-file`, `--text`, `--text-file`, `--font`,
   `--size`, `--color`, `--align`, `--line-height`, `--weight`, `--font-style`,
-  `--letter-spacing`, `--vertical-align`, `--fit`, `--asset`, and
+  `--letter-spacing`, `--paragraph-spacing`, `--runs`, `--runs-file`,
+  `--vertical-align`, `--fit`, `--asset`, and
   `--allow-locked`. The invocation can carry many flags, but it is one `update`
   operation: journalled once, undone once. The layer's kind refuses a property
   it does not have, and the refusal names it. `assemblash style` still exists
@@ -119,6 +120,28 @@ kits, customer assets, or downstream workflow data.
 
 For exact arguments, payloads, and supported properties, use
 `assemblash --help` and the committed schemas. Do not guess.
+
+## Text and resize controls (1.12.0 candidate)
+
+Version 1.12.0 is not published. Check the running binary before you use these properties.
+
+- `runs` stores inline text styles. Run text must join to the layer text exactly.
+  Use `--runs-file` for CLI JSON. Rendering requires each exact font face.
+  Ordinary style updates preserve runs and unknown nested values. Text-only updates clear runs.
+- `paragraphSpacing` adds finite, nonnegative pixels between explicit paragraphs. Its default is zero.
+  CLI uses `--paragraph-spacing`. HTTP and MCP use `paragraphSpacing`.
+- `align: "justify"` expands regular spaces (U+0020) between words on eligible wrapped lines.
+  Leading and trailing whitespace receive no extra width. Paragraph-final lines keep their natural width.
+  CLI uses `--align justify`. Presets store paragraph spacing and justified alignment.
+- Older consumers can ignore paragraph spacing and styled runs. Older history replay can discard these updates.
+  Versions 1.0.0, 1.10.0, and 1.11.0 refuse snapshots and journals that contain justified alignment.
+
+In the reference editor, Shift preserves the resize ratio. Image corners reverse this default.
+Alt preserves the centre. These keys update an active resize without pointer movement.
+A resize keeps text font sizes and uses one undo transaction.
+Text selections and unsupported preview combinations keep the authoritative image while the outline moves.
+Canvas handles omit zero-size boxes, unsupported ancestor transforms, and parent-with-child selections.
+Use the existing box operations for programmatic resizing. No modifier fields are added to the operation API.
 
 ## Canvas editing (1.4.0 and newer)
 
@@ -356,7 +379,7 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   means the whole document; an id that is not in the document is refused, not
   ignored.
 - `update_layer` takes `lineHeight`, `fontWeight`, `fontStyle`,
-  `letterSpacing`, and `verticalAlign` beside `opacity`, `text`,
+  `letterSpacing`, `paragraphSpacing`, `runs`, and `verticalAlign` beside `opacity`, `text`,
   `fontFamily`, `fontSize`, `color`, `align`, `fit`, `blendMode`, and
   `effects`. The render refuses a `fontWeight` that the font store has no face
   for, and names family, weight and style — never substituted.

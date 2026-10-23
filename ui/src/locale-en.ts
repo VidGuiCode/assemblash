@@ -496,6 +496,8 @@ export const en = {
   "slots.kind": "Slot kind",
   "slots.layerId": "Slot layer id",
   "canvas.resizeHandle": "Resize {handle}",
+  "canvas.resizeUnavailable": "Use Position and size for zero-size boxes, nested selections, or transformed parent groups.",
+  "canvas.resizeHelp": "Shift: keep the ratio, or resize image corners freely. Alt: keep the centre. Shift on an edge scales both axes.",
   "common.apply": "Apply",
   "common.edit": "Edit",
   "common.remove": "Remove",
