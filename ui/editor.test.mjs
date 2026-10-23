@@ -3956,6 +3956,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.equal(fixture.writes.length, 1);
     assert.deepEqual(fixture.writes[0].body.commands, [{ op: "resize", id: "layer_resize", width: 160, height: 80 }]);
     assert.equal(fixture.writes[0].body.expectedVersion, 1);
+    await page.waitFor(`!document.querySelector('#undo').disabled`, "resize undo to be available");
     await page.click("#undo"); await waitForSaved(page);
     await page.waitFor(`Math.abs(parseFloat(document.querySelector('.handle-box').style.width)*10-128)<.001`, "resize undo");
     // This fixture models undo only. The actual embedded journey proves redo.

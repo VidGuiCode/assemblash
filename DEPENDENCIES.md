@@ -49,12 +49,12 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 | Crate | Version | Licence |
 | ----- | ------- | ------- |
-| assemblash-cli | 1.11.0 | Apache-2.0 |
-| assemblash-core | 1.11.0 | Apache-2.0 |
-| assemblash-liveness | 1.11.0 | Apache-2.0 |
-| assemblash-mcp | 1.11.0 | Apache-2.0 |
-| assemblash-renderer | 1.11.0 | Apache-2.0 |
-| assemblash-server | 1.11.0 | Apache-2.0 |
+| assemblash-cli | 1.12.0 | Apache-2.0 |
+| assemblash-core | 1.12.0 | Apache-2.0 |
+| assemblash-liveness | 1.12.0 | Apache-2.0 |
+| assemblash-mcp | 1.12.0 | Apache-2.0 |
+| assemblash-renderer | 1.12.0 | Apache-2.0 |
+| assemblash-server | 1.12.0 | Apache-2.0 |
 
 ## Dependencies
 
@@ -254,7 +254,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | tiny-skia-path | 0.12.0 | BSD-3-Clause |
 | tinyvec | 1.12.0 | Zlib OR Apache-2.0 OR MIT |
 | tinyvec_macros | 0.1.1 | MIT OR Apache-2.0 OR Zlib |
-| tokio | 1.53.1 | MIT |
+| tokio | 1.53.3 | MIT |
 | tokio-macros | 2.7.2 | MIT |
 | tokio-stream | 0.1.19 | MIT |
 | tokio-util | 0.7.19 | MIT |
