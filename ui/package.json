@@ -1,7 +1,7 @@
 {
   "name": "assemblash-ui",
   "private": true,
-  "version": "1.11.0",
+  "version": "1.12.0",
   "type": "module",
   "description": "Reference interface for Assemblash. React and Mantine components bundle with Vite. The output is committed for offline binary embedding.",
   "scripts": {

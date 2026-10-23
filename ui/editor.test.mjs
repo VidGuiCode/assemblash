@@ -762,6 +762,12 @@ async function startFixtureServer() {
         group("group_locked", [{ ...structuredClone(editableText), id: "layer_nested_guarded", name: "Nested guarded" }], true),
       ])];
     },
+    useResizeShape() {
+      document.layers = [{ id: "layer_resize", name: "Resize shape", type: "shape", shape: { kind: "rect", cornerRadius: 0 },
+        fill: "#336699", transform: { x: 100, y: 100, width: 128, height: 64, rotation: 0 },
+        opacity: 1, visible: true, locked: false, protected: false, readOnly: false, effects: [] }];
+      document.slots = [];
+    },
     version: () => document.version,
     createAsAgent(id) {
       otherProjects.push({ id, name: id, documentId: `doc_${id}`, version: 0, layers: 0 });
@@ -3928,6 +3934,58 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.deepEqual(fixture.writes[20].body.operation, { op: "update", id: "layer_text", fontSize: 52 });
     assert.deepEqual(fixture.writes[21].body.operation, { op: "update", id: "layer_text", lineHeight: 1.6 });
     assert.deepEqual(fixture.writes[22].body.operation, { op: "update", id: "layer_text", paragraphSpacing: 17.25 });
+  });
+
+  await t.test("resize modifiers replay stationary keys and commit one batch; Escape cancels", async () => {
+    fixture.reset(); fixture.useResizeShape();
+    await openProject(page); await waitForSaved(page); await selectLayer(page, "layer_resize");
+    await page.click("#zoom-100");
+    await page.waitFor(`document.querySelector('#zoom-value').textContent==='100%'`, "natural-scale resize input");
+    fixture.writes.length = 0;
+    const point = await page.evaluate(`(() => {const grip=document.querySelector('[data-resize-handle="se"]');grip.scrollIntoView({block:'center'});return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const r=grip.getBoundingClientRect(),c=document.querySelector('#canvas').getBoundingClientRect();resolve({x:r.x+r.width/2,y:r.y+r.height/2,scale:c.width/1000});})));})()`);
+    const mouse = (type, modifiers = 0, moved = false) => page.send("Input.dispatchMouseEvent", { type, x: point.x + (moved ? 32 * point.scale : 0), y: point.y - (moved ? 16 * point.scale : 0), button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, modifiers });
+    const key = (name, down, modifiers) => page.send("Input.dispatchKeyEvent", { type: down ? "keyDown" : "keyUp", key: name, code: `${name}Left`, windowsVirtualKeyCode: name === "Shift" ? 16 : 18, modifiers });
+    const bounds = () => page.evaluate(`(()=>{const b=document.querySelector('.handle-box').style;return {x:parseFloat(b.left)*10,y:parseFloat(b.top)*7,width:parseFloat(b.width)*10,height:parseFloat(b.height)*7};})()`);
+    await mouse("mouseMoved"); await mouse("mousePressed"); await mouse("mouseMoved", 0, true);
+    await key("Shift", true, 8);
+    let box = await bounds(); assert.ok(Math.abs(box.width - 160) < .001 && Math.abs(box.height - 80) < .001);
+    await key("Alt", true, 9); box = await bounds();
+    assert.ok(Math.abs(box.width - 192) < .001 && Math.abs(box.height - 96) < .001 && Math.abs(box.x - 68) < .001 && Math.abs(box.y - 84) < .001);
+    await key("Alt", false, 8); await mouse("mouseReleased", 8, true); await key("Shift", false, 0);
+    await waitForWrites(fixture, 1); await waitForSaved(page);
+    assert.equal(fixture.writes.length, 1);
+    assert.deepEqual(fixture.writes[0].body.commands, [{ op: "resize", id: "layer_resize", width: 160, height: 80 }]);
+    assert.equal(fixture.writes[0].body.expectedVersion, 1);
+    await page.click("#undo"); await waitForSaved(page);
+    await page.waitFor(`Math.abs(parseFloat(document.querySelector('.handle-box').style.width)*10-128)<.001`, "resize undo");
+    // This fixture models undo only. The actual embedded journey proves redo.
+    const before = fixture.writes.length;
+    await page.evaluate(`(() => {const grip=document.querySelector('[data-resize-handle="e"]'),r=grip.getBoundingClientRect();grip.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:73,clientX:r.x,clientY:r.y}));window.dispatchEvent(new PointerEvent('pointermove',{pointerId:73,clientX:r.x+20,clientY:r.y}));})()`);
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await page.evaluate(`window.dispatchEvent(new PointerEvent('pointerup',{pointerId:73,clientX:500,clientY:300}))`);
+    assert.equal(fixture.writes.length, before);
+    assert.equal(await page.evaluate(`document.querySelector('#canvas-image').classList.contains('drag-preview-hidden')`), false);
+  });
+
+  await t.test("a held free-text height cannot replace a newer ratio preview or commit", async () => {
+    fixture.reset(); await openProject(page); await waitForSaved(page); await selectLayer(page, "layer_text");
+    await page.click("#zoom-100");
+    await page.waitFor(`document.querySelector('#zoom-value').textContent==='100%'`, "natural-scale text resize input");
+    fixture.writes.length = 0;
+    await page.evaluate(`(()=>{const original=window.fetch;window.releaseResizeHeight=null;window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).includes('/text-layout?')){window.fetch=original;await new Promise(resolve=>window.releaseResizeHeight=resolve);}return response;};const g=document.querySelector('[data-resize-handle="e"]'),r=g.getBoundingClientRect(),s=document.querySelector('#canvas').getBoundingClientRect().width/1000;g.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:74,clientX:r.x,clientY:r.y}));window.resizeReleasePoint={x:r.x+80*s,y:r.y};window.dispatchEvent(new PointerEvent('pointermove',{pointerId:74,clientX:r.x+80*s,clientY:r.y}));})()`);
+    await page.waitFor(`!!window.releaseResizeHeight`, "held actual fixture measurement");
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, modifiers: 8 });
+    await page.evaluate(`window.releaseResizeHeight()`);
+    await page.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+    const height = await page.evaluate(`parseFloat(document.querySelector('.handle-box').style.height)*7`);
+    assert.ok(Math.abs(height - 120) < .001, `late free height replaces ratio: ${height}`);
+    await page.evaluate(`window.dispatchEvent(new PointerEvent('pointerup',{pointerId:74,clientX:window.resizeReleasePoint.x,clientY:window.resizeReleasePoint.y,shiftKey:true}))`);
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 });
+    await waitForWrites(fixture, 1); await waitForSaved(page);
+    const commands = fixture.writes[0].body.commands;
+    assert.deepEqual(commands, [{ op: "move", id: "layer_text", dx: 0, dy: -10 }, { op: "resize", id: "layer_text", width: 480, height: 120 }]);
+    const layer = JSON.parse(fixture.documentJson()).layers.find(one => one.id === "layer_text");
+    assert.equal(layer.fontSize, 48); assert.equal(layer.text, "Edit me");
   });
 
   await t.test("justified alignment uses the shared toolbar and preserves text", async () => {

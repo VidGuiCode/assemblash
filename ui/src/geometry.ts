@@ -136,19 +136,116 @@ export function resizeItemInSelection(
   item: Rect,
   selection: Rect,
   resizedSelection: Rect,
+  sharedMinimum = false,
 ): Rect {
-  const scaleX = resizedSelection.width / Math.max(1, selection.width);
-  const scaleY = resizedSelection.height / Math.max(1, selection.height);
+  const scaleX = resizedSelection.width / (sharedMinimum ? selection.width : Math.max(1, selection.width));
+  const scaleY = resizedSelection.height / (sharedMinimum ? selection.height : Math.max(1, selection.height));
   const centreX = resizedSelection.x +
     (item.x + item.width / 2 - selection.x) * scaleX;
   const centreY = resizedSelection.y +
     (item.y + item.height / 2 - selection.y) * scaleY;
-  const width = Math.max(1, item.width * scaleX);
-  const height = Math.max(1, item.height * scaleY);
+  const width = sharedMinimum ? item.width * scaleX : Math.max(1, item.width * scaleX);
+  const height = sharedMinimum ? item.height * scaleY : Math.max(1, item.height * scaleY);
   return {
     x: centreX - width / 2,
     y: centreY - height / 2,
     width,
     height,
   };
+}
+
+export interface ResizeModifiers {
+  ratio: boolean;
+  centre: boolean;
+}
+
+/** The next representable positive factor. Minimum correction stays shared. */
+function nextFactor(value: number): number {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  view.setBigUint64(0, view.getBigUint64(0) + 1n);
+  return view.getFloat64(0);
+}
+
+/**
+ * One canvas resize result, from immutable starting geometry.
+ * A null result refuses unsupported or nonfinite canvas geometry.
+ * The document and inspector retain their existing dimension contract.
+ */
+export function modifierResizedBounds(
+  bounds: Rect,
+  rotation: number,
+  handle: string,
+  dx: number,
+  dy: number,
+  modifiers: ResizeModifiers,
+  items: readonly Pick<Rect, "width" | "height">[] = [bounds],
+): Rect | null {
+  if (![bounds.x, bounds.y, bounds.width, bounds.height, rotation, dx, dy].every(Number.isFinite)) return null;
+  const horizontal = handle.includes("e") ? 1 : handle.includes("w") ? -1 : 0;
+  const vertical = handle.includes("s") ? 1 : handle.includes("n") ? -1 : 0;
+  const local = rotate(dx, dy, -rotation);
+  const xChange = horizontal * local.x * (modifiers.centre ? 2 : 1);
+  const yChange = vertical * local.y * (modifiers.centre ? 2 : 1);
+  // Identity precedes all division and floors, including valid subpixel starts.
+  if (xChange === 0 && yChange === 0) return { ...bounds };
+  if (!(bounds.width > 0 && bounds.height > 0) || items.length === 0 ||
+      items.some((item) => !Number.isFinite(item.width) || !Number.isFinite(item.height) || item.width <= 0 || item.height <= 0)) return null;
+  const rawX = 1 + xChange / bounds.width;
+  const rawY = 1 + yChange / bounds.height;
+  if (![rawX, rawY].every(Number.isFinite)) return null;
+  const floorX = Math.max(...items.map((item) => Math.min(1, item.width) / item.width));
+  const floorY = Math.max(...items.map((item) => Math.min(1, item.height) / item.height));
+  let scaleX: number;
+  let scaleY: number;
+  if (modifiers.ratio) {
+    const driver = horizontal && vertical
+      ? Math.abs(rawX - 1) >= Math.abs(rawY - 1) ? rawX : rawY
+      : horizontal ? rawX : rawY;
+    scaleX = scaleY = Math.max(driver, floorX, floorY);
+  } else {
+    scaleX = horizontal ? Math.max(rawX, floorX) : 1;
+    scaleY = vertical ? Math.max(rawY, floorY) : 1;
+  }
+  // Check actual products, not only quotient approximations. Never fix an item alone.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const lowX = items.some((item) => item.width * scaleX < Math.min(1, item.width));
+    const lowY = items.some((item) => item.height * scaleY < Math.min(1, item.height));
+    if (!lowX && !lowY) break;
+    if (modifiers.ratio) scaleX = scaleY = nextFactor(scaleX);
+    else {
+      if (lowX) scaleX = nextFactor(scaleX);
+      if (lowY) scaleY = nextFactor(scaleY);
+    }
+  }
+  if (scaleX === 1 && scaleY === 1) return { ...bounds };
+  const width = bounds.width * scaleX;
+  const height = bounds.height * scaleY;
+  const shift = rotate(
+    modifiers.centre ? 0 : horizontal * (width - bounds.width) / 2,
+    modifiers.centre ? 0 : vertical * (height - bounds.height) / 2,
+    rotation,
+  );
+  const result = {
+    x: bounds.x + bounds.width / 2 + shift.x - width / 2,
+    y: bounds.y + bounds.height / 2 + shift.y - height / 2,
+    width,
+    height,
+  };
+  if (rotation === 0) {
+    result.x = modifiers.centre || horizontal === 0 ? bounds.x + (bounds.width - width) / 2
+      : horizontal > 0 ? bounds.x : bounds.x + bounds.width - width;
+    result.y = modifiers.centre || vertical === 0 ? bounds.y + (bounds.height - height) / 2
+      : vertical > 0 ? bounds.y : bounds.y + bounds.height - height;
+  }
+  if (!Object.values(result).every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  // Emission and mapping consume the factors reconstructed from this result.
+  const actualX = result.width / bounds.width;
+  const actualY = result.height / bounds.height;
+  if (items.some((item) => {
+    const w = item.width * actualX;
+    const h = item.height * actualY;
+    return !Number.isFinite(w) || !Number.isFinite(h) || w < Math.min(1, item.width) || h < Math.min(1, item.height);
+  })) return null;
+  return result;
 }

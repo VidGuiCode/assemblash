@@ -497,6 +497,8 @@ export const fr: Record<keyof typeof en, string> = {
   "slots.kind": "Type de champ",
   "slots.layerId": "Identifiant du calque du champ",
   "canvas.resizeHandle": "Redimensionner {handle}",
+  "canvas.resizeUnavailable": "Utilisez Position et taille pour les dimensions nulles, les sélections imbriquées ou les groupes parents transformés.",
+  "canvas.resizeHelp": "Maj : conserver le rapport, ou redimensionner librement les coins des images. Alt : conserver le centre. Maj sur un bord redimensionne les deux axes.",
   "common.apply": "Appliquer",
   "common.edit": "Modifier",
   "common.remove": "Supprimer",

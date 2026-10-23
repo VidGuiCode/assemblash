@@ -21,12 +21,14 @@ import { mountAgents } from "./agents.js";
 import { mountExport } from "./export-mantine.js";
 import {
   placedAssetSize,
+  modifierResizedBounds,
   resizeItemInSelection,
   resizedBounds,
   resizedRotatedBounds,
   rotatedRectBounds,
   selectionBounds,
 } from "./geometry.js";
+import { resizePreviewLayers, resizePreviewMatrix } from "./resize-preview.js";
 import { appendInstalledFontSpecimen, facesOf, releaseFontSpecimens } from "./fonts.js";
 import type { FontSelector } from "./fonts.js";
 import { mountFontSelectorMantine as mountFontSelector } from "./font-selector-mantine.js";
@@ -80,6 +82,18 @@ interface State {
     handle?: string;
     startX: number;
     startY: number;
+    pointerId: number;
+    capture: Element;
+    project: string;
+    version: number;
+    generation: number;
+    shift: boolean;
+    alt: boolean;
+    epoch: number;
+    invalid?: boolean;
+    cancelled?: boolean;
+    next?: { x: number; y: number; width: number; height: number };
+    measurement?: { width: number; epoch: number; pending: Promise<void>; height?: number };
     bounds: { x: number; y: number; width: number; height: number };
     origins: Array<{
       id: string;
@@ -90,6 +104,7 @@ interface State {
       width: number;
       height: number;
       rotation: number;
+      layer: Layer;
     }>;
     /** Text boxes resize their layout area; their rendered glyphs never scale. */
     preserveSelectionScale?: boolean;
@@ -305,9 +320,13 @@ interface DragPreviewCache {
   baseUrl?: string;
   selectionUrl?: string;
   pending: Promise<void>;
+  items?: Array<{ id: string; url: string }>;
+  itemsPending?: Promise<void>;
 }
 
 let dragPreviewCache: DragPreviewCache | null = null;
+let dragGeneration = 0;
+let pendingResize: NonNullable<State["drag"]> | null = null;
 
 /**
  * The blob URLs a painted drag preview is showing. They live until the
@@ -812,6 +831,24 @@ function editableLayer(layer: Layer): boolean {
   return layerGuardReason(layer) === null;
 }
 
+/** Canvas resizing requires one independent, positive box for every selected ID. */
+function canvasResizeAvailable(): boolean {
+  if (!state.document || state.selection.length === 0) return false;
+  const flat = api.flatten(api.layersOf(state.document));
+  const ids = new Set(state.selection);
+  return state.selection.every((id) => {
+    const entry = flat.find((one) => one.layer.id === id);
+    if (!entry || !editableLayer(entry.layer) || !canvasAncestorOffset(flat, entry.parent) ||
+        entry.layer.transform.width <= 0 || entry.layer.transform.height <= 0) return false;
+    let parent = entry.parent;
+    while (parent) {
+      if (ids.has(parent)) return false;
+      parent = flat.find((one) => one.layer.id === parent)?.parent ?? null;
+    }
+    return true;
+  });
+}
+
 function wireLongPressMenu(
   target: HTMLElement,
   beforeOpen?: () => void,
@@ -854,6 +891,7 @@ function showCanvasHint(): void {
 let refreshSequence = 0;
 
 async function refresh(): Promise<void> {
+  cancelResizeGesture();
   if (!state.project) return;
   const sequence = ++refreshSequence;
   const doc = await api.getDocument(state.project);
@@ -872,6 +910,8 @@ async function refresh(): Promise<void> {
  * a read-after-write used to need.
  */
 function applyDocument(doc: Document): void {
+  const resize = state.drag?.mode === "resize" ? state.drag : pendingResize;
+  if (resize && (doc.id !== state.document?.id || api.versionOf(doc) !== resize.version)) cancelResizeGesture();
   state.document = doc;
   state.selection = state.selection.filter((id) =>
     api.flatten(api.layersOf(doc)).some(({ layer }) => layer.id === id),
@@ -1055,6 +1095,20 @@ function ancestorOffset(
   return offset;
 }
 
+/** The canvas omits children whose ancestor reflection has no supported inverse. */
+function canvasAncestorOffset(
+  flat: Array<{ layer: Layer; parent: string | null; depth: number }>,
+  parent: string | null,
+): { x: number; y: number } | null {
+  let current = parent;
+  while (current) {
+    const entry = flat.find((one) => one.layer.id === current);
+    if (!entry || entry.layer.transform.flipHorizontal || entry.layer.transform.flipVertical) return null;
+    current = entry.parent;
+  }
+  return ancestorOffset(flat, parent);
+}
+
 /**
  * Selection handles, as DOM elements over the SVG.
  *
@@ -1068,7 +1122,7 @@ function drawOverlay(): void {
   const { width, height } = state.document.canvas;
   const flat = api.flatten(api.layersOf(state.document));
   const geometries = flat.flatMap(({ layer, parent }) => {
-    const offset = ancestorOffset(flat, parent);
+    const offset = canvasAncestorOffset(flat, parent);
     return offset
       ? [{
           layer,
@@ -1164,13 +1218,17 @@ function drawOverlay(): void {
         : null;
       if (text) beginInlineTextEdit(text);
     });
-    for (const handle of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+    if (!canvasResizeAvailable()) box.title = translate("canvas.resizeUnavailable");
+    for (const handle of canvasResizeAvailable() ? ["nw", "n", "ne", "e", "se", "s", "sw", "w"] : []) {
       const grip = document.createElement("button");
       grip.type = "button";
       grip.className = `resize-handle handle-${handle}`;
       grip.dataset["handle"] = handle;
       grip.dataset["resizeHandle"] = handle;
       grip.setAttribute("aria-label", translate("canvas.resizeHandle", { handle }));
+      grip.title = translate("canvas.resizeHelp");
+      grip.setAttribute("aria-description", grip.title);
+      grip.dataset["i18nAttr"] = "title:canvas.resizeHelp;aria-description:canvas.resizeHelp";
       grip.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
         beginDrag(event, selected, bounds, "resize", handle);
@@ -2804,7 +2862,7 @@ async function sendSequence(what: string, operations: Operation[]): Promise<void
   await sendBatch(what, operations);
 }
 
-async function sendBatch(what: string, operations: api.OperationBatchCommand[]): Promise<void> {
+async function sendBatch(what: string, operations: api.OperationBatchCommand[], resize?: NonNullable<State["drag"]>): Promise<void> {
   if (!state.project || !state.document || operations.length === 0) return;
   // A batch is a delta intent — one drag, one paste — so it never coalesces:
   // every pointerup is one journalled transaction, and the journal must match
@@ -2818,7 +2876,9 @@ async function sendBatch(what: string, operations: api.OperationBatchCommand[]):
     label: what,
     coalesceKey: null,
     run: async () => {
-      if (state.project !== project || !state.document) {
+      if (state.project !== project || !state.document || (resize && !resizeContextValid(resize))) {
+        restore();
+        unmountDragPreview();
         say(translate("status.editNotSent"), "error");
         return;
       }
@@ -2826,7 +2886,7 @@ async function sendBatch(what: string, operations: api.OperationBatchCommand[]):
         project,
         what,
         operations,
-        api.versionOf(state.document),
+        resize?.version ?? api.versionOf(state.document),
       );
       applied = true;
       if (result.created?.length) state.selection = result.created;
@@ -2850,12 +2910,24 @@ function beginDrag(
 ): void {
   event.preventDefault();
   if (!state.document || dom.canvas.getBoundingClientRect().width === 0) return;
+  if (state.drag && state.drag.pointerId !== event.pointerId) return;
+  if (mode === "resize" && !canvasResizeAvailable()) return;
+  cancelResizeGesture();
+  const capture = dom.canvas;
   state.drag = {
     ids: selected.map(({ layer }) => layer.id),
     mode,
     handle,
     startX: event.clientX,
     startY: event.clientY,
+    pointerId: event.pointerId,
+    capture,
+    project: state.project!,
+    version: api.versionOf(state.document),
+    generation: ++dragGeneration,
+    shift: event.shiftKey,
+    alt: event.altKey,
+    epoch: 0,
     bounds,
     origins: selected.map(({ layer, x, y, width, height }) => ({
       id: layer.id,
@@ -2866,6 +2938,7 @@ function beginDrag(
       width,
       height,
       rotation: layer.transform.rotation ?? 0,
+      layer: structuredClone(layer),
     })),
     preserveSelectionScale:
       mode === "resize" && selected.length === 1 && selected[0]?.layer.type === "text",
@@ -2883,7 +2956,8 @@ function beginDrag(
       });
     }
   }
-  (event.target as Element).setPointerCapture?.(event.pointerId);
+  try { capture.setPointerCapture?.(event.pointerId); }
+  catch { if (event.isTrusted) cancelResizeGesture(); }
 }
 
 /**
@@ -2928,6 +3002,7 @@ function retireDragPreviewCache(): void {
   if (cache.selectionUrl && !paintedPreviewUrls.includes(cache.selectionUrl)) {
     URL.revokeObjectURL(cache.selectionUrl);
   }
+  for (const item of cache.items ?? []) if (!paintedPreviewUrls.includes(item.url)) URL.revokeObjectURL(item.url);
 }
 
 async function prepareDragPreview(ids: readonly string[]): Promise<void> {
@@ -2964,6 +3039,10 @@ async function prepareDragPreview(ids: readonly string[]): Promise<void> {
 }
 
 function mountDragPreview(drag: NonNullable<State["drag"]>): void {
+  if (drag.mode === "resize") {
+    refreshResizePreview(drag);
+    return;
+  }
   const cache = dragPreviewCache;
   if (
     drag.previewActive ||
@@ -2994,237 +3073,290 @@ function mountDragPreview(drag: NonNullable<State["drag"]>): void {
 function unmountDragPreview(): void {
   document.getElementById("drag-preview-base")?.remove();
   document.getElementById("drag-preview-selection")?.remove();
+  document.querySelectorAll("[data-resize-preview-item]").forEach((node) => node.remove());
   dom.canvasImage.classList.remove("drag-preview-hidden");
   for (const url of paintedPreviewUrls) URL.revokeObjectURL(url);
   paintedPreviewUrls = [];
   paintedPreviewVersion = null;
   paintedPreviewOrigin = null;
+  retireDragPreviewCache();
 }
 
-function dragResizedBounds(
-  drag: NonNullable<State["drag"]>,
-  dx: number,
-  dy: number,
-): { x: number; y: number; width: number; height: number } {
-  const origin = drag.origins.length === 1 ? drag.origins[0] : null;
-  return origin
-    ? resizedRotatedBounds(
-        drag.bounds,
-        origin.rotation,
-        drag.handle ?? "se",
-        dx,
-        dy,
-      )
-    : resizedBounds(drag.bounds, drag.handle ?? "se", dx, dy);
+function resizeRatio(drag: NonNullable<State["drag"]>): boolean {
+  return drag.handle?.length === 2 && drag.origins.length === 1 && drag.origins[0]?.layer.type === "image"
+    ? !drag.shift : drag.shift;
 }
 
-function updateDragPreview(
-  drag: NonNullable<State["drag"]>,
-  dx: number,
-  dy: number,
-): void {
+function resizeContextValid(drag: NonNullable<State["drag"]>): boolean {
+  if (drag.cancelled || drag.generation !== dragGeneration || state.project !== drag.project ||
+      !state.document || api.versionOf(state.document) !== drag.version) return false;
+  const flat = api.flatten(api.layersOf(state.document));
+  return drag.ids.every((id) => {
+    const found = flat.find((entry) => entry.layer.id === id);
+    return found && editableLayer(found.layer) && canvasAncestorOffset(flat, found.parent) !== null;
+  });
+}
+
+function releaseDragCapture(drag: NonNullable<State["drag"]>): void {
+  if (drag.capture.hasPointerCapture?.(drag.pointerId)) drag.capture.releasePointerCapture(drag.pointerId);
+}
+
+function cancelResizeGesture(): void {
+  const active = state.drag?.mode === "resize" ? state.drag : pendingResize;
+  if (!active) return;
+  active.cancelled = true;
+  dragGeneration += 1;
+  if (state.drag === active) state.drag = null;
+  pendingResize = null;
+  releaseDragCapture(active);
+  unmountDragPreview();
+  delete dom.canvas.dataset["resizePreview"];
+  drawOverlay();
+}
+
+function dragResizedBounds(drag: NonNullable<State["drag"]>, dx: number, dy: number) {
+  const result = modifierResizedBounds(drag.bounds, drag.origins.length === 1 ? drag.origins[0]!.rotation : 0,
+    drag.handle ?? "se", dx, dy, { ratio: resizeRatio(drag), centre: drag.alt }, drag.origins);
+  const measured = drag.measurement;
+  if (result && measured?.height !== undefined && measured.width === result.width && measured.epoch === drag.epoch && !resizeRatio(drag)) {
+    // x/y describe the unrotated box. Keep its world centre when height changes.
+    result.y += (result.height - measured.height) / 2;
+    result.height = measured.height;
+  }
+  return result && Object.values(result).every(Number.isFinite) ? result : null;
+}
+
+function resizedDragItems(drag: NonNullable<State["drag"]>, next: NonNullable<State["drag"]>["bounds"]) {
+  return drag.origins.map((origin) => ({ origin, next: drag.origins.length === 1 ? next : resizeItemInSelection(
+    { x: origin.absoluteX, y: origin.absoluteY, width: origin.width, height: origin.height }, drag.bounds, next, true) }));
+}
+
+function requestResizeHeight(drag: NonNullable<State["drag"]>, next: NonNullable<State["drag"]>["bounds"]): void {
+  const origin = drag.origins[0];
+  if (drag.origins.length !== 1 || origin?.layer.type !== "text" || resizeRatio(drag) ||
+      (drag.handle !== "e" && drag.handle !== "w") || next.width === drag.bounds.width) return;
+  if (drag.measurement?.width === next.width && drag.measurement.epoch === drag.epoch) return;
+  const measurement = { width: next.width, epoch: drag.epoch, pending: Promise.resolve(), height: undefined as number | undefined };
+  drag.measurement = measurement;
+  measurement.pending = api.textLayout(drag.project, origin.id, next.width).then((layout) => {
+    if (!resizeContextValid(drag) || drag.measurement !== measurement || drag.epoch !== measurement.epoch || resizeRatio(drag)) return;
+    const height = Math.max(1, Math.ceil(layout.height));
+    if (!Number.isFinite(height)) return;
+    measurement.height = height;
+    if (state.drag === drag) refreshResizeDrag(drag);
+  }).catch(() => { /* A refused read keeps valid free geometry at its starting height. */ });
+}
+
+function resizeHandlesOnly(drag: NonNullable<State["drag"]>): void {
+  if (drag.previewActive || paintedPreviewVersion !== null || document.querySelector(".drag-preview-image")) unmountDragPreview();
+  drag.previewActive = false;
+  dom.canvas.dataset["resizePreview"] = "handles-only";
+}
+
+function refreshResizePreview(drag: NonNullable<State["drag"]>): void {
+  if (!state.document || drag.cancelled || !resizeContextValid(drag)) return;
+  const next = drag.next;
+  const layers = resizePreviewLayers(state.document, drag.ids);
+  const mapped = next ? resizedDragItems(drag, next) : [];
+  const outside = mapped.some(({ origin, next: item }) => [
+    { x: origin.absoluteX, y: origin.absoluteY, width: origin.width, height: origin.height }, item,
+  ].some((rect) => {
+    const painted = rotatedRectBounds({ ...rect, rotation: origin.rotation });
+    return painted.x < 0 || painted.y < 0 || painted.x + painted.width > state.document!.canvas.width || painted.y + painted.height > state.document!.canvas.height;
+  }));
+  const surface = dom.canvasImage.getBoundingClientRect();
+  // A scaled or letterboxed browser image has a different sampling grid.
+  const exactPixels = surface.width === state.document.canvas.width && surface.height === state.document.canvas.height;
+  if (!next || !layers || outside || !exactPixels) {
+    resizeHandlesOnly(drag);
+    return;
+  }
+  const cache = dragPreviewCache;
+  if (!cache || cache.key !== dragPreviewKey(drag.ids) || !cache.baseUrl) {
+    resizeHandlesOnly(drag);
+    void prepareDragPreview(drag.ids).then(() => { if (state.drag === drag) refreshResizePreview(drag); });
+    return;
+  }
+  if (!cache.items) {
+    resizeHandlesOnly(drag);
+    cache.itemsPending ??= (async () => {
+      const items: Array<{ id: string; url: string }> = [];
+      try {
+        // Serial requests bound renderer concurrency and keep document paint order.
+        for (const layer of layers) items.push({ id: layer.id, url: await api.imageObjectUrl(api.pngUrl(drag.project, drag.version, interactivePreviewScale(), { only: [layer.id] })) });
+        if (dragPreviewCache !== cache) { for (const item of items) URL.revokeObjectURL(item.url); return; }
+        cache.items = items;
+        if (state.drag === drag) refreshResizePreview(drag);
+      } catch { for (const item of items) URL.revokeObjectURL(item.url); }
+    })();
+    return;
+  }
+  const transforms = cache.items.map((item) => {
+    const found = mapped.find(({ origin }) => origin.id === item.id)!;
+    return resizePreviewMatrix(found.origin.layer,
+      { x: found.origin.absoluteX, y: found.origin.absoluteY, width: found.origin.width, height: found.origin.height }, found.next);
+  });
+  if (transforms.some((matrix) => !matrix)) { resizeHandlesOnly(drag); return; }
+  if (!drag.previewActive) {
+    const base = document.createElement("img");
+    base.id = "drag-preview-base"; base.className = "drag-preview-image"; base.alt = ""; base.src = cache.baseUrl;
+    base.style.objectFit = "contain";
+    dom.overlay.before(base);
+    for (const item of cache.items) {
+      const image = document.createElement("img");
+      image.className = "drag-preview-image drag-preview-selection";
+      image.dataset["resizePreviewItem"] = item.id; image.alt = ""; image.src = item.url;
+      image.style.objectFit = "contain";
+      dom.overlay.before(image);
+    }
+    dom.canvasImage.classList.add("drag-preview-hidden");
+    paintedPreviewUrls = [cache.baseUrl, ...cache.items.map((item) => item.url)];
+    drag.previewActive = true;
+  }
+  for (let index = 0; index < cache.items.length; index += 1) {
+    const image = document.querySelector<HTMLElement>(`[data-resize-preview-item="${CSS.escape(cache.items[index]!.id)}"]`)!;
+    const matrix = transforms[index]!;
+    image.style.transformOrigin = "0 0";
+    image.style.transform = `matrix(${matrix[0]},${matrix[1]},${matrix[2]},${matrix[3]},${matrix[4]! * surface.width / state.document.canvas.width},${matrix[5]! * surface.height / state.document.canvas.height})`;
+  }
+  dom.canvas.dataset["resizePreview"] = "items";
+}
+
+function refreshResizeDrag(drag: NonNullable<State["drag"]>): void {
+  if (!resizeContextValid(drag)) { cancelResizeGesture(); return; }
+  const next = dragResizedBounds(drag, drag.lastDelta?.x ?? 0, drag.lastDelta?.y ?? 0);
+  drag.invalid = next === null;
+  drag.next = next ?? undefined;
+  if (!next) { resizeHandlesOnly(drag); return; }
+  requestResizeHeight(drag, next);
+  const box = dom.overlay.querySelector<HTMLElement>(".handle-box");
+  if (box && state.document) {
+    box.style.left = `${next.x / state.document.canvas.width * 100}%`;
+    box.style.top = `${next.y / state.document.canvas.height * 100}%`;
+    box.style.width = `${next.width / state.document.canvas.width * 100}%`;
+    box.style.height = `${next.height / state.document.canvas.height * 100}%`;
+  }
+  refreshResizePreview(drag);
+}
+
+function updateDragPreview(drag: NonNullable<State["drag"]>, dx: number, dy: number): void {
+  if (drag.mode === "resize") { refreshResizeDrag(drag); return; }
   if (!state.document || !drag.previewActive) return;
   const selection = document.getElementById("drag-preview-selection") as HTMLImageElement | null;
   if (!selection) return;
   const canvas = state.document.canvas;
   selection.style.transformOrigin = "0 0";
   if (drag.mode === "move") {
-    // An adopted preview already sits where the last commit left it; the
-    // drag moves it from there, not from where the older canvas image shows
-    // the layer.
-    const originX = drag.adoptedDelta?.x ?? 0;
-    const originY = drag.adoptedDelta?.y ?? 0;
-    selection.style.transform =
-      `translate(${((originX + dx) / canvas.width) * 100}%, ${((originY + dy) / canvas.height) * 100}%)`;
-  } else if (drag.mode === "resize") {
-    const next = dragResizedBounds(drag, dx, dy);
-    if (drag.preserveSelectionScale) {
-      // A text resize changes its wrapping rectangle, not its glyph geometry.
-      // Keep the cached Rust-rendered text at 1:1 scale while the handles move;
-      // pointer-up requests the exact newly wrapped renderer image.
-      const centreDx = next.x + next.width / 2 - (drag.bounds.x + drag.bounds.width / 2);
-      const centreDy = next.y + next.height / 2 - (drag.bounds.y + drag.bounds.height / 2);
-      selection.style.transform =
-        `translate(${(centreDx / canvas.width) * 100}%, ${(centreDy / canvas.height) * 100}%)`;
-      return;
-    }
-    const scaleX = next.width / Math.max(1, drag.bounds.width);
-    const scaleY = next.height / Math.max(1, drag.bounds.height);
-    if (drag.origins.length === 1) {
-      const rotation = drag.origins[0]?.rotation ?? 0;
-      const centreDx = next.x + next.width / 2 - (drag.bounds.x + drag.bounds.width / 2);
-      const centreDy = next.y + next.height / 2 - (drag.bounds.y + drag.bounds.height / 2);
-      selection.style.transformOrigin =
-        `${((drag.bounds.x + drag.bounds.width / 2) / canvas.width) * 100}% ` +
-        `${((drag.bounds.y + drag.bounds.height / 2) / canvas.height) * 100}%`;
-      selection.style.transform =
-        `translate(${(centreDx / canvas.width) * 100}%, ${(centreDy / canvas.height) * 100}%) ` +
-        `rotate(${rotation}deg) scale(${scaleX}, ${scaleY}) rotate(${-rotation}deg)`;
-      return;
-    }
-    const translateX = next.x - drag.bounds.x * scaleX;
-    const translateY = next.y - drag.bounds.y * scaleY;
-    selection.style.transform =
-      `translate(${(translateX / canvas.width) * 100}%, ${(translateY / canvas.height) * 100}%) ` +
-      `scale(${scaleX}, ${scaleY})`;
+    selection.style.transform = `translate(${((drag.adoptedDelta?.x ?? 0) + dx) / canvas.width * 100}%, ${((drag.adoptedDelta?.y ?? 0) + dy) / canvas.height * 100}%)`;
   } else {
     const rect = dom.canvas.getBoundingClientRect();
-    const centreX = rect.left + ((drag.bounds.x + drag.bounds.width / 2) / canvas.width) * rect.width;
-    const centreY = rect.top + ((drag.bounds.y + drag.bounds.height / 2) / canvas.height) * rect.height;
+    const centreX = rect.left + (drag.bounds.x + drag.bounds.width / 2) / canvas.width * rect.width;
+    const centreY = rect.top + (drag.bounds.y + drag.bounds.height / 2) / canvas.height * rect.height;
     const start = Math.atan2(drag.startY - centreY, drag.startX - centreX);
     const current = Math.atan2(drag.startY + dy / dragScale() - centreY, drag.startX + dx / dragScale() - centreX);
-    selection.style.transformOrigin =
-      `${((drag.bounds.x + drag.bounds.width / 2) / canvas.width) * 100}% ` +
-      `${((drag.bounds.y + drag.bounds.height / 2) / canvas.height) * 100}%`;
-    selection.style.transform = `rotate(${((current - start) * 180) / Math.PI}deg)`;
+    selection.style.transformOrigin = `${(drag.bounds.x + drag.bounds.width / 2) / canvas.width * 100}% ${(drag.bounds.y + drag.bounds.height / 2) / canvas.height * 100}%`;
+    selection.style.transform = `rotate(${(current - start) * 180 / Math.PI}deg)`;
   }
 }
 
 function dragScale(): number {
   const rect = dom.canvas.getBoundingClientRect();
-  if (!state.document || rect.width === 0) return 1;
-  // Screen pixels to document units: the canvas is scaled to fit.
-  return state.document.canvas.width / rect.width;
+  return state.document && rect.width !== 0 ? state.document.canvas.width / rect.width : 1;
+}
+
+function resizeModifierEvent(event: KeyboardEvent): boolean {
+  const drag = state.drag;
+  if (drag?.mode !== "resize") return false;
+  if (event.key === "Escape") { event.preventDefault(); cancelResizeGesture(); return true; }
+  if (event.key !== "Shift" && event.key !== "Alt") return false;
+  const shift = event.key === "Shift" ? event.type === "keydown" : event.shiftKey;
+  const alt = event.key === "Alt" ? event.type === "keydown" : event.altKey;
+  if (shift !== drag.shift || alt !== drag.alt) {
+    drag.shift = shift; drag.alt = alt; drag.epoch += 1; drag.measurement = undefined;
+    refreshResizeDrag(drag);
+  }
+  return true;
 }
 
 window.addEventListener("pointermove", (event) => {
   const drag = state.drag;
-  if (!drag || !state.document) return;
-  const scale = dragScale();
-  let dx = (event.clientX - drag.startX) * scale;
-  let dy = (event.clientY - drag.startY) * scale;
+  if (!drag || !state.document || event.pointerId !== drag.pointerId) return;
+  let dx = (event.clientX - drag.startX) * dragScale();
+  let dy = (event.clientY - drag.startY) * dragScale();
   dom.overlay.querySelectorAll(".smart-guide").forEach((guide) => guide.remove());
-  if (drag.mode === "move") {
-    ({ dx, dy } = snapMove(dx, dy, drag.bounds, drag.ids, scale));
+  if (drag.mode === "move") ({ dx, dy } = snapMove(dx, dy, drag.bounds, drag.ids, dragScale()));
+  if (drag.mode === "resize" && (drag.shift !== event.shiftKey || drag.alt !== event.altKey)) {
+    drag.shift = event.shiftKey; drag.alt = event.altKey; drag.epoch += 1; drag.measurement = undefined;
   }
   drag.lastDelta = { x: dx, y: dy };
   updateDragPreview(drag, dx, dy);
-
   const box = dom.overlay.querySelector<HTMLElement>(".handle-box");
   if (!box) return;
-  const { width, height } = state.document.canvas;
   if (drag.mode === "move") {
-    box.style.left = `${((drag.bounds.x + dx) / width) * 100}%`;
-    box.style.top = `${((drag.bounds.y + dy) / height) * 100}%`;
-  } else if (drag.mode === "resize") {
-    const next = dragResizedBounds(drag, dx, dy);
-    box.style.left = `${(next.x / width) * 100}%`;
-    box.style.top = `${(next.y / height) * 100}%`;
-    box.style.width = `${(next.width / width) * 100}%`;
-    box.style.height = `${(next.height / height) * 100}%`;
-  } else {
-    const canvasRect = dom.canvas.getBoundingClientRect();
-    const centreX = canvasRect.left + ((drag.bounds.x + drag.bounds.width / 2) / state.document.canvas.width) * canvasRect.width;
-    const centreY = canvasRect.top + ((drag.bounds.y + drag.bounds.height / 2) / state.document.canvas.height) * canvasRect.height;
-    const start = Math.atan2(drag.startY - centreY, drag.startX - centreX);
-    const current = Math.atan2(event.clientY - centreY, event.clientX - centreX);
-    const baseRotation = drag.origins.length === 1 ? (drag.origins[0]?.rotation ?? 0) : 0;
-    box.style.transform = `rotate(${baseRotation + ((current - start) * 180) / Math.PI}deg)`;
+    box.style.left = `${(drag.bounds.x + dx) / state.document.canvas.width * 100}%`;
+    box.style.top = `${(drag.bounds.y + dy) / state.document.canvas.height * 100}%`;
+  } else if (drag.mode === "rotate") {
+    const rect = dom.canvas.getBoundingClientRect();
+    const x = rect.left + (drag.bounds.x + drag.bounds.width / 2) / state.document.canvas.width * rect.width;
+    const y = rect.top + (drag.bounds.y + drag.bounds.height / 2) / state.document.canvas.height * rect.height;
+    const delta = (Math.atan2(event.clientY - y, event.clientX - x) - Math.atan2(drag.startY - y, drag.startX - x)) * 180 / Math.PI;
+    box.style.transform = `rotate(${(drag.origins.length === 1 ? drag.origins[0]!.rotation : 0) + delta}deg)`;
   }
 });
 
 window.addEventListener("pointerup", async (event) => {
   const drag = state.drag;
-  state.drag = null;
-  if (!drag) return;
-  const scale = dragScale();
-  const dx = Math.round(drag.lastDelta?.x ?? (event.clientX - drag.startX) * scale);
-  const dy = Math.round(drag.lastDelta?.y ?? (event.clientY - drag.startY) * scale);
-  if (dx === 0 && dy === 0) {
-    // No edit, so nothing to hand over. Pixels adopted from an earlier
-    // commit stay until the render of that version replaces them; taking
-    // them down here would flash the older canvas image underneath.
-    if (paintedPreviewVersion === null) unmountDragPreview();
-    return;
-  }
-  // The pixels this drag painted become the prediction of the state the
-  // batch is about to create. Naming the version it will produce is what
-  // lets the render hand-off — and a foreign commit, an undo — tell the
-  // prediction and the truth apart.
-  paintedPreviewVersion = api.versionOf(state.document!) + 1;
-  paintedPreviewOrigin = drag.mode === "move"
-    ? {
-        x: (drag.adoptedDelta?.x ?? 0) + dx,
-        y: (drag.adoptedDelta?.y ?? 0) + dy,
-      }
-    // A resized or rotated selection repaints through a different
-    // transform, so it cannot be re-anchored; it hands over to the render
-    // like the rest, but a later drag starts fresh.
-    : null;
-  if (drag.mode === "move") {
-    void sendBatch("move selection", drag.ids.map((id) => ({ op: "move", id, dx, dy } as Operation)));
-    return;
-  }
+  if (!drag || event.pointerId !== drag.pointerId) return;
   if (drag.mode === "resize") {
-    let next = dragResizedBounds(drag, dx, dy);
-    const horizontalTextResize =
-      drag.ids.length === 1 && (drag.handle === "e" || drag.handle === "w");
-    if (horizontalTextResize && state.project && state.document) {
-      const layer = api
-        .flatten(api.layersOf(state.document))
-        .find(({ layer }) => layer.id === drag.ids[0])?.layer;
-      if (layer?.type === "text") {
-        try {
-          const layout = await api.textLayout(state.project, layer.id, next.width);
-          const height = Math.max(1, Math.ceil(layout.height));
-          // Horizontal text resizing changes wrapping height around the box's
-          // local centre, rather than making a rotated box jump vertically.
-          next = {
-            ...next,
-            y: next.y + (next.height - height) / 2,
-            height,
-          };
-        } catch {
-          // A read-only measurement failure must not swallow the resize. The
-          // renderer will still wrap to the new width; only auto-height falls
-          // back to the layer's existing value.
-        }
-      }
+    if (drag.shift !== event.shiftKey || drag.alt !== event.altKey) {
+      drag.shift = event.shiftKey; drag.alt = event.altKey; drag.epoch += 1; drag.measurement = undefined;
+    }
+    drag.lastDelta = { x: (event.clientX - drag.startX) * dragScale(), y: (event.clientY - drag.startY) * dragScale() };
+    refreshResizeDrag(drag);
+    state.drag = null; pendingResize = drag;
+    releaseDragCapture(drag);
+    await drag.measurement?.pending;
+    if (!resizeContextValid(drag) || drag.invalid) { if (pendingResize === drag) cancelResizeGesture(); return; }
+    const next = dragResizedBounds(drag, drag.lastDelta.x, drag.lastDelta.y);
+    if (!next) { cancelResizeGesture(); return; }
+    if (next.x === drag.bounds.x && next.y === drag.bounds.y && next.width === drag.bounds.width && next.height === drag.bounds.height) {
+      pendingResize = null; unmountDragPreview(); drawOverlay(); return;
     }
     const operations: Operation[] = [];
-    for (const origin of drag.origins) {
-      const resized = drag.origins.length === 1
-        ? next
-        : resizeItemInSelection(
-            {
-              x: origin.absoluteX,
-              y: origin.absoluteY,
-              width: origin.width,
-              height: origin.height,
-            },
-            drag.bounds,
-            next,
-          );
-      const moveX = Math.round(resized.x - origin.absoluteX);
-      const moveY = Math.round(resized.y - origin.absoluteY);
-      if (moveX !== 0 || moveY !== 0) {
-        operations.push({ op: "move", id: origin.id, dx: moveX, dy: moveY } as Operation);
-      }
-      operations.push({
-        op: "resize",
-        id: origin.id,
-        width: Math.max(1, Math.round(resized.width)),
-        height: Math.max(1, Math.round(resized.height)),
-      } as Operation);
+    for (const { origin, next: item } of resizedDragItems(drag, next)) {
+      const dx = item.x - origin.absoluteX, dy = item.y - origin.absoluteY;
+      if (dx !== 0 || dy !== 0) operations.push({ op: "move", id: origin.id, dx, dy } as Operation);
+      if (item.width !== origin.width || item.height !== origin.height) operations.push({ op: "resize", id: origin.id, width: item.width, height: item.height } as Operation);
     }
-    void sendBatch("resize selection", operations);
+    pendingResize = null;
+    if (!operations.length) { unmountDragPreview(); drawOverlay(); return; }
+    paintedPreviewVersion = drag.previewActive ? drag.version + 1 : null;
+    paintedPreviewOrigin = null;
+    await sendBatch("resize selection", operations, drag);
+    delete dom.canvas.dataset["resizePreview"];
     return;
   }
-  const canvasRect = dom.canvas.getBoundingClientRect();
-  const centreX = canvasRect.left + ((drag.bounds.x + drag.bounds.width / 2) / state.document!.canvas.width) * canvasRect.width;
-  const centreY = canvasRect.top + ((drag.bounds.y + drag.bounds.height / 2) / state.document!.canvas.height) * canvasRect.height;
-  const start = Math.atan2(drag.startY - centreY, drag.startX - centreX);
-  const current = Math.atan2(event.clientY - centreY, event.clientX - centreX);
-  const delta = ((current - start) * 180) / Math.PI;
-  void sendBatch(
-    "rotate selection",
-    drag.origins.map((origin) => ({
-      op: "rotate",
-      id: origin.id,
-      degrees: Math.round((origin.rotation + delta) * 10) / 10,
-    } as Operation)),
-  );
+  state.drag = null;
+  releaseDragCapture(drag);
+  const dx = Math.round(drag.lastDelta?.x ?? (event.clientX - drag.startX) * dragScale());
+  const dy = Math.round(drag.lastDelta?.y ?? (event.clientY - drag.startY) * dragScale());
+  if (dx === 0 && dy === 0) { if (paintedPreviewVersion === null) unmountDragPreview(); return; }
+  paintedPreviewVersion = api.versionOf(state.document!) + 1;
+  paintedPreviewOrigin = drag.mode === "move" ? { x: (drag.adoptedDelta?.x ?? 0) + dx, y: (drag.adoptedDelta?.y ?? 0) + dy } : null;
+  if (drag.mode === "move") {
+    void sendBatch("move selection", drag.ids.map((id) => ({ op: "move", id, dx, dy } as Operation)));
+  } else {
+    const rect = dom.canvas.getBoundingClientRect();
+    const x = rect.left + (drag.bounds.x + drag.bounds.width / 2) / state.document!.canvas.width * rect.width;
+    const y = rect.top + (drag.bounds.y + drag.bounds.height / 2) / state.document!.canvas.height * rect.height;
+    const delta = (Math.atan2(event.clientY - y, event.clientX - x) - Math.atan2(drag.startY - y, drag.startX - x)) * 180 / Math.PI;
+    void sendBatch("rotate selection", drag.origins.map((origin) => ({ op: "rotate", id: origin.id, degrees: Math.round((origin.rotation + delta) * 10) / 10 } as Operation)));
+  }
 });
+
+window.addEventListener("pointercancel", (event) => { if (state.drag?.pointerId === event.pointerId) cancelResizeGesture(); });
+window.addEventListener("lostpointercapture", (event) => { if (state.drag?.pointerId === event.pointerId) cancelResizeGesture(); }, true);
+window.addEventListener("blur", cancelResizeGesture);
 
 function snapMove(
   dx: number,
@@ -3778,6 +3910,7 @@ function alignFromContextMenu(
  * on their own project, and the open follows them.
  */
 function openFromQueue(project: string | null): void {
+  cancelResizeGesture();
   void guard("open", async () => {
     state.project = project;
     projectPicker.setCurrentProject(project);
@@ -4346,6 +4479,7 @@ syncResponsivePanels();
 let spacePressed = false;
 let finishActivePan: (() => void) | null = null;
 window.addEventListener("keyup", (event) => {
+  if (resizeModifierEvent(event)) return;
   if (event.code === "Space") {
     spacePressed = false;
     dom.stageViewport.classList.remove("pan-ready");
@@ -4449,6 +4583,12 @@ function typingInAField(target: EventTarget | null): boolean {
 }
 
 window.addEventListener("keydown", (event) => {
+  if (resizeModifierEvent(event)) return;
+  if (event.key === "Escape" && pendingResize) {
+    event.preventDefault();
+    cancelResizeGesture();
+    return;
+  }
   // Never steal a key from someone editing a value.
   if (typingInAField(event.target)) return;
   if (
@@ -4578,6 +4718,7 @@ window.addEventListener("keydown", (event) => {
  * and the picker keeps listing what the workspace still holds.
  */
 function closeProject(): void {
+  cancelResizeGesture();
   state.project = null;
   state.document = null;
   state.selection = [];
