@@ -17,7 +17,7 @@ mkdirSync(dirname(output),{recursive:true});
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 const env={...process.env};for(const key of ["ASSEMBLASH_WORKSPACE","ASSEMBLASH_FONT_STORE","ASSEMBLASH_BIND","ASSEMBLASH_TOKEN"])delete env[key];
 function cli(...args){const r=spawnSync(binary,args,{env,encoding:"utf8",windowsHide:true,timeout:30000});assert.equal(r.status,0,r.stderr??String(r.error));return r.stdout.trim();}
-const binaryVersion=cli("--version");assert.equal(binaryVersion,"assemblash 1.12.0");
+const binaryVersion=cli("--version");assert.equal(binaryVersion,"assemblash 1.13.0");
 cli("workspace","--workspace",workspace);
 writeFileSync(join(workspace,"config.toml"),"port = 8787\nopen-browser = false\nbind = '127.0.0.1'\n");
 for(const font of ["NotoSans-Subset.ttf","NotoSans-Bold-Subset.ttf"])cli("font","add",join(repo,"crates/assemblash-renderer/tests/fonts",font),"--license","OFL-1.1","--font-store",join(workspace,"fonts"));

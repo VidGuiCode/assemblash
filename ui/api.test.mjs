@@ -3,6 +3,22 @@ import assert from "node:assert/strict";
 
 import { pngUrl } from "./.test-dist/api.js";
 
+test("hue rotation starts neutral and exposes degrees", async () => {
+  const { newEffect, effectFields } = await import("./.test-dist/api.js");
+  assert.deepEqual(newEffect("hueRotate"), { type: "hueRotate", degrees: 0 });
+  assert.deepEqual(effectFields({ type: "hueRotate", degrees: -90 }), [
+    { name: "degrees", value: -90, kind: "number" },
+  ]);
+});
+
+test("invert starts neutral and exposes its amount", async () => {
+  const { newEffect, effectFields } = await import("./.test-dist/api.js");
+  assert.deepEqual(newEffect("invert"), { type: "invert", amount: 0 });
+  assert.deepEqual(effectFields({ type: "invert", amount: 0.75 }), [
+    { name: "amount", value: 0.75, kind: "number" },
+  ]);
+});
+
 test("saved text styles include paragraph spacing and an explicit zero reset", async () => {
   const { styleOf } = await import("./.test-dist/api.js");
   const layer = { type: "text", fontFamily: "Noto Sans", fontSize: 32, runs: [{ text: "A", future: 7 }] };

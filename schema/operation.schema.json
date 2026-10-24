@@ -1588,8 +1588,48 @@
       ]
     },
     "Effect": {
-      "description": "One adjustment in a layer's effect stack.\n\nTagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps\nan effect written by a newer build verbatim and refuses to render it —\nthe same bargain as [`BlendMode::Other`]: never lose it, never guess at it.\n\nThe amounts are multipliers where 1 means \"unchanged\", which is what\n`filter: brightness(1.2)` means everywhere else, so a number copied from a\nCSS example does what it looks like it does.\n\nEvery known variant also carries a `#[serde(flatten)]` capture map\n(D27): a key this build does not know rides along verbatim instead of\nbeing dropped on the next save.",
+      "description": "One adjustment in a layer's effect stack.\n\nTagged by `type`, so the JSON reads as what it is. [`Effect::Other`] keeps\nan effect written by a newer build verbatim and refuses to render it —\nthe same bargain as [`BlendMode::Other`]: never lose it, never guess at it.\n\nBrightness, contrast, and saturation use multipliers. Hue rotation uses degrees.\n\nEvery known variant also carries a `#[serde(flatten)]` capture map\n(D27): a key this build does not know rides along verbatim instead of\nbeing dropped on the next save.",
       "anyOf": [
+        {
+          "description": "Interpolates between the original and inverted RGB channels. Alpha stays unchanged.",
+          "type": "object",
+          "properties": {
+            "amount": {
+              "description": "The amount, from 0 (unchanged) to 1 (fully inverted).",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "invert"
+            }
+          },
+          "required": [
+            "type",
+            "amount"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "description": "Rotates hue in sRGB. 0 and complete turns preserve the colour.",
+          "type": "object",
+          "properties": {
+            "degrees": {
+              "description": "A finite angle in degrees. Negative values rotate in reverse.",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "hueRotate"
+            }
+          },
+          "required": [
+            "type",
+            "degrees"
+          ],
+          "additionalProperties": true
+        },
         {
           "description": "Scales each channel. 1 is unchanged, 0 is black.",
           "type": "object",

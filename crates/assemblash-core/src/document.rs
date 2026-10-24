@@ -900,9 +900,7 @@ pub enum LineMarker {
 /// an effect written by a newer build verbatim and refuses to render it —
 /// the same bargain as [`BlendMode::Other`]: never lose it, never guess at it.
 ///
-/// The amounts are multipliers where 1 means "unchanged", which is what
-/// `filter: brightness(1.2)` means everywhere else, so a number copied from a
-/// CSS example does what it looks like it does.
+/// Brightness, contrast, and saturation use multipliers. Hue rotation uses degrees.
 ///
 /// Every known variant also carries a `#[serde(flatten)]` capture map
 /// (D27): a key this build does not know rides along verbatim instead of
@@ -910,6 +908,22 @@ pub enum LineMarker {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Effect {
+    /// Interpolates between the original and inverted RGB channels. Alpha stays unchanged.
+    Invert {
+        /// The amount, from 0 (unchanged) to 1 (fully inverted).
+        amount: f64,
+        /// Unknown keys remain unchanged during serialization.
+        #[serde(flatten)]
+        extra: Extras,
+    },
+    /// Rotates hue in sRGB. 0 and complete turns preserve the colour.
+    HueRotate {
+        /// A finite angle in degrees. Negative values rotate in reverse.
+        degrees: f64,
+        /// Unknown keys remain unchanged during serialization.
+        #[serde(flatten)]
+        extra: Extras,
+    },
     /// Scales each channel. 1 is unchanged, 0 is black.
     Brightness {
         /// The multiplier.
@@ -1000,6 +1014,8 @@ impl Effect {
     /// What this effect is called in the document.
     pub fn type_name(&self) -> &str {
         match self {
+            Self::Invert { .. } => "invert",
+            Self::HueRotate { .. } => "hueRotate",
             Self::Brightness { .. } => "brightness",
             Self::Contrast { .. } => "contrast",
             Self::Saturation { .. } => "saturation",
@@ -1027,6 +1043,8 @@ impl Effect {
     /// [`BlendMode::RENDERED`] gives the blend-mode half of the listing.
     pub fn styles_example(&self) -> Option<&'static str> {
         match self {
+            Self::Invert { .. } => Some(r#"{"type":"invert","amount":1}"#),
+            Self::HueRotate { .. } => Some(r#"{"type":"hueRotate","degrees":90}"#),
             Self::Brightness { .. } => Some(r#"{"type":"brightness","amount":1.2}"#),
             Self::Contrast { .. } => Some(r#"{"type":"contrast","amount":1.4}"#),
             Self::Saturation { .. } => Some(r#"{"type":"saturation","amount":0}"#),
@@ -1044,6 +1062,8 @@ impl Effect {
     /// `#rrggbbaa` flood opacity are documented for discovery.
     pub fn styles_notes(&self) -> &'static [&'static str] {
         match self {
+            Self::Invert { .. } => &["amount from 0 to 1; 0 is unchanged, 1 is fully inverted"],
+            Self::HueRotate { .. } => &["finite degrees; 0 and complete turns are unchanged"],
             Self::Brightness { .. } => &["1 is unchanged"],
             Self::Contrast { .. } => &["1 is unchanged"],
             Self::Saturation { .. } => &["1 is unchanged, 0 is greyscale"],
@@ -1091,6 +1111,14 @@ impl Effect {
     /// rendered but was never advertised.
     pub fn rendered_examples() -> Vec<Self> {
         vec![
+            Self::Invert {
+                amount: 1.0,
+                extra: Extras::new(),
+            },
+            Self::HueRotate {
+                degrees: 90.0,
+                extra: Extras::new(),
+            },
             Self::Brightness {
                 amount: 1.2,
                 extra: Extras::new(),

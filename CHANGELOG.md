@@ -10,6 +10,16 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-10-24
+
+**Hue rotation and invert.**
+
+- Add `hueRotate` with finite `degrees` and `invert` with `amount` from zero to one.
+- Use the existing effect stack across CLI, HTTP, MCP, and reference interface controls.
+- Preserve alpha, stack order, undo, protected layers, version checks, and recovery.
+- Add EN, FR, and DE control labels and renderer controls for six targets.
+- Keep `schemaVersion` at 1. Version 1.12.0 preserves these effects and refuses their rendering.
+
 ## [1.12.0] — 2026-10-23
 
 **Styled text, paragraph spacing, justified alignment, and modifier resizing.**

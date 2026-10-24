@@ -416,6 +416,16 @@ fn check_effects(layer: &Layer, errors: &mut Vec<ValidationError>) {
             });
         };
         match effect {
+            Effect::Invert { amount, .. } => {
+                if !amount.is_finite() || !(0.0..=1.0).contains(amount) {
+                    bad("amount", "between 0 and 1", *amount);
+                }
+            }
+            Effect::HueRotate { degrees, .. } => {
+                if !degrees.is_finite() {
+                    bad("degrees", "a finite number", *degrees);
+                }
+            }
             // No upper bound: brightness 4 on a dark photograph is a real
             // thing to want, and the renderer clamps at white anyway.
             Effect::Brightness { amount, .. }
@@ -1083,6 +1093,52 @@ mod tests {
             extra: Extras::new(),
         }];
         assert!(validate(&doc).is_ok(), "a glow is a shadow with no offset");
+    }
+
+    #[test]
+    fn hue_rotation_accepts_finite_degrees_only() {
+        let mut doc = shape_document(ShapeKind::Ellipse {
+            extra: Extras::new(),
+        });
+        for degrees in [0.0, -90.0, 360.0, 720.0, f64::MAX, -f64::MAX] {
+            doc.layers[0].effects = vec![Effect::HueRotate {
+                degrees,
+                extra: Extras::new(),
+            }];
+            assert!(validate(&doc).is_ok(), "degrees {degrees}");
+        }
+        for degrees in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            doc.layers[0].effects = vec![Effect::HueRotate {
+                degrees,
+                extra: Extras::new(),
+            }];
+            assert!(errors(&doc).iter().any(|error| matches!(error,
+                ValidationError::InvalidEffect { effect, field: "degrees", .. } if effect == "hueRotate"
+            )));
+        }
+    }
+
+    #[test]
+    fn invert_accepts_finite_amounts_from_zero_to_one() {
+        let mut doc = shape_document(ShapeKind::Ellipse {
+            extra: Extras::new(),
+        });
+        for amount in [0.0, 0.25, 0.5, 1.0] {
+            doc.layers[0].effects = vec![Effect::Invert {
+                amount,
+                extra: Extras::new(),
+            }];
+            assert!(validate(&doc).is_ok(), "amount {amount}");
+        }
+        for amount in [-0.01, 1.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            doc.layers[0].effects = vec![Effect::Invert {
+                amount,
+                extra: Extras::new(),
+            }];
+            assert!(errors(&doc).iter().any(|error| matches!(error,
+                ValidationError::InvalidEffect { effect, field: "amount", .. } if effect == "invert"
+            )));
+        }
     }
 
     #[test]

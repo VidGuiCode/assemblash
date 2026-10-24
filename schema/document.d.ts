@@ -229,14 +229,22 @@ export type BlendMode = "normal" | "multiply" | "screen" | "overlay" | "darken" 
 /// an effect written by a newer build verbatim and refuses to render it —
 /// the same bargain as [`BlendMode::Other`]: never lose it, never guess at it.
 ///
-/// The amounts are multipliers where 1 means "unchanged", which is what
-/// `filter: brightness(1.2)` means everywhere else, so a number copied from a
-/// CSS example does what it looks like it does.
+/// Brightness, contrast, and saturation use multipliers. Hue rotation uses degrees.
 ///
 /// Every known variant also carries a `#[serde(flatten)]` capture map
 /// (D27): a key this build does not know rides along verbatim instead of
 /// being dropped on the next save.
 export type Effect = {
+  /** The amount, from 0 (unchanged) to 1 (fully inverted). */
+  amount: number;
+  type: "invert";
+  [key: string]: unknown;
+} | {
+  /** A finite angle in degrees. Negative values rotate in reverse. */
+  degrees: number;
+  type: "hueRotate";
+  [key: string]: unknown;
+} | {
   /** The multiplier. */
   amount: number;
   type: "brightness";

@@ -153,6 +153,14 @@ fn blend_mode() -> impl Strategy<Value = BlendMode> {
 /// generated documents have to be valid.
 fn effect() -> impl Strategy<Value = Effect> {
     prop_oneof![
+        (-1080.0f64..1080.0).prop_map(|degrees| Effect::HueRotate {
+            degrees,
+            extra: Extras::new(),
+        }),
+        (0.0f64..=1.0).prop_map(|amount| Effect::Invert {
+            amount,
+            extra: Extras::new(),
+        }),
         (0.0f64..4.0).prop_map(|amount| Effect::Brightness {
             amount,
             extra: Extras::new(),

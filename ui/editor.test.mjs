@@ -3830,7 +3830,7 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
       fields: [...document.querySelectorAll('.effect-row[data-effect="dropShadow"] input')]
         .map((one) => [one.dataset.field, one.type, one.value])
     })`), {
-      offered: ["brightness", "contrast", "saturation", "blur", "grain", "dropShadow"],
+      offered: ["brightness", "contrast", "saturation", "blur", "grain", "dropShadow", "hueRotate", "invert"],
       // The colour is typed rather than picked: a colour input cannot hold the
       // alpha this default carries, and dropping it silently would change the
       // picture on the first edit.
@@ -3849,6 +3849,81 @@ test("editor interaction journeys use the real compiled interface", { timeout: J
     assert.deepEqual(fixture.writes[0].body.operation.effects, [
       { type: "dropShadow", dx: 4, dy: 10, blur: 6, color: "#00000080" },
     ]);
+  });
+
+  await t.test("hue rotation uses the existing effect controls and operation stack", async () => {
+    await selectLayer(page, "layer_made_5");
+    const previous = structuredClone(fixture.layers().find((one) => one.id === "layer_made_5").effects);
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const select = document.querySelector(".effect-chooser");
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, "hueRotate");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await page.click(".effect-add");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation.effects, [...previous, { type: "hueRotate", degrees: 0 }]);
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const input = document.querySelector('.effect-row[data-effect="hueRotate"] [data-field="degrees"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "-90");
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update", id: "layer_made_5", effects: [...previous, { type: "hueRotate", degrees: -90 }],
+    });
+    assert.equal(await page.evaluate(`document.querySelector('.effect-row[data-effect="hueRotate"] .effect-name').textContent`), "Hue rotation");
+  });
+
+  await t.test("invert edits and reorders the same operation stack", async () => {
+    await selectLayer(page, "layer_made_5");
+    const previous = structuredClone(fixture.layers().find((one) => one.id === "layer_made_5").effects);
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const select = document.querySelector(".effect-chooser");
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, "invert");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await page.click(".effect-add");
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation.effects, [...previous, { type: "invert", amount: 0 }]);
+    fixture.writes.length = 0;
+    await page.evaluate(`(() => {
+      const input = document.querySelector('.effect-row[data-effect="invert"] [data-field="amount"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "0.75");
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation, {
+      op: "update", id: "layer_made_5", effects: [...previous, { type: "invert", amount: 0.75 }],
+    });
+    assert.equal(await page.evaluate(`document.querySelector('.effect-row[data-effect="invert"] .effect-name').textContent`), "Invert");
+    fixture.writes.length = 0;
+    await page.click('.effect-row[data-effect="invert"] .effect-up');
+    await waitForWrites(fixture);
+    await waitForSaved(page);
+    assert.deepEqual(fixture.writes[0].body.operation.effects, [
+      ...previous.slice(0, -1), { type: "invert", amount: 0.75 }, previous.at(-1),
+    ]);
+    for (const [locale, hue, invert, degrees, amount] of [
+      ["fr", "Rotation de teinte", "Inverser", "Degrés", "Intensité"],
+      ["de", "Farbton drehen", "Invertieren", "Grad", "Stärke"],
+      ["en", "Hue rotation", "Invert", "Degrees", "Amount"],
+    ]) {
+      await page.evaluate(`import('/i18n.js').then(module => module.setLocale('${locale}'))`);
+      await page.waitFor(`document.querySelector('.effect-row[data-effect="hueRotate"] .effect-name').textContent === ${JSON.stringify(hue)}
+        && document.querySelector('.effect-row[data-effect="invert"] .effect-name').textContent === ${JSON.stringify(invert)}
+        && document.querySelector('.effect-chooser option[value="hueRotate"]').textContent === ${JSON.stringify(hue)}
+        && document.querySelector('.effect-chooser option[value="invert"]').textContent === ${JSON.stringify(invert)}
+        && document.querySelector('.effect-row[data-effect="hueRotate"] input').getAttribute('aria-label').includes(${JSON.stringify(degrees)})
+        && document.querySelector('.effect-row[data-effect="invert"] input').getAttribute('aria-label').includes(${JSON.stringify(amount)})`, "localized colour effect controls");
+      assert.equal(await page.evaluate(`document.querySelector('.effect-row[data-effect="invert"] input').value`), "0.75");
+    }
   });
 
   await t.test("a rapid burst of edits is never dropped, and the journal matches", async () => {

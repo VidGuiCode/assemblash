@@ -370,6 +370,67 @@ fn effects_document() -> (Document, AssetHrefs) {
     (document, hrefs)
 }
 
+fn hue_rotation_document() -> (Document, AssetHrefs) {
+    let (mut document, hrefs) = effects_document();
+    document.canvas.background = None;
+    for (layer, degrees) in
+        document
+            .layers
+            .iter_mut()
+            .zip([0.0, 90.0, -90.0, 360.0, 450.0, f64::MAX, 270.0])
+    {
+        layer.opacity = 0.625;
+        layer.effects = vec![Effect::HueRotate {
+            degrees,
+            extra: Extras::new(),
+        }];
+    }
+    (document, hrefs)
+}
+
+fn invert_document() -> (Document, AssetHrefs) {
+    let (mut document, hrefs) = effects_document();
+    document.canvas.background = None;
+    for (layer, amount) in document
+        .layers
+        .iter_mut()
+        .zip([0.0, 0.25, 0.5, 0.75, 1.0, 0.125, 0.875])
+    {
+        layer.opacity = 0.625;
+        layer.effects = vec![Effect::Invert {
+            amount,
+            extra: Extras::new(),
+        }];
+    }
+    (document, hrefs)
+}
+
+fn color_effect_stack_document() -> (Document, AssetHrefs) {
+    let (mut document, hrefs) = effects_document();
+    document.canvas.background = None;
+    for (index, layer) in document.layers.iter_mut().enumerate() {
+        layer.opacity = 0.625;
+        layer.effects = vec![
+            Effect::HueRotate {
+                degrees: 90.0,
+                extra: Extras::new(),
+            },
+            Effect::Brightness {
+                amount: 2.0,
+                extra: Extras::new(),
+            },
+            Effect::Invert {
+                amount: 0.75,
+                extra: Extras::new(),
+            },
+        ];
+        if index % 2 != 0 {
+            layer.effects.reverse();
+        }
+    }
+    (document, hrefs)
+}
+
 fn shape_layer(
     index: usize,
     transform: Transform,
@@ -1849,6 +1910,9 @@ fn reference_documents() -> Vec<(&'static str, Document, AssetHrefs)> {
         ("arabic", arabic_document()),
         ("japanese", japanese_document()),
         ("effects", effects_document()),
+        ("hue-rotation", hue_rotation_document()),
+        ("invert", invert_document()),
+        ("color-effect-stack", color_effect_stack_document()),
         ("shapes", shapes_document()),
         ("shadow", shadow_document()),
         ("text-weight", text_weight_document()),
