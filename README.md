@@ -25,8 +25,8 @@ command-line interface, a local HTTP API, and an MCP server for AI agents.
 You and an AI agent can work on the same document at the same time. No cloud
 service and no account are necessary.
 
-**Current release: 1.12.0.** The document schema and the operation API are
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.12.0)
+**Current release: 1.13.0.** The document schema and the operation API are
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.13.0)
 or the [changelog](CHANGELOG.md).
 
 <p align="center">
@@ -44,8 +44,8 @@ You do not need a terminal for these steps.
 Go to [GitHub Releases](https://github.com/VidGuiCode/assemblash/releases/latest)
 and download the file for your computer:
 
-For example, the Windows file of release 1.12.0 is
-`assemblash-v1.12.0-windows-x86_64.exe`.
+For example, the Windows file of release 1.13.0 is
+`assemblash-v1.13.0-windows-x86_64.exe`.
 
 | Your computer | Download this file |
 | --- | --- |
@@ -207,7 +207,7 @@ files it installs. The formula is in `packaging/homebrew/`, but the tap is
 Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.12.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.13.0 assemblash-cli
 ```
 
 ### Create and export from the CLI
@@ -467,9 +467,9 @@ The document schema stays at version 1.
 
 Assemblash converts a document to SVG with a pure function. Then `resvg` and
 `tiny-skia` convert the SVG to pixels. Assemblash exports PNG and SVG at the
-output size that you set. It has fourteen deterministic blend modes and a
-non-destructive effect stack: brightness, contrast, saturation, blur, seeded
-grain, and drop shadow. A glow is a drop shadow with no offset.
+output size that you set. It supports fourteen deterministic blend modes and a non-destructive effect stack.
+The effects are brightness, contrast, saturation, blur, seeded grain, drop shadow, hue rotation, and invert.
+A glow is a drop shadow with no offset.
 
 Assemblash loads fonts only from files that you give it or install in the
 font store. It records a hash of each font file. Thus text and exported pixels
@@ -498,7 +498,7 @@ Name a loaded family in the asset, or convert the text to outlines before you
 import the asset. The 1.3.0 warning code `svgAssetTextWithoutFont` still
 exists, but this case now gives the error instead.
 
-### Colour effects in 1.13.0 source builds
+### Colour effects (1.13.0)
 
 Hue rotation and invert use the existing layer effect stack.
 Both effects preserve alpha and run in stored stack order.

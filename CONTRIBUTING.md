@@ -8,7 +8,7 @@ Please also read the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Project status
 
-**Released at 1.12.0.** Released binaries support six targets.
+**Released at 1.13.0.** Released binaries support six targets.
 See [README.md](README.md) for implemented features.
 See [PRD.md](PRD.md) for the product requirements.
 

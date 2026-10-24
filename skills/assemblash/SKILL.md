@@ -121,7 +121,7 @@ kits, customer assets, or downstream workflow data.
 For exact arguments, payloads, and supported properties, use
 `assemblash --help` and the committed schemas. Do not guess.
 
-## Colour effects (1.13.0 source builds)
+## Colour effects (1.13.0 and newer)
 
 Check `list_capabilities`, `GET /api/capabilities`, or `assemblash styles --json` before using these effects.
 

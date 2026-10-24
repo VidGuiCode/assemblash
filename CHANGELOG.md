@@ -10,6 +10,10 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-10-24
+
+**Hue rotation and invert.**
+
 - Add `hueRotate` with finite `degrees` and `invert` with `amount` from zero to one.
 - Use the existing effect stack across CLI, HTTP, MCP, and reference interface controls.
 - Preserve alpha, stack order, undo, protected layers, version checks, and recovery.
