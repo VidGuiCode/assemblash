@@ -62,6 +62,14 @@ subfolders, plus `handoffs/`, `goals/`, `decisions/`, `roadmap/`, `skills/`,
   Do not rewrite verbatim license texts (for example
   `THIRD_PARTY_LICENSES.md`), and leave `CHANGELOG.md` history as-is.
 - **Do not run `git init`, create remotes, commit, or push unless asked.**
+- **Follow the version pipeline for release work.** Use one branch for each
+  version, one pull request to `main`, and one tag after a green merge. Read
+  [skills/version-pipeline/SKILL.md](skills/version-pipeline/SKILL.md) before
+  you start a version or prepare its release documentation. Never push a
+  commit directly to `main`. Never tag a commit that is not green. Name a
+  version branch `release/X.Y.Z-<description>`. Never use a tool or agent
+  name as a branch prefix. Use `chore/<description>`
+  for work that owns no version.
 - **Check changes against the PRD invariants** before proposing them —
   one operation layer, determinism, reversibility, protected layers, the
   filesystem boundary, and offline operation. If a change breaks one, say so
