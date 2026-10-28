@@ -65,7 +65,8 @@ These are not style preferences — they are product requirements:
    adapter. Say which PRD requirement it serves.
 3. **Keep pull requests small and single-purpose.** A PR that changes the
    document schema and adds a renderer feature and adds an MCP tool is three
-   PRs.
+   PRs. A release pull request is the exception: it holds one whole version,
+   including its documentation and version bump.
 
 ## Changes that need extra scrutiny
 
@@ -113,6 +114,56 @@ increments it and must ship with a migration path. This rule applies
 regardless of the release version. If your change touches the document schema,
 say so in the PR and include the migration. See PRD §16.1 for the full policy.
 
+## How a version is released
+
+One version is in work at one time. Each version uses one branch and one pull
+request. The tag comes after the merge.
+
+1. **Branch.** Create `release/X.Y.Z-<description>` from `origin/main`. Do not start from a
+   local `main` that differs from `origin/main`.
+2. **Build.** Add one plan step for each commit group. Each commit builds, and
+   its tests pass.
+3. **Review.** Run the format check, the lint check, the dependency check, and
+   the test suite. Read the full diff.
+4. **Version and documentation.** Bump every version string and update the
+   release documentation in the same commit. The file
+   [skills/version-pipeline/SKILL.md](skills/version-pipeline/SKILL.md) lists
+   the files.
+5. **Pull request.** Open one pull request to `main`. The pull request holds the
+   whole version: code, tests, documentation, and the version bump.
+6. **CI.** The full six-target matrix must pass. One re-run of a failed job is
+   permitted. A second failure is a defect.
+7. **Merge.** Merge with a merge commit. Confirm that `main` is green on the
+   merge commit.
+8. **Tag.** Create an annotated tag `vX.Y.Z` on the merge commit, then push the
+   tag. The Release workflow builds the six targets and attaches the assets.
+9. **Publish.** Create the draft release. Verify the assets and the checksums.
+   Download one archive and run it. Then publish as the latest release.
+
+The Homebrew formula needs the hashes of the published archives. Update it in
+one short pull request after publication.
+
+Do not tag a commit that is not green. Do not describe a release as working
+until its smoke checks ran.
+
+## Branch names
+
+Use one form for work that ships:
+
+```text
+release/X.Y.Z-<description>
+```
+
+- Put the version that will ship the work in the name. A new capability ships
+  in a MINOR version: `release/1.14.0-page-sets`. A defect fix ships in a PATCH
+  version: `release/1.13.1-arm-lock-race`.
+- Use lowercase letters, digits, and hyphens.
+- Open one `release/` branch for each version at a time. That branch is the one
+  that gets the tag.
+- Delete the branch after its tag exists.
+- Never start a branch with a tool or agent name.
+- Use `chore/<description>` for repository work that ships with no version.
+- Use `spike/<description>` for an experiment. Never merge a spike branch.
 ## Commit and PR conventions
 
 - Write commit messages in the imperative mood: "add group transform
