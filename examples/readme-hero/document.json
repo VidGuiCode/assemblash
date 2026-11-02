@@ -1,48 +1,67 @@
 {
   "schemaVersion": 1,
-  "id": "doc_01M23MFW7YFRJ7XQKD3ZB9E6WC",
-  "version": 69,
-  "name": "Assemblash README hero",
+  "id": "doc_01M61KK47YJDXV9PYGHBAYZ5HH",
+  "version": 37,
+  "name": "Assemblash hero",
   "canvas": {
-    "width": 1200.0,
-    "height": 675.0,
-    "background": "#fbfbfa"
+    "width": 2048.0,
+    "height": 1152.0,
+    "background": "#F6F4EF"
   },
   "assets": [
     {
-      "id": "asset_01M23MFYMQ6XR6RJ0VGFEFF0Z8",
-      "path": "455af832c44e7ab68ca40448a846c998bc6164fcef97a7aacc19c2f89ea6fda9.svg",
-      "hash": "sha256:455af832c44e7ab68ca40448a846c998bc6164fcef97a7aacc19c2f89ea6fda9",
+      "id": "asset_01M61KK4XMBQ6XAAG3VHTV3VDM",
+      "path": "e47719ba7500b36c2c9b9d746c7b9edb1f0f2c4d1cde77e6a572722791004817.svg",
+      "hash": "sha256:e47719ba7500b36c2c9b9d746c7b9edb1f0f2c4d1cde77e6a572722791004817",
       "mediaType": "image/svg+xml"
     },
     {
-      "id": "asset_01M23MFZ7MGWDCDYVHPP08MGQV",
-      "path": "f751a897687725c4e03e2212c9179277ad3058cdea459151ab9c555bd1ddf924.svg",
-      "hash": "sha256:f751a897687725c4e03e2212c9179277ad3058cdea459151ab9c555bd1ddf924",
-      "mediaType": "image/svg+xml"
-    },
-    {
-      "id": "asset_01M23MFZVXV6F9K9MDG8FKWFCC",
-      "path": "e38ecb91c447adfc57808351d500672e31a8b63ef2cb42036c1dccb7cf540040.svg",
-      "hash": "sha256:e38ecb91c447adfc57808351d500672e31a8b63ef2cb42036c1dccb7cf540040",
-      "mediaType": "image/svg+xml"
-    },
-    {
-      "id": "asset_01M23MG044V85KP3N49907K4E3",
-      "path": "6db6a89bb6f734ea1608343fb6465110966797a7617fa055062598331d30a018.svg",
-      "hash": "sha256:6db6a89bb6f734ea1608343fb6465110966797a7617fa055062598331d30a018",
+      "id": "asset_01M61KK5004NN79S5H26AA2YBB",
+      "path": "7a1f2020d8bc878b939caa054fa928e1ae0ae17b89cc8f58571f6125f7657762.svg",
+      "hash": "sha256:7a1f2020d8bc878b939caa054fa928e1ae0ae17b89cc8f58571f6125f7657762",
       "mediaType": "image/svg+xml"
     }
   ],
   "layers": [
     {
-      "id": "layer_01M23MKE8SP2KQMDGKR51M8HJQ",
-      "name": "Agents",
+      "id": "layer_01M61KK48SR70BFG5ECWS13REA",
+      "name": "Paper texture",
       "transform": {
-        "x": 232.0,
-        "y": 232.0,
-        "width": 186.62081050606815,
-        "height": 226.0,
+        "x": 0.0,
+        "y": 0.0,
+        "width": 2048.0,
+        "height": 1152.0,
+        "rotation": 0.0
+      },
+      "opacity": 0.8,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [
+        {
+          "type": "grain",
+          "amount": 1.0,
+          "seed": 7,
+          "scale": 0.8
+        }
+      ],
+      "type": "shape",
+      "shape": {
+        "kind": "rect",
+        "cornerRadius": 0.0
+      },
+      "fill": "#F6F4EF"
+    },
+    {
+      "id": "layer_01M61KKWGWTPJXNX2JVFCB1PA5",
+      "name": "Hero copy",
+      "transform": {
+        "x": 116.0,
+        "y": 154.0,
+        "width": 1006.0,
+        "height": 862.0,
         "rotation": 0.0
       },
       "opacity": 1.0,
@@ -55,13 +74,13 @@
       "type": "group",
       "children": [
         {
-          "id": "layer_01M23MKE7X6CWG58HTX6JVG9G0",
-          "name": "CLI",
+          "id": "layer_01M61KK4ADQYNGKPJJEG0YJSW5",
+          "name": "Category label",
           "transform": {
-            "x": 0.0,
+            "x": 6.0,
             "y": 0.0,
-            "width": 186.62081050606815,
-            "height": 94.0,
+            "width": 900.0,
+            "height": 60.0,
             "rotation": 0.0
           },
           "opacity": 1.0,
@@ -71,126 +90,24 @@
           "readOnly": false,
           "blendMode": "normal",
           "effects": [],
-          "type": "group",
-          "children": [
-            {
-              "id": "layer_01M23MFWAYC81SXS7VX0CNZKFN",
-              "name": "Connector CLI",
-              "transform": {
-                "x": 77.05000000000001,
-                "y": 48.0,
-                "width": 111.9,
-                "height": 4.0,
-                "rotation": 18.76
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "line"
-              },
-              "stroke": {
-                "color": "#1a1a1a",
-                "width": 1.5
-              }
-            },
-            {
-              "id": "layer_01M23MFYAZ8DWEHG8TPQ7HNY5W",
-              "name": "Ring CLI",
-              "transform": {
-                "x": 16.0,
-                "y": 0.0,
-                "width": 64.0,
-                "height": 64.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [
-                {
-                  "type": "dropShadow",
-                  "dx": 0.0,
-                  "dy": 10.0,
-                  "blur": 14.0,
-                  "color": "#0000003d"
-                }
-              ],
-              "type": "shape",
-              "shape": {
-                "kind": "ellipse"
-              },
-              "fill": "#ffffff",
-              "stroke": {
-                "color": "#1a1a1a",
-                "width": 1.5
-              }
-            },
-            {
-              "id": "layer_01M23MFYMVCSE1QXVQZSNCYW79",
-              "name": "Icon CLI",
-              "transform": {
-                "x": 34.0,
-                "y": 18.0,
-                "width": 28.0,
-                "height": 28.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "svg",
-              "asset": "asset_01M23MFYMQ6XR6RJ0VGFEFF0Z8",
-              "fit": "contain"
-            },
-            {
-              "id": "layer_01M23MFYS36SQ4JFM9354AMV2B",
-              "name": "Label CLI",
-              "transform": {
-                "x": 0.0,
-                "y": 74.0,
-                "width": 96.0,
-                "height": 20.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "text",
-              "text": "CLI",
-              "fontFamily": "Noto Sans",
-              "fontSize": 14.0,
-              "color": "#5c5c5c",
-              "align": "center",
-              "lineHeight": 1.2,
-              "runs": []
-            }
-          ]
+          "type": "text",
+          "text": "STRUCTURED VISUAL DOCUMENTS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 24.0,
+          "color": "#F13223",
+          "align": "left",
+          "lineHeight": 1.2,
+          "letterSpacing": 5.0,
+          "runs": []
         },
         {
-          "id": "layer_01M23MKE89MWD8M7CDP2BT7SE1",
-          "name": "MCP",
+          "id": "layer_01M61KK4B7DSAGQW66TWEC4W8V",
+          "name": "Main headline",
           "transform": {
             "x": 0.0,
-            "y": 126.11246727998838,
-            "width": 186.62081050606815,
-            "height": 99.88753272001162,
+            "y": 71.0,
+            "width": 1000.0,
+            "height": 480.0,
             "rotation": 0.0
           },
           "opacity": 1.0,
@@ -200,128 +117,79 @@
           "readOnly": false,
           "blendMode": "normal",
           "effects": [],
-          "type": "group",
-          "children": [
-            {
-              "id": "layer_01M23MFWFH3A6D6VPJ3XYJ282D",
-              "name": "Connector MCP",
-              "transform": {
-                "x": 77.05000000000001,
-                "y": 17.88753272001162,
-                "width": 111.9,
-                "height": 4.0,
-                "rotation": -18.76
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "line"
-              },
-              "stroke": {
-                "color": "#1a1a1a",
-                "width": 1.5
-              }
-            },
-            {
-              "id": "layer_01M23MFYZ3VSAH7WK1XDK2105Q",
-              "name": "Ring MCP",
-              "transform": {
-                "x": 16.0,
-                "y": 5.88753272001162,
-                "width": 64.0,
-                "height": 64.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [
-                {
-                  "type": "dropShadow",
-                  "dx": 0.0,
-                  "dy": 10.0,
-                  "blur": 14.0,
-                  "color": "#0000003d"
-                }
-              ],
-              "type": "shape",
-              "shape": {
-                "kind": "ellipse"
-              },
-              "fill": "#ffffff",
-              "stroke": {
-                "color": "#1a1a1a",
-                "width": 1.5
-              }
-            },
-            {
-              "id": "layer_01M23MFZ7S5VW863DJ1C4RV732",
-              "name": "Icon MCP",
-              "transform": {
-                "x": 34.0,
-                "y": 23.88753272001162,
-                "width": 28.0,
-                "height": 28.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "svg",
-              "asset": "asset_01M23MFZ7MGWDCDYVHPP08MGQV",
-              "fit": "contain"
-            },
-            {
-              "id": "layer_01M23MFZC6T09CR4PNVG87S9YQ",
-              "name": "Label MCP",
-              "transform": {
-                "x": 0.0,
-                "y": 79.88753272001162,
-                "width": 96.0,
-                "height": 20.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "text",
-              "text": "MCP",
-              "fontFamily": "Noto Sans",
-              "fontSize": 14.0,
-              "color": "#5c5c5c",
-              "align": "center",
-              "lineHeight": 1.2,
-              "runs": []
-            }
-          ]
+          "type": "text",
+          "text": "Make it yours.\nKeep control.",
+          "fontFamily": "Montserrat",
+          "fontSize": 132.0,
+          "color": "#1D1D1D",
+          "align": "left",
+          "lineHeight": 0.985,
+          "fontWeight": 800,
+          "runs": []
+        },
+        {
+          "id": "layer_01M61KK4CPVTRMY85V4RAYCDWX",
+          "name": "Description",
+          "transform": {
+            "x": 6.0,
+            "y": 484.0,
+            "width": 1000.0,
+            "height": 230.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "A poster, a diagram, your next idea.\nMove things around. Change your mind.\nEvery part stays editable.",
+          "fontFamily": "Inter",
+          "fontSize": 40.0,
+          "color": "#706C66",
+          "align": "left",
+          "lineHeight": 1.425,
+          "runs": []
+        },
+        {
+          "id": "layer_01M61KK4E5ZJHJ5C2F3EYT5MRY",
+          "name": "Technical footer",
+          "transform": {
+            "x": 6.0,
+            "y": 802.0,
+            "width": 900.0,
+            "height": 60.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "EDITOR · CLI · HTTP · MCP",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 25.0,
+          "color": "#706C66",
+          "align": "left",
+          "lineHeight": 1.2,
+          "letterSpacing": 4.0,
+          "runs": []
         }
       ]
     },
     {
-      "id": "layer_01M23MKE97ETFFT2Z3W4H1567H",
-      "name": "Canvas",
+      "id": "layer_01M61KKWJA1EDB7VYBG3GGQTX8",
+      "name": "Editable poster",
       "transform": {
-        "x": 818.0,
-        "y": 298.0,
-        "width": 150.0,
-        "height": 94.0,
+        "x": 1216.0,
+        "y": 128.0,
+        "width": 688.0,
+        "height": 896.0,
         "rotation": 0.0
       },
       "opacity": 1.0,
@@ -334,13 +202,148 @@
       "type": "group",
       "children": [
         {
-          "id": "layer_01M23MFWMF3KY3P2W5694ZS0CX",
-          "name": "Connector Canvas",
+          "id": "layer_01M61KK4FKV013TT4FMGAEPR3A",
+          "name": "Poster background",
           "transform": {
             "x": 0.0,
-            "y": 30.0,
-            "width": 70.0,
-            "height": 4.0,
+            "y": 0.0,
+            "width": 688.0,
+            "height": 896.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [
+            {
+              "type": "dropShadow",
+              "dx": 0.0,
+              "dy": 22.0,
+              "blur": 56.0,
+              "color": "#1D1D1F14"
+            }
+          ],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 20.0
+          },
+          "fill": "#1F1F1F"
+        },
+        {
+          "id": "layer_01M61KK4HEAY6JYW6BDJHGQCXD",
+          "name": "Poster top label",
+          "transform": {
+            "x": 60.0,
+            "y": 54.0,
+            "width": 600.0,
+            "height": 56.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "POSTER / IN PROGRESS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 24.0,
+          "color": "#A8A29A",
+          "align": "left",
+          "lineHeight": 1.2,
+          "letterSpacing": 3.5,
+          "runs": []
+        },
+        {
+          "id": "layer_01M61KK4J339MSAD96BKEE3NHD",
+          "name": "Poster headline",
+          "transform": {
+            "x": 60.0,
+            "y": 123.0,
+            "width": 568.0,
+            "height": 280.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "Layers,\nnot flat.",
+          "fontFamily": "Montserrat",
+          "fontSize": 108.0,
+          "color": "#F6F4EF",
+          "align": "left",
+          "lineHeight": 1.0,
+          "fontWeight": 800,
+          "runs": []
+        },
+        {
+          "id": "layer_01M61KK4KE3FFTSR3H6WQSAN0J",
+          "name": "Poster supporting text",
+          "transform": {
+            "x": 60.0,
+            "y": 439.0,
+            "width": 568.0,
+            "height": 140.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "Every element is a layer. Move it, restyle\nit, undo it.",
+          "fontFamily": "Inter",
+          "fontSize": 28.0,
+          "color": "#CFCAC2",
+          "align": "left",
+          "lineHeight": 1.429,
+          "runs": []
+        },
+        {
+          "id": "layer_01M61KK4MQBQFZFB5D5NV6Y2EQ",
+          "name": "Red circle",
+          "transform": {
+            "x": 72.0,
+            "y": 596.0,
+            "width": 144.0,
+            "height": 144.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "ellipse"
+          },
+          "fill": "#F13223"
+        },
+        {
+          "id": "layer_01M61KK4NCQWTJS0AVNPY160C7",
+          "name": "Poster divider",
+          "transform": {
+            "x": 60.0,
+            "y": 814.0,
+            "width": 580.0,
+            "height": 1.0,
             "rotation": 0.0
           },
           "opacity": 1.0,
@@ -355,74 +358,18 @@
             "kind": "line"
           },
           "stroke": {
-            "color": "#1a1a1a",
-            "width": 1.5
+            "color": "#4C4842",
+            "width": 1.0
           }
         },
         {
-          "id": "layer_01M23MFZK595F3V3QGNGFRKEC9",
-          "name": "Ring Canvas",
+          "id": "layer_01M61KK4P2NW5HAV4K7C16C0NH",
+          "name": "Poster output label",
           "transform": {
-            "x": 70.0,
-            "y": 0.0,
-            "width": 64.0,
-            "height": 64.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [
-            {
-              "type": "dropShadow",
-              "dx": 0.0,
-              "dy": 10.0,
-              "blur": 14.0,
-              "color": "#0000003d"
-            }
-          ],
-          "type": "shape",
-          "shape": {
-            "kind": "ellipse"
-          },
-          "fill": "#ffffff",
-          "stroke": {
-            "color": "#1a1a1a",
-            "width": 1.5
-          }
-        },
-        {
-          "id": "layer_01M23MFZW200H6CPVNPH29WM0Z",
-          "name": "Icon Canvas",
-          "transform": {
-            "x": 88.0,
-            "y": 18.0,
-            "width": 28.0,
-            "height": 28.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [],
-          "type": "svg",
-          "asset": "asset_01M23MFZVXV6F9K9MDG8FKWFCC",
-          "fit": "contain"
-        },
-        {
-          "id": "layer_01M23MFZZP5Z3101S3TYM7MR1C",
-          "name": "Label Canvas",
-          "transform": {
-            "x": 54.0,
-            "y": 74.0,
-            "width": 96.0,
-            "height": 20.0,
+            "x": 60.0,
+            "y": 830.0,
+            "width": 300.0,
+            "height": 56.0,
             "rotation": 0.0
           },
           "opacity": 1.0,
@@ -433,369 +380,52 @@
           "blendMode": "normal",
           "effects": [],
           "type": "text",
-          "text": "Canvas",
-          "fontFamily": "Noto Sans",
-          "fontSize": 14.0,
-          "color": "#5c5c5c",
-          "align": "center",
-          "lineHeight": 1.2,
-          "runs": []
-        }
-      ]
-    },
-    {
-      "id": "layer_01M23MKE7DRZM66BKCCA52CPBZ",
-      "name": "Document",
-      "transform": {
-        "x": 418.0,
-        "y": 166.0,
-        "width": 424.0,
-        "height": 304.0,
-        "rotation": 0.0
-      },
-      "opacity": 1.0,
-      "visible": true,
-      "locked": false,
-      "protected": false,
-      "readOnly": false,
-      "blendMode": "normal",
-      "effects": [],
-      "type": "group",
-      "children": [
-        {
-          "id": "layer_01M23MFWS947V4XM1D381CGXFN",
-          "name": "Sheet, two edits ago",
-          "transform": {
-            "x": 24.0,
-            "y": 0.0,
-            "width": 400.0,
-            "height": 280.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [],
-          "type": "shape",
-          "shape": {
-            "kind": "rect",
-            "cornerRadius": 18.0
-          },
-          "fill": "#ffffff",
-          "stroke": {
-            "color": "#1a1a1a40",
-            "width": 1.5
-          }
-        },
-        {
-          "id": "layer_01M23MFWYN0S3N0GW2Q0WBRJSE",
-          "name": "Sheet, one edit ago",
-          "transform": {
-            "x": 12.0,
-            "y": 12.0,
-            "width": 400.0,
-            "height": 280.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [],
-          "type": "shape",
-          "shape": {
-            "kind": "rect",
-            "cornerRadius": 18.0
-          },
-          "fill": "#ffffff",
-          "stroke": {
-            "color": "#1a1a1a80",
-            "width": 1.5
-          }
-        },
-        {
-          "id": "layer_01M23MFX4Z0PE8ZKP2667RPR95",
-          "name": "Sheet, current",
-          "transform": {
-            "x": 0.0,
-            "y": 24.0,
-            "width": 400.0,
-            "height": 280.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [
-            {
-              "type": "dropShadow",
-              "dx": 0.0,
-              "dy": 22.0,
-              "blur": 26.0,
-              "color": "#0000004a"
-            }
-          ],
-          "type": "shape",
-          "shape": {
-            "kind": "rect",
-            "cornerRadius": 18.0
-          },
-          "fill": "#ffffff",
-          "stroke": {
-            "color": "#1a1a1a",
-            "width": 1.5
-          }
-        },
-        {
-          "id": "layer_01M23MKE6XX43E3D32MAM6N5FQ",
-          "name": "Design",
-          "transform": {
-            "x": 32.0,
-            "y": 56.0,
-            "width": 336.0,
-            "height": 184.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [],
-          "type": "group",
-          "children": [
-            {
-              "id": "layer_01M23MFXCYD58DHA60Q63YYMWS",
-              "name": "Block",
-              "transform": {
-                "x": 0.0,
-                "y": 0.0,
-                "width": 150.0,
-                "height": 100.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "rect",
-                "cornerRadius": 12.0
-              },
-              "fill": "#EF3325"
-            },
-            {
-              "id": "layer_01M23MFXJAG22NY09BCH6N83QD",
-              "name": "Dot",
-              "transform": {
-                "x": 178.0,
-                "y": 0.0,
-                "width": 76.0,
-                "height": 76.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "ellipse"
-              },
-              "fill": "#1a1a1a"
-            },
-            {
-              "id": "layer_01M23MFXPMYT51X6W0Q0S7PF7B",
-              "name": "Bar",
-              "transform": {
-                "x": 276.0,
-                "y": 0.0,
-                "width": 60.0,
-                "height": 100.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "rect",
-                "cornerRadius": 12.0
-              },
-              "fill": "#EF332559"
-            },
-            {
-              "id": "layer_01M23MFXVM7HJPKZF6WHNDN8K7",
-              "name": "Line 1",
-              "transform": {
-                "x": 0.0,
-                "y": 130.0,
-                "width": 220.0,
-                "height": 10.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "rect",
-                "cornerRadius": 5.0
-              },
-              "fill": "#dcdcdc"
-            },
-            {
-              "id": "layer_01M23MFXZHJ0TH2971C8KJZDGR",
-              "name": "Line 2",
-              "transform": {
-                "x": 0.0,
-                "y": 152.0,
-                "width": 160.0,
-                "height": 10.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "rect",
-                "cornerRadius": 5.0
-              },
-              "fill": "#dcdcdc"
-            },
-            {
-              "id": "layer_01M23MFY3KNP1RW040N0CRTTRT",
-              "name": "Line 3",
-              "transform": {
-                "x": 0.0,
-                "y": 174.0,
-                "width": 190.0,
-                "height": 10.0,
-                "rotation": 0.0
-              },
-              "opacity": 1.0,
-              "visible": true,
-              "locked": false,
-              "protected": false,
-              "readOnly": false,
-              "blendMode": "normal",
-              "effects": [],
-              "type": "shape",
-              "shape": {
-                "kind": "rect",
-                "cornerRadius": 5.0
-              },
-              "fill": "#dcdcdc"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "layer_01M23MKE9P2KK6RP23MRSTH33S",
-      "name": "Brand",
-      "transform": {
-        "x": 498.64,
-        "y": 84.0,
-        "width": 202.72,
-        "height": 42.0,
-        "rotation": 0.0
-      },
-      "opacity": 1.0,
-      "visible": true,
-      "locked": false,
-      "protected": false,
-      "readOnly": false,
-      "blendMode": "normal",
-      "effects": [],
-      "type": "group",
-      "children": [
-        {
-          "id": "layer_01M23MG04993X6NYWYY6KPT9WA",
-          "name": "Assemblash mark",
-          "transform": {
-            "x": 0.0,
-            "y": 0.0,
-            "width": 42.0,
-            "height": 42.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [],
-          "type": "svg",
-          "asset": "asset_01M23MG044V85KP3N49907K4E3",
-          "fit": "contain"
-        },
-        {
-          "id": "layer_01M23MG089T625MNC35E30BP4F",
-          "name": "Wordmark",
-          "transform": {
-            "x": 54.0,
-            "y": 5.0,
-            "width": 150.72,
-            "height": 36.0,
-            "rotation": 0.0
-          },
-          "opacity": 1.0,
-          "visible": true,
-          "locked": false,
-          "protected": false,
-          "readOnly": false,
-          "blendMode": "normal",
-          "effects": [],
-          "type": "text",
-          "text": "Assemblash",
-          "fontFamily": "Noto Sans Bold",
-          "fontSize": 25.0,
-          "color": "#1a1a1a",
+          "text": "PNG / SVG",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 23.0,
+          "color": "#A8A29A",
           "align": "left",
           "lineHeight": 1.2,
+          "letterSpacing": 2.5,
+          "runs": []
+        },
+        {
+          "id": "layer_01M61KK4PQJAHJG58EQTN8QXMV",
+          "name": "Poster signature",
+          "transform": {
+            "x": 340.0,
+            "y": 830.0,
+            "width": 300.0,
+            "height": 56.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "ASSEMBLASH",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 23.0,
+          "color": "#A8A29A",
+          "align": "right",
+          "lineHeight": 1.2,
+          "letterSpacing": 2.5,
           "runs": []
         }
       ]
     },
     {
-      "id": "layer_01M23MG0D2C1X692E4238V1RGF",
-      "name": "Headline",
+      "id": "layer_01M61KKWKEPAAW8NTJ9QJ7VY6Z",
+      "name": "Circle selection",
       "transform": {
-        "x": 0.0,
-        "y": 556.0,
-        "width": 1200.0,
-        "height": 60.0,
+        "x": 1268.0,
+        "y": 704.0,
+        "width": 184.0,
+        "height": 184.0,
         "rotation": 0.0
       },
       "opacity": 1.0,
@@ -805,14 +435,350 @@
       "readOnly": false,
       "blendMode": "normal",
       "effects": [],
-      "type": "text",
-      "text": "Visuals that stay editable.",
-      "fontFamily": "Noto Sans Bold",
-      "fontSize": 42.0,
-      "color": "#1a1a1a",
-      "align": "center",
-      "lineHeight": 1.2,
-      "runs": []
+      "type": "group",
+      "children": [
+        {
+          "id": "layer_01M61KK4QJ0JZZQEZW793V6JZ0",
+          "name": "Selection bounds",
+          "transform": {
+            "x": 8.0,
+            "y": 8.0,
+            "width": 168.0,
+            "height": 168.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4R9WPHW34E1F37989XS",
+          "name": "Selection handle 1",
+          "transform": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4RZHDP949WR5R3560ES",
+          "name": "Selection handle 2",
+          "transform": {
+            "x": 84.0,
+            "y": 0.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4SM4S9EBNETN9KNW2HH",
+          "name": "Selection handle 3",
+          "transform": {
+            "x": 168.0,
+            "y": 0.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4T8QBHZPS6F4DERJP9Z",
+          "name": "Selection handle 4",
+          "transform": {
+            "x": 0.0,
+            "y": 84.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4TXNAH8EBTAMYJTNADM",
+          "name": "Selection handle 5",
+          "transform": {
+            "x": 168.0,
+            "y": 84.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4VG35EZ51C1AY7RK3TC",
+          "name": "Selection handle 6",
+          "transform": {
+            "x": 0.0,
+            "y": 168.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4W4VDHYVX2MF7PBFP8A",
+          "name": "Selection handle 7",
+          "transform": {
+            "x": 84.0,
+            "y": 168.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4WV85321JK8HVRKPT53",
+          "name": "Selection handle 8",
+          "transform": {
+            "x": 168.0,
+            "y": 168.0,
+            "width": 16.0,
+            "height": 16.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "shape",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0.0
+          },
+          "fill": "#FFFFFF",
+          "stroke": {
+            "color": "#7E9BC4",
+            "width": 1.5
+          }
+        },
+        {
+          "id": "layer_01M61KK4XT2F9TJPX8RKBTC1BA",
+          "name": "Selection cursor",
+          "transform": {
+            "x": 124.0,
+            "y": 130.0,
+            "width": 52.0,
+            "height": 52.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "svg",
+          "asset": "asset_01M61KK4XMBQ6XAAG3VHTV3VDM",
+          "fit": "contain"
+        }
+      ]
+    },
+    {
+      "id": "layer_01M61KKWMP1B19FHY1BAN01XB2",
+      "name": "Handwritten note",
+      "transform": {
+        "x": 953.3951611733887,
+        "y": 716.7947670994259,
+        "width": 273.20967765322257,
+        "height": 193.20523290057406,
+        "rotation": 0.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "protected": false,
+      "readOnly": false,
+      "blendMode": "normal",
+      "effects": [],
+      "type": "group",
+      "children": [
+        {
+          "id": "layer_01M61KK4YKE4N13FJFEXM8XK95",
+          "name": "Note text",
+          "transform": {
+            "x": 6.604838826611285,
+            "y": 13.20523290057406,
+            "width": 260.0,
+            "height": 140.0,
+            "rotation": -6.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "text",
+          "text": "a little to\nthe left",
+          "fontFamily": "Caveat",
+          "fontSize": 42.0,
+          "color": "#706C66",
+          "align": "left",
+          "lineHeight": 1.1,
+          "fontWeight": 700,
+          "runs": []
+        },
+        {
+          "id": "layer_01M61KK508GN3YN86HSWHZ5E8R",
+          "name": "Note arrow",
+          "transform": {
+            "x": 76.60483882661129,
+            "y": 53.20523290057406,
+            "width": 180.0,
+            "height": 140.0,
+            "rotation": 0.0
+          },
+          "opacity": 1.0,
+          "visible": true,
+          "locked": false,
+          "protected": false,
+          "readOnly": false,
+          "blendMode": "normal",
+          "effects": [],
+          "type": "svg",
+          "asset": "asset_01M61KK5004NN79S5H26AA2YBB",
+          "fit": "contain"
+        }
+      ]
     }
   ]
 }

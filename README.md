@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/assemblash-mark.svg" width="112" alt="Assemblash logo">
+  <img src="assets/assemblash-mark.svg" width="96" alt="Assemblash logo">
 </p>
 
 <h1 align="center">Assemblash</h1>
 
 <p align="center">
-  A local-first visual document engine for people, applications, scripts, and AI agents.
+  A structured visual document engine for people, scripts, and AI agents.
 </p>
 
 <p align="center">
@@ -15,25 +15,58 @@
   <img alt="Windows, Linux, and macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-2f3136">
 </p>
 
+<p align="center">
+  <img src="assets/hero.png" width="1000" alt="Warm paper split into two columns. On the left: the red mono line STRUCTURED VISUAL DOCUMENTS, the headline Make it yours. Keep control., three lines of grey body text, and the line EDITOR . CLI . HTTP . MCP. On the right: a dark poster reading Layers, not flat. in white display type, with small mono captions, a red circle inside a blue selection outline, and a handwritten note that says a little to the left with a small arrow pointing at the circle.">
+</p>
+
+<p align="center"><sub>A real document, drawn by the engine. <a href="examples/readme-hero">Open the editable project.</a></sub></p>
+
+## What Assemblash is
+
 Assemblash makes visual documents: posters, social images, diagrams, and
 templates. You build a document from text, shapes, images, and SVG files. The
-document stays editable: every layer stays a layer, every change can be
-undone, and the export is exactly what you see.
+document stays editable. Every layer stays a layer, every change is recorded,
+and the export has the same content as the editor.
 
-Assemblash is one program. It contains a browser-based editor, a
-command-line interface, a local HTTP API, and an MCP server for AI agents.
-You and an AI agent can work on the same document at the same time. No cloud
-service and no account are necessary.
+One program contains four interfaces:
+
+- the reference editor for people;
+- a command line for scripts;
+- a local HTTP API for applications;
+- an MCP server for AI agents.
+
+A person and an agent can change the same open document at the same time. There
+is no cloud service and no account. Assemblash contains no AI model; the agent
+brings its own.
+
+The reference editor is available in English, French, and German. To set its
+appearance, open **Settings** → **Application** and select Light, Dark, or
+System. The browser stores this choice locally. It does not change document
+colours.
 
 **Current release: 1.13.0.** The document schema and the operation API are
 stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.13.0)
 or the [changelog](CHANGELOG.md).
 
+## What one document can hold
+
 <p align="center">
-  <img src="assets/assemblash-example.png" width="960" alt="A near-white diagram in Assemblash red and black: a white outlined document sheet with a simple layout on it and two earlier sheets behind it; on the left, terminal and node-graph icons labelled CLI and MCP connect to it, on the right a cursor icon labelled Canvas; the Assemblash mark and wordmark centred above, and one centred line below, Visuals that stay editable">
+  <img src="assets/capabilities.png" width="1000" alt="A capability sheet titled Six things one document can do, above six white tiles labelled TYPE, SHAPE, PAINT, EFFECT, MASK, and STRUCTURE. The tiles show a justified paragraph with a red run, geometric shapes and a dashed arrow, gradients and blended circles, four effect swatches, two masked images, and an indented layer tree.">
 </p>
 
-<p align="center"><sub>Created as a structured Assemblash document and exported by the deterministic renderer. <a href="examples/readme-hero">Inspect the editable project.</a></sub></p>
+<p align="center"><sub>Six capability tiles, all in one editable project. <a href="examples/readme-capabilities">Inspect it.</a></sub></p>
+
+- **Layers.** Text, raster image, SVG, rectangle, ellipse, line, path, and
+  nested groups.
+- **Text.** Styled runs, justified alignment, paragraph spacing, vertical
+  alignment, and exact font files.
+- **Paint.** Solid colours, linear and radial gradients, fourteen blend modes,
+  and a non-destructive effect stack.
+- **Geometry.** Rounded corners, dashes, arrow and circle markers, clip, crop,
+  flip, rotation, and opacity.
+- **Templates.** Named slots, presets, and deterministic variant batches.
+- **Record.** Undo, redo, history, version checks, dry runs, and protected
+  layers.
 
 ## Quick start
 
@@ -42,10 +75,8 @@ You do not need a terminal for these steps.
 ### 1. Download Assemblash
 
 Go to [GitHub Releases](https://github.com/VidGuiCode/assemblash/releases/latest)
-and download the file for your computer:
-
-For example, the Windows file of release 1.13.0 is
-`assemblash-v1.13.0-windows-x86_64.exe`.
+and download the file for your computer. The file is the complete program. You
+do not install anything else.
 
 | Your computer | Download this file |
 | --- | --- |
@@ -54,7 +85,8 @@ For example, the Windows file of release 1.13.0 is
 | Mac with an Intel processor | `assemblash-<version>-macos-x86_64.tar.gz` |
 | Debian or Ubuntu | `assemblash_<version>_amd64.deb` (on ARM: `arm64`) |
 
-The file is the complete program. You do not install anything else.
+For example, the Windows file of release 1.13.0 is
+`assemblash-v1.13.0-windows-x86_64.exe`.
 
 ### 2. Start Assemblash
 
@@ -71,48 +103,50 @@ The file is the complete program. You do not install anything else.
   3. Find the message about `assemblash` and click **Open Anyway**.
   4. Double-click `assemblash` again and confirm.
 
+  As an alternative, remove the quarantine flag in a terminal:
+  `xattr -d com.apple.quarantine ./assemblash`. A Homebrew tap would remove
+  this step, but the tap is not published yet. The formula is in
+  `packaging/homebrew/`.
+
 The editor opens in your web browser. A small text window also opens (a
 console window on Windows, a Terminal window on a Mac). Keep that window open
-while you use Assemblash.
-
-If you start Assemblash a second time, it opens the editor that already runs.
+while you use Assemblash. If you start Assemblash a second time, it opens the
+editor that already runs.
 
 ### 3. Make your first document
 
 1. Click **Create a project**. Type a name, select a size, and click
    **Create project**.
-2. Use the tools on the left side to add content: **Text**, **Shapes**,
-   **Uploads** (images), and **Vector** (SVG files).
-3. To add text, you need a font. The first time, open **Fonts** and click the
-   button that installs the default fonts (Noto Sans, Noto Serif, and Noto
-   Sans Mono). This is the only step that downloads something.
+2. Add content with the tools on the left: **Text**, **Shapes**, **Uploads**
+   (images), and **Vector** (SVG files).
+3. The first time, open **Fonts** and install the default pack (Noto Sans,
+   Noto Serif, and Noto Sans Mono). This is the only step in this guide that
+   downloads something.
 4. Click a layer on the canvas to select it. Drag it to move it. Change its
    properties in the panel. Use **Undo** and **Redo** at the top.
 5. Click **Export** and select PNG or SVG.
 
 Assemblash saves every change immediately. There is no **Save** button.
 
-### 4. Let an AI agent work with you (1.9.0)
+### 4. Let an AI agent work with you
 
 An AI agent, for example Codex or Claude, can work on your projects while the
-editor is open. You see the agent's changes in the editor as they happen.
+editor is open. You see the agent's changes as they happen.
 
-1. Start Assemblash (step 2).
+1. Start Assemblash.
 2. In the editor, click the robot button at the top: **Connect an AI agent**.
    This window also opens by itself the first time you start Assemblash.
 3. Click **Copy** on the configuration for your AI client.
-4. Paste it into the MCP settings of your AI client:
-   - **Codex:** add it to `~/.codex/config.toml`, or use **Settings** →
-     **MCP servers** → **Add server** → **STDIO**.
-   - **Other clients:** add it to the client's MCP configuration. Use the
-     first block if the client starts a command, or the URL if the client
-     asks for a URL.
-5. Restart the AI client. Then ask the agent, for example: "List my
-   Assemblash projects."
+4. Paste it into the MCP settings of your AI client, then restart the client.
+   For Codex, add it to `~/.codex/config.toml`, or use **Settings** →
+   **MCP servers** → **Add server** → **STDIO**. For other clients, use the
+   first block when the client starts a command, or the URL when the client
+   asks for a URL.
+5. Ask the agent, for example: "List my Assemblash projects."
 
-The copied configuration already contains the full path of the program and of
-your workspace. Do not replace the path with only `assemblash`: a downloaded
-program is not on your `PATH`, so the client cannot find it by name.
+The copied configuration contains the full path of the program and of your
+workspace. Do not replace the path with only `assemblash`. A downloaded program
+is not on your `PATH`, so the client cannot find it by name.
 
 Keep the editor open while the agent works. If the agent starts before the
 editor, it works alone. When you start the editor, the agent moves to it
@@ -121,8 +155,8 @@ automatically.
 ### 5. Stop Assemblash
 
 Click the power button at the top right of the editor: **Stop Assemblash**.
-Your work is already saved. If you started Assemblash from a terminal, you
-can also press Ctrl+C there.
+Your work is already saved. If you started Assemblash from a terminal, you can
+also press Ctrl+C there.
 
 ### Where your projects are
 
@@ -135,85 +169,49 @@ Assemblash keeps your projects, fonts, and settings in one folder, the
 | Mac | `~/Library/Application Support/Assemblash` |
 | Linux | `~/.local/share/assemblash` |
 
-Each project is a folder in `projects/`. You can copy a project folder to
-back it up or to give it to another person.
+Each project is a folder in `projects/`. You can copy a project folder to back
+it up or to give it to another person.
 
 ### If something does not work
 
 | Problem | What to do |
 | --- | --- |
 | macOS says the program "cannot be opened" | Do the **Open Anyway** steps in step 2. |
-| The browser does not open | Find the address in the small text window, and open it in your browser. Usually it is `http://127.0.0.1:8787`. |
+| The browser does not open | Open `http://127.0.0.1:8787` in your browser. The small text window shows the address when it is different. |
 | The AI client cannot start Assemblash | Use the configuration from **Connect an AI agent**. It contains the full path of the program. |
 | The agent reports `projectLocked` | Another Assemblash process has the project open. Connect the agent to the running editor (step 4). Never delete a `.assemblash-lock` file. |
 | The agent reports `versionConflict` | This is normal when you and the agent edit the same project. The agent reads the document again and retries. |
 | An error says that a font is missing | Install the font in **Fonts** (step 3). Assemblash never uses a different font without telling you. |
 
-## Why Assemblash?
+## Four ways in
 
-Usually you must choose. A powerful editor is difficult to automate. A code or
-image-generation pipeline gives a flat image, and a flat image is difficult to
-change. Assemblash gives you structure and automation together.
+<p align="center">
+  <img src="assets/pipeline.png" width="1000" alt="Four chips labelled EDITOR, CLI, HTTP, and MCP join into one red-outlined card labelled OPERATIONS. Arrows lead from it to a card labelled DOCUMENT, then to a card labelled RENDERER, then to two output chips labelled PNG and SVG.">
+</p>
 
-- **Structured, not flattened.** Documents keep their layers, groups, assets,
-  metadata, templates, and named slots.
-- **Local by default.** Create, edit, render, and export operations work
-  offline. No account or AI provider is necessary.
-- **Safe to automate.** Mutations are typed, validated, journalled, versioned,
-  dry-runnable, and undoable. Protected content stays protected.
-- **Deterministic.** The same document, assets, and pinned font files produce
-  bit-identical PNGs on all six supported release targets.
-- **Easy to embed.** Use the Rust crates, HTTP API, CLI, or MCP server. You do
-  not need to drive the reference interface with clicks.
+<p align="center"><sub>Every interface becomes the same validated operation. <a href="examples/readme-pipeline">Inspect the diagram.</a></sub></p>
 
-Assemblash contains no AI model. It gives an AI agent two things: an MCP
-server, and a history that records who made each change. The agent brings its
-own model. You can create, edit, render, and export documents with no model at
-all. A change from an agent goes through the same validated operations as a
-click or a command. The history records it with the agent as the actor, so you
-can review it and undo it.
+| Interface | Best for | Start with |
+| --- | --- | --- |
+| Reference editor | Creating and refining documents visually | Launch `assemblash` |
+| CLI | Shell scripts and straightforward local workflows | `assemblash --help` |
+| HTTP API | Applications and custom frontends | `assemblash serve` |
+| MCP server | AI agents and MCP-compatible clients | **Connect an AI agent** in the editor, or `assemblash mcp` |
 
-Assemblash does not replace Photoshop, GIMP, or Figma. It is a composition
-engine for repeatable visual assets, templates, and work with AI agents.
+The editor is a reference client. It has no special access. Edits in the
+editor, CLI commands, HTTP requests, and MCP tools all become the same
+operations. The API and the MCP server contain no document logic of their own:
 
----
+- `assemblash-core` does the validation and the operations.
+- `assemblash-renderer` does the rendering.
+- The server, MCP, and CLI crates give these functions to different clients.
 
-## Technical guide
-
-The sections below are for developers, scripts, and self-hosting. You do not
-need them to use the editor or to connect an agent.
-
-## Get started from a terminal
-
-### Launch options
-
-A launch without arguments creates the workspace, starts the server, and opens
-the editor in your browser. A second launch opens the server that already
-runs. `assemblash workspace` prints the workspace folder.
-
-On macOS, you can also clear the quarantine flag in a terminal instead of the
-**Open Anyway** steps:
-
-```sh
-xattr -d com.apple.quarantine ./assemblash
-```
-
-A Homebrew tap would remove that step, because Homebrew clears the flag on the
-files it installs. The formula is in `packaging/homebrew/`, but the tap is
-**not published yet**.
-
-### Install from source
-
-Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
-
-```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.13.0 assemblash-cli
-```
+Rust programs can use the same crates directly. They are in [`crates/`](crates/).
 
 ### Create and export from the CLI
 
 Assemblash never substitutes a system font without telling you. Install a font
-into a local store once, then use that same store when you export:
+into a font store once, then use the same font store when you export:
 
 ```sh
 assemblash font install "Noto Sans" --font-store ./assemblash-fonts
@@ -223,75 +221,57 @@ assemblash add-rect ./poster --x 40 --y 200 --width 240 --height 96 --fill '#1d1
 assemblash export ./poster --out poster.png --font-store ./assemblash-fonts
 ```
 
-Do you have a font file? Then use `--font /path/to/SomeFont.ttf` or
-`--font-dir /path/to/fonts` instead. Run `assemblash --help` or
-`assemblash <command> --help` for the complete command reference.
-
-`add-ellipse` and `add-line` take the same box flags. A line's box is the line,
-so `--width` is its length and `--rotation` its angle.
-
-The editor manages the same store without a terminal, in the **Fonts** section
-of the Add panel (1.5.0 and newer):
-
-- It lists the installed families and their faces.
-- It imports TTF, OTF, TTC, OTC, WOFF, and WOFF2 files from disk.
-- It removes a family. Before it removes one, it tells you that projects that
-  use the family will report a missing font.
-- When the store is empty, it shows one button that installs the `default`
-  pack: Noto Sans, Noto Serif, and Noto Sans Mono. It names the download
-  before it starts.
-
-The font picker and the canvas update immediately. A removal never changes
-the fonts of your operating system or the file that you imported.
-
-To change a layer later, use `assemblash set`. It changes every property that
-can change: name, position, size, rotation, opacity, visibility, lock, blend
-mode, effect stack, text, font, font size, colour, alignment, line height, font
-weight, font style, letter spacing, vertical alignment, fill, stroke, stroke
-width, corner radius, fit, and asset:
-
-```sh
-assemblash set ./poster --layer <LAYER_ID> --color '#1d1d1f' --size 72 --line-height 1.4
-assemblash set ./poster --layer <LAYER_ID> --weight 700 --letter-spacing 3
-```
-
-For a text layer, `--weight` selects the exact face in the font store. A
-weight that is not installed is refused. It is never replaced by another
-weight. `--color none` with `--stroke` gives outlined text. `--vertical-align`
-`top`, `middle`, or `bottom` places the text in its box.
+`render` and `export` print the written path and its `sha256:` digest as one
+tab-separated line. A script can compare what two interfaces produced without
+hashing the file itself.
 
 One command is one operation, however many flags it has. The history records
-it once, and one undo reverts it.
+it once, and one undo reverts it. Run `assemblash --help` or
+`assemblash <command> --help` for the complete command reference.
 
-`render` and `export` take the output path positionally as well as through
-`--out`. Both print the written path and its `sha256:` digest as one
-tab-separated line. So a script can compare what two interfaces produced
-without hashing the file itself:
+### Install from source
+
+Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-assemblash export ./poster poster.png --font-store ./assemblash-fonts
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.13.0 assemblash-cli
 ```
 
-### Update Assemblash (1.10.0)
+## Why Assemblash
 
-Assemblash can tell you that a new version exists, and can install it.
+Usually you must choose. An editor with many controls is difficult to automate.
+A code or image-generation pipeline gives a flat image, and a flat image is
+difficult to change. Assemblash gives you structure and automation together.
 
-- The first `serve` asks once whether to check for updates. The answer is
-  kept in `config.toml` as `updateCheck = "off"` or `"notify"`. You can
-  change it later in Settings.
-- A check sends one request to the release feed of this repository. It
-  sends no identifiers and no document data. It runs at most once every 24
-  hours, and the result is kept in the workspace.
-- When a newer stable version exists, the editor shows a banner. The banner
-  links to the release notes and never blocks your work.
-- `assemblash upgrade --check` prints the installed version and the latest
-  version. `assemblash upgrade` downloads the new version, checks it
-  against the `SHA256SUMS` file of the release, replaces the program, and
-  starts `serve` again. The old program is kept as `.old` until the next
-  start. A failed or interrupted download changes nothing.
-- An installation that a package manager owns gets advice to use that
-  package manager instead of a swap.
-- MCP mode never checks for updates.
+- **Structured, not flattened.** Documents keep their layers, groups, assets,
+  metadata, templates, and named slots.
+- **Local by default.** Create, edit, render, and export work offline. No
+  account or AI provider is necessary.
+- **Safe to automate.** Mutations are typed, validated, journalled, versioned,
+  dry-runnable, and undoable. Protected content stays protected.
+- **Deterministic.** The same document, assets, and pinned font files give
+  bit-identical PNGs. This holds on all six release targets.
+- **Embeddable.** Use the Rust crates, HTTP API, CLI, or MCP server. You do not
+  need to drive the reference editor with clicks.
+
+Assemblash does not replace Photoshop, GIMP, or Figma. It is a composition
+engine for repeatable visual assets, templates, and work with AI agents.
+
+## History and safety
+
+Every change uses the same transactional operation layer. A refused operation
+does not change the document. The history records each successful operation
+with its actor and transaction ID. You can undo and redo it, also after a
+restart.
+
+- Expected-version checks prevent stale clients from overwriting newer work.
+- A dry run shows what a mutation would do without committing it.
+- `locked`, `protected`, and `readOnly` layers are enforced in the engine.
+- Project and asset paths stay inside the configured filesystem boundary.
+- Assemblash sanitises an imported SVG before it enters the asset store.
+- A change from an agent goes through the same validated operations as a
+  click. The history records the agent as the actor, so you can review it and
+  undo it.
 
 ## Platform compatibility
 
@@ -303,635 +283,13 @@ The same six platforms are built, tested, and included in every release:
 | Linux | ✅ `.deb`, `.tar.gz` | ✅ `.deb`, `.tar.gz` |
 | macOS | ✅ Intel `.tar.gz` | ✅ Apple silicon `.tar.gz` |
 
-Every release also contains a single `.exe` for each Windows target and a
-`.deb` for each Linux target. macOS has no installer yet. See the
-**Open Anyway** steps in the Quick start.
+Every release also contains one `.exe` for each Windows target and one `.deb`
+for each Linux target. macOS has no installer yet. See the **Open Anyway**
+steps in the Quick start.
 
 The release workflow checks that every binary starts before it attaches the
 binary. CI also runs the Rust workspace tests on all six targets. The reference
 editor runs in a modern browser and is served by the executable itself.
-
-## What is included
-
-### A structured document engine
-
-- Canvas dimensions and background settings
-- Text, raster image, SVG, shape, and nested group layers
-- Rectangle, ellipse, line, and path shapes with fill, stroke, corner
-  radius, dash pattern, line cap, and line join
-- Arrow and circle markers on the ends of a line
-- Position, size, rotation, scale, opacity, visibility, and ordering
-- Stable IDs, metadata, locking, duplication, grouping, and ungrouping
-- Alignment, centering, distribution, snapping, bounds, and overlap queries
-- JSON persistence with unknown-field preservation
-- Named presets, templates, slots, and deterministic variant batches
-
-A project remains ordinary, portable files:
-
-```text
-my-project/
-├── document.json
-├── assets/
-└── history/
-```
-
-You can inspect and hand-edit `document.json`. Normal edits should still go
-through an Assemblash interface, so they are validated and recorded in history.
-The published contracts live in [`schema/`](schema/).
-
-### Clipping, cropping, and flips
-
-From 1.8.0, a layer can carry a mask, and an image layer can show only part of
-its source file. Both are ordinary document values, so they are journalled,
-undoable, and reversible like any other property.
-
-- **Clip.** A layer clips to its own box, as a rectangle or an ellipse. A
-  corner radius makes a rounded rectangle. A radius larger than the box makes a
-  stadium. This is how a circle avatar or a rounded screenshot is made.
-- **Crop.** An image layer shows a rectangle of its source file, in source
-  pixels. The crop composes with `fit`: `fill` stretches the rectangle to the
-  box, and `contain` and `cover` work from its shape. Values outside the source
-  clamp to it, and a rectangle that misses the source is refused.
-- **Flip.** A layer mirrors horizontally, vertically, or both, about the centre
-  of its box. Mirroring text mirrors its glyphs.
-
-The clip sits inside the effect stack, not beside it. A shadow the layer
-carries follows the clipped shape, and a rotated clipped layer is cut to the
-box in its parent's space. No clip, no crop, and no flip means the document
-renders exactly as it did before 1.8.0.
-
-An imported image records its pixel size, so a crop can be placed. An asset
-whose size this build cannot read is still imported, and a crop of it is
-refused by name rather than guessed at.
-
-Set these on the CLI with `set --clip-rect`, `--clip-radius`, `--clip-ellipse`,
-`--no-clip`, `--crop X,Y,W,H`, `--no-crop`, `--flip-h`, and `--flip-v`; in the
-interface with the inspector rows; and over MCP with the `clip`, `crop`,
-`flipHorizontal`, and `flipVertical` arguments of `update_layer`.
-
-### Paths, dashes, and markers (1.10.0)
-
-A shape can be any silhouette. A path shape carries an SVG path string, and
-so can a clip. A stroke can be dashed, and a line can end in an arrow or a
-circle.
-
-- **The path grammar.** The accepted commands are `M`, `L`, `H`, `V`, `C`,
-  `S`, `A`, and `Z`, in upper or lower case. The path starts with one `M`
-  and ends with `Z`. It holds at most 30 commands and 2048 bytes. Every
-  number must be finite. A path that breaks a rule is refused with a
-  message that names the command and its position.
-- **Stroke style.** A stroke carries `dashArray` (at most 8 entries, each
-  greater than zero), `lineCap` (`butt`, `round`, or `square`), and
-  `lineJoin` (`miter`, `round`, or `bevel`).
-- **Markers.** A line carries `markerStart` and `markerEnd` from a fixed
-  set: `arrow`, `circle`, or `none`. The marker size follows the stroke
-  width, so a marker never appears at a size the document did not ask for.
-- **Presets** carry the dash, cap, and join fields. Markers belong to the
-  line, so presets do not carry them.
-
-Set these on the CLI with `add-path` and `set --path --dash --cap --join
---marker-start --marker-end`; in the interface with the shape rows of the
-properties panel; and over MCP with the `path` argument of
-`add_shape_layer` and the `shape`, `path`, and marker arguments of
-`update_layer`.
-
-### Paragraph spacing (1.12.0)
-
-`paragraphSpacing` sets extra pixels between explicit paragraphs. Its default is zero.
-The value must be finite and nonnegative. Leading, trailing, and empty paragraphs count.
-Automatic line wrapping adds no paragraph spacing. Plain text and styled runs support this property.
-Measurement, vertical alignment, overflow warnings, and automatic text height use the same paragraph spacing.
-
-Use `add-text --paragraph-spacing 12` or `set --paragraph-spacing 12` on the CLI.
-Use `paragraphSpacing` in HTTP operations and the MCP `add_text_layer` and `update_layer` tools.
-The Typography section has a Paragraph spacing field in pixels.
-Presets include this property. Set zero to remove an existing paragraph spacing value.
-Ordinary paragraph spacing updates preserve raw runs and unknown run properties.
-
-Older consumers can preserve the stored property but do not render paragraph spacing.
-Older history replay can discard paragraph spacing updates.
-Use a consumer with paragraph spacing support to edit these documents.
-The document schema stays at version 1.
-
-### Justified alignment (1.12.0)
-
-Set `align` to `justify` for text layers.
-Only groups of regular spaces (U+0020) between words receive extra width.
-Leading and trailing whitespace receive no extra width. A run boundary adds no word gap.
-Eligible automatically wrapped lines fill the box width.
-Each explicit paragraph's final line keeps its natural width.
-Single-word lines, lines without word gaps, and oversized natural lines stay unstretched.
-The fit check excludes trailing whitespace. Stored text and raw runs stay unchanged.
-Unstretched final lines retain natural whitespace advances. Their measured width can exceed the box width.
-
-Justified text requires exact loaded font bytes and uses exact shaping for wrapping.
-Existing alignment modes keep their previous behavior.
-Rendering, measurement, overflow, clipping, and automatic text height use the same layout.
-
-Use `--align justify` with CLI `add-text` and `set`.
-Set `align` to `justify` in HTTP create and update operations.
-Use the same value with MCP `add_text_layer` and `update_layer`.
-Choose Justify text on the existing alignment toolbar. Presets store this alignment value.
-Ordinary alignment updates preserve text, raw runs, and unknown nested values.
-
-Versions 1.0.0, 1.10.0, and 1.11.0 refuse snapshots with `justify` in text layers or presets.
-Undo can restore an earlier alignment while the journal still contains a `justify` update.
-These older consumers also refuse that journal.
-Use a consumer with justified alignment support to open or edit these documents.
-The document schema stays at version 1.
-
-### Layer resizing (1.12.0)
-
-Drag a canvas resize handle to change the selected layer boxes.
-Hold Shift to preserve the ratio. On an edge, Shift changes both dimensions.
-Image corners preserve the ratio by default. Hold Shift to resize an image corner freely.
-Hold Alt to preserve the centre. Combine Alt with Shift when necessary.
-Press or release these keys during a drag to update the outline without pointer movement.
-Press Escape to cancel. A completed resize uses one undo transaction.
-
-Text keeps its font sizes and raw runs. A free horizontal text resize measures the required height.
-Ratio resizing keeps the scaled box height. A stale height response cannot replace that height.
-Positive subpixel boxes retain their dimensions when the pointer does not move.
-
-Text selections keep the authoritative canvas image while the outline moves.
-Scaled previews, groups, clips, effects, and interleaved selections can use the same outline-only fallback.
-The engine renders the committed document after the drag ends.
-
-Canvas resize handles are unavailable for zero-size boxes and parent-with-child selections.
-Children of rotated or flipped groups also omit these handles.
-A mixed selection with an unsupported item omits all resize handles.
-Use Position and size for supported inspector edits. Existing document dimensions remain valid.
-The document schema stays at version 1.
-
-### Rendering and export
-
-Assemblash converts a document to SVG with a pure function. Then `resvg` and
-`tiny-skia` convert the SVG to pixels. Assemblash exports PNG and SVG at the
-output size that you set. It supports fourteen deterministic blend modes and a non-destructive effect stack.
-The effects are brightness, contrast, saturation, blur, seeded grain, drop shadow, hue rotation, and invert.
-A glow is a drop shadow with no offset.
-
-Assemblash loads fonts only from files that you give it or install in the
-font store. It records a hash of each font file. Thus text and exported pixels
-are the same on all operating systems.
-
-An export also reports problems that did not stop it:
-
-- `wordBrokenMidWord`: one word is too wide for its box, so it is split.
-- `textOverflowsBox`: the text is taller than its box.
-- `lockReclaimed` (1.5.0 and newer, HTTP and MCP only): the server cleared a
-  stale project lock before the export.
-
-Each warning has a `code`, a `message`, and a `layerId` when a layer applies.
-A warning changes no pixel and no exit status. The HTTP export response and
-the MCP `export_document` result contain a `warnings` array. The CLI prints
-one line for each warning on stderr. With `--warnings-json`, it prints the
-array as JSON on stdout.
-
-Text in an imported SVG asset is different: it causes an error, not a
-warning. From 1.5.0, a render is refused with a typed error that names the
-asset, unless each `<text>` in the asset names a font family that the render
-loaded. A generic family, such as `sans-serif`, is not sufficient, because the
-font store never contains the fallback font of the renderer. Earlier releases
-exported such a document without the text, and the result looked complete.
-Name a loaded family in the asset, or convert the text to outlines before you
-import the asset. The 1.3.0 warning code `svgAssetTextWithoutFont` still
-exists, but this case now gives the error instead.
-
-### Colour effects (1.13.0)
-
-Hue rotation and invert use the existing layer effect stack.
-Both effects preserve alpha and run in stored stack order.
-
-| Effect type | Parameter | Neutral value |
-| --- | --- | --- |
-| `hueRotate` | Any finite `degrees` value | `0`, or any complete turn |
-| `invert` | `amount` from `0` to `1` | `0` |
-
-Hue rotation uses the SVG hue matrix in sRGB. Negative angles rotate in reverse.
-Invert interpolates each RGB channel toward its inverse. An amount of `1` gives full inversion.
-
-Save this array as `effects.json`:
-
-```json
-[
-  { "type": "hueRotate", "degrees": 90 },
-  { "type": "invert", "amount": 0.75 }
-]
-```
-
-Apply the array with one reversible operation:
-
-```sh
-assemblash set ./project --layer layer_id --effects-file effects.json
-```
-
-HTTP accepts the same array in `operation.effects` on an `update` operation.
-MCP accepts it in `update_layer.effects`. The reference interface provides both effects in its Effects control.
-Use `assemblash styles --json`, `GET /api/capabilities`, or MCP `list_capabilities` to inspect support.
-
-Released 1.12.0 preserves these unknown effects during load and unrelated edits.
-Its renderer refuses them. HTTP returns `422 renderFailed`.
-The document schema stays at version 1. No migration is needed.
-
-### History and safety
-
-Every change uses the same transactional operation layer. A refused
-operation does not change the document. The history records each successful
-operation with its actor and transaction ID. You can undo and redo it, also
-after a restart.
-
-- Expected-version checks prevent stale clients from overwriting newer work.
-- A dry run shows what a supported mutation would do without committing it.
-- `locked`, `protected`, and `readOnly` layers are enforced in the engine, not
-  just hidden behind UI controls.
-- Project and asset paths stay inside the configured filesystem boundary.
-- Imported SVGs are sanitized before they enter the asset store.
-- The editor puts every action in a queue. It does not drop fast actions. When
-  you set the same property of the same layer again before the first change
-  is sent, only the newest value is sent. The canvas shows your edit
-  immediately, and the engine render then replaces it with the exact pixels.
-
-To see how long each interaction took, add `?perf` to the editor address. The
-editor then shows the time in the queue, the run time, and the time until the
-exact preview appeared. A script can read the same numbers from
-`window.__assemblashPerf`.
-
-## Choose the interface that fits
-
-| Interface | Best for | Start with |
-| --- | --- | --- |
-| Reference editor | Creating and refining documents visually | Launch `assemblash` |
-| CLI | Shell scripts and straightforward local workflows | `assemblash --help` |
-| HTTP API | Applications and custom frontends | `assemblash serve` |
-| MCP server | AI agents and MCP-compatible clients | **Connect an AI agent** in the editor, or `assemblash mcp` |
-| Rust crates | Embedding the engine directly | [`crates/`](crates/) |
-
-The editor is a reference client. It has no special access. Edits in the
-editor, CLI commands, HTTP requests, and MCP tools all become the same
-operations.
-
-### MCP in detail (1.9.0)
-
-For the simple steps, see **Let an AI agent work with you** in the Quick
-start. This section explains how the connection works.
-
-The editor process serves MCP. An agent that connects to it works on the same
-open projects as the person, with one lock for each project. The editor shows
-the changes of the agent without a reload.
-
-The **Connect an AI agent** dialog in the editor gives copy-ready
-configuration. It contains the full path of the executable and the workspace.
-It opens by itself on the first launch of an empty workspace.
-
-You can also write the configuration yourself. Most MCP clients start a
-command. Write the full path of the executable in `command`. A downloaded
-binary is not on your `PATH`, so the bare name `assemblash` does not start it:
-
-```json
-{
-  "command": "C:\\Users\\you\\Downloads\\assemblash-<version>-windows-x86_64.exe",
-  "args": ["mcp"]
-}
-```
-
-On macOS or Linux, the path has the form `/Users/you/Downloads/assemblash`.
-Use the bare name `assemblash` only when the package or `cargo install` put
-the executable on your `PATH`. Add `"--workspace", "<path>"` to `args` when
-the editor uses a workspace other than the default one.
-
-For Codex, add the same command to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.assemblash]
-command = '/Users/you/Downloads/assemblash'
-args = ['mcp']
-```
-
-`assemblash mcp` finds the editor that runs on the same workspace and sends
-the agent's requests to it. It opens no project itself while the editor runs,
-so it cannot lock you out of a project. When no editor runs, it serves the
-workspace itself. It checks about once a second: if the agent starts first
-and you start the editor later, the agent releases its projects and moves to
-the editor. It moves back when you stop the editor. A request that is in
-progress at the moment of a move can fail with an error; send it again.
-
-Clients that take a URL can connect directly to `http://127.0.0.1:8787/mcp`
-(Streamable HTTP). Use the command form when your client supports it: the
-editor uses another port when 8787 is in use, and the command finds the editor
-on any port. `assemblash serve` prints the MCP URL on standard error.
-
-How the relay finds the editor, and its limits:
-
-- It uses the server that the workspace records, only when the address is
-  loopback and that server confirms that it serves the same workspace. A
-  record for another workspace, for example one that a synchronised folder
-  copied, is ignored.
-- It sends the workspace access token when the workspace has one.
-- A server bound to a wider address is not recorded. Connect to its URL
-  directly, with the token.
-- The editor ends an MCP session after five minutes without activity. The
-  relay then starts a new session by itself. A client that connects to the
-  URL directly must start a new session.
-- It forwards requests and their answers. It does not open the optional
-  event stream for messages that the server starts itself. The Assemblash
-  server sends no such messages today.
-
-Never delete a project's `.assemblash-lock` file while a process uses the
-project. A `projectLocked` refusal means that another process has the project
-open. Connect the agent to that editor instead.
-
-Add `--project /path/to/project` to serve one project instead of the
-workspace. This mode does not look for a running editor.
-
-The MCP server has read tools for documents, layers, validation, history, and
-rendered previews. It has change tools with a dry run, a version check, a
-protection check, and an undo transaction ID. Other tools:
-
-- `create_project` creates a project.
-- `set_layer_box` sets a layer's position, size, and rotation in absolute
-  values, in one change that one undo reverts.
-- `add_svg_layer` adds a layer that draws an imported SVG asset.
-- `render_document` returns the vector render of the document as text.
-- `find_overlaps` returns the overlapping layers, in the same pairs and order
-  as the CLI and the HTTP API.
-- `update_layer` sets `lineHeight` and the other text properties.
-- `add_shape_layer` takes `path` for a path shape, and `markerStart` and
-  `markerEnd` for a line. `update_layer` replaces the geometry with `shape`
-  and `path`, and sets the markers of a line.
-- `export_document` returns the same `warnings` array as the other
-  interfaces. It refuses to replace a file of the same name unless the call
-  passes `overwrite`.
-- Six more tools cover the whole surface: `insert_layer_tree` pastes a
-  copied layer tree, `list_fonts` reads the font store, `install_font_pack`
-  and `remove_font_family` manage it, and `delete_project` and
-  `rename_project` manage projects. The tool surface holds 53 tools.
-
-A change to a text layer reports the same warnings immediately, in the
-`warnings` field of the result. An agent cannot see its own render, so it
-learns at once that text does not fit its box (`textOverflowsBox`), that a
-word was split (`wordBrokenMidWord`), or that another layer is drawn over the
-text (`textCoveredByLayer`).
-
-While an agent is connected, the editor shows "1 AI agent connected" in its
-status bar.
-
-For agents that work in a checkout of this repository, a public skill is in
-[`skills/assemblash/SKILL.md`](skills/assemblash/SKILL.md). It explains the
-document-first workflow and the guarantees that an integration must keep.
-
-## How the pieces fit together
-
-```text
-Reference editor ───────┐
-CLI and scripts ────────┼──> API / typed operations ──> document + history
-Custom applications ───┤              │
-AI agents via MCP ──────┘              └──────────────> renderer + export
-```
-
-The API and the MCP server contain no document logic of their own:
-
-- `assemblash-core` does the validation and the operations.
-- `assemblash-renderer` does the rendering.
-- The server, MCP, and CLI crates give these functions to different clients.
-
-Assemblash is written in Rust. The reference interface is written in
-TypeScript and is built into the executable, so you do not need Node.js. The
-official `scratch` container image is approximately 9 MB.
-
-## Local use and self-hosting
-
-`assemblash serve` listens on `127.0.0.1` by default and needs no
-configuration:
-
-```sh
-assemblash serve
-```
-
-A non-loopback bind refuses to start without an access token:
-
-```sh
-assemblash token show
-assemblash serve --bind 0.0.0.0
-```
-
-Every server also serves MCP at `/mcp`. The access token applies to `/mcp` as
-to every other route.
-
-A server on a loopback address with no token also protects itself from web
-pages in your browser (1.9.0 and newer). On every route, including `/mcp`, it
-refuses:
-
-- a request whose `Host` is not `localhost`, `127.0.0.1`, or `::1`. This stops
-  DNS rebinding, where a web page makes its own name point to your computer;
-- a request from a web page on another origin (`Origin` header).
-
-A client that is not a web page sends no `Origin`, so the second check does
-not affect it. A reverse proxy on the same computer that sends its public name
-as `Host` needs that name in `config.toml`:
-
-```toml
-allowed-hosts = ["assemblash.example.com"]
-```
-
-A server with a token does not do these checks: a web page cannot know the
-token.
-
-The token authenticates requests; it does not encrypt traffic. Put Assemblash
-behind a TLS reverse proxy when it is reachable beyond a trusted network. See
-[DEPLOYMENT.md](DEPLOYMENT.md) for Docker, Caddy, Traefik, nginx, and identity
-provider guidance.
-
-A process that stops unexpectedly can leave the lock file of a project behind.
-Then Assemblash refuses to open the project until the lock is cleared:
-
-- A person can clear it in the confirm dialog of the editor, or with
-  `assemblash unlock`.
-- `serve --reclaim-stale-locks` lets the server clear it automatically.
-  `assemblash mcp` accepts the same flag. From 1.5.0, the double-click launch
-  and `--friendly` do this without the flag.
-- The server clears a lock automatically only when the lock names this
-  computer and its process is not running. A lock from another computer, or
-  from an older build that recorded no computer name, still needs a person.
-  On a synchronized project folder, a process ID from another computer proves
-  nothing.
-- Every automatic clear is reported in the server log, in the editor, and as a
-  `lockReclaimed` export warning.
-
-## Styled text runs (1.12.0)
-
-Assemblash 1.12.0 accepts styled runs through the reference interface, CLI, HTTP API, and MCP.
-
-Select one text layer. Open **Typography** in **Properties**, then select **Edit runs**.
-Use **Add run**, **Delete**, **Move up**, and **Move down** to arrange the rows.
-Edit the text and style overrides. Inherited values stay in the base style.
-The fill control distinguishes inherited fill, an override, and no fill.
-Select **Apply runs** to save all rows in one operation and one undo step.
-Select **Cancel** to discard the draft without a write.
-The layer box stays unchanged.
-
-Drafts retain unknown fields and untouched null values.
-Unsupported stored values and inconsistent run text stay read-only until an explicit clear or replacement.
-Apply uses the document version captured when the draft starts.
-A concurrent write can refuse Apply. The draft remains available.
-Use **Discard draft and load current runs** to replace the draft with current stored values.
-An uncertain response also requires this action before another Apply.
-
-Each run has a `text` string. Joining all run text must produce the layer's `text` exactly.
-These optional fields override the layer style:
-
-| Field | Supported value |
-| --- | --- |
-| `fontFamily` | Font family name |
-| `fontSize` | Positive size in pixels |
-| `color` | Solid colour, gradient object, or `null` for no fill |
-| `fontWeight` | Integer from 100 to 900 |
-| `fontStyle` | `normal` or `italic` |
-| `letterSpacing` | Finite spacing in pixels |
-
-Omitted fields inherit the layer style. Null fields also inherit, except `color: null`, which removes the fill.
-Unknown run properties remain unchanged during storage.
-
-Save this array as `runs.json`:
-
-```json
-[{"text":"Hello "},{"text":"world","fontWeight":700}]
-```
-
-Create a layer with matching text:
-
-```sh
-assemblash add-text ./poster --text "Hello world" --font "Noto Sans" --runs-file runs.json --x 24 --y 24 --width 500 --height 150
-assemblash set ./poster --layer <LAYER_ID> --runs-file runs.json
-```
-
-Use `--runs` for an inline JSON array. Do not combine `--runs` and `--runs-file`.
-An empty array clears styling. Outer update `null` omits the runs field. Creation refuses outer `null`.
-Supply `text` and `runs` together to replace both in one operation.
-The engine does not infer text from runs.
-A text-only write clears runs, even when the supplied text is unchanged.
-Ordinary base-style writes preserve runs. Text and Color slot fills clear them.
-
-HTTP uses the existing `create` and `update` operations at `POST /api/projects/{id}/operations`.
-MCP uses `add_text_layer` and `update_layer`. Both tools accept `runs` and retain their existing safeguards.
-
-Writes check structure without loading fonts. Rendering requires each exact font family, weight, and style.
-Rendering refuses incompatible styles within one shaping cluster and invalid spacing geometry.
-HTTP and MCP can return `cannotMeasureText` after a successful write. The operation remains saved.
-
-Version 1.11.0 loads stored raw runs but renders the base style.
-Its text-only writes can leave run text inconsistent.
-Cached snapshots can retain new runs during undo and redo.
-History replay from before a new run update can silently drop runs, despite a successful command.
-Assemblash 1.12.0 preserves runs during recovery. Read-only history leaves project files unchanged.
-Use a styled-run build for projects with styled runs.
-
-## Edit the canvas
-
-Click **Canvas** to open the Properties panel of the editor. Set the size, a
-background colour or transparency, and a resize anchor. Then apply the
-changes together. Layers keep their sizes. The anchor changes only their
-positions. The same change in the CLI:
-
-```sh
-assemblash canvas set ./poster --width 1200 --height 900 --background "#102030" --anchor center
-assemblash canvas set ./poster --no-background
-assemblash undo ./poster
-```
-
-MCP has `update_canvas` with `width`, `height`, `background`, `anchor`,
-`expectedVersion`, and `dryRun`. HTTP accepts the same fields in an
-`updateCanvas` operation at `POST /api/projects/{id}/operations`. Omit
-`background` to keep it, or send `null` to remove it. A resize that moves
-locked, protected, or read-only content is refused, and nothing changes.
-
-Canvas editing needs 1.4.0 or newer. When a project history contains
-`updateCanvas`, 1.3.1 refuses `show` and `history`, also after undo, because
-it cannot read that operation. Continue to use the newer executable, and do
-not edit the history files. The document schema stays at version 1.
-
-### Gradient paints and background images (1.11.0)
-
-Use a solid colour string or a gradient object for canvas backgrounds, text, shape fills, and strokes.
-Presets accept the same paints. Colour slot values remain solid colour strings.
-Gradient shadow colours are refused. Image shape fills are refused; use an image layer with a clip.
-
-A linear gradient has `kind`, `angle`, and `stops`. Angle `0` runs from left to right.
-A radial gradient has `kind`, `center`, `radius`, and `stops`.
-Its centre and radius use fractions of the painted box.
-The default centre is `{ "x": 0.5, "y": 0.5 }`. The default radius is `0.5`.
-
-Each stop has `offset`, a solid `color`, and optional `alpha`.
-Offsets must increase strictly within `0` to `1`. Alpha defaults to `1` and multiplies the colour alpha.
-Each gradient has 1 to 16 stops.
-Writes refuse empty stop lists, invalid numbers, and unsupported gradient kinds.
-Loads preserve unsupported gradient kinds. Edits and rendering refuse their use.
-
-Save this example as `paint.json`:
-
-```json
-{
-  "kind": "linear",
-  "angle": 30,
-  "stops": [
-    { "offset": 0, "color": "#102030" },
-    { "offset": 1, "color": "#ddeeff", "alpha": 0.7 }
-  ]
-}
-```
-
-CLI colour arguments accept hexadecimal colours, inline JSON, and `@file.json`:
-
-```sh
-assemblash canvas set ./poster --background @paint.json
-assemblash set ./poster --layer <LAYER_ID> --color @paint.json
-```
-
-Import an image asset before you use it as a canvas background.
-The canvas colour appears below the image. All layers appear above the image.
-Use `fill`, `contain`, or `cover`. The default fit is `fill`.
-
-```sh
-assemblash canvas set ./poster --background-image <ASSET_ID> --background-image-fit cover
-assemblash canvas set ./poster --clear-background-image
-assemblash undo ./poster
-```
-
-HTTP `updateCanvas` and MCP `update_canvas` accept `backgroundImage: { "asset": "<ASSET_ID>", "fit": "cover" }`.
-Set `clearBackgroundImage: true` to remove it. Omit both fields to preserve it.
-Writes refuse missing assets and a simultaneous set and clear.
-Asset pruning keeps assets used by the canvas background.
-
-Builds 1.0 to 1.10 refuse to load or export a document with gradient paints.
-They can also refuse a project whose journal contains gradient operations.
-Release 1.10.0 preserves `backgroundImage` when it loads a document, but its renderer ignores the image.
-The canvas colour remains visible in that build.
-Recovery with 1.10.0 can discard image metadata from a newer `updateCanvas` journal entry.
-Use 1.11.0 or newer to edit or recover these documents.
-
-### Reference interface (1.11.0)
-
-The reference interface uses React and Mantine for controls, menus, dialogs, font controls, and login.
-All browser assets ship inside the executable.
-The editor keeps its existing document controller and operation queue.
-The canvas keeps pointer handling and the Rust preview.
-
-Open Settings. Open the Application section. Set Appearance to Light, Dark, or System.
-System is the default. The browser stores this preference locally.
-The appearance preference does not change document colours.
-
-Paint controls accept solid colours and gradient JSON.
-For a canvas gradient, select Gradient JSON, enter the object, and select Use JSON paint.
-Select Apply changes to submit the canvas draft.
-The canvas image controls select or upload an image, set its fit, and remove it.
-English, French, and German include these controls.
-
-The **Shapes** row in the Add panel (1.6.0 and newer) adds a rectangle, an
-ellipse, or a line. The inspector of a shape then changes Fill, Stroke, Stroke
-width, and, for a rectangle, Corner radius. Each row is one change that you
-can undo. The **None** button next to a paint removes it. A drop shadow is an
-effect, not a shape property: add `dropShadow` to the effect stack of a layer
-and set `dx`, `dy`, `blur`, and the colour. For a glow, set both offsets to 0.
 
 ## Stability and current limits
 
@@ -946,44 +304,31 @@ stay in the document when it is loaded and saved.
 
 The important limits:
 
-- Assemblash contains no AI image generator or AI provider adapter. They are
-  not part of the core.
+- Assemblash contains no AI image generator or AI provider adapter.
 - Fourteen blend modes are supported. `color-dodge` and `color-burn` are
   refused because they are not bit-identical across every target.
-- A document with a shape layer needs 1.6.0 or newer. Releases 1.0 to 1.5
-  refuse the whole document and name `shape` as an unknown layer kind.
-- A path shape or a path clip is preserved by releases 1.6.0 to 1.9.x, but
-  those releases refuse to draw it and refuse an update that touches it.
-- Gradient paints need 1.11.0. Builds 1.0 to 1.10 refuse gradient documents and can refuse gradient journals.
-- Unknown fields survive load and save at every level of the document,
-  including inside `clip`, `crop`, `stroke`, `shape`, and the effect stack
-  (1.10.0).
 - The stroke of a shape is painted inside its box, so the box is the visible
-  size. A stroke narrower than 1 is the exception: it is a hairline on the
-  edge and can extend half a pixel outside the box.
+  size. A stroke narrower than 1 is a hairline on the edge.
+- A path shape paints its fill. In 1.13.0 it does not paint its stroke.
 - Built-in authentication is one shared token. Accounts, roles, OIDC, SSO,
   TLS, and per-user audit identity belong in a reverse proxy.
 - The editor is a reference client. It is not a complete professional design
   application.
 
-For the product scope and the design decisions, read [PRD.md](PRD.md). For the
-changes in each release, read [CHANGELOG.md](CHANGELOG.md).
+## Learn more
 
-## Try it and tell us what you find
-
-Assemblash is released, and its core contracts are stable. Now the project
-needs to see it in real work. If you use it, tell us what you made, what
-worked well, and what caused problems.
-
-- Share a workflow, result, or question in
-  [GitHub Discussions](https://github.com/VidGuiCode/assemblash/discussions).
-- Report reproducible problems with the
-  [bug form](https://github.com/VidGuiCode/assemblash/issues/new?template=bug_report.yml).
-- Propose a focused addition with the
-  [feature form](https://github.com/VidGuiCode/assemblash/issues/new?template=feature_request.yml).
-
-Do not report security problems in public. Report them privately, as
-[SECURITY.md](SECURITY.md) describes.
+| Document | What it covers |
+| --- | --- |
+| [docs/document-model.md](docs/document-model.md) | Layers, groups, canvas, clipping, paths, and persistence |
+| [docs/text-and-fonts.md](docs/text-and-fonts.md) | Font store, styled runs, justification, and warnings |
+| [docs/paint-and-rendering.md](docs/paint-and-rendering.md) | Gradients, blend modes, effects, and the renderer |
+| [docs/automation.md](docs/automation.md) | CLI, HTTP, MCP, history, locks, and self-hosting |
+| [PRD.md](PRD.md) | Scope, requirements, invariants, and product decisions |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Tokens, Docker, TLS, and reverse proxies |
+| [CHANGELOG.md](CHANGELOG.md) | Release-by-release history |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution and review expectations |
+| [SECURITY.md](SECURITY.md) | Supported releases and private reporting |
+| [DEPENDENCIES.md](DEPENDENCIES.md) | Dependency and license inventory |
 
 ## Develop and contribute
 
@@ -1003,10 +348,9 @@ npm ci
 npm run check
 ```
 
-`ui/dist/` is committed because the Rust binary embeds it. After you change
-the interface, `npm run build` must leave that directory up to date.
-
-After the interface build, run these commands from the repository root:
+`ui/dist/` is committed because the Rust binary embeds it. After you change the
+interface, `npm run build` must leave that directory up to date. Then run these
+commands from the repository root:
 
 ```sh
 python scripts/ui_assets.py
@@ -1015,24 +359,25 @@ python scripts/ui_assets.py --check
 python scripts/ui_notices.py --check
 ```
 
-The asset list embeds every browser file. Its login list includes only local login dependencies.
-The notices include the locked runtime packages and the icon font.
+Before you propose a change, read [CONTRIBUTING.md](CONTRIBUTING.md). It
+explains the stability rules, testing expectations, and the line between the
+generic engine and downstream adapters. Report security problems privately as
+described in [SECURITY.md](SECURITY.md), never as public issues.
 
-Before you propose a change, please read [CONTRIBUTING.md](CONTRIBUTING.md).
-It explains the stability rules, testing expectations, and the line between
-the generic engine and downstream adapters. Report security problems privately
-as described in [SECURITY.md](SECURITY.md), never as public issues.
+## Try it and tell us what you find
 
-Useful project documents:
+Assemblash is released, and its core contracts are stable. If you use it, tell
+us what you made, what worked well, and what caused problems.
 
-| Document | What it covers |
-| --- | --- |
-| [PRD.md](PRD.md) | Scope, requirements, invariants, and product decisions |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution and review expectations |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Tokens, Docker, TLS, and reverse proxies |
-| [SECURITY.md](SECURITY.md) | Supported releases and private reporting |
-| [DEPENDENCIES.md](DEPENDENCIES.md) | Dependency and license inventory |
-| [CHANGELOG.md](CHANGELOG.md) | Release-by-release history |
+- Share a workflow, result, or question in
+  [GitHub Discussions](https://github.com/VidGuiCode/assemblash/discussions).
+- Report reproducible problems with the
+  [bug form](https://github.com/VidGuiCode/assemblash/issues/new?template=bug_report.yml).
+- Propose a focused addition with the
+  [feature form](https://github.com/VidGuiCode/assemblash/issues/new?template=feature_request.yml).
+
+Do not report security problems in public. Report them privately, as
+[SECURITY.md](SECURITY.md) describes.
 
 Assemblash is licensed under the [Apache License 2.0](LICENSE). The public
 repository contains only the generic engine and neutral examples. Private
