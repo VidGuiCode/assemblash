@@ -40,6 +40,19 @@
 - [ ] The core still works offline, with no AI provider and no cloud account.
 - [ ] Output is still deterministic, or the non-determinism is recorded with its parameters.
 
+## Pipeline
+
+- [ ] The branch name is `release/X.Y.Z-<description>` (work that ships) or
+      `chore/<description>` (repository work with no version). It does not
+      start with a tool or agent name.
+- [ ] `cargo fmt --all --check` passes.
+- [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes.
+- [ ] `cargo deny check` passes.
+- [ ] `cargo test --workspace` passes.
+- [ ] Schema artifacts are regenerated after a schema change, or the schema did not change.
+- [ ] New UI strings are in `locale-en.ts`, `locale-fr.ts`, and `locale-de.ts`, or there are none.
+- [ ] `CHANGELOG.md` has a version section (release pull request), an entry under `[Unreleased]`, or the change is not visible to users.
+
 ## Testing
 
 <!-- What you ran, and on which OS. Tests must pass without a paid or cloud provider. -->
