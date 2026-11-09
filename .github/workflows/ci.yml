@@ -242,7 +242,10 @@ jobs:
 
   candidate:
     name: Candidate binary (${{ matrix.target-name }})
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/1.13.0'
+    # Candidate jobs run only when a maintainer starts the workflow by hand on
+    # a version branch (release/X.Y.Z-<description>). They never run on main,
+    # on a pull request, or on a push.
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/release/')
     needs: [hygiene, lint, ui, deny, test, render-identity]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
