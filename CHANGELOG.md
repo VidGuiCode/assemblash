@@ -10,6 +10,13 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.13.1] — 2026-11-10
+
+**Security release: dependency advisories.** This release contains only two
+dependency updates. No new capability. `schemaVersion` stays 1. Documents and
+the operation API do not change. No route, tool, flag, or control changes. The
+gate goldens do not change.
+
 ### Security
 
 - Update `rmcp` from 3.1.0 to 3.9.0. This fixes RUSTSEC-2026-0457, RUSTSEC-2026-0461, and RUSTSEC-2026-0462.

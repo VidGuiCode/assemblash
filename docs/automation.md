@@ -54,7 +54,7 @@ A launch without arguments creates the workspace, starts the server, and opens t
 Builds need Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.13.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.13.1 assemblash-cli
 ```
 
 The main commands:

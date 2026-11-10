@@ -172,7 +172,7 @@ Presets carry `dashArray`, `lineCap`, and `lineJoin`. Markers belong to the line
 
 The CLI has `add-path` and `set --path --dash --cap --join --marker-start --marker-end`. The reference editor has shape rows in the properties panel. MCP has the `path` argument of `add_shape_layer` and the `shape`, `path`, and marker arguments of `update_layer`.
 
-In 1.13.0, a path shape paints its fill and never its stroke. The document keeps the stroke values, but the SVG export omits the `stroke` and `stroke-width` attributes on the path element. Thus a stroked path shows no outline in an export.
+In 1.13.1, a path shape paints its fill and never its stroke. The document keeps the stroke values, but the SVG export omits the `stroke` and `stroke-width` attributes on the path element. Thus a stroked path shows no outline in an export.
 
 ## Layer resizing
 
