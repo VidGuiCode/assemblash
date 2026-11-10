@@ -14,7 +14,7 @@
 
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{
-    CallToolResult, ContentBlock, ErrorData, ProtocolVersion, ServerCapabilities, ServerInfo,
+    CallToolResult, ContentBlock, ErrorData, ProtocolVersion, ServerCapabilities, ServerConfig,
 };
 use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 use schemars::JsonSchema;
@@ -394,7 +394,7 @@ impl AssemblashMcp {
 
 #[tool_handler(router = self.all_tools())]
 impl ServerHandler for AssemblashMcp {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let scope = if self.backend.needs_project_argument() {
             "This server holds a workspace of projects. Call list_projects first, then pass \
              the project name to the other tools."
@@ -421,7 +421,7 @@ impl ServerHandler for AssemblashMcp {
              and retry. Never delete a project's `.assemblash-lock` file."
         );
 
-        let mut info = ServerInfo::default();
+        let mut info = ServerConfig::default();
         info.protocol_version = ProtocolVersion::V_2025_06_18;
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info.server_info.name = "assemblash".to_owned();

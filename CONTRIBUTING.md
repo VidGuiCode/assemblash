@@ -164,6 +164,7 @@ release/X.Y.Z-<description>
 - Never start a branch with a tool or agent name.
 - Use `chore/<description>` for repository work that ships with no version.
 - Use `spike/<description>` for an experiment. Never merge a spike branch.
+
 ## Commit and PR conventions
 
 - Write commit messages in the imperative mood: "add group transform

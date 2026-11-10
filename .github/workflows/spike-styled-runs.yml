@@ -1,15 +1,9 @@
 name: Styled runs renderer spike
 
+# The spike is complete. Start this workflow by hand only.
+
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/spike-styled-runs.yml
-      - Cargo.toml
-      - Cargo.lock
-      - crates/assemblash-renderer/**
-      - scripts/styled_runs_spike_compare.py
-      - scripts/test_styled_runs_spike_compare.py
 
 permissions:
   contents: read

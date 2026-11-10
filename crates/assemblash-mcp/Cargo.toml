@@ -12,7 +12,7 @@ authors.workspace = true
 assemblash-core.workspace = true
 assemblash-renderer.workspace = true
 assemblash-server.workspace = true
-rmcp = { version = "3.1.0", default-features = false, features = [
+rmcp = { version = "3.9.0", default-features = false, features = [
     "server",
     "macros",
     "transport-io",
@@ -51,7 +51,7 @@ workspace = true
 # first let a `-p assemblash-mcp` run pass against a stale binary.
 [dev-dependencies]
 png = "0.18.1"
-rmcp = { version = "3.1.0", default-features = false, features = [
+rmcp = { version = "3.9.0", default-features = false, features = [
     "client",
     "transport-child-process",
 ] }

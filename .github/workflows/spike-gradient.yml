@@ -1,12 +1,10 @@
 name: Gradient bit-identity spike
 
-# Run the rendering check on the candidate branch.
 # Compare the complete hash tables from all six targets.
 # Use the same committed PNG fixture on every target.
+# The spike is complete. Start this workflow by hand only.
 
 on:
-  push:
-    branches: [codex/1.11.0]
   workflow_dispatch:
 
 permissions:

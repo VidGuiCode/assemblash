@@ -10,6 +10,11 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+### Security
+
+- Update `rmcp` from 3.1.0 to 3.9.0. This fixes RUSTSEC-2026-0457, RUSTSEC-2026-0461, and RUSTSEC-2026-0462.
+- Update `rusqlite` from 0.38 to 0.41, and its bundled SQLite through `libsqlite3-sys` 0.39.1. This fixes RUSTSEC-2026-0459.
+
 ## [1.13.0] — 2026-10-24
 
 **Hue rotation and invert.**
