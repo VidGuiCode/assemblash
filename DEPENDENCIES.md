@@ -103,9 +103,9 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | cpufeatures | 0.3.0 | MIT OR Apache-2.0 |
 | crc32fast | 1.5.0 | MIT OR Apache-2.0 |
 | crypto-common | 0.2.2 | MIT OR Apache-2.0 |
-| darling | 0.23.0 | MIT |
-| darling_core | 0.23.0 | MIT |
-| darling_macro | 0.23.0 | MIT |
+| darling | 0.24.1 | MIT |
+| darling_core | 0.24.1 | MIT |
+| darling_macro | 0.24.1 | MIT |
 | data-url | 0.3.2 | MIT OR Apache-2.0 |
 | digest | 0.11.3 | MIT OR Apache-2.0 |
 | dyn-clone | 1.0.20 | MIT OR Apache-2.0 |
@@ -141,7 +141,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | harfrust | 0.12.0 | MIT |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
-| hashlink | 0.11.1 | MIT OR Apache-2.0 |
+| hashlink | 0.12.2 | MIT OR Apache-2.0 |
 | heck | 0.5.0 | MIT OR Apache-2.0 |
 | http | 1.5.0 | MIT OR Apache-2.0 |
 | http-body | 1.1.0 | MIT |
@@ -162,7 +162,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | js-sys | 0.3.103 | MIT OR Apache-2.0 |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT |
 | libc | 0.2.189 | MIT OR Apache-2.0 |
-| libsqlite3-sys | 0.36.0 | MIT |
+| libsqlite3-sys | 0.39.1 | MIT |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | log | 0.4.33 | MIT OR Apache-2.0 |
 | matchit | 0.8.4 | MIT AND BSD-3-Clause |
@@ -184,7 +184,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | polycool | 0.4.0 | MIT OR Apache-2.0 |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
-| process-wrap | 9.1.0 | Apache-2.0 OR MIT |
+| process-wrap | 10.0.1 | Apache-2.0 OR MIT |
 | proptest | 1.11.0 | MIT OR Apache-2.0 |
 | quick-error | 1.2.3 | MIT/Apache-2.0 |
 | quick-error | 2.0.1 | MIT/Apache-2.0 |
@@ -204,12 +204,12 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | resvg | 0.48.1 | Apache-2.0 OR MIT |
 | rgb | 0.8.53 | MIT |
 | ring | 0.17.14 | Apache-2.0 AND ISC |
-| rmcp | 3.1.0 | Apache-2.0 |
-| rmcp-macros | 3.1.0 | Apache-2.0 |
+| rmcp | 3.9.0 | Apache-2.0 |
+| rmcp-macros | 3.9.0 | Apache-2.0 |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.1 | MIT OR Apache-2.0 |
 | rsqlite-vfs | 0.1.1 | MIT |
-| rusqlite | 0.38.0 | MIT |
+| rusqlite | 0.41.1 | MIT |
 | rustix | 1.1.4 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
