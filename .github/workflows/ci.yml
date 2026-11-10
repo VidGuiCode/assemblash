@@ -158,7 +158,8 @@ jobs:
           # macos-13 was retired; macos-15-intel is the current Intel runner.
           - os: macos-15-intel
             target-name: macos-x86_64
-          - os: macos-14
+          # macos-14 was retired; macos-15 is the pinned Apple silicon runner.
+          - os: macos-15
             target-name: macos-aarch64
     steps:
       - uses: actions/checkout@v4
@@ -263,7 +264,8 @@ jobs:
             target-name: windows-aarch64
           - os: macos-15-intel
             target-name: macos-x86_64
-          - os: macos-14
+          # macos-14 was retired; macos-15 is the pinned Apple silicon runner.
+          - os: macos-15
             target-name: macos-aarch64
     steps:
       - uses: actions/checkout@v4
