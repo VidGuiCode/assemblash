@@ -10,7 +10,7 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
-## [1.13.1] — 2026-11-10
+## [1.13.1] — 2026-11-11
 
 **Security release: dependency advisories.** This release contains only two
 dependency updates. No new capability. `schemaVersion` stays 1. Documents and
