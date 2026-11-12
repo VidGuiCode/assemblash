@@ -2,10 +2,13 @@ name: JPEG and WebP determinism spike
 
 # Encode fixed inputs with each candidate encoder on all six targets.
 # Print the sha256 of every output and compare the tables.
-# Spike branch only. Start this workflow by hand only.
+# Spike branch only. GitHub dispatches a workflow only when the file is on
+# the default branch, so a push to the spike branch also starts it.
 
 on:
   workflow_dispatch:
+  push:
+    branches: [spike/jpeg-webp-determinism]
 
 permissions:
   contents: read
