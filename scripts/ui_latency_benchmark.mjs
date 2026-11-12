@@ -18,6 +18,10 @@ const binary = resolve(options.binary);
 const workspace = resolve(options.workspace);
 const fixture = resolve(options.fixture);
 const sampleCount = Number(options.samples ?? 20);
+// Project tabs open before the measured one (1.14.0 exit test 8). Each extra
+// tab holds the same 30 layers; the measured tab is opened last.
+const tabCount = Number(options.tabs ?? 1);
+if (!Number.isInteger(tabCount) || tabCount < 1 || tabCount > 16) throw new Error("Require --tabs between 1 and 16");
 const profileOutput = options.profile ? resolve(options.profile) : null;
 if (!Number.isInteger(sampleCount) || sampleCount < 5) throw new Error("Require at least five samples");
 const browserPath = options.browser ?? process.env.ASSEMBLASH_TEST_BROWSER ?? [
@@ -65,6 +69,14 @@ if (!existsSync(fixture)) {
 }
 const fixtureBytes = readFileSync(fixture);
 writeFileSync(join(project, "document.json"), fixtureBytes);
+const extraTabs = Array.from({ length: tabCount - 1 }, (_, index) => `tab-${index + 1}`);
+for (const id of extraTabs) {
+  const directory = join(workspace, "projects", id);
+  command(["new", directory, "--width", "1920", "--height", "1080", "--background", "#fafafa", "--name", `Tab ${id}`]);
+  const own = JSON.parse(readFileSync(join(directory, "document.json"), "utf8"));
+  own.layers = JSON.parse(fixtureBytes.toString("utf8")).layers;
+  writeFileSync(join(directory, "document.json"), JSON.stringify(own, null, 2) + "\n");
+}
 const loginCheck = options["login-check"] === "true";
 const accessToken = loginCheck ? command(["token", "show", "--workspace", workspace]).trim() : null;
 const port = await freePort();
@@ -193,14 +205,19 @@ try {
     throw new Error(`${error.message}; ${JSON.stringify(status)}; ${exceptions.join("; ")}`);
   }
   const oldPicker = await evaluate(`Boolean(document.querySelector("#projects"))`);
-  if (oldPicker) {
-    await evaluate(`(() => { const select = document.querySelector("#projects"); select.value = "latency"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
-  } else {
-    await evaluate('document.querySelector("#project-search").focus()');
-    await until(() => evaluate('Boolean(document.querySelector("#project-options [data-project-id=latency]"))'), "project picker rows");
-    await evaluate('document.querySelector("#project-options [data-project-id=latency]").click()');
+  if (oldPicker && extraTabs.length) throw new Error("This build has no project tabs");
+  for (const id of [...extraTabs, "latency"]) {
+    if (oldPicker) {
+      await evaluate(`(() => { const select = document.querySelector("#projects"); select.value = "latency"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    } else {
+      await evaluate('document.querySelector("#project-search").focus()');
+      await until(() => evaluate(`Boolean(document.querySelector('#project-options [data-project-id="${id}"]'))`), "project picker rows");
+      await evaluate(`document.querySelector('#project-options [data-project-id="${id}"]').click()`);
+    }
+    await until(() => evaluate(`Boolean(document.querySelector("#canvas-image")?.complete && document.querySelector("#canvas-image")?.naturalWidth > 0 && document.querySelector(".layer") && (document.querySelectorAll("[data-tab-id]").length === 0 || document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tabId === "${id}"))`), `project preview of ${id}`);
   }
-  await until(() => evaluate('Boolean(document.querySelector("#canvas-image")?.complete && document.querySelector("#canvas-image")?.naturalWidth > 0 && document.querySelector(".layer"))'), "project preview");
+  const openTabs = await evaluate(`document.querySelectorAll("[data-tab-id]").length`);
+  if (extraTabs.length && openTabs !== tabCount) throw new Error(`Expected ${tabCount} open tabs, found ${openTabs}`);
   const layerPoint = await evaluate('(() => { const layer = document.querySelector(".layer[data-id=layer_latency_29]"); layer.scrollIntoView({ block: "center" }); const rect = layer.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; })()');
   await send("Input.dispatchMouseEvent", { type: "mousePressed", ...layerPoint, button: "left", clickCount: 1 });
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...layerPoint, button: "left", clickCount: 1 });
@@ -251,7 +268,7 @@ try {
     label: options.label ?? binary, host: platform(), cpu: cpus()[0].model,
     browser: await send("Browser.getVersion"), viewport: [1400, 900], fixtureSha256: sha256(fixtureBytes),
     binarySha256: sha256(readFileSync(binary)), binaryVersion: command(["--version"]).trim(),
-    loginChecked: loginCheck, uiSource: options["ui-dir"] ? "directory" : "embedded", externalAssetRequests: externalRequests.length,
+    tabs: tabCount, openTabs, loginChecked: loginCheck, uiSource: options["ui-dir"] ? "directory" : "embedded", externalAssetRequests: externalRequests.length,
     metric: "ArrowRight input to authoritative preview load and two animation frames", warmupSamples: 3,
     samplesMs: samples, medianMs: sorted[Math.floor(sorted.length / 2)], p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1],
   };
