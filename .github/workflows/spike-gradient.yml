@@ -1,8 +1,10 @@
-name: Gradient bit-identity spike
+name: PDF reproducibility spike
 
-# Compare the complete hash tables from all six targets.
-# Use the same committed PNG fixture on every target.
-# The spike is complete. Start this workflow by hand only.
+# Build the PDF spike binary on all six targets.
+# Print the sha256 of each output and compare the tables.
+# Start this workflow by hand only.
+# This file replaces the finished gradient spike on the spike branch only,
+# because a dispatch needs a workflow path that exists on main.
 
 on:
   workflow_dispatch:
@@ -15,9 +17,9 @@ env:
 
 jobs:
   render:
-    name: Render (${{ matrix.target-name }})
+    name: PDF spike (${{ matrix.target-name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -41,32 +43,66 @@ jobs:
           toolchain: "1.92.0"
       - uses: Swatinem/rust-cache@v2
         with:
-          key: spike-${{ matrix.target-name }}
-      - name: Render and hash the spike documents
+          key: pdf-spike-${{ matrix.target-name }}
+      - name: Build the spike binary (release profile, all routes)
         shell: bash
-        run: >-
-          cargo run -p assemblash-renderer
-          --example gradient_bit_identity_spike
-          -- --out "$RUNNER_TEMP/grad-spike"
+        run: cargo build --release -p assemblash-pdf-spike --all-features
+      - name: Run 1
+        shell: bash
+        run: ./target/release/assemblash-pdf-spike --out "$RUNNER_TEMP/pdf-spike/run1"
+      - name: Run 2
+        shell: bash
+        run: ./target/release/assemblash-pdf-spike --out "$RUNNER_TEMP/pdf-spike/run2"
+      - name: Compare the two runs and print sha256
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/pdf-spike"
+          status=0
+          for f in run1/*.pdf run1/*.png; do
+            b=$(basename "$f")
+            if cmp -s "run1/$b" "run2/$b"; then r=identical; else r=DIFFERENT; status=1; fi
+            echo "$b $r"
+          done | tee two-process-runs.txt
+          cp run1/hashes.csv hashes.csv
+          cp run1/notes.csv notes.csv
+          echo "${{ matrix.target-name }}" > target.txt
+          rm -rf run2
       - uses: actions/upload-artifact@v4
         with:
-          name: grad-spike-${{ matrix.target-name }}
-          path: ${{ runner.temp }}/grad-spike
+          name: pdf-spike-${{ matrix.target-name }}
+          path: ${{ runner.temp }}/pdf-spike
           if-no-files-found: error
 
   compare:
     name: Compare hashes across targets
     needs: render
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: grad-spike-*
-          path: hashes
+          pattern: pdf-spike-*
+          path: results
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: All six hash tables must be byte-equal
-        run: python scripts/gradient_spike_compare.py hashes
+      - name: Print the six-target table
+        run: python scripts/pdf_spike_compare.py results
+
+  dependencies:
+    name: Duplicate crates and licences
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo tree -d per route
+        run: |
+          for f in "" "--features svg2pdf-route" "--features krilla-route"; do
+            echo "== assemblash-pdf-spike $f"
+            cargo tree -p assemblash-pdf-spike $f -e normal -d --depth 0
+          done
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
