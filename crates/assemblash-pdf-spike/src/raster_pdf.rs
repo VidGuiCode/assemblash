@@ -85,7 +85,7 @@ pub fn write_pdf(pages: &[PageImage], print: Option<Print>) -> Vec<u8> {
     let first_page_obj = 4usize;
     let total_objs = 3 + per_page * pages.len();
 
-    let mut obj = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]| {
+    let obj = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]| {
         offsets.push(out.len());
         let n = offsets.len();
         out.extend_from_slice(format!("{n} 0 obj\n").as_bytes());
@@ -106,7 +106,7 @@ pub fn write_pdf(pages: &[PageImage], print: Option<Print>) -> Vec<u8> {
 
     for (i, page) in pages.iter().enumerate() {
         let base = first_page_obj + i * per_page;
-        let (page_obj, content_obj, image_obj, smask_obj) = (base, base + 1, base + 2, base + 3);
+        let (_page_obj, content_obj, image_obj, smask_obj) = (base, base + 1, base + 2, base + 3);
 
         // Geometry in points. Without print: media = trim = image.
         let (bleed, slug) = print.map_or((0.0, 0.0), |p| (p.bleed_pt, p.slug_pt));

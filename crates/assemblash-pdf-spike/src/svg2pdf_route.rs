@@ -67,7 +67,7 @@ pub fn write_pdf(
         page.finish();
         let mut content = Content::new();
         content.save_state().transform([*w, 0.0, 0.0, *h, slug, slug]).x_object(Name(b"S0")).restore_state();
-        let mut bytes = content.finish().into_vec();
+        let mut bytes = content.finish();
         // CROP-MARKS-BEGIN svg2pdf
         if let Some(p) = print {
             bytes.extend_from_slice(crop_marks_ops(slug + bleed, slug + bleed, trim_w, trim_h, p).as_bytes());
