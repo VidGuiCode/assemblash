@@ -30,7 +30,7 @@ jobs:
           - { os: windows-latest, name: windows-x86_64 }
           - { os: windows-11-arm, name: windows-aarch64 }
           - { os: macos-15-intel, name: macos-x86_64 }
-          - { os: macos-14, name: macos-aarch64 }
+          - { os: macos-15, name: macos-aarch64 }
         variant: [scalar, simd]
         include:
           - variant: scalar
@@ -67,6 +67,26 @@ jobs:
           name: jpeg-webp-${{ matrix.target.name }}-${{ matrix.variant }}
           path: spike-out
           if-no-files-found: error
+
+  size:
+    name: Binary size (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [none, enc-image, enc-jpeg-encoder, jpeg-encoder-simd, enc-mozjpeg, enc-libwebp, enc-zenwebp, zenwebp-simd]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - name: Build with one encoder only and print the size
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = none ]; then features=""; else features="--features ${{ matrix.features }}"; fi
+          cargo build --release --locked --manifest-path spike/jpeg-webp/Cargo.toml --no-default-features $features
+          echo "SIZE ${{ matrix.features }} $(stat -c %s spike/jpeg-webp/target/release/jpeg-webp-spike)"
 
   compare:
     name: Compare hashes across targets
