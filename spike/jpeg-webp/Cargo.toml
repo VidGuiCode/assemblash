@@ -1,0 +1,40 @@
+# Throwaway measurement crate for the JPEG and WebP encoder determinism spike.
+# It is outside the workspace on purpose: the workspace lock file and the
+# default binary do not change. Never merge this branch.
+[package]
+name = "jpeg-webp-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[features]
+default = ["enc-jpeg-encoder", "enc-image", "enc-mozjpeg", "enc-libwebp", "enc-zenwebp"]
+enc-jpeg-encoder = ["dep:jpeg-encoder"]
+# Turns on the runtime-detected AVX2 path in jpeg-encoder.
+jpeg-encoder-simd = ["enc-jpeg-encoder", "jpeg-encoder/simd"]
+enc-image = ["dep:image"]
+enc-mozjpeg = ["dep:mozjpeg"]
+enc-libwebp = ["dep:webp"]
+enc-zenwebp = ["dep:zenwebp"]
+zenwebp-simd = ["enc-zenwebp", "zenwebp/simd"]
+
+[dependencies]
+assemblash-core = { path = "../../crates/assemblash-core" }
+assemblash-renderer = { path = "../../crates/assemblash-renderer" }
+resvg = "0.48.1"
+sha2 = "0.11.0"
+jpeg-encoder = { version = "=0.7.1", default-features = false, features = ["std"], optional = true }
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "webp"], optional = true }
+mozjpeg = { version = "=0.10.13", default-features = false, optional = true }
+webp = { version = "=0.3.1", default-features = false, optional = true }
+zenwebp = { version = "=0.3.2", default-features = false, features = ["std"], optional = true }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

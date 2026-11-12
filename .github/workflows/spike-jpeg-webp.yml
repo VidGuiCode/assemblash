@@ -1,0 +1,84 @@
+name: JPEG and WebP determinism spike
+
+# Encode fixed inputs with each candidate encoder on all six targets.
+# Print the sha256 of every output and compare the tables.
+# Spike branch only. Start this workflow by hand only.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  encode:
+    name: Encode (${{ matrix.target.name }}, ${{ matrix.variant }})
+    runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { os: ubuntu-latest, name: linux-x86_64 }
+          - { os: ubuntu-24.04-arm, name: linux-aarch64 }
+          - { os: windows-latest, name: windows-x86_64 }
+          - { os: windows-11-arm, name: windows-aarch64 }
+          - { os: macos-15-intel, name: macos-x86_64 }
+          - { os: macos-14, name: macos-aarch64 }
+        variant: [scalar, simd]
+        include:
+          - variant: scalar
+            features: ""
+          - variant: simd
+            features: "--features jpeg-encoder-simd,zenwebp-simd"
+    env:
+      SPIKE_OUT: ${{ github.workspace }}/spike-out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spike/jpeg-webp
+          key: jpeg-webp-${{ matrix.target.name }}-${{ matrix.variant }}
+      - name: Build the spike binary
+        shell: bash
+        run: cargo build --release --locked --manifest-path spike/jpeg-webp/Cargo.toml ${{ matrix.features }}
+      - name: Run twice and compare the runs
+        shell: bash
+        run: |
+          bin=spike/jpeg-webp/target/release/jpeg-webp-spike
+          mkdir -p "$SPIKE_OUT"
+          "$bin" --out "$RUNNER_TEMP/run1" > "$SPIKE_OUT/run1.csv"
+          "$bin" --out "$RUNNER_TEMP/run2" > "$SPIKE_OUT/run2.csv"
+          if cmp "$SPIKE_OUT/run1.csv" "$SPIKE_OUT/run2.csv"; then echo "two runs: equal"; else echo "two runs: DIFFERENT"; fi
+          ls -l "$bin"* | tee "$SPIKE_OUT/binary-size.txt"
+          cat "$SPIKE_OUT/run1.csv"
+          echo "${{ matrix.target.name }}" > "$SPIKE_OUT/target-name.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jpeg-webp-${{ matrix.target.name }}-${{ matrix.variant }}
+          path: spike-out
+          if-no-files-found: error
+
+  compare:
+    name: Compare hashes across targets
+    needs: encode
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: jpeg-webp-*
+          path: hashes
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Print the per-target table
+        run: python spike/jpeg-webp/compare.py hashes
