@@ -1,0 +1,106 @@
+name: PDF reproducibility spike
+
+# Build the PDF spike binary on all six targets.
+# Print the sha256 of each output and compare the tables.
+# Start this workflow by hand only.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  render:
+    name: PDF spike (${{ matrix.target-name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target-name: linux-aarch64
+          - os: windows-latest
+            target-name: windows-x86_64
+          - os: windows-11-arm
+            target-name: windows-aarch64
+          - os: macos-15-intel
+            target-name: macos-x86_64
+          - os: macos-14
+            target-name: macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pdf-spike-${{ matrix.target-name }}
+      - name: Build the spike binary (release profile, all routes)
+        shell: bash
+        run: cargo build --release -p assemblash-pdf-spike --all-features
+      - name: Run 1
+        shell: bash
+        run: ./target/release/assemblash-pdf-spike --out "$RUNNER_TEMP/pdf-spike/run1"
+      - name: Run 2
+        shell: bash
+        run: ./target/release/assemblash-pdf-spike --out "$RUNNER_TEMP/pdf-spike/run2"
+      - name: Compare the two runs and print sha256
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/pdf-spike"
+          status=0
+          for f in run1/*.pdf run1/*.png; do
+            b=$(basename "$f")
+            if cmp -s "run1/$b" "run2/$b"; then r=identical; else r=DIFFERENT; status=1; fi
+            echo "$b $r"
+          done | tee two-process-runs.txt
+          cp run1/hashes.csv hashes.csv
+          cp run1/notes.csv notes.csv
+          echo "${{ matrix.target-name }}" > target.txt
+          rm -rf run2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-spike-${{ matrix.target-name }}
+          path: ${{ runner.temp }}/pdf-spike
+          if-no-files-found: error
+
+  compare:
+    name: Compare hashes across targets
+    needs: render
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pdf-spike-*
+          path: results
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Print the six-target table
+        run: python scripts/pdf_spike_compare.py results
+
+  dependencies:
+    name: Duplicate crates and licences
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo tree -d per route
+        run: |
+          for f in "" "--features svg2pdf-route" "--features krilla-route"; do
+            echo "== assemblash-pdf-spike $f"
+            cargo tree -p assemblash-pdf-spike $f -e normal -d --depth 0
+          done
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses

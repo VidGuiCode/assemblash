@@ -1,0 +1,29 @@
+[package]
+name = "assemblash-pdf-spike"
+description = "Spike: PDF byte reproducibility on three routes. Not shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[features]
+default = []
+svg2pdf-route = ["dep:svg2pdf", "dep:pdf-writer"]
+krilla-route = ["dep:krilla", "dep:krilla-svg", "dep:usvg47"]
+
+[dependencies]
+assemblash-core.workspace = true
+assemblash-renderer.workspace = true
+png = "0.18.1"
+sha2 = "0.11.0"
+# The raster route needs only a zlib encoder. miniz_oxide is pure Rust and
+# already in the lock file (png and flate2 pull it in).
+miniz_oxide = "0.8.9"
+svg2pdf = { version = "=0.13.0", optional = true }
+pdf-writer = { version = "0.12", optional = true }
+krilla = { version = "=0.8.2", optional = true }
+krilla-svg = { version = "=0.8.1", optional = true }
+usvg47 = { package = "usvg", version = "0.47", optional = true }
