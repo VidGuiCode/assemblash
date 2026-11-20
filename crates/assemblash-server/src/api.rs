@@ -115,6 +115,8 @@ pub fn router_with_limits(
             "/api/open-tabs",
             get(crate::tabs::get_open_tabs).put(crate::tabs::put_open_tabs),
         )
+        .route("/api/page-sets", get(list_page_sets))
+        .route("/api/page-sets/{name}", get(get_page_set))
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/recent", get(recent_projects))
         .route(
@@ -995,6 +997,29 @@ async fn recent_projects(
         }),
     )
     .await
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PageSetList {
+    page_sets: Vec<assemblash_core::page_sets::PageSetName>,
+}
+
+/// The page sets of the workspace, by name. Read-only; the files are not
+/// opened, so a malformed set is listed and reported when it is read.
+async fn list_page_sets(State(state): State<AppState>) -> Result<Json<PageSetList>, ApiError> {
+    Ok(Json(PageSetList {
+        page_sets: state.workspace().page_sets()?,
+    }))
+}
+
+/// One page set, with its flat, ordered page list. Read-only.
+async fn get_page_set(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<assemblash_core::page_sets::ResolvedPageSet>, ApiError> {
+    let name = assemblash_core::page_sets::PageSetName::new(name)?;
+    Ok(Json(state.workspace().resolve_page_set(&name)?))
 }
 
 async fn list_projects(

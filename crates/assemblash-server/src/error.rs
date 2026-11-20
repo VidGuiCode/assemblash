@@ -15,6 +15,7 @@
 //! The `code` is the part a client should branch on: it is a closed set,
 //! and it does not change when a message is reworded.
 
+use assemblash_core::page_sets::PageSetError;
 use assemblash_core::session::SessionError;
 use assemblash_core::storage::StorageError;
 use assemblash_core::workspace::WorkspaceError;
@@ -144,6 +145,42 @@ impl From<WorkspaceError> for ApiError {
                     .with_details(json!({ "id": id }))
             }
             _ => Self::new(StatusCode::INTERNAL_SERVER_ERROR, "workspace", message),
+        }
+    }
+}
+
+impl From<PageSetError> for ApiError {
+    fn from(error: PageSetError) -> Self {
+        let message = error.to_string();
+        let code = error.code();
+        match error {
+            PageSetError::InvalidName { name, reason } => {
+                Self::new(StatusCode::BAD_REQUEST, code, message)
+                    .with_details(json!({ "name": name, "reason": reason }))
+            }
+            PageSetError::NotFound { name } => Self::new(StatusCode::NOT_FOUND, code, message)
+                .with_details(json!({ "name": name })),
+            PageSetError::Malformed { set, reason } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "set": set, "reason": reason }))
+            }
+            PageSetError::MissingMembers { set, missing } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "set": set, "missing": missing }))
+            }
+            PageSetError::Loop { chain } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "chain": chain }))
+            }
+            PageSetError::DuplicatePage {
+                set,
+                project,
+                first,
+                second,
+            } => Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message).with_details(
+                json!({ "set": set, "project": project, "first": first, "second": second }),
+            ),
+            _ => Self::new(StatusCode::INTERNAL_SERVER_ERROR, code, message),
         }
     }
 }

@@ -22,7 +22,7 @@ use serde::Deserialize;
 
 use crate::backend::{
     Backend, DocumentState, FontStoreListing, HistoryReport, LayerList, LayerSummary,
-    OverlapReport, ProjectList, SvgRender, ValidationReport,
+    OverlapReport, PageSetList, ProjectList, SvgRender, ValidationReport,
 };
 
 /// Which project a tool is about.
@@ -38,6 +38,14 @@ pub struct ProjectArgs {
     /// was started for a single project.
     #[serde(default)]
     pub project: Option<String>,
+}
+
+/// Which page set.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSetArgs {
+    /// Page set to read, as reported by `list_page_sets`.
+    pub name: String,
 }
 
 /// Which layer, in which project.
@@ -231,6 +239,28 @@ impl AssemblashMcp {
     )]
     async fn list_projects(&self) -> Result<Json<ProjectList>, ErrorData> {
         self.backend.list_projects().map(Json).map_err(to_error)
+    }
+
+    /// The page sets of the workspace.
+    #[tool(
+        description = "List the page sets of the workspace, by name. A page set is an                        ordered list of projects, kept in page-sets/<name>.json. Read-only."
+    )]
+    async fn list_page_sets(&self) -> Result<Json<PageSetList>, ErrorData> {
+        self.backend.list_page_sets().map(Json).map_err(to_error)
+    }
+
+    /// One page set, resolved.
+    #[tool(
+        description = "Read one page set and its flat, ordered page list. Nested sets add                        their pages in place. A loop, a missing member, or a project on two                        pages is refused with a typed error. Read-only."
+    )]
+    async fn get_page_set(
+        &self,
+        Parameters(args): Parameters<PageSetArgs>,
+    ) -> Result<Json<assemblash_core::page_sets::ResolvedPageSet>, ErrorData> {
+        self.backend
+            .get_page_set(&args.name)
+            .map(Json)
+            .map_err(to_error)
     }
 
     /// What this build can render.

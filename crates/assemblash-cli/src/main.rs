@@ -536,6 +536,13 @@ enum Command {
         reclaim_stale_locks: bool,
     },
 
+    /// Lists and reads page sets: ordered lists of projects in a workspace.
+    ///
+    /// A page set is one file, `page-sets/<name>.json`, beside `projects/`.
+    /// These commands only read. Write the file to make or change a set.
+    #[command(subcommand, name = "page-set")]
+    PageSet(PageSetCommand),
+
     /// Manages the access token a non-loopback bind requires.
     #[command(subcommand)]
     Token(TokenCommand),
@@ -1132,6 +1139,35 @@ enum TokenCommand {
         /// Workspace to change. Defaults to this machine's.
         #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
         workspace: Option<PathBuf>,
+    },
+}
+
+/// Reads the page sets of a workspace.
+#[derive(Debug, Subcommand)]
+enum PageSetCommand {
+    /// Prints the name of each page set, one on each line.
+    List {
+        /// Workspace to read. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+        /// Print the JSON that `GET /api/page-sets` serves.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolves one page set and prints its pages in order.
+    ///
+    /// Each line is the page index, a tab, and the project id. Nested sets add
+    /// their pages in place. A loop, a missing member, or a project on two
+    /// pages is an error, and nothing is printed.
+    Show {
+        /// Name of the set: its file name without `.json`.
+        name: String,
+        /// Workspace to read. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+        /// Print the JSON that `GET /api/page-sets/{name}` serves.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1869,6 +1905,8 @@ enum CliError {
     PaintJson { source: serde_json::Error },
     #[error(transparent)]
     Session(#[from] SessionError),
+    #[error("{} ({})", .0, .0.code())]
+    PageSet(#[from] assemblash_core::page_sets::PageSetError),
     #[error(transparent)]
     FontStore(#[from] FontStoreError),
     #[error(transparent)]
@@ -2508,6 +2546,8 @@ fn run(command: Command) -> Result<(), CliError> {
         }
 
         Command::Font(command) => run_font(command),
+
+        Command::PageSet(command) => run_page_set(command),
 
         Command::Token(command) => run_token(command),
 
@@ -3347,6 +3387,42 @@ fn check_family_installed(directory: &Path, family: &str) -> Result<(), CliError
 fn new_token() -> Result<String, CliError> {
     assemblash_server::auth::generate_token()
         .map_err(|source| CliError::Serve(assemblash_server::ServeError::Access { source }))
+}
+
+fn run_page_set(command: PageSetCommand) -> Result<(), CliError> {
+    use assemblash_core::page_sets::PageSetName;
+    match command {
+        PageSetCommand::List { workspace, json } => {
+            let names = open_workspace(workspace)?.page_sets()?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "pageSets": names }))?
+                );
+            } else {
+                for name in names {
+                    println!("{name}");
+                }
+            }
+            Ok(())
+        }
+        PageSetCommand::Show {
+            name,
+            workspace,
+            json,
+        } => {
+            let workspace = open_workspace(workspace)?;
+            let resolved = workspace.resolve_page_set(&PageSetName::new(name)?)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resolved)?);
+            } else {
+                for page in &resolved.pages {
+                    println!("{}	{}", page.index, page.project);
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 fn run_token(command: TokenCommand) -> Result<(), CliError> {

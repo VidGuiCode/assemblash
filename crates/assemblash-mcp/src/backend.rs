@@ -336,6 +336,14 @@ pub struct ProjectList {
     pub projects: Vec<ProjectSummary>,
 }
 
+/// The page sets of a workspace.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSetList {
+    /// The set names, sorted. A name is the file name without `.json`.
+    pub page_sets: Vec<assemblash_core::page_sets::PageSetName>,
+}
+
 /// A document's layers, flattened.
 ///
 /// An object for the same reason [`ProjectList`] is.
@@ -685,6 +693,32 @@ impl Backend {
                 Ok(ProjectList {
                     projects: vec![summarise(name, &document)],
                 })
+            }
+        }
+    }
+
+    /// The page sets of the workspace, by name.
+    ///
+    /// A server opened for one project has no workspace, so it has no page
+    /// sets: the list is empty.
+    pub fn list_page_sets(&self) -> Result<PageSetList, ApiError> {
+        let page_sets = match &self.root {
+            Root::Workspace(state) => state.workspace().page_sets()?,
+            Root::SingleProject { .. } => Vec::new(),
+        };
+        Ok(PageSetList { page_sets })
+    }
+
+    /// One page set, resolved to its flat, ordered page list.
+    pub fn get_page_set(
+        &self,
+        name: &str,
+    ) -> Result<assemblash_core::page_sets::ResolvedPageSet, ApiError> {
+        let name = assemblash_core::page_sets::PageSetName::new(name)?;
+        match &self.root {
+            Root::Workspace(state) => Ok(state.workspace().resolve_page_set(&name)?),
+            Root::SingleProject { .. } => {
+                Err(assemblash_core::page_sets::PageSetError::NotFound { name }.into())
             }
         }
     }

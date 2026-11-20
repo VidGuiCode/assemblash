@@ -951,6 +951,91 @@ fn overflowing_text_warns_on_stderr_and_still_exits_zero() {
 }
 
 #[test]
+fn page_set_commands_list_and_resolve_a_workspace_set() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    let root_arg = root.to_str().unwrap();
+    for id in ["cover", "inside", "back"] {
+        let project = root.join("projects").join(id);
+        run(&[
+            "new",
+            project.to_str().unwrap(),
+            "--width",
+            "10",
+            "--height",
+            "10",
+        ]);
+    }
+    let sets = root.join("page-sets");
+    std::fs::create_dir_all(&sets).unwrap();
+    std::fs::write(
+        sets.join("middle.json"),
+        r#"{"pages":[{"project":"inside"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sets.join("deck.json"),
+        r#"{"pages":[{"project":"cover"},{"set":"middle"},{"project":"back"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sets.join("twice.json"),
+        r#"{"pages":[{"project":"cover"},{"project":"cover"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(sets.join("holes.json"), r#"{"pages":[{"project":"gone"}]}"#).unwrap();
+
+    assert_eq!(
+        run(&["page-set", "list", "--workspace", root_arg]),
+        "deck
+holes
+middle
+twice
+"
+    );
+    let listed: serde_json::Value = serde_json::from_str(&run(&[
+        "page-set",
+        "list",
+        "--workspace",
+        root_arg,
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(listed["pageSets"][0], "deck");
+
+    assert_eq!(
+        run(&["page-set", "show", "deck", "--workspace", root_arg]),
+        "0	cover
+1	inside
+2	back
+"
+    );
+    let shown: serde_json::Value = serde_json::from_str(&run(&[
+        "page-set",
+        "show",
+        "deck",
+        "--workspace",
+        root_arg,
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(
+        shown["pages"][1]["via"],
+        serde_json::json!(["deck", "middle"])
+    );
+
+    let twice = run_failing(&["page-set", "show", "twice", "--workspace", root_arg]);
+    assert!(twice.contains("pageSetDuplicatePage"), "{twice}");
+    let holes = run_failing(&["page-set", "show", "holes", "--workspace", root_arg]);
+    assert!(
+        holes.contains("pageSetMemberMissing") && holes.contains("gone"),
+        "{holes}"
+    );
+    let none = run_failing(&["page-set", "show", "none", "--workspace", root_arg]);
+    assert!(none.contains("pageSetNotFound"), "{none}");
+}
+
+#[test]
 fn canvas_set_resizes_clears_background_and_undoes() {
     let scratch = tempfile::tempdir().unwrap();
     let project = scratch.path().join("canvas");

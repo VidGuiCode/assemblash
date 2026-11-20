@@ -375,6 +375,82 @@ fn add_text(harness: &Harness, id: &str, family: &str) -> Value {
 }
 
 #[test]
+fn page_sets_are_listed_and_resolved_read_only() {
+    let harness = Harness::start();
+    assert_eq!(
+        http::get(&harness.url("/api/page-sets")).json()["pageSets"],
+        json!([])
+    );
+
+    for id in ["cover", "inside", "back"] {
+        create_project(&harness, id);
+    }
+    let sets = harness.root().join("page-sets");
+    std::fs::create_dir_all(&sets).unwrap();
+    std::fs::write(
+        sets.join("middle.json"),
+        r#"{"pages":[{"project":"inside"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sets.join("deck.json"),
+        r#"{"pages":[{"project":"cover"},{"set":"middle"},{"project":"back"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(sets.join("loop.json"), r#"{"pages":[{"set":"loop"}]}"#).unwrap();
+    std::fs::write(
+        sets.join("holes.json"),
+        r#"{"pages":[{"project":"gone"},{"set":"nowhere"}]}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        http::get(&harness.url("/api/page-sets")).json()["pageSets"],
+        json!(["deck", "holes", "loop", "middle"])
+    );
+
+    let deck = http::get(&harness.url("/api/page-sets/deck"));
+    assert_eq!(deck.status, 200, "{}", deck.json());
+    let deck = deck.json();
+    assert_eq!(deck["name"], "deck");
+    let pages: Vec<&str> = deck["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|page| page["project"].as_str().unwrap())
+        .collect();
+    assert_eq!(pages, ["cover", "inside", "back"]);
+    assert_eq!(deck["pages"][1]["via"], json!(["deck", "middle"]));
+
+    let looped = http::get(&harness.url("/api/page-sets/loop"));
+    assert_eq!(looped.status, 422);
+    assert_eq!(error_code(&looped), "pageSetLoop");
+    assert_eq!(
+        looped.json()["error"]["details"]["chain"],
+        json!(["loop", "loop"])
+    );
+
+    let holes = http::get(&harness.url("/api/page-sets/holes"));
+    assert_eq!(holes.status, 422);
+    assert_eq!(error_code(&holes), "pageSetMemberMissing");
+    assert_eq!(
+        holes.json()["error"]["details"]["missing"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let none = http::get(&harness.url("/api/page-sets/none"));
+    assert_eq!(none.status, 404);
+    assert_eq!(error_code(&none), "pageSetNotFound");
+
+    let bad = http::get(&harness.url("/api/page-sets/CON"));
+    assert_eq!(bad.status, 400);
+    assert_eq!(error_code(&bad), "invalidPageSetName");
+}
+
+#[test]
 fn first_run_creates_a_valid_workspace() {
     let harness = Harness::start();
 

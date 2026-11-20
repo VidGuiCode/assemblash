@@ -354,6 +354,52 @@ async fn a_real_mcp_client_inspects_a_document() {
 }
 
 #[tokio::test]
+async fn page_sets_are_listed_and_resolved_over_mcp() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let sets = root.join("page-sets");
+    std::fs::create_dir_all(&sets).unwrap();
+    std::fs::write(
+        sets.join("deck.json"),
+        r#"{"pages":[{"project":"poster"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(sets.join("ring.json"), r#"{"pages":[{"set":"loop"}]}"#).unwrap();
+    std::fs::write(sets.join("loop.json"), r#"{"pages":[{"set":"ring"}]}"#).unwrap();
+
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let listed = structured(
+        &client
+            .call_tool(call("list_page_sets", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(listed["pageSets"], json!(["deck", "loop", "ring"]));
+
+    let deck = structured(
+        &client
+            .call_tool(call("get_page_set", arguments(json!({ "name": "deck" }))))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(deck["pages"][0]["project"], "poster");
+    assert_eq!(deck["pages"][0]["via"], json!(["deck"]));
+
+    let looped = client
+        .call_tool(call("get_page_set", arguments(json!({ "name": "ring" }))))
+        .await;
+    let text = format!("{looped:?}");
+    assert!(text.contains("pageSetLoop"), "{text}");
+    assert!(text.contains("ring -> loop -> ring"), "{text}");
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
 async fn a_single_project_server_needs_no_project_name() {
     let scratch = tempfile::tempdir().unwrap();
     let project = scratch.path().join("standalone");
@@ -487,9 +533,11 @@ async fn every_new_tool_is_advertised_and_callable() {
     // 1.10.0 added six parity tools by maintainer ruling — `insert_layer_tree`,
     // `install_font_pack`, `remove_font_family`, `list_fonts`,
     // `delete_project`, and `rename_project`: 53.
+    // 1.14.0 added two read-only page-set tools, `list_page_sets` and
+    // `get_page_set`: 55.
     assert_eq!(
         tools.len(),
-        53,
+        55,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 
@@ -928,7 +976,7 @@ async fn no_tool_schema_has_a_ref_cycle() {
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
 
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 53, "the tool surface holds 53 tools");
+    assert_eq!(tools.len(), 55, "the tool surface holds 55 tools");
     for tool in &tools {
         assert_eq!(
             ref_cycle(&tool.input_schema),
