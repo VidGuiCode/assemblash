@@ -346,6 +346,11 @@ async fn recover_project_lock(
     Ok(Json(RecoverLockResponse { unlocked }))
 }
 
+/// The close route takes no arguments: its body is empty or `{}`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CloseProjectRequest {}
+
 #[derive(Debug, Serialize)]
 struct CloseProjectResponse {
     closed: bool,
@@ -356,12 +361,30 @@ struct CloseProjectResponse {
 /// The interface calls this when a person closes the project's tab. A
 /// project that is not open answers `closed: false`. Nothing in the project
 /// changes: the journal, the document, and the undo history stay as they are.
+///
+/// The body is read to its end before the answer goes out, even though the
+/// route needs nothing from it. An answer to a request whose body is still
+/// on its way lets the server close the connection with those bytes unread.
+/// The body then arrives at a closed socket, the host answers with `RST`,
+/// and on Windows that `RST` discards the answer the client has not read
+/// yet (os error 10053 or 10054). A `closed: false` or a refused id answers
+/// at once, so that window is real.
 async fn close_project(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    body: axum::body::Bytes,
 ) -> Result<Json<CloseProjectResponse>, ApiError> {
     let id = ProjectId::new(id)?;
-    let closed = state.close_project(&id)?;
+    if !body.iter().all(u8::is_ascii_whitespace) {
+        serde_json::from_slice::<CloseProjectRequest>(&body)
+            .map_err(|source| ApiError::bad_request(source.to_string()))?;
+    }
+    // Closing waits up to five seconds for a running request to let go of
+    // the project. That wait sleeps, so it runs on the blocking pool and not
+    // on the thread that serves the other connections.
+    let closed = tokio::task::spawn_blocking(move || state.close_project(&id))
+        .await
+        .map_err(join_error)??;
     Ok(Json(CloseProjectResponse { closed }))
 }
 

@@ -2641,6 +2641,21 @@ fn closing_a_project_releases_its_lock_and_a_later_read_opens_it_again() {
     assert_eq!(again.status, 200, "{}", again.json());
     assert_eq!(again.json()["closed"], false);
 
+    // The route takes no arguments: an empty body is the ordinary case, and
+    // a body with a field in it is refused.
+    let empty = http::request(
+        "POST",
+        &harness.url("/api/projects/tabbed/close"),
+        None,
+        None,
+    );
+    assert_eq!(empty.status, 200, "{}", empty.json());
+    let unknown = http::post_json(
+        &harness.url("/api/projects/tabbed/close"),
+        &json!({ "force": true }),
+    );
+    assert_eq!(unknown.status, 400, "{}", unknown.json());
+
     // The next read opens the project again, with its journal intact.
     let document = http::get(&harness.url("/api/projects/tabbed/document"));
     assert_eq!(document.status, 200, "{}", document.json());
