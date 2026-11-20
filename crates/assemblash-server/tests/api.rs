@@ -2869,10 +2869,10 @@ fn each_new_format_is_written_and_served_with_its_media_type() {
         }
     }
 
-    // `.jpeg` is a name the route accepts; nothing of that name was written.
-    let missing = http::get(&harness.url("/api/projects/poster/exports/out-jpeg.jpeg"));
-    assert_eq!(missing.status, 404);
-    assert_eq!(error_code(&missing), "noSuchExport");
+    // A JPEG is written as `.jpg` only, so `.jpeg` is not a name of an export.
+    let alias = http::get(&harness.url("/api/projects/poster/exports/out-jpeg.jpeg"));
+    assert_eq!(alias.status, 400);
+    assert_eq!(error_code(&alias), "invalidExportName");
     let unknown = http::get(&harness.url("/api/projects/poster/exports/out.gif"));
     assert_eq!(unknown.status, 400);
     assert_eq!(error_code(&unknown), "invalidExportName");

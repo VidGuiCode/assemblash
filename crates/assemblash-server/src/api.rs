@@ -2322,14 +2322,13 @@ async fn get_export(
     State(state): State<AppState>,
     Path((id, file)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // The extensions this engine writes, and `jpeg` as a second name for
-    // `jpg`. Anything else is not a file this engine wrote.
+    // The extensions this engine writes. A JPEG is always written as `.jpg`.
+    // Anything else is not a file this engine wrote.
     let (stem, extension, media_type) = [
         ("png", "image/png"),
         ("svg", "image/svg+xml"),
         ("pdf", "application/pdf"),
         ("jpg", "image/jpeg"),
-        ("jpeg", "image/jpeg"),
         ("webp", "image/webp"),
     ]
     .into_iter()
