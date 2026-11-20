@@ -40,6 +40,13 @@ pub const PAGE_SETS_DIR: &str = "page-sets";
 /// Extension of a page-set file.
 pub const PAGE_SET_EXTENSION: &str = "json";
 
+/// The most sets in one chain of nested sets, the resolved set included.
+///
+/// A deeper chain is refused with [`PageSetError::TooDeep`]. The limit keeps
+/// the walk, and the `via` list of each page, short. 32 is far above the
+/// nesting of a usual deck.
+pub const MAX_PAGE_SET_DEPTH: usize = 32;
+
 /// The name of a page set: its file name without `.json`.
 ///
 /// The same rules as a [`ProjectId`] apply: a name is one path segment, never
@@ -279,6 +286,20 @@ pub enum PageSetError {
         chain: Vec<PageSetName>,
     },
 
+    /// Sets are nested deeper than [`MAX_PAGE_SET_DEPTH`].
+    #[error(
+        "page set {:?} nests sets deeper than {limit}: {}",
+        chain[0].as_str(),
+        chain_text(chain)
+    )]
+    TooDeep {
+        /// The nested sets, from the resolved set to the first set past the
+        /// limit.
+        chain: Vec<PageSetName>,
+        /// The limit, [`MAX_PAGE_SET_DEPTH`].
+        limit: usize,
+    },
+
     /// The same project is two pages of one set.
     #[error(
         "project {project:?} is page {first} and page {second} of page set {set:?}; \
@@ -330,6 +351,7 @@ impl PageSetError {
             Self::Malformed { .. } => "pageSetMalformed",
             Self::MissingMembers { .. } => "pageSetMemberMissing",
             Self::Loop { .. } => "pageSetLoop",
+            Self::TooDeep { .. } => "pageSetTooDeep",
             Self::DuplicatePage { .. } => "pageSetDuplicatePage",
             Self::Io { .. } => "pageSetUnreadable",
         }
@@ -349,8 +371,9 @@ pub trait PageSetSource {
 /// Resolves a set to its flat, ordered page list.
 ///
 /// Nested sets add their pages in place, depth first. The checks come in this
-/// order: a loop is refused at once, because the walk cannot continue past
-/// it; then every missing member is reported together; then a project that is
+/// order: a loop, or nesting deeper than [`MAX_PAGE_SET_DEPTH`], is refused
+/// at once, because the walk cannot continue past it; then every missing
+/// member is reported together; then a project that is
 /// two pages is refused.
 ///
 /// The work is linear in the number of distinct sets and entries. Each file is
@@ -448,6 +471,14 @@ impl<S: PageSetSource> Walk<'_, S> {
                         let mut chain = self.stack[start..].to_vec();
                         chain.push(child.clone());
                         return Err(PageSetError::Loop { chain });
+                    }
+                    if self.stack.len() >= MAX_PAGE_SET_DEPTH {
+                        let mut chain = self.stack.clone();
+                        chain.push(child.clone());
+                        return Err(PageSetError::TooDeep {
+                            chain,
+                            limit: MAX_PAGE_SET_DEPTH,
+                        });
                     }
                     if let Some(first_page) = self.expanded.get(child) {
                         // Expanded before without a loop, so its subtree has
@@ -689,6 +720,48 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// `level0` names the project `leaf`, and each `levelN` names
+    /// `level(N-1)`. Resolving `level{top}` nests `top + 1` sets.
+    fn chain(top: usize) -> Map {
+        let mut map = Map::default()
+            .project("leaf")
+            .set("level0", r#"{"pages":[{"project":"leaf"}]}"#);
+        for level in 1..=top {
+            map = map.set(
+                &format!("level{level}"),
+                &format!(r#"{{"pages":[{{"set":"level{}"}}]}}"#, level - 1),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn nesting_up_to_the_depth_limit_resolves() {
+        let resolved = chain(MAX_PAGE_SET_DEPTH - 1)
+            .resolve(&format!("level{}", MAX_PAGE_SET_DEPTH - 1))
+            .unwrap();
+        assert_eq!(pages(&resolved), ["leaf"]);
+        assert_eq!(resolved.pages[0].via.len(), MAX_PAGE_SET_DEPTH);
+    }
+
+    #[test]
+    fn nesting_deeper_than_the_limit_is_refused_and_names_the_chain() {
+        let top = MAX_PAGE_SET_DEPTH;
+        let error = chain(top).resolve(&format!("level{top}")).unwrap_err();
+        assert_eq!(error.code(), "pageSetTooDeep", "{error}");
+        let PageSetError::TooDeep { chain, limit } = &error else {
+            panic!("{error}")
+        };
+        assert_eq!(*limit, MAX_PAGE_SET_DEPTH);
+        assert_eq!(chain.len(), MAX_PAGE_SET_DEPTH + 1);
+        assert_eq!(chain[0].as_str(), format!("level{top}"));
+        assert_eq!(chain[MAX_PAGE_SET_DEPTH].as_str(), "level0");
+        assert!(
+            error.to_string().contains(&format!("level{top} -> ")),
+            "{error}"
+        );
     }
 
     #[test]

@@ -225,6 +225,10 @@ impl From<PageSetError> for ApiError {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
                     .with_details(json!({ "chain": chain }))
             }
+            PageSetError::TooDeep { chain, limit } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "chain": chain, "limit": limit }))
+            }
             PageSetError::DuplicatePage {
                 set,
                 project,

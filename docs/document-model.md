@@ -142,6 +142,7 @@ The engine resolves a set to a flat, ordered page list. It never drops a page. I
 | `pageSetLoop` | A set contains itself, directly or through other sets. The error names the loop, for example `a -> b -> a`. |
 | `pageSetMemberMissing` | An entry names a project or a set that does not exist. The error lists every missing member. |
 | `pageSetDuplicatePage` | One project is two pages of the set. A project can be one page only. |
+| `pageSetTooDeep` | Sets are nested more than 32 deep, the resolved set included. The error names the chain, for example `a -> b -> c`. |
 | `pageSetMalformed` | The file is not valid JSON of this shape, or an entry names zero or two members. |
 | `pageSetNotFound` | No set has this name. |
 | `invalidPageSetName` | The name is not one path segment. |
