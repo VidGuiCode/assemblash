@@ -1914,6 +1914,12 @@ fn api_error(error: assemblash_server::ApiError) -> CliError {
     }
 }
 
+impl From<assemblash_server::ApiError> for CliError {
+    fn from(error: assemblash_server::ApiError) -> Self {
+        api_error(error)
+    }
+}
+
 /// `export --pages`: the pages of a page set, read from the workspace without
 /// a lock, into one file.
 ///
@@ -1945,20 +1951,24 @@ fn export_page_set(
     for page in selected {
         let directory = workspace.existing_project_dir(&page.project)?;
         let document = Session::open_read_only(&directory)?.document().clone();
-        let hrefs = std::sync::Arc::new(assemblash_renderer::data_uris(&document, &directory)?);
-        let loaded = load_fonts(&fonts, &document)?;
-        sources.push(render::OwnedPage {
+        sources.push(render::PageSource {
             project: page.project.to_string(),
             document,
             directory,
-            fonts: loaded,
-            hrefs,
         });
     }
-    let rendered = render::encode_pages(&sources, scale, settings).map_err(api_error)?;
-    write_file(out, &rendered.bytes)?;
-    let noticed = render::page_warnings(&sources, settings.warning_scale(scale));
-    report_written(out, &rendered.bytes, &noticed, warnings)
+    // The fonts and assets of a page are loaded on the thread that renders
+    // it, and let go when the page is done.
+    let load = |page: &render::PageSource| -> Result<render::PageAssets, CliError> {
+        let hrefs = assemblash_renderer::data_uris(&page.document, &page.directory)?;
+        Ok(render::PageAssets {
+            fonts: load_fonts(&fonts, &page.document)?,
+            hrefs: std::sync::Arc::new(hrefs),
+        })
+    };
+    let rendered = render::render_page_sources(&sources, load, scale, settings)?;
+    write_file(out, &rendered.rendered.bytes)?;
+    report_written(out, &rendered.rendered.bytes, &rendered.warnings, warnings)
 }
 
 /// Reads a file a flag named, saying which path failed and what it was for.

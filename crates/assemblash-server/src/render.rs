@@ -342,23 +342,34 @@ pub fn export_into_project_as(
 /// `target_dir`, the project the request was sent to.
 ///
 /// A PDF holds every page. Any other format holds one page, and the caller
-/// checks with [`check_page_count`] that there is exactly one.
-pub fn export_pages_into_project(
+/// checks with [`check_page_count`] that there is exactly one. `load` gives
+/// the fonts and assets of one page; it runs on the thread that renders the
+/// page (see [`render_page_sources`]).
+pub fn export_pages_into_project<L>(
     target_dir: &Path,
-    pages: &[OwnedPage],
+    pages: &[PageSource],
+    load: L,
     scale: f32,
     name: Option<&str>,
     settings: ExportSettings,
-) -> Result<Exported, ApiError> {
+) -> Result<Exported, ApiError>
+where
+    L: Fn(&PageSource) -> Result<PageAssets, ApiError> + Sync,
+{
     let stem = export_stem(name)?;
-    let rendered = encode_pages(pages, scale, settings)?;
-    let path = write_export(target_dir, &stem, settings.format(), &rendered.bytes)?;
+    let rendered = render_page_sources(pages, load, scale, settings)?;
+    let path = write_export(
+        target_dir,
+        &stem,
+        settings.format(),
+        &rendered.rendered.bytes,
+    )?;
     Ok(Exported {
         path,
-        bytes: rendered.bytes.len(),
-        width: rendered.width,
-        height: rendered.height,
-        warnings: page_warnings(pages, settings.warning_scale(scale)),
+        bytes: rendered.rendered.bytes.len(),
+        width: rendered.rendered.width,
+        height: rendered.rendered.height,
+        warnings: rendered.warnings,
         pages: Some(pages.len()),
     })
 }
@@ -400,6 +411,31 @@ pub const PRINT_NEEDS_PDF: &str = "printNeedsPdf";
 pub const INVALID_PAGE_SELECTION: &str = "invalidPageSelection";
 /// The code for more than one page with a format that holds one image.
 pub const PAGES_NEED_PDF: &str = "pagesNeedPdf";
+/// The code for a PDF export with more than [`MAX_PDF_PAGES`] pages.
+pub const PDF_PAGE_LIMIT_EXCEEDED: &str = "pdfPageLimitExceeded";
+/// The code for a PDF export with more than [`MAX_PDF_PIXELS`] output pixels.
+pub const PDF_PIXEL_LIMIT_EXCEEDED: &str = "pdfPixelLimitExceeded";
+
+/// The most pages one page-set or variants PDF holds.
+///
+/// A PDF page is a full raster image, so the page count sets the render time
+/// and the file size. 200 pages is far above a usual deck or batch.
+pub const MAX_PDF_PAGES: usize = 200;
+
+/// The most output pixels one page-set or variants PDF renders, all pages
+/// together: the sum of `round(width × scale) × round(height × scale)`.
+///
+/// 400 000 000 pixels is, for example, 200 pages of 1414 × 1414 pixels, or
+/// 45 A4 pages at 300 dpi. The engine refuses a larger request before it
+/// renders a page.
+pub const MAX_PDF_PIXELS: u64 = 400_000_000;
+
+/// The most threads that render PDF pages at one time, in the whole process.
+///
+/// One export uses at most this many threads, and two exports at the same
+/// time share them. A page holds its full RGBA image while it renders, so
+/// this also sets how many page images are in memory at one time.
+pub const MAX_RENDER_THREADS: usize = 4;
 
 /// How an export is encoded, after the request is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -596,9 +632,10 @@ pub struct PageInput<'a> {
 /// Renders pages into one PDF, one page each, in the order given.
 ///
 /// The pages are rendered and prepared on several threads, at most
-/// [`std::thread::available_parallelism`]. The results are put back in page
-/// order, so the bytes do not depend on thread timing. When pages fail, the
-/// error of the lowest page index is given.
+/// [`MAX_RENDER_THREADS`] in the whole process (see [`parallel_in_order`]).
+/// The results are put back in page order, so the bytes do not depend on
+/// thread timing. When pages fail, the error of the lowest page index is
+/// given. The page count and the pixel budget are checked first.
 ///
 /// The width and height are the pixel size of the first page.
 pub fn pages_to_pdf(
@@ -606,6 +643,7 @@ pub fn pages_to_pdf(
     scale: f32,
     print: bool,
 ) -> Result<Rendered, ApiError> {
+    check_pdf_limits(pages.iter().map(|page| page.document), scale)?;
     let prepared = parallel_in_order(pages, |page| {
         pdf_page(page.document, page.fonts, page.hrefs, scale, print)
     })?;
@@ -620,24 +658,88 @@ pub fn pages_to_pdf(
     })
 }
 
+/// Render threads not in use, shared by the whole process.
+static RENDER_SLOTS: RenderSlots = RenderSlots {
+    free: std::sync::Mutex::new(MAX_RENDER_THREADS),
+    freed: std::sync::Condvar::new(),
+};
+
+/// A counting semaphore over [`MAX_RENDER_THREADS`].
+struct RenderSlots {
+    free: std::sync::Mutex<usize>,
+    freed: std::sync::Condvar,
+}
+
+/// Render slots taken by one export, given back when dropped.
+struct SlotGuard {
+    taken: usize,
+}
+
+impl RenderSlots {
+    /// Waits for at least one slot, then takes up to `wanted` slots.
+    ///
+    /// Never more than one wait: an export that has one slot can always
+    /// finish, so two exports cannot block each other.
+    fn take(&self, wanted: usize) -> SlotGuard {
+        // A poisoned count is still a count: the guard that panicked gave its
+        // slots back in its own drop.
+        let mut free = self
+            .free
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *free == 0 {
+            free = self
+                .freed
+                .wait(free)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        let taken = wanted.clamp(1, *free);
+        *free -= taken;
+        SlotGuard { taken }
+    }
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        let mut free = RENDER_SLOTS
+            .free
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *free += self.taken;
+        RENDER_SLOTS.freed.notify_all();
+    }
+}
+
 /// Runs `work` on every item on a bounded set of threads, and gives the
 /// results in item order. The first error in item order wins.
-fn parallel_in_order<T, R, F>(items: &[T], work: F) -> Result<Vec<R>, ApiError>
+///
+/// The threads come from [`RENDER_SLOTS`]: at most [`MAX_RENDER_THREADS`]
+/// run `work` at one time in the whole process, and at most
+/// [`std::thread::available_parallelism`]. A call waits until one slot is
+/// free.
+fn parallel_in_order<T, R, E, F>(items: &[T], work: F) -> Result<Vec<R>, E>
 where
     T: Sync,
     R: Send,
-    F: Fn(&T) -> Result<R, ApiError> + Sync,
+    E: From<ApiError> + Send,
+    F: Fn(&T) -> Result<R, E> + Sync,
 {
-    let workers = std::thread::available_parallelism()
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let wanted = std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
+        .min(MAX_RENDER_THREADS)
         .min(items.len());
+    let slots = RENDER_SLOTS.take(wanted);
+    let workers = slots.taken;
     if workers <= 1 {
         return items.iter().map(&work).collect();
     }
 
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut slots: Vec<Option<Result<R, ApiError>>> = Vec::with_capacity(items.len());
-    slots.resize_with(items.len(), || None);
+    let mut done_slots: Vec<Option<Result<R, E>>> = Vec::with_capacity(items.len());
+    done_slots.resize_with(items.len(), || None);
     let mut stopped = false;
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
@@ -659,7 +761,7 @@ where
             match handle.join() {
                 Ok(done) => {
                     for (index, result) in done {
-                        if let Some(slot) = slots.get_mut(index) {
+                        if let Some(slot) = done_slots.get_mut(index) {
                             *slot = Some(result);
                         }
                     }
@@ -677,97 +779,199 @@ where
         )
     };
     // In item order: the first error found is the error of the lowest index.
-    let mut results = Vec::with_capacity(slots.len());
-    for slot in slots {
+    drop(slots);
+    let mut results = Vec::with_capacity(done_slots.len());
+    for slot in done_slots {
         match slot {
             Some(result) => results.push(result?),
-            None => return Err(lost()),
+            None => return Err(lost().into()),
         }
     }
     if stopped {
-        return Err(lost());
+        return Err(lost().into());
     }
     Ok(results)
 }
 
-/// One page of a page set, read and ready to render.
+/// One page of a page set: its project and its current document.
+///
+/// The fonts and assets of the page are not here. They are loaded by the
+/// thread that renders the page, so a large set does not hold the fonts and
+/// assets of every page in memory at one time.
 #[derive(Debug, Clone)]
-pub struct OwnedPage {
+pub struct PageSource {
     /// The project that is this page.
     pub project: String,
     /// The project's current document.
     pub document: Document,
     /// The project's directory, where its assets are.
     pub directory: PathBuf,
+}
+
+/// The fonts and assets one page renders with.
+#[derive(Debug, Clone)]
+pub struct PageAssets {
     /// The fonts the document names.
     pub fonts: LoadedFonts,
     /// The asset hrefs of the document.
     pub hrefs: std::sync::Arc<assemblash_renderer::AssetHrefs>,
 }
 
-impl OwnedPage {
-    /// The page by reference.
-    pub fn input(&self) -> PageInput<'_> {
-        PageInput {
-            document: &self.document,
-            fonts: &self.fonts,
-            hrefs: &self.hrefs,
-        }
-    }
+/// The pages of a page set, rendered, with the warnings of every page.
+#[derive(Debug, Clone)]
+pub struct RenderedPages {
+    /// The bytes and the pixel size of the first page.
+    pub rendered: Rendered,
+    /// The export warnings of every page, in page order, each with its
+    /// project.
+    pub warnings: Vec<ExportWarning>,
 }
 
 /// Renders the pages of a page set to the bytes of one export format.
 ///
-/// A PDF holds every page. Any other format renders the first page: the
-/// caller checks with [`check_page_count`] that there is only one.
-pub fn encode_pages(
-    pages: &[OwnedPage],
+/// A PDF holds every page. Any other format holds one page. The page count
+/// ([`check_page_count`]) and, for a PDF, the pixel budget
+/// ([`check_pdf_limits`]) are checked before `load` runs for any page.
+///
+/// `load` gives the fonts and assets of one page. For a PDF it runs on the
+/// thread that renders that page, and the page lets go of them when it is
+/// done.
+pub fn render_page_sources<L, E>(
+    pages: &[PageSource],
+    load: L,
     scale: f32,
     settings: ExportSettings,
-) -> Result<Rendered, ApiError> {
-    if settings.format() == ExportFormat::Pdf {
-        let inputs: Vec<_> = pages.iter().map(OwnedPage::input).collect();
-        return pages_to_pdf(&inputs, scale, settings.print);
-    }
+) -> Result<RenderedPages, E>
+where
+    L: Fn(&PageSource) -> Result<PageAssets, E> + Sync,
+    E: From<ApiError> + Send,
+{
     check_page_count(settings, pages.len())?;
+    let warning_scale = settings.warning_scale(scale);
+    if settings.format() == ExportFormat::Pdf {
+        check_pdf_limits(pages.iter().map(|page| &page.document), scale)?;
+        let prepared = parallel_in_order(pages, |page| -> Result<_, E> {
+            let assets = load(page)?;
+            let (pdf, width, height) = pdf_page(
+                &page.document,
+                &assets.fonts,
+                &assets.hrefs,
+                scale,
+                settings.print,
+            )?;
+            let warnings = page_warnings(page, &assets, warning_scale);
+            Ok((pdf, width, height, warnings))
+        })?;
+        let (width, height) = prepared
+            .first()
+            .map_or((0, 0), |(_, width, height, _)| (*width, *height));
+        let mut pdf_pages = Vec::with_capacity(prepared.len());
+        let mut warnings = Vec::new();
+        for (pdf, _, _, found) in prepared {
+            pdf_pages.push(pdf);
+            warnings.extend(found);
+        }
+        return Ok(RenderedPages {
+            rendered: Rendered {
+                bytes: assemblash_export::pdf::write_pdf(&pdf_pages),
+                width,
+                height,
+            },
+            warnings,
+        });
+    }
     let Some(page) = pages.first() else {
-        return Err(no_pages());
+        return Err(no_pages().into());
     };
-    encode_document(
+    let assets = load(page)?;
+    let rendered = encode_document(
         &page.document,
-        &page.fonts,
-        &page.hrefs,
+        &assets.fonts,
+        &assets.hrefs,
         scale,
         settings,
         &PngMetadata::for_document(&page.document),
+    )?;
+    Ok(RenderedPages {
+        rendered,
+        warnings: page_warnings(page, &assets, warning_scale),
+    })
+}
+
+/// The export warnings of one page, each with its project.
+fn page_warnings(page: &PageSource, assets: &PageAssets, scale: f32) -> Vec<ExportWarning> {
+    assemblash_renderer::export_warnings_at(
+        &page.document,
+        assets.fonts.font_set(),
+        &page.directory,
+        scale,
     )
+    .into_iter()
+    .map(|mut warning| {
+        warning.project = Some(page.project.clone());
+        warning
+    })
+    .collect()
 }
 
-/// The export warnings of every page, in page order, each with its project.
-pub fn page_warnings(pages: &[OwnedPage], scale: f32) -> Vec<ExportWarning> {
-    let mut warnings = Vec::new();
-    for page in pages {
-        let found = assemblash_renderer::export_warnings_at(
-            &page.document,
-            page.fonts.font_set(),
-            &page.directory,
-            scale,
-        );
-        warnings.extend(found.into_iter().map(|mut warning| {
-            warning.project = Some(page.project.clone());
-            warning
-        }));
+/// Refuses a PDF whose pages, all together, render more than
+/// [`MAX_PDF_PIXELS`] pixels, or that has more than [`MAX_PDF_PAGES`] pages.
+///
+/// The pixel size of a page is the size its PNG export has. Nothing renders
+/// before this check.
+pub fn check_pdf_limits<'a>(
+    documents: impl ExactSizeIterator<Item = &'a Document>,
+    scale: f32,
+) -> Result<(), ApiError> {
+    check_pdf_page_count(documents.len())?;
+    let mut total: u64 = 0;
+    for document in documents {
+        let width = (f64::from(scale) * document.canvas.width).round().max(0.0);
+        let height = (f64::from(scale) * document.canvas.height).round().max(0.0);
+        // Saturating: a canvas this large is far above the budget anyway.
+        let pixels = (width * height).min(u64::MAX as f64) as u64;
+        total = total.saturating_add(pixels);
     }
-    warnings
+    if total > MAX_PDF_PIXELS {
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            PDF_PIXEL_LIMIT_EXCEEDED,
+            format!(
+                "these pages render {total} pixels at scale {scale}, and one PDF holds at \
+                 most {MAX_PDF_PIXELS}; select fewer pages or use a smaller scale"
+            ),
+        )
+        .with_details(serde_json::json!({ "pixels": total, "limit": MAX_PDF_PIXELS })));
+    }
+    Ok(())
 }
 
-/// Refuses more than one page with a format that holds one image, and a
-/// selection of no pages.
+/// Refuses a PDF with more than [`MAX_PDF_PAGES`] pages.
+fn check_pdf_page_count(count: usize) -> Result<(), ApiError> {
+    if count > MAX_PDF_PAGES {
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            PDF_PAGE_LIMIT_EXCEEDED,
+            format!(
+                "these pages are {count}, and one PDF holds at most {MAX_PDF_PAGES}; \
+                 select fewer pages, for example deck:1-{MAX_PDF_PAGES}"
+            ),
+        )
+        .with_details(serde_json::json!({ "pages": count, "limit": MAX_PDF_PAGES })));
+    }
+    Ok(())
+}
+
+/// Refuses more than one page with a format that holds one image, a PDF
+/// with more than [`MAX_PDF_PAGES`] pages, and a selection of no pages.
 pub fn check_page_count(settings: ExportSettings, count: usize) -> Result<(), ApiError> {
     if count == 0 {
         return Err(no_pages());
     }
     let format = settings.format();
+    if format == ExportFormat::Pdf {
+        check_pdf_page_count(count)?;
+    }
     if format != ExportFormat::Pdf && count != 1 {
         return Err(ApiError::new(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
@@ -969,7 +1173,7 @@ mod tests {
     #[test]
     fn parallel_work_keeps_item_order_and_reports_the_lowest_failing_index() {
         let items: Vec<usize> = (0..64).collect();
-        let doubled = parallel_in_order(&items, |item| Ok(item * 2)).unwrap();
+        let doubled = parallel_in_order(&items, |item| Ok::<_, ApiError>(item * 2)).unwrap();
         assert_eq!(
             doubled,
             items.iter().map(|item| item * 2).collect::<Vec<_>>()
@@ -988,6 +1192,163 @@ mod tests {
             .unwrap_err();
             assert_eq!(error.message(), "item 7");
         }
+    }
+
+    #[test]
+    fn render_threads_are_bounded_across_concurrent_exports() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let active = AtomicUsize::new(0);
+        let most = AtomicUsize::new(0);
+        let items: Vec<usize> = (0..24).collect();
+        let work = |item: &usize| -> Result<usize, ApiError> {
+            let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            most.fetch_max(now, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(15));
+            active.fetch_sub(1, Ordering::SeqCst);
+            Ok(*item)
+        };
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| parallel_in_order(&items, work));
+            let second = scope.spawn(|| parallel_in_order(&items, work));
+            assert_eq!(first.join().unwrap().unwrap(), items);
+            assert_eq!(second.join().unwrap().unwrap(), items);
+        });
+        let most = most.load(Ordering::SeqCst);
+        assert!(
+            most <= MAX_RENDER_THREADS,
+            "two exports at one time ran {most} render threads"
+        );
+    }
+
+    fn pdf() -> ExportSettings {
+        ExportSettings::from_request(Some("pdf"), None, None).unwrap()
+    }
+
+    fn blank(width: f64, height: f64) -> Document {
+        Document::new(
+            &mut assemblash_core::ids::SequentialIdSource::new(),
+            width,
+            height,
+        )
+    }
+
+    #[test]
+    fn a_pdf_holds_at_most_the_page_limit() {
+        assert!(check_page_count(pdf(), MAX_PDF_PAGES).is_ok());
+        let error = check_page_count(pdf(), MAX_PDF_PAGES + 1).unwrap_err();
+        assert_eq!(error.code(), PDF_PAGE_LIMIT_EXCEEDED);
+        assert_eq!(error.details()["limit"], MAX_PDF_PAGES);
+    }
+
+    #[test]
+    fn a_pdf_above_the_pixel_budget_is_refused_before_any_page_loads() {
+        let directory = tempfile::tempdir().unwrap();
+        // 5 pages of 10 000 x 10 000 pixels: 500 000 000 pixels.
+        let pages: Vec<_> = (0..5)
+            .map(|index| PageSource {
+                project: format!("p{index}"),
+                document: blank(10_000.0, 10_000.0),
+                directory: directory.path().to_path_buf(),
+            })
+            .collect();
+        let loaded = std::sync::atomic::AtomicBool::new(false);
+        let error = render_page_sources::<_, ApiError>(
+            &pages,
+            |_| {
+                loaded.store(true, std::sync::atomic::Ordering::SeqCst);
+                Err(ApiError::bad_request("no page may load"))
+            },
+            1.0,
+            pdf(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), PDF_PIXEL_LIMIT_EXCEEDED);
+        assert_eq!(error.details()["pixels"], 500_000_000_u64);
+        assert!(!loaded.load(std::sync::atomic::Ordering::SeqCst));
+
+        // The scale counts squared: the same pages at 0.5 fit.
+        assert!(check_pdf_limits(pages.iter().map(|page| &page.document), 0.5).is_ok());
+    }
+
+    /// A template with one text slot, `headline`.
+    fn template(width: f64, height: f64) -> Document {
+        use assemblash_core::document::{Extras, TextAlign, TextLayer, Transform};
+        let mut document = blank(width, height);
+        document.layers.push(assemblash_core::Layer::new(
+            assemblash_core::LayerId::new("layer_headline"),
+            Transform::new(0.0, 0.0, 10.0, 10.0),
+            assemblash_core::LayerKind::Text(TextLayer {
+                text: "placeholder".to_owned(),
+                font_family: "Noto Sans".to_owned(),
+                font_size: 24.0,
+                color: None,
+                align: TextAlign::Left,
+                line_height: 1.2,
+                paragraph_spacing: 0.0,
+                font_weight: 400,
+                font_style: assemblash_core::FontStyle::Normal,
+                letter_spacing: 0.0,
+                stroke: None,
+                vertical_align: assemblash_core::VerticalAlign::Top,
+                runs: Vec::new(),
+                extra: Extras::new(),
+            }),
+        ));
+        document.slots = vec![assemblash_core::Slot {
+            name: "headline".to_owned(),
+            layer: assemblash_core::LayerId::new("layer_headline"),
+            kind: assemblash_core::SlotKind::Text,
+            description: None,
+            required: false,
+            extra: Extras::new(),
+        }];
+        document
+    }
+
+    #[test]
+    fn a_variants_pdf_has_the_same_limits_and_writes_nothing() {
+        let directory = tempfile::tempdir().unwrap();
+        let fonts = LoadedFonts::from_bytes([]);
+        let variant = |index: usize| Variant {
+            name: format!("v{index}"),
+            values: Default::default(),
+        };
+
+        let many: Vec<_> = (0..=MAX_PDF_PAGES).map(variant).collect();
+        let error = render_variants_as(
+            &template(10.0, 10.0),
+            directory.path(),
+            &fonts,
+            1.0,
+            &many,
+            pdf(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), PDF_PAGE_LIMIT_EXCEEDED);
+
+        let large: Vec<_> = (0..5).map(variant).collect();
+        let error = render_variants_as(
+            &template(10_000.0, 10_000.0),
+            directory.path(),
+            &fonts,
+            1.0,
+            &large,
+            pdf(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.code(),
+            PDF_PIXEL_LIMIT_EXCEEDED,
+            "{}",
+            error.message()
+        );
+        assert!(!directory
+            .path()
+            .join(EXPORTS_DIR)
+            .join("variants.pdf")
+            .exists());
     }
 
     #[test]
@@ -1143,6 +1504,9 @@ pub fn render_variants_as(
     // Checked once, before anything renders: a broken template should be one
     // clear error rather than the same error N times.
     assemblash_core::templates::validate_slots(template).map_err(template_error)?;
+    if settings.format() == ExportFormat::Pdf {
+        check_pdf_page_count(variants.len())?;
+    }
     let pdf_stem = match name {
         Some(name) => safe_stem(name)?,
         None => VARIANTS_PDF_STEM.to_owned(),

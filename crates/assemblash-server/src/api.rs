@@ -2298,9 +2298,17 @@ async fn export_page_set(
     let sources = state.export_pages(pages, settings)?;
     let project = id.clone();
     let target = project_directory(state, id)?;
+    let loader = state.clone();
     let mut exported =
         tokio::task::spawn_blocking(move || -> Result<render::Exported, ApiError> {
-            render::export_pages_into_project(&target, &sources, scale, name.as_deref(), settings)
+            render::export_pages_into_project(
+                &target,
+                &sources,
+                |page| loader.page_assets(page),
+                scale,
+                name.as_deref(),
+                settings,
+            )
         })
         .await
         .map_err(join_error)??;

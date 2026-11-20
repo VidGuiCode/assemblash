@@ -468,23 +468,27 @@ impl Backend {
                 (loaded.directory, bytes, width, height, warnings, None)
             }
             Some(pages) => {
-                let sources = self.export_pages(pages, settings)?;
+                let (sources, loader) = self.export_pages(pages, settings)?;
                 let target = {
                     let opened = self.open(project)?;
                     let session = lock_project(&opened)?;
                     session.project_dir().to_path_buf()
                 };
-                let warnings = assemblash_server::render::page_warnings(&sources, warning_scale);
                 let count = sources.len();
                 let rendered = crate::backend::run_cancellable(self.cancel_token(), move || {
-                    assemblash_server::render::encode_pages(&sources, scale, settings)
+                    assemblash_server::render::render_page_sources(
+                        &sources,
+                        |page| loader.page_assets(page),
+                        scale,
+                        settings,
+                    )
                 })?;
                 (
                     target,
-                    rendered.bytes,
-                    rendered.width,
-                    rendered.height,
-                    warnings,
+                    rendered.rendered.bytes,
+                    rendered.rendered.width,
+                    rendered.rendered.height,
+                    rendered.warnings,
                     Some(count),
                 )
             }

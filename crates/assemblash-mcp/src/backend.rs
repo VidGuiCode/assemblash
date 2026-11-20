@@ -783,7 +783,8 @@ impl Backend {
         }
     }
 
-    /// The pages of a page-set export, read and checked against the format.
+    /// The pages of a page-set export, read and checked against the format,
+    /// and the state that loads the fonts and assets of each page.
     ///
     /// A server opened for one project has no workspace and so no page sets:
     /// the set is not found.
@@ -791,9 +792,9 @@ impl Backend {
         &self,
         pages: &assemblash_server::render::PageRequest,
         settings: assemblash_server::render::ExportSettings,
-    ) -> Result<Vec<assemblash_server::render::OwnedPage>, ApiError> {
+    ) -> Result<(Vec<assemblash_server::render::PageSource>, AppState), ApiError> {
         match &self.root {
-            Root::Workspace(state) => state.export_pages(pages, settings),
+            Root::Workspace(state) => Ok((state.export_pages(pages, settings)?, (**state).clone())),
             Root::SingleProject { .. } => Err(assemblash_core::page_sets::PageSetError::NotFound {
                 name: pages.set.clone(),
             }

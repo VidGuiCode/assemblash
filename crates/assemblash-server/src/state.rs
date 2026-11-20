@@ -512,37 +512,47 @@ impl AppState {
         Ok((session.document().clone(), directory))
     }
 
-    /// Every page of a page-set export, read and ready to render.
+    /// Every page of a page-set export: its project and current document.
     ///
-    /// Each page has its own project's document, fonts and assets.
+    /// The fonts and assets of each page are loaded later, by the thread
+    /// that renders it, with [`AppState::page_assets`].
     pub fn page_sources(
         &self,
         pages: &[&assemblash_core::page_sets::ResolvedPage],
-    ) -> Result<Vec<crate::render::OwnedPage>, ApiError> {
+    ) -> Result<Vec<crate::render::PageSource>, ApiError> {
         pages
             .iter()
             .map(|page| {
                 let (document, directory) = self.current_document(&page.project)?;
-                let fonts = self.fonts_for(&document)?;
-                let hrefs = self.asset_hrefs(&document, &directory)?;
-                Ok(crate::render::OwnedPage {
+                Ok(crate::render::PageSource {
                     project: page.project.to_string(),
                     document,
                     directory,
-                    fonts,
-                    hrefs,
                 })
             })
             .collect()
     }
 
+    /// The fonts and assets of one page of a page-set export.
+    pub fn page_assets(
+        &self,
+        page: &crate::render::PageSource,
+    ) -> Result<crate::render::PageAssets, ApiError> {
+        Ok(crate::render::PageAssets {
+            fonts: self.fonts_for(&page.document)?,
+            hrefs: self.asset_hrefs(&page.document, &page.directory)?,
+        })
+    }
+
     /// Resolves the `pages` field of an export in this workspace, and checks
     /// the selection against the format.
+    ///
+    /// The page count is checked before any document is read.
     pub fn export_pages(
         &self,
         request: &crate::render::PageRequest,
         settings: crate::render::ExportSettings,
-    ) -> Result<Vec<crate::render::OwnedPage>, ApiError> {
+    ) -> Result<Vec<crate::render::PageSource>, ApiError> {
         let resolved = self.inner.workspace.resolve_page_set(&request.set)?;
         let selected = request.select(&resolved)?;
         crate::render::check_page_count(settings, selected.len())?;

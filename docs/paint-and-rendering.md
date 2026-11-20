@@ -209,6 +209,12 @@ For a canvas of 1080 × 1350 with a bleed of 9, the page is 1134 × 1404 points.
 - A `pdf` export holds every selected page. Any other format holds one image. More than one selected page with such a format is refused with `pagesNeedPdf`.
 - Each page renders with the assets of its own project.
 
+A page-set PDF and a variants PDF have these limits. The engine checks them before it renders a page.
+
+- One PDF holds at most 200 pages. More pages are refused with `pdfPageLimitExceeded`.
+- One PDF renders at most 400 000 000 output pixels, all pages together. The pixels of a page are `round(width × scale) × round(height × scale)`. More pixels are refused with `pdfPixelLimitExceeded`. For example, 200 pages of 1414 × 1414 at scale 1 are in the limit.
+- At most 4 threads render PDF pages at one time in one process. Two exports at the same time share these threads. Each thread loads the fonts and assets of its page when it renders the page.
+
 The CLI writes the file to the path that you give. HTTP and MCP write the file to the `exports/` directory of the project in the request. That project does not have to be a page of the set.
 
 ### Variants
@@ -233,6 +239,8 @@ A refused export writes no file. The engine checks the format fields before it r
 | `printNeedsPdf` | `print` with a format other than `pdf`. |
 | `invalidPageSelection` | The page selection cannot be used. |
 | `pagesNeedPdf` | More than one page with a format other than `pdf`. |
+| `pdfPageLimitExceeded` | A page-set or variants PDF with more than 200 pages. |
+| `pdfPixelLimitExceeded` | A page-set or variants PDF with more than 400 000 000 output pixels. |
 | `variantsNameNeedsPdf` | A variants `name` with a format other than `pdf`. |
 | `timestampNeedsPng` | CLI only. `--timestamp` with a format other than `png`. |
 | `exportEncodingFailed` | The encoder cannot write the image, for example because it is too large. |
