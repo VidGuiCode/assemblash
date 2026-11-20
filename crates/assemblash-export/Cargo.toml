@@ -1,0 +1,24 @@
+[package]
+name = "assemblash-export"
+description = "Deterministic export encoders: raster PDF, JPEG, lossless WebP"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# This crate works on plain pixel buffers. It does not depend on another
+# workspace crate, so the renderer's gate test can use it as a
+# dev-dependency without a cycle.
+[dependencies]
+# Only the JPEG and WebP codecs. The JPEG encoder and the lossless WebP
+# encoder give the same bytes on all six release targets.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "webp"] }
+# Flate for the PDF streams. The same version the renderer already uses.
+miniz_oxide = "0.8.9"
+sha2 = "0.11.0"
+thiserror = "2.0.19"
+
+[lints]
+workspace = true
