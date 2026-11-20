@@ -10,6 +10,25 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.14.0] — 2026-11-20
+
+**Project tabs, page sets, print geometry, and PDF, JPEG, and WebP export.**
+
+The reference interface opens projects in tabs. A page set puts projects in
+one ordered list. A canvas can hold bleed and margins for print. The engine
+exports PDF, JPEG, and lossless WebP, and it exports a page set as one PDF.
+A new workspace crate, `assemblash-export`, holds the encoders. The MCP tool
+count goes from 53 to 55. A `path` shape now paints its stroke.
+
+`schemaVersion` stays 1. The operation API stays compatible with 1.0. Every
+change is additive.
+
+**Oldest build that opens a 1.14.0 document: 1.0.** Older 1.x builds keep
+`bleed` and `margins` as unknown canvas fields, and their exports are the
+same. Older builds ignore a page-set file and still open each member project.
+Only 1.14.0 or newer reads a page set and writes the PDF, JPEG, WebP, and
+page-set exports.
+
 ### Added
 
 - Project tabs in the reference interface. Open, show, close, and reorder projects in a tab strip under the top bar. Reorder with a drag or with Alt+Shift+Left Arrow and Alt+Shift+Right Arrow.

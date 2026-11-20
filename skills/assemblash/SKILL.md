@@ -472,8 +472,9 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   default pack (a network action only on this call), `remove_font_family`
   removes one family, and `delete_project` / `rename_project` manage
   projects — a project another process holds is refused `projectLocked`,
-  never deleted or renamed past. The tool surface holds 53 tools. 1.14.0
-  adds the read-only `list_page_sets` and `get_page_set`: 55 tools.
+  never deleted or renamed past. The tool surface holds 55 tools. 1.14.0
+  adds the read-only `list_page_sets` and `get_page_set`. Before 1.14.0, the
+  surface held 53 tools.
 - In the `insert_layer_tree` input schema and the `get_document_state` output
   schema, the `children` of a group is an untyped object. Each child has the
   same layer shape as an item of `layers`.

@@ -50,13 +50,13 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 | Crate | Version | Licence |
 | ----- | ------- | ------- |
-| assemblash-cli | 1.13.1 | Apache-2.0 |
-| assemblash-core | 1.13.1 | Apache-2.0 |
-| assemblash-export | 1.13.1 | Apache-2.0 |
-| assemblash-liveness | 1.13.1 | Apache-2.0 |
-| assemblash-mcp | 1.13.1 | Apache-2.0 |
-| assemblash-renderer | 1.13.1 | Apache-2.0 |
-| assemblash-server | 1.13.1 | Apache-2.0 |
+| assemblash-cli | 1.14.0 | Apache-2.0 |
+| assemblash-core | 1.14.0 | Apache-2.0 |
+| assemblash-export | 1.14.0 | Apache-2.0 |
+| assemblash-liveness | 1.14.0 | Apache-2.0 |
+| assemblash-mcp | 1.14.0 | Apache-2.0 |
+| assemblash-renderer | 1.14.0 | Apache-2.0 |
+| assemblash-server | 1.14.0 | Apache-2.0 |
 
 ## Dependencies
 

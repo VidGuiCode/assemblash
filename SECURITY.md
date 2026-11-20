@@ -2,7 +2,7 @@
 
 ## Project status
 
-Assemblash is **released at 1.13.1**.
+Assemblash is **released at 1.14.0**.
 By default, the local-first engine binds `127.0.0.1`.
 It needs no account, no network, and no cloud service.
 
@@ -10,12 +10,8 @@ It needs no account, no network, and no cloud service.
 
 | Version | Supported |
 | ------- | --------- |
-| 1.13.x | Yes |
-| 1.12.x | Yes |
-| 1.2.x | Yes |
-| 1.1.x | Yes |
-| 1.0.x | Yes |
-| < 1.0 | No — upgrade to the latest release |
+| 1.14.x | Yes |
+| < 1.14 | No — upgrade to the latest release |
 
 ## What the built-in authentication is, and is not
 
