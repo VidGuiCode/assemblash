@@ -371,7 +371,8 @@ Every export reports what it could not do well, with these codes:
   has `canvas.bleed` or `canvas.margins`. See "Page sets and print geometry"
   below.
 
-Each warning is `{ code, message, layerId? }`. **A warning is not a failure.**
+Each warning is `{ code, message, layerId?, project? }`. Only a page-set
+export sets `project`. **A warning is not a failure.**
 It changes no pixel and no exit status; the file is written either way. Report
 it and fix the document. Do not treat the export as failed.
 `POST /api/projects/{id}/export` and MCP `export_document` return a `warnings`
@@ -392,11 +393,53 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   refused. No page is dropped. No tool writes a set: write the file.
 - `canvas.bleed` and `canvas.margins` are optional `{top, right, bottom,
   left}` distances in pixels. The canvas is the trim box. Bleed goes outward,
-  margins go inward. A PNG or SVG export does not change with them. Set them
+  margins go inward. A PNG, SVG, JPEG, or WebP export does not change with
+  them. Only a print PDF reads `bleed`. Set them
   with `updateCanvas` / MCP `update_canvas` (`bleed`, `margins`: omit to keep,
   `null` to clear) or `assemblash canvas set --bleed 9 --margins 36`.
 - Exports are sRGB only. `colorSpace: "cmyk"` on an export is refused with
   `colorSpaceNotSupported`. Do not promise a CMYK file.
+
+## Export formats and page-set export (1.14.0 and newer)
+
+- `format` on `export` (`--format`), `POST /api/projects/{id}/export`, and MCP
+  `export_document`: `png` (the default), `svg`, `pdf`, `jpeg` (or `jpg`), or
+  `webp`. The format never comes from the file extension. A JPEG file is
+  always `<name>.jpg`.
+- Every format is byte-identical on every run and every target: PNG, SVG,
+  raster PDF, JPEG, and lossless WebP.
+- `quality` is for JPEG only: 1 to 100, 90 when omitted. WebP is lossless
+  only. `webp` with a `quality` is refused with `lossyWebpNotSupported`. For a
+  lossy file, use `jpeg` with a quality.
+- JPEG has no transparency. Transparent pixels become white.
+- The PDF is a raster PDF: one image for each page, the PNG pixels of that
+  page. 1 canvas pixel is 1 point. `scale` changes the image resolution, not
+  the page size. The text is part of the image and cannot be selected. The
+  file has no date.
+- `print` (`--print`) is for PDF only. It adds a trim box, a bleed box from
+  `canvas.bleed`, an 18 pt mark zone, and crop marks. The image covers the
+  trim box only. Nothing is rendered into the bleed in this release.
+- `pages` (`--pages`): `deck` for every page of the set, or `deck:1-3,5`.
+  Pages are numbered from 1 in manifest order, nested sets expanded. A `pdf`
+  holds every selected page. Any other format needs exactly one page, or the
+  export is refused with `pagesNeedPdf`.
+- The CLI writes a page-set export to the path you give:
+  `assemblash export --workspace ./ws --pages deck --format pdf deck.pdf`.
+  HTTP and MCP write it to the `exports/` of the project in the request. That
+  project need not be a page of the set.
+- Variants (`variants`, `POST .../variants`, MCP `render_variants`) take
+  `format`, `quality`, and `name`. `pdf` writes one PDF, `exports/<name>.pdf`
+  (`variants.pdf` without a name), one page for each variant in order. `name`
+  with another format is refused with `variantsNameNeedsPdf`.
+- Other refusals: `exportFormatNotSupported`, `exportQualityOutOfRange`,
+  `exportQualityNotApplicable`, `printNeedsPdf`, `invalidPageSelection`,
+  `timestampNeedsPng` (CLI), and `exportEncodingFailed`. HTTP answers `422`.
+  A refused export writes no file.
+- A page-set export reports the warnings of each page in page order. Each has
+  a `project` field. The CLI prints it as a fourth column.
+- 1.13.1 has no `--format`. Its HTTP export refuses the new fields with
+  `400 malformedRequest`. Its MCP `export_document` ignores the new
+  arguments and writes a PNG. Check the version before you ask for a PDF.
 
 ## MCP tools beyond the read/mutate set
 
@@ -422,7 +465,7 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   and effects with examples — the same JSON `GET /api/capabilities` and
   `assemblash styles --json` serve.
 - `export_document` returns `warnings` beside `path`, `bytes`, `width`, and
-  `height`.
+  `height`, and `pages` for a page-set export.
 - Six parity tools (1.10.0): `insert_layer_tree` pastes a copied layer tree
   (the same expansion the HTTP batch runs), `list_fonts` reads the font
   store's families and faces, `install_font_pack` fetches the pinned

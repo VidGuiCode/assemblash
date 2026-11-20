@@ -92,7 +92,9 @@ The engine refuses a resize that moves locked, protected, or read-only content. 
 }
 ```
 
-A PNG or SVG export never reads `bleed` or `margins`. The exported bytes are the same with and without them. The fields enable the print-proofing warnings. See [Export warnings](paint-and-rendering.md#export-warnings).
+A PNG, SVG, JPEG, or WebP export never reads `bleed` or `margins`. A PDF without `print` does not read them either. The exported bytes are the same with and without them. The fields enable the print-proofing warnings. See [Export warnings](paint-and-rendering.md#export-warnings).
+
+A print PDF reads `bleed`. It uses the bleed for its bleed box, its trim box, and its crop marks. The bleed area holds no rendered content in this release. A print PDF does not read `margins`. See [Print PDF](paint-and-rendering.md#print-pdf).
 
 Set them with the `updateCanvas` operation, the MCP tool `update_canvas`, or `canvas set`. Omit a field to keep it. Send `null` to remove it. The engine refuses a negative side, or margins that leave no safe area, and nothing changes. One undo reverts the change.
 
@@ -145,6 +147,8 @@ The engine resolves a set to a flat, ordered page list. It never drops a page. I
 | `invalidPageSetName` | The name is not one path segment. |
 
 A set with no pages is valid. It resolves to no pages.
+
+Export the pages of a set with `pages`, for example `deck:1-3,5`. A PDF holds one page for each selected page. See [Page sets](paint-and-rendering.md#page-sets) in the export formats.
 
 Read page sets with `assemblash page-set list` and `assemblash page-set show <name>`, with `GET /api/page-sets` and `GET /api/page-sets/{name}`, or with the MCP tools `list_page_sets` and `get_page_set`. No interface writes a page-set file. Write the file to make or change a set.
 
@@ -284,6 +288,7 @@ A document written by release 1.0 stays readable by every 1.x release. The schem
 - Canvas editing needs 1.4.0 or newer. When a project history contains `updateCanvas`, 1.3.1 refuses `show` and `history`, also after undo. Continue to use the newer executable.
 - `canvas.bleed` and `canvas.margins` need 1.14.0 or newer. An older 1.x release keeps them as unknown canvas fields, and its exports are the same.
 - Page sets need 1.14.0 or newer. An older release does not read `page-sets/`. It opens each member project unchanged.
+- The export of a page set, the PDF, JPEG, and WebP exports, and the print PDF need 1.14.0 or newer. They add no document field. Release 1.13.1 opens each exported project unchanged, but it cannot write these formats.
 - Unknown fields survive load and save at every level of the document. This includes the inside of `clip`, `crop`, `stroke`, `shape`, and the effect stack.
 - The stroke of a shape is painted inside its layer box. Thus the layer box is the visible size. A stroke narrower than 1 is a hairline on the edge and can extend half a pixel outside the layer box.
 

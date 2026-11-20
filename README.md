@@ -218,6 +218,7 @@ operations. The API and the MCP server contain no document logic of their own:
 
 - `assemblash-core` does the validation and the operations.
 - `assemblash-renderer` does the rendering.
+- `assemblash-export` writes the PDF, JPEG, and WebP files from the rendered pixels.
 - The server, MCP, and CLI crates give these functions to different clients.
 
 Rust programs can use the same crates directly. They are in [`crates/`](crates/).
@@ -233,6 +234,14 @@ assemblash new ./poster --width 800 --height 400 --background '#f6f4ef'
 assemblash add-text ./poster --text "Hello" --font "Noto Sans" --size 64 --x 40 --y 40 --width 720 --height 120
 assemblash add-rect ./poster --x 40 --y 200 --width 240 --height 96 --fill '#1d1d1f' --corner-radius 12
 assemblash export ./poster --out poster.png --font-store ./assemblash-fonts
+```
+
+`export` also writes PDF, JPEG, and lossless WebP with `--format`. With
+`--pages`, it writes the pages of a page set into one PDF:
+
+```sh
+assemblash export ./poster poster.pdf --format pdf --font-store ./assemblash-fonts
+assemblash export --workspace ./workspace --pages deck --format pdf deck.pdf
 ```
 
 `render` and `export` print the written path and its `sha256:` digest as one

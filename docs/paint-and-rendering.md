@@ -132,7 +132,7 @@ Use `assemblash styles --json`, `GET /api/capabilities`, or MCP `list_capabiliti
 
 1. A pure function converts the document to SVG.
 2. `resvg` and `tiny-skia` convert the SVG to pixels.
-3. PNG export writes those pixels. SVG export writes the intermediate SVG.
+3. PNG export writes those pixels. SVG export writes the intermediate SVG. The PDF, JPEG, and WebP exports start from the same pixels as the PNG export. `assemblash-export` encodes them.
 
 The output size is the canvas size multiplied by the export scale. The pipeline is pure Rust, including text shaping. It has no platform-specific code path.
 
@@ -147,6 +147,98 @@ The same document, assets, and pinned font files give bit-identical PNGs on all 
 - Font files are hash-pinned. A changed font file changes the pixels and the recorded hash.
 - The fourteen blend modes are the modes that pass the determinism check on every target.
 - `export` writes no PNG timestamp by default. Two exports of the same document are byte-identical. Use `--timestamp` to record a time.
+- The same promise applies to every export format: PNG, SVG, raster PDF, JPEG, and lossless WebP. Lossy WebP does not give the same bytes on all targets, so the engine refuses it.
+
+## Export formats
+
+An export writes one of five formats. PNG is the default.
+
+| Format | Request value | File | Contents |
+| --- | --- | --- | --- |
+| PNG | `png` | `.png` | The pixels, with transparency. |
+| SVG | `svg` | `.svg` | The intermediate SVG of the renderer. |
+| PDF | `pdf` | `.pdf` | A raster PDF: one image for each page. |
+| JPEG | `jpeg` or `jpg` | `.jpg` | The pixels, flattened onto white. |
+| WebP | `webp` | `.webp` | The pixels, lossless, with transparency. |
+
+The request value is not case-sensitive. The engine never takes the format from the file extension. Any other value is refused with `exportFormatNotSupported`.
+
+### Quality
+
+- `quality` applies to JPEG only. The value is 1 to 100. The default is 90.
+- A JPEG quality outside 1 to 100 is refused with `exportQualityOutOfRange`.
+- WebP is lossless only. A `quality` with `webp` is a request for lossy WebP. The engine refuses it with `lossyWebpNotSupported`. For a lossy file, use `jpeg` with a quality.
+- A `quality` with `png`, `svg`, or `pdf` is refused with `exportQualityNotApplicable`.
+
+### JPEG
+
+JPEG has no transparency. The engine flattens each pixel onto white before it encodes the file. A transparent area of the document is white in the JPEG. The flattening uses integer arithmetic only, so it gives the same bytes on all targets.
+
+### Raster PDF
+
+The PDF holds one image for each page. Each image is the PNG pixels of that page.
+
+- One canvas pixel is one PDF point. A 1080 × 1350 canvas gives a page of 1080 × 1350 points.
+- `scale` changes the resolution of the image. It does not change the page size.
+- A page with transparent pixels keeps them in a soft mask. A page with only opaque pixels has no soft mask.
+- The file has no creation date, no modification date, and no XMP metadata. Its `/ID` comes from the file content. Its producer is `Assemblash`.
+- The text is part of the image. A PDF reader cannot select or search it.
+- A PDF of the same pages is byte-identical on each export.
+
+### Print PDF
+
+`print` adds print geometry to a PDF. It reads `canvas.bleed`. See [Print geometry](document-model.md#print-geometry).
+
+- The page gets a `/TrimBox` and a `/BleedBox`. The trim box is the canvas.
+- The page gets an 18 pt mark zone outside the bleed on each side, and crop marks in that zone. Each crop mark is a 0.25 pt line on a trim line.
+- The image covers the trim box only. The bleed area holds no rendered content in this release. Content that crosses the trim edge is cut at the trim edge.
+- A document without `bleed`, or with a bleed of `0` on all sides, gives a plain page.
+- `print` with a format other than `pdf` is refused with `printNeedsPdf`.
+
+For a canvas of 1080 × 1350 with a bleed of 9, the page is 1134 × 1404 points. The bleed box is `18 18 1116 1386`. The trim box is `27 27 1107 1377`.
+
+### Page sets
+
+`pages` exports the pages of a page set. See [Page sets](document-model.md#page-sets).
+
+- `<set>` selects every page of the set, for example `deck`.
+- `<set>:<selection>` selects some pages, for example `deck:1-3,5`. A selection is a comma-separated list of page numbers and ranges.
+- Pages are numbered from 1, in manifest order. A nested set adds its pages in place.
+- The export keeps manifest order. A page that you name two times is exported one time.
+- A page number of `0`, a page above the page count, a range that goes down, or an empty selection is refused with `invalidPageSelection`.
+- A `pdf` export holds every selected page. Any other format holds one image. More than one selected page with such a format is refused with `pagesNeedPdf`.
+- Each page renders with the assets of its own project.
+
+The CLI writes the file to the path that you give. HTTP and MCP write the file to the `exports/` directory of the project in the request. That project does not have to be a page of the set.
+
+### Variants
+
+A batch of variants takes `format` and `quality`, with the same rules.
+
+- `png`, `svg`, `jpeg`, and `webp` write one file for each variant, `exports/<variant name>.<extension>`.
+- `pdf` writes one PDF, `exports/<name>.pdf`, with one page for each variant in the order of the request. Without `name`, the file is `exports/variants.pdf`. Each variant in the result has its `page` number and the hash of the PDF.
+- `name` applies to `pdf` only. `name` with another format is refused with `variantsNameNeedsPdf`.
+- A variants PDF has no print geometry.
+
+### Refusals
+
+A refused export writes no file. The engine checks the format fields before it reads a project.
+
+| Code | Cause |
+| --- | --- |
+| `exportFormatNotSupported` | The format is not one of the five formats. |
+| `lossyWebpNotSupported` | A `quality` with `webp`. |
+| `exportQualityOutOfRange` | A JPEG quality outside 1 to 100. |
+| `exportQualityNotApplicable` | A `quality` with `png`, `svg`, or `pdf`. |
+| `printNeedsPdf` | `print` with a format other than `pdf`. |
+| `invalidPageSelection` | The page selection cannot be used. |
+| `pagesNeedPdf` | More than one page with a format other than `pdf`. |
+| `variantsNameNeedsPdf` | A variants `name` with a format other than `pdf`. |
+| `timestampNeedsPng` | CLI only. `--timestamp` with a format other than `png`. |
+| `exportEncodingFailed` | The encoder cannot write the image, for example because it is too large. |
+| `colorSpaceNotSupported` | A colour space other than `srgb`. |
+
+HTTP returns these refusals with status `422`. A set that does not resolve gives a page-set code, for example `pageSetNotFound`. See [Page sets](document-model.md#page-sets).
 
 ## Export warnings
 
@@ -164,6 +256,10 @@ An export reports problems that did not stop it:
 | `assetBelowTargetResolution` | Print proofing. An image has fewer source pixels than the output pixels that it covers. |
 
 Each warning has a `code`, a `message`, and a `layerId` when a layer applies. A warning changes no pixel and no exit status.
+
+A page-set export reports the warnings of each page, in page order. Each of these warnings has an extra `project` field that names the project of the page. The CLI prints the project as a fourth column. Other exports do not have the `project` field.
+
+An SVG export measures its warnings at scale 1. The other formats measure them at the export scale.
 
 - The CLI prints one line for each warning on standard error.
 - With `--warnings-json`, the CLI prints the array as JSON on standard output.
@@ -201,6 +297,8 @@ The 1.3.0 warning code `svgAssetTextWithoutFont` still exists. This case now giv
 - Recovery with 1.10.0 can discard image metadata from a newer `updateCanvas` journal entry.
 - Unknown fields survive inside `clip`, `crop`, `stroke`, `shape`, and the effect stack.
 - Release 1.12.0 keeps `hueRotate` and `invert` as unknown effects and refuses to render them. HTTP returns `422 renderFailed`. Use 1.13.0 to render them.
+- The PDF, JPEG, and WebP exports, `print`, and `pages` need 1.14.0. They add no document field. Release 1.13.1 opens every exported project unchanged.
+- Release 1.13.1 has no `--format`, `--quality`, `--pages`, or `--print` on `export`. Its HTTP export refuses the new body fields with `400 malformedRequest`. Its MCP `export_document` ignores the new arguments and writes a PNG.
 - The schema version stays at `1`.
 
 ## Related pages

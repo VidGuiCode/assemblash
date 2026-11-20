@@ -64,7 +64,7 @@ The main commands:
 | `new`, `canvas set` | Create a project and change the canvas. |
 | `add-text`, `add-rect`, `add-ellipse`, `add-line`, `add-path`, `add-image`, `add-svg` | Add a layer. |
 | `set`, `style` | Change layer properties, the blend mode, and the effect stack. |
-| `show`, `render`, `export` | Print or write the document, SVG, or PNG. |
+| `show`, `render`, `export` | Print or write the document, SVG, PNG, PDF, JPEG, or WebP. |
 | `undo`, `redo`, `history` | Read or move through the history. |
 | `align`, `center`, `distribute`, `snap`, `bounds`, `overlaps` | Measure and place layers. |
 | `preset`, `slot`, `slots`, `variants` | Define and fill templates. |
@@ -93,9 +93,15 @@ Important flags:
 | `--font-store <DIR>` | Use this font store. |
 | `--font <FILE>`, `--font-dir <DIR>` | Load font files directly on `render` and `export`. |
 | `--scale <N>` | Multiply the canvas size. `export` and `variants` only. |
-| `--timestamp <TIME>` | Record a timestamp in PNG metadata. |
+| `--timestamp <TIME>` | Record a timestamp in PNG metadata. PNG only. |
 | `--warnings-json` | Print export warnings as JSON on standard output. |
 | `--color-space <SPACE>` | Name the colour space of `export`. Only `srgb` is accepted. |
+| `--format <FORMAT>` | Write `png` (the default), `svg`, `pdf`, `jpeg` (or `jpg`), or `webp`. `export` and `variants` only. |
+| `--quality <N>` | JPEG quality, 1 to 100. The default is 90. `export` and `variants` only. |
+| `--pages <SET[:PAGES]>` | Export pages of a page set, for example `deck:1-3,5`. `export` only. |
+| `--workspace <DIR>` | The workspace that holds the page set. `export --pages` only. |
+| `--print` | Add trim and bleed boxes and crop marks to a PDF. `export` only. |
+| `--name <NAME>` | The file stem of a variants PDF. `variants --format pdf` only. |
 
 `render` and `export` take the output path positionally as well as through `--out`. Both print the written path and its `sha256:` digest as one tab-separated line. A script can compare two interfaces without hashing the file itself.
 
@@ -106,6 +112,18 @@ assemblash add-text ./poster --text "Hello" --font "Noto Sans" --size 64 --x 40 
 assemblash add-rect ./poster --x 40 --y 200 --width 240 --height 96 --fill '#1d1d1f' --corner-radius 12
 assemblash export ./poster --out poster.png --font-store ./assemblash-fonts
 ```
+
+`--format` selects another export format. With `--pages`, the pages come from a page set of the workspace, and the one path is the output file:
+
+```sh
+assemblash export ./poster poster.jpg --format jpeg --quality 80 --font-store ./assemblash-fonts
+assemblash export ./poster poster.webp --format webp --font-store ./assemblash-fonts
+assemblash export ./poster poster.pdf --format pdf --print --font-store ./assemblash-fonts
+assemblash export --workspace ./workspace --pages deck --format pdf deck.pdf
+assemblash export --workspace ./workspace --pages deck:2 --format png page-2.png
+```
+
+Without a font flag, `export --pages` uses the font store of the workspace. See [Export formats](paint-and-rendering.md#export-formats) for the rules of each format.
 
 `add-ellipse` and `add-line` take the same layer box flags. The layer box of a line is the line. Thus `--width` is its length and `--rotation` its angle.
 
@@ -160,6 +178,37 @@ An operation request has this shape:
 
 The response has `version`, `dryRun`, an optional `transaction` ID, the outcome, optional `warnings`, and an optional `document`. Add `?includeDocument=true` to an operation request to receive the document as `GET .../document` serves it. A dry run returns no transaction and no warnings.
 
+An export request has this shape. Every field is optional:
+
+```json
+{
+  "name": "deck",
+  "scale": 1,
+  "colorSpace": "srgb",
+  "format": "pdf",
+  "pages": "deck:1-3,5",
+  "print": false
+}
+```
+
+- `format` is `png` (the default), `svg`, `pdf`, `jpeg` (or `jpg`), or `webp`.
+- `quality` is the JPEG quality, 1 to 100. The default is 90.
+- `pages` selects pages of a page set. The file goes to the `exports/` directory of the project in the URL.
+- `print` adds trim and bleed boxes and crop marks. PDF only.
+
+The response has `path`, `bytes`, `width`, `height`, and `warnings`. A page-set export also has `pages`, the number of pages. `width` and `height` are the pixel size of the first page.
+
+```sh
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"format":"pdf","pages":"deck","name":"deck"}' \
+  http://127.0.0.1:8787/api/projects/cover/export
+curl -o deck.pdf http://127.0.0.1:8787/api/projects/cover/exports/deck.pdf
+```
+
+`GET .../exports/{file}` serves the `.png`, `.svg`, `.pdf`, `.jpg`, and `.webp` files of the `exports/` directory, with the media type of the format. A JPEG export is always `<name>.jpg`.
+
+`POST .../variants` takes `variants`, `scale`, `format`, `quality`, and `name`. A `pdf` batch writes one PDF with one page for each variant. See [Variants](paint-and-rendering.md#variants).
+
 An error has one envelope. The common codes are:
 
 ```json
@@ -170,7 +219,7 @@ An error has one envelope. The common codes are:
 - `401` for a missing or wrong token.
 - `409` for `versionConflict` or `projectLocked`.
 - `404` for `pageSetNotFound`.
-- `422` for `operationRefused`, `renderFailed`, `colorSpaceNotSupported`, or a page-set refusal such as `pageSetLoop`.
+- `422` for `operationRefused`, `renderFailed`, `colorSpaceNotSupported`, an export refusal such as `lossyWebpNotSupported`, or a page-set refusal such as `pageSetLoop`. See [Refusals](paint-and-rendering.md#refusals).
 
 ## MCP
 
@@ -230,6 +279,12 @@ In the `insert_layer_tree` input schema and the `get_document_state` output sche
 - `add_shape_layer` takes `path` for a path and `markerStart` and `markerEnd` for a line. `update_layer` replaces the geometry with `shape` and `path`, and sets the line markers.
 
 `export_document` returns the same `warnings` array as the other interfaces. It refuses to replace a file of the same name unless the call passes `overwrite`. It takes an optional `colorSpace`. Only `srgb` is accepted.
+
+`export_document` also takes `format`, `quality`, `pages`, and `print`, with the same rules as HTTP. A page-set export writes to the exports of `project`. That project does not have to be a page of the set. `render_variants` takes `format`, `quality`, and `name`.
+
+```json
+{ "project": "cover", "format": "pdf", "pages": "deck:1,3", "name": "deck" }
+```
 
 `list_page_sets` and `get_page_set` only read. `get_page_set` returns the same JSON as `GET /api/page-sets/{name}`. A server started with `--project` has no page sets.
 
