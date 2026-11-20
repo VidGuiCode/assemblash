@@ -23,6 +23,14 @@ const sampleCount = Number(options.samples ?? 20);
 const tabCount = Number(options.tabs ?? 1);
 if (!Number.isInteger(tabCount) || tabCount < 1 || tabCount > 16) throw new Error("Require --tabs between 1 and 16");
 const profileOutput = options.profile ? resolve(options.profile) : null;
+// Page-set PDF export (1.14.0 exit test 7). With this option the run opens a
+// page set of N pages and measures exports from the export dialog instead of
+// keyboard edits: a one-page PNG as the baseline, then the N-page set as one
+// PDF. It also times the same PDF request without a browser.
+const exportPages = options["export-pages"] === undefined ? 0 : Number(options["export-pages"]);
+if (!Number.isInteger(exportPages) || exportPages < 0 || exportPages > 64) throw new Error("Require --export-pages between 2 and 64");
+if (exportPages === 1) throw new Error("Require --export-pages between 2 and 64");
+if (exportPages && profileOutput) throw new Error("Use --profile without --export-pages");
 if (!Number.isInteger(sampleCount) || sampleCount < 5) throw new Error("Require at least five samples");
 const browserPath = options.browser ?? process.env.ASSEMBLASH_TEST_BROWSER ?? [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -76,6 +84,18 @@ for (const id of extraTabs) {
   const own = JSON.parse(readFileSync(join(directory, "document.json"), "utf8"));
   own.layers = JSON.parse(fixtureBytes.toString("utf8")).layers;
   writeFileSync(join(directory, "document.json"), JSON.stringify(own, null, 2) + "\n");
+}
+const setPages = Array.from({ length: exportPages }, (_, index) => `page-${String(index + 1).padStart(2, "0")}`);
+for (const id of setPages) {
+  const directory = join(workspace, "projects", id);
+  command(["new", directory, "--width", "1920", "--height", "1080", "--background", "#fafafa", "--name", `Page ${id}`]);
+  const own = JSON.parse(readFileSync(join(directory, "document.json"), "utf8"));
+  own.layers = JSON.parse(fixtureBytes.toString("utf8")).layers;
+  writeFileSync(join(directory, "document.json"), JSON.stringify(own, null, 2) + "\n");
+}
+if (exportPages) {
+  mkdirSync(join(workspace, "page-sets"), { recursive: true });
+  writeFileSync(join(workspace, "page-sets", "bench-set.json"), JSON.stringify({ pages: setPages.map((project) => ({ project })) }, null, 2) + "\n");
 }
 const loginCheck = options["login-check"] === "true";
 const accessToken = loginCheck ? command(["token", "show", "--workspace", workspace]).trim() : null;
@@ -175,6 +195,37 @@ try {
       }).observe({ type: "longtask", buffered: true });
     ` });
   }
+  if (exportPages) {
+    // Times the export request and the read of the written file, as the
+    // dialog itself makes them.
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: `
+      window.__exportTiming = null;
+      const originalFetch = window.fetch;
+      window.fetch = async (...args) => {
+        const url = String(args[0]);
+        const method = String(args[1]?.method ?? "GET").toUpperCase();
+        const requestAt = performance.now();
+        const response = await originalFetch(...args);
+        if (method === "POST" && /\\/export$/.test(url)) {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            const value = await json();
+            window.__exportTiming = { ...(window.__exportTiming ?? {}), requestAt, responseAt: performance.now() };
+            return value;
+          };
+        }
+        if (/\\/exports\\//.test(url)) {
+          const blob = response.blob.bind(response);
+          response.blob = async () => {
+            const value = await blob();
+            window.__exportTiming = { ...(window.__exportTiming ?? {}), fileAt: performance.now() };
+            return value;
+          };
+        }
+        return response;
+      };
+    ` });
+  }
   await send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
   if (loginCheck) {
     await send("Page.navigate", { url: `${base}/login.html` });
@@ -218,62 +269,171 @@ try {
   }
   const openTabs = await evaluate(`document.querySelectorAll("[data-tab-id]").length`);
   if (extraTabs.length && openTabs !== tabCount) throw new Error(`Expected ${tabCount} open tabs, found ${openTabs}`);
-  const layerPoint = await evaluate('(() => { const layer = document.querySelector(".layer[data-id=layer_latency_29]"); layer.scrollIntoView({ block: "center" }); const rect = layer.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; })()');
-  await send("Input.dispatchMouseEvent", { type: "mousePressed", ...layerPoint, button: "left", clickCount: 1 });
-  await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...layerPoint, button: "left", clickCount: 1 });
-  await evaluate('document.querySelector("#canvas").focus({ preventScroll: true })');
-  await pause(500);
-  const samples = [];
-  const profileSamples = [];
-  if (profileOutput) {
-    await send("Profiler.enable");
-    await send("Profiler.start");
-  }
-  for (let index = 0; index < sampleCount + 3; index++) {
-    if (profileOutput) await evaluate("window.__assemblashProfile.length = 0; performance.clearResourceTimings()");
-    await evaluate(`window.latencySample = new Promise((resolve, reject) => {
-      const image = document.querySelector("#canvas-image");
-      const before = image.src;
-      const start = performance.now();
-      const timeout = setTimeout(() => { image.removeEventListener("load", loaded); reject(new Error("Rust preview did not load after edit")); }, 20000);
-      function loaded() {
-        if (image.src === before) return;
-        image.removeEventListener("load", loaded);
+  /** One export from the dialog, timed in the page. */
+  async function exportSample(format, wholeSet, name) {
+    await evaluate('document.querySelector("#export").click()');
+    await until(() => evaluate(`Boolean(document.querySelector('#export-dialog[data-state="open"] #export-formats [data-format="${format}"]'))`), "export dialog");
+    await evaluate(`document.querySelector('#export-formats [data-format="${format}"]').click()`);
+    await evaluate(`document.querySelector('#export-options [data-resolution="original"]').click()`);
+    if (wholeSet) {
+      await until(() => evaluate(`Boolean(document.querySelector('#export-pages [data-pages="set"]'))`), "page-set choice");
+      await evaluate(`document.querySelector('#export-pages [data-pages="set"]').click()`);
+    }
+    await evaluate(`(() => {
+      const input = document.querySelector("#export-name");
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, ${JSON.stringify(name)});
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await until(() => evaluate(`document.querySelector("#export-name").value === ${JSON.stringify(name)} && document.querySelector('#export-options [data-resolution="original"]').getAttribute("aria-checked") === "true"`), "dialog settings");
+    await evaluate(`window.__exportTiming = null; window.exportSample = new Promise((resolve, reject) => {
+      const clickAt = performance.now();
+      const timeout = setTimeout(() => { observer.disconnect(); reject(new Error("export did not settle")); }, 300000);
+      const observer = new MutationObserver(check);
+      function check() {
+        const link = document.querySelector("#export-download");
+        const error = document.querySelector("#export-error");
+        if (error) { observer.disconnect(); clearTimeout(timeout); reject(new Error(error.textContent)); return; }
+        if (!link || link.hidden || !window.__exportTiming?.responseAt) return;
+        observer.disconnect();
         clearTimeout(timeout);
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now() - start)));
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve({ clickAt, ...window.__exportTiming, settledAt: performance.now(),
+          summary: document.querySelector("#export-summary").textContent })));
       }
-      image.addEventListener("load", loaded);
+      observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
     }); true`);
-    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
-    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
-    const elapsed = await evaluate("window.latencySample");
-    if (index >= 3) samples.push(elapsed);
-    await until(() => evaluate('document.querySelector("#save-state")?.textContent.includes("All changes saved")'), "edit saved");
-    if (profileOutput) profileSamples.push(await evaluate(`({ warmup: ${index < 3}, events: window.__assemblashProfile,
-      resources: performance.getEntriesByType("resource").map(({ name, startTime, duration, responseStart, responseEnd }) =>
-        ({ name, startTime, duration, responseStart, responseEnd })) })`));
+    await evaluate('document.querySelector("#export-confirm").click()');
+    const timing = await evaluate("window.exportSample");
+    await evaluate('document.querySelector("#export-cancel").click()');
+    await until(() => evaluate(`Boolean(document.querySelector('#export-dialog[data-state="closed"]'))`), "export dialog closed");
+    return {
+      serverInPageMs: timing.responseAt - timing.requestAt,
+      fileReadMs: timing.fileAt - timing.responseAt,
+      settleAfterResponseMs: timing.settledAt - timing.responseAt,
+      clickToSettleMs: timing.settledAt - timing.clickAt,
+      summary: timing.summary,
+    };
   }
-  if (profileOutput) {
-    const { profile: cpuProfile } = await send("Profiler.stop");
-    writeFileSync(profileOutput, JSON.stringify({ samples: profileSamples, cpuProfile }, null, 2) + "\n");
+
+  /** Exit test 7: a one-page PNG baseline, then the page set as one PDF, then the PDF request alone. */
+  async function measureExports() {
+    await evaluate('document.querySelector("#project-search").focus()');
+    await until(() => evaluate(`Boolean(document.querySelector('#project-options [data-page-set="bench-set"]'))`), "page set in the picker");
+    await evaluate(`document.querySelector('#project-options [data-page-set="bench-set"]').click()`);
+    await until(() => evaluate(`document.querySelectorAll(".project-tab[data-page-set]").length === ${exportPages} && document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tabId === "page-01" && document.querySelector("#canvas-image")?.naturalWidth > 0`), "page set open", 120000);
+    const openTabsNow = await evaluate(`document.querySelectorAll("[data-tab-id]").length`);
+    const summarize = (values) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      return { samplesMs: values, medianMs: sorted[Math.floor(sorted.length / 2)], p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1] };
+    };
+    const runs = {};
+    for (const [label, format, wholeSet] of [["onePagePng", "png", false], ["pageSetPdf", "pdf", true]]) {
+      const kept = [];
+      for (let index = 0; index < sampleCount + 3; index++) {
+        const sample = await exportSample(format, wholeSet, `bench-${label.toLowerCase()}-${index}`);
+        if (index >= 3) kept.push(sample);
+      }
+      runs[label] = {
+        format, pages: wholeSet ? exportPages : 1, summary: kept.at(-1)?.summary,
+        settleAfterResponse: summarize(kept.map((one) => one.settleAfterResponseMs)),
+        fileRead: summarize(kept.map((one) => one.fileReadMs)),
+        serverInPage: summarize(kept.map((one) => one.serverInPageMs)),
+        clickToSettle: summarize(kept.map((one) => one.clickToSettleMs)),
+      };
+    }
+    // The same PDF request without a browser: the server time on its own.
+    const direct = [];
+    for (let index = 0; index < sampleCount + 3; index++) {
+      const start = performance.now();
+      const response = await fetch(`${base}/api/projects/page-01/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+        body: JSON.stringify({ name: `bench-direct-${index}`, scale: 1, format: "pdf", pages: "bench-set" }),
+      });
+      const body = await response.json();
+      const elapsed = performance.now() - start;
+      if (!response.ok || body.pages !== exportPages) throw new Error(`direct PDF export: ${JSON.stringify(body)}`);
+      if (index >= 3) direct.push(elapsed);
+    }
+    if (exceptions.length) throw new Error(`Browser exceptions: ${exceptions.join("; ")}`);
+    if (externalRequests.length) throw new Error(`Interface requests external assets: ${externalRequests.join("; ")}`);
+    if (options.screenshot) {
+      const capture = await send("Page.captureScreenshot", { format: "png" });
+      writeFileSync(resolve(options.screenshot), Buffer.from(capture.data, "base64"));
+    }
+    const result = {
+      label: options.label ?? binary, host: platform(), cpu: cpus()[0].model,
+      browser: await send("Browser.getVersion"), viewport: [1400, 900], fixtureSha256: sha256(fixtureBytes),
+      binarySha256: sha256(readFileSync(binary)), binaryVersion: command(["--version"]).trim(),
+      tabs: tabCount, openTabs: openTabsNow, loginChecked: loginCheck, uiSource: options["ui-dir"] ? "directory" : "embedded", externalAssetRequests: externalRequests.length,
+      metric: "export response body read to the download link shown and two animation frames (settleAfterResponse); the same PDF request from Node without a browser (serverDirect)",
+      pageSize: [1920, 1080], scale: 1, warmupSamples: 3,
+      exports: runs,
+      serverDirectPdf: { pages: exportPages, ...summarize(direct) },
+    };
+    writeFileSync(resolve(options.output), JSON.stringify(result, null, 2) + "\n");
+    console.log(JSON.stringify(result));
   }
-  if (exceptions.length) throw new Error(`Browser exceptions: ${exceptions.join("; ")}`);
-  if (externalRequests.length) throw new Error(`Interface requests external assets: ${externalRequests.join("; ")}`);
-  if (options.screenshot) {
-    const capture = await send("Page.captureScreenshot", { format: "png" });
-    writeFileSync(resolve(options.screenshot), Buffer.from(capture.data, "base64"));
+
+  if (exportPages) {
+    await measureExports();
+  } else {
+    const layerPoint = await evaluate('(() => { const layer = document.querySelector(".layer[data-id=layer_latency_29]"); layer.scrollIntoView({ block: "center" }); const rect = layer.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; })()');
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", ...layerPoint, button: "left", clickCount: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...layerPoint, button: "left", clickCount: 1 });
+    await evaluate('document.querySelector("#canvas").focus({ preventScroll: true })');
+    await pause(500);
+    const samples = [];
+    const profileSamples = [];
+    if (profileOutput) {
+      await send("Profiler.enable");
+      await send("Profiler.start");
+    }
+    for (let index = 0; index < sampleCount + 3; index++) {
+      if (profileOutput) await evaluate("window.__assemblashProfile.length = 0; performance.clearResourceTimings()");
+      await evaluate(`window.latencySample = new Promise((resolve, reject) => {
+        const image = document.querySelector("#canvas-image");
+        const before = image.src;
+        const start = performance.now();
+        const timeout = setTimeout(() => { image.removeEventListener("load", loaded); reject(new Error("Rust preview did not load after edit")); }, 20000);
+        function loaded() {
+          if (image.src === before) return;
+          image.removeEventListener("load", loaded);
+          clearTimeout(timeout);
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now() - start)));
+        }
+        image.addEventListener("load", loaded);
+      }); true`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+      const elapsed = await evaluate("window.latencySample");
+      if (index >= 3) samples.push(elapsed);
+      await until(() => evaluate('document.querySelector("#save-state")?.textContent.includes("All changes saved")'), "edit saved");
+      if (profileOutput) profileSamples.push(await evaluate(`({ warmup: ${index < 3}, events: window.__assemblashProfile,
+        resources: performance.getEntriesByType("resource").map(({ name, startTime, duration, responseStart, responseEnd }) =>
+          ({ name, startTime, duration, responseStart, responseEnd })) })`));
+    }
+    if (profileOutput) {
+      const { profile: cpuProfile } = await send("Profiler.stop");
+      writeFileSync(profileOutput, JSON.stringify({ samples: profileSamples, cpuProfile }, null, 2) + "\n");
+    }
+    if (exceptions.length) throw new Error(`Browser exceptions: ${exceptions.join("; ")}`);
+    if (externalRequests.length) throw new Error(`Interface requests external assets: ${externalRequests.join("; ")}`);
+    if (options.screenshot) {
+      const capture = await send("Page.captureScreenshot", { format: "png" });
+      writeFileSync(resolve(options.screenshot), Buffer.from(capture.data, "base64"));
+    }
+    const sorted = [...samples].sort((a, b) => a - b);
+    const result = {
+      label: options.label ?? binary, host: platform(), cpu: cpus()[0].model,
+      browser: await send("Browser.getVersion"), viewport: [1400, 900], fixtureSha256: sha256(fixtureBytes),
+      binarySha256: sha256(readFileSync(binary)), binaryVersion: command(["--version"]).trim(),
+      tabs: tabCount, openTabs, loginChecked: loginCheck, uiSource: options["ui-dir"] ? "directory" : "embedded", externalAssetRequests: externalRequests.length,
+      metric: "ArrowRight input to authoritative preview load and two animation frames", warmupSamples: 3,
+      samplesMs: samples, medianMs: sorted[Math.floor(sorted.length / 2)], p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1],
+    };
+    writeFileSync(resolve(options.output), JSON.stringify(result, null, 2) + "\n");
+    console.log(JSON.stringify(result));
   }
-  const sorted = [...samples].sort((a, b) => a - b);
-  const result = {
-    label: options.label ?? binary, host: platform(), cpu: cpus()[0].model,
-    browser: await send("Browser.getVersion"), viewport: [1400, 900], fixtureSha256: sha256(fixtureBytes),
-    binarySha256: sha256(readFileSync(binary)), binaryVersion: command(["--version"]).trim(),
-    tabs: tabCount, openTabs, loginChecked: loginCheck, uiSource: options["ui-dir"] ? "directory" : "embedded", externalAssetRequests: externalRequests.length,
-    metric: "ArrowRight input to authoritative preview load and two animation frames", warmupSamples: 3,
-    samplesMs: samples, medianMs: sorted[Math.floor(sorted.length / 2)], p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1],
-  };
-  writeFileSync(resolve(options.output), JSON.stringify(result, null, 2) + "\n");
-  console.log(JSON.stringify(result));
 } finally {
   socket?.close();
   chrome?.kill();
