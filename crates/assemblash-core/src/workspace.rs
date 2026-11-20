@@ -25,6 +25,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::page_sets::{PageSet, PageSetError, PageSetName, PageSetSource, ResolvedPageSet};
+
 /// Settings file at the root of a workspace.
 pub const CONFIG_FILE: &str = "config.toml";
 
@@ -120,7 +122,7 @@ impl WorkspaceError {
 /// paths, no drive letters, no leading dot, no control characters, and none of
 /// the characters Windows forbids. A value of this type has already been
 /// checked, so the places that build paths do not each have to remember to.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct ProjectId(String);
 
@@ -354,6 +356,65 @@ impl Workspace {
         self.root.join(PROJECTS_DIR)
     }
 
+    /// The directory holding page-set files.
+    pub fn page_sets_dir(&self) -> PathBuf {
+        self.root.join(crate::page_sets::PAGE_SETS_DIR)
+    }
+
+    /// The page sets in the workspace, sorted by name.
+    ///
+    /// A plain directory scan of `page-sets/*.json`. A file whose name is not
+    /// a usable set name is skipped, as [`Workspace::projects`] skips such a
+    /// directory: it cannot be addressed. The contents are not read here.
+    pub fn page_sets(&self) -> Result<Vec<PageSetName>, PageSetError> {
+        let directory = self.page_sets_dir();
+        if !directory.is_dir() {
+            return Ok(Vec::new());
+        }
+        let unreadable = |source| PageSetError::Io {
+            path: directory.clone(),
+            source,
+        };
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(&directory).map_err(unreadable)? {
+            let path = entry.map_err(unreadable)?.path();
+            if !path.is_file()
+                || path.extension().and_then(|e| e.to_str())
+                    != Some(crate::page_sets::PAGE_SET_EXTENSION)
+            {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if let Ok(name) = PageSetName::new(stem) {
+                found.push(name);
+            }
+        }
+        found.sort();
+        Ok(found)
+    }
+
+    /// The file of a page set.
+    pub fn page_set_path(&self, name: &PageSetName) -> PathBuf {
+        self.page_sets_dir().join(format!(
+            "{}.{}",
+            name.as_str(),
+            crate::page_sets::PAGE_SET_EXTENSION
+        ))
+    }
+
+    /// Reads one page set, without resolving it.
+    pub fn read_page_set(&self, name: &PageSetName) -> Result<PageSet, PageSetError> {
+        PageSetSource::page_set(self, name)?
+            .ok_or_else(|| PageSetError::NotFound { name: name.clone() })
+    }
+
+    /// Reads one page set and resolves it to its flat, ordered page list.
+    pub fn resolve_page_set(&self, name: &PageSetName) -> Result<ResolvedPageSet, PageSetError> {
+        crate::page_sets::resolve(name, self)
+    }
+
     /// The settings.
     pub fn config(&self) -> &Config {
         &self.config
@@ -430,6 +491,21 @@ impl Workspace {
             });
         }
         Ok(self.project_dir(id))
+    }
+}
+
+impl PageSetSource for Workspace {
+    fn has_project(&self, id: &ProjectId) -> bool {
+        Workspace::has_project(self, id)
+    }
+
+    fn page_set(&self, name: &PageSetName) -> Result<Option<PageSet>, PageSetError> {
+        let path = self.page_set_path(name);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => PageSet::parse(name, &text).map(Some),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(PageSetError::Io { path, source }),
+        }
     }
 }
 
@@ -625,6 +701,50 @@ mod tests {
             reopened.config().extra.get("something-newer"),
             Some(&toml::Value::String("keep me".to_owned())),
             "an unknown key must survive being written back"
+        );
+    }
+
+    #[test]
+    fn page_sets_are_listed_read_and_resolved_from_the_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open_or_create(dir.path()).unwrap();
+        assert!(workspace.page_sets().unwrap().is_empty());
+
+        for name in ["cover", "back"] {
+            let id = ProjectId::new(name).unwrap();
+            let project = workspace.create_project_dir(&id).unwrap();
+            let document =
+                crate::Document::new(&mut crate::ids::SequentialIdSource::new(), 1.0, 1.0);
+            crate::storage::save(&document, &project).unwrap();
+        }
+        let sets = workspace.page_sets_dir();
+        std::fs::create_dir_all(&sets).unwrap();
+        std::fs::write(
+            sets.join("deck.json"),
+            r#"{"pages":[{"project":"cover"},{"project":"back"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(sets.join("notes.txt"), "not a set").unwrap();
+        std::fs::write(sets.join(".hidden.json"), "{}").unwrap();
+
+        let listed: Vec<String> = workspace
+            .page_sets()
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(listed, ["deck"]);
+
+        let deck = PageSetName::new("deck").unwrap();
+        assert_eq!(workspace.read_page_set(&deck).unwrap().pages.len(), 2);
+        let resolved = workspace.resolve_page_set(&deck).unwrap();
+        let pages: Vec<&str> = resolved.pages.iter().map(|p| p.project.as_str()).collect();
+        assert_eq!(pages, ["cover", "back"]);
+
+        let none = PageSetName::new("none").unwrap();
+        assert_eq!(
+            workspace.read_page_set(&none).unwrap_err().code(),
+            "pageSetNotFound"
         );
     }
 

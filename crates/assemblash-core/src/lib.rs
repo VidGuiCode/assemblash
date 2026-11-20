@@ -20,6 +20,7 @@ pub mod index;
 pub mod inventory;
 pub mod layout;
 pub mod ops;
+pub mod page_sets;
 pub mod path;
 pub mod presets;
 pub mod schema;
