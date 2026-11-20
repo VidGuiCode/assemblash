@@ -45,6 +45,15 @@ schema change is always noted explicitly.
 - New typed refusals: `exportFormatNotSupported`, `lossyWebpNotSupported`, `exportQualityOutOfRange`, `exportQualityNotApplicable`, `printNeedsPdf`, `invalidPageSelection`, `pagesNeedPdf`, `variantsNameNeedsPdf`, `timestampNeedsPng` (CLI only), and `exportEncodingFailed`. HTTP answers `422`. A refused export writes no file.
 - The new formats add no document field and no operation. Release 1.13.1 opens every exported project unchanged. Release 1.13.1 has no `--format`, `--quality`, `--pages`, or `--print`. Its HTTP export and variants routes refuse the new body fields with `400 malformedRequest`. Its MCP `export_document` and `render_variants` ignore the new arguments and write PNG files. `schemaVersion` stays 1. The MCP tool count stays 55.
 - New workspace crate `assemblash-export` (Apache-2.0): the raster PDF writer and the JPEG and lossless WebP encoders. The workspace has seven crates.
+- The export dialog of the reference interface offers PNG, SVG, PDF, JPEG, and lossless WebP. PNG stays the default and sends the same request as before. A quality control shows for JPEG only. A print option shows for PDF only, and only when the document has bleed.
+- The export dialog shows a refusal from the engine as a readable message, for example `lossyWebpNotSupported` or `pageSetLoop`. A refused export offers no download.
+- Page sets in the reference interface. The project search lists the page sets of the workspace. Opening a set opens its pages as tabs in manifest order, as one run in the tab strip. Each tab of the set shows its page number and the engine thumbnail of the project.
+- A page that already has a tab keeps it and moves into the run. It does not open a second time.
+- A set with a loop, a missing page, or another refusal shows a readable message, and no tab opens. A set that would open more than 64 tabs is refused before any page is read.
+- From a tab of a page set, the export dialog exports all pages of the set as one PDF (`pages` on the HTTP export).
+- EN, FR, and DE strings for page sets, the export formats, and the readable refusals.
+- `scripts/page_sets_browser.mjs`: a browser journey for page sets as tabs, one page-set PDF export, one JPEG export, and one refused export. CI runs it on the candidate binary.
+- `scripts/ui_latency_benchmark.mjs --export-pages N`: measures a one-page PNG export and an N-page page-set PDF export from the export dialog, and the same PDF request without a browser.
 - New third-party dependencies: `image` 0.25.10 (MIT OR Apache-2.0), with only its JPEG and WebP codecs, and `moxcms` 0.8.1 (BSD-3-Clause OR Apache-2.0) and `pxfm` 0.1.30 (BSD-3-Clause OR Apache-2.0), which `image` brings in. `DEPENDENCIES.md` is regenerated.
 
 ### Fixed

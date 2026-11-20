@@ -124,7 +124,10 @@ editor that already runs.
    downloads something.
 4. Click a layer on the canvas to select it. Drag it to move it. Change its
    properties in the panel. Use **Undo** and **Redo** at the top.
-5. Click **Export** and select PNG or SVG.
+5. Click **Export** and select a format: PNG, SVG, PDF, JPEG, or WebP. PNG is
+   the default. For JPEG, set the quality from 1 to 100. WebP is lossless.
+   For a PDF of a document with bleed, select **Add crop marks and bleed** to
+   get a trim box, a bleed box, and crop marks.
 
 Assemblash saves every change immediately. There is no **Save** button.
 
@@ -141,6 +144,21 @@ Alt+Shift+Right Arrow. Click × on a tab to close it.
   programs, for example the `assemblash` command line, can then change it.
 - The open tabs and their order are stored in the workspace. The next start
   opens the same tabs.
+
+A page set is an ordered list of projects, for example the pages of a
+carousel. Each set is one file, `page-sets/<name>.json`, in the workspace. The
+project search shows the page sets under **Page sets**. Click a page set to
+open its pages:
+
+- Each page opens in a tab, in the order of the file. The tabs of the set open
+  side by side in the strip. Each tab shows its page number and a small
+  thumbnail.
+- A page that is already open keeps its tab and moves into the set. It does
+  not open a second time.
+- If the set contains itself, or names a project that does not exist, the
+  status bar shows the problem. No tab opens.
+- To export all pages as one PDF, show a page of the set, click **Export**,
+  select **PDF**, and then select the choice for all pages of the set.
 
 ### 4. Let an AI agent work with you
 
