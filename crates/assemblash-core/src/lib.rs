@@ -41,7 +41,7 @@ pub mod workspace;
 pub use assemblash_liveness as liveness;
 pub use document::{
     Asset, BackgroundImage, BlendMode, Canvas, Color, Document, Extras, FontStyle, GradientCenter,
-    GradientStop, GroupLayer, ImageFit, ImageLayer, Layer, LayerKind, LineCap, LineJoin,
+    GradientStop, GroupLayer, ImageFit, ImageLayer, Insets, Layer, LayerKind, LineCap, LineJoin,
     LineMarker, LinearGradient, LinearTag, RadialGradient, RadialTag, ShapeKind, ShapeLayer,
     SolidColor, Stroke, SvgLayer, TextAlign, TextLayer, Transform, UnknownGradient, VerticalAlign,
     MAX_DASH_ENTRIES, MAX_GRADIENT_STOPS,

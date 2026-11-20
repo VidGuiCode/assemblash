@@ -84,6 +84,8 @@ impl Document {
                 height,
                 background: None,
                 background_image: None,
+                bleed: None,
+                margins: None,
                 extra: Extras::new(),
             },
             assets: Vec::new(),
@@ -141,9 +143,69 @@ pub struct Canvas {
     /// Image composited over the fill and under every layer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background_image: Option<BackgroundImage>,
+    /// Print bleed: how far printed content may extend past each canvas edge.
+    ///
+    /// The canvas is the trim box. Bleed goes outward from it. A PNG or SVG
+    /// export never reads this field, so it never changes their bytes. It is
+    /// used by the print-proofing warnings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bleed: Option<Insets>,
+    /// Print margins: the safe area inside each canvas edge.
+    ///
+    /// Margins go inward from the canvas edge. A PNG or SVG export never reads
+    /// this field. It is used by the print-proofing warnings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margins: Option<Insets>,
     /// Keys this build does not know about, preserved verbatim.
     #[serde(flatten)]
     pub extra: Extras,
+}
+
+/// Four distances, one for each canvas edge, in canvas pixels.
+///
+/// A side that is not written is zero. Every side must be finite and zero or
+/// more.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Insets {
+    /// Distance at the top edge.
+    #[serde(default)]
+    pub top: f64,
+    /// Distance at the right edge.
+    #[serde(default)]
+    pub right: f64,
+    /// Distance at the bottom edge.
+    #[serde(default)]
+    pub bottom: f64,
+    /// Distance at the left edge.
+    #[serde(default)]
+    pub left: f64,
+    /// Keys this build does not know about, preserved verbatim.
+    #[serde(flatten)]
+    pub extra: Extras,
+}
+
+impl Insets {
+    /// The same distance on all four sides.
+    pub fn uniform(value: f64) -> Self {
+        Self {
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
+            extra: Extras::new(),
+        }
+    }
+
+    /// The four sides with their names, in the order top, right, bottom, left.
+    pub fn sides(&self) -> [(&'static str, f64); 4] {
+        [
+            ("top", self.top),
+            ("right", self.right),
+            ("bottom", self.bottom),
+            ("left", self.left),
+        ]
+    }
 }
 
 /// An imported file living under the project's `assets/` directory.

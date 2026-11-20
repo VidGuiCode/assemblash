@@ -51,6 +51,34 @@ pub enum ValidationError {
         value: f64,
     },
 
+    /// A side of the canvas bleed or margins is negative or not a number.
+    #[error("canvas {field}.{side} must be a finite number of zero or more, got {value}")]
+    InvalidCanvasInset {
+        /// `bleed` or `margins`.
+        field: &'static str,
+        /// `top`, `right`, `bottom`, or `left`.
+        side: &'static str,
+        /// The offending value.
+        value: f64,
+    },
+
+    /// The canvas margins leave no safe area on one axis.
+    #[error(
+        "canvas margins {first} and {second} add up to {total},          which is not less than the canvas {dimension} {size}"
+    )]
+    CanvasMarginsTooLarge {
+        /// `width` or `height`.
+        dimension: &'static str,
+        /// `left` or `top`.
+        first: &'static str,
+        /// `right` or `bottom`.
+        second: &'static str,
+        /// The sum of the two margins.
+        total: f64,
+        /// The canvas size on that axis.
+        size: f64,
+    },
+
     /// A transform field is negative where it may not be, or not a number.
     #[error("layer {layer}: transform {field} is invalid ({value})")]
     InvalidTransform {

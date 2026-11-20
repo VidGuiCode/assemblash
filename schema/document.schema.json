@@ -109,6 +109,28 @@
               "type": "null"
             }
           ]
+        },
+        "bleed": {
+          "description": "Print bleed: how far printed content may extend past each canvas edge.\n\nThe canvas is the trim box. Bleed goes outward from it. A PNG or SVG\nexport never reads this field, so it never changes their bytes. It is\nused by the print-proofing warnings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Insets"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "margins": {
+          "description": "Print margins: the safe area inside each canvas edge.\n\nMargins go inward from the canvas edge. A PNG or SVG export never reads\nthis field. It is used by the print-proofing warnings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Insets"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -329,6 +351,37 @@
           "const": "cover"
         }
       ]
+    },
+    "Insets": {
+      "description": "Four distances, one for each canvas edge, in canvas pixels.\n\nA side that is not written is zero. Every side must be finite and zero or\nmore.",
+      "type": "object",
+      "properties": {
+        "top": {
+          "description": "Distance at the top edge.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "right": {
+          "description": "Distance at the right edge.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "bottom": {
+          "description": "Distance at the bottom edge.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "left": {
+          "description": "Distance at the left edge.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        }
+      },
+      "additionalProperties": true
     },
     "Asset": {
       "description": "An imported file living under the project's `assets/` directory.",

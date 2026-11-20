@@ -15,6 +15,10 @@ export type Canvas = {
   background?: Color | null;
   /** Image composited over the fill and under every layer. */
   backgroundImage?: BackgroundImage | null;
+  /** Print bleed: how far printed content may extend past each canvas edge. */
+  bleed?: Insets | null;
+  /** Print margins: the safe area inside each canvas edge. */
+  margins?: Insets | null;
   [key: string]: unknown;
 };
 
@@ -126,6 +130,22 @@ export type AssetId = string;
 
 /// How an image is scaled into its box.
 export type ImageFit = "fill" | "contain" | "cover";
+
+/// Four distances, one for each canvas edge, in canvas pixels.
+///
+/// A side that is not written is zero. Every side must be finite and zero or
+/// more.
+export type Insets = {
+  /** Distance at the top edge. */
+  top?: number;
+  /** Distance at the right edge. */
+  right?: number;
+  /** Distance at the bottom edge. */
+  bottom?: number;
+  /** Distance at the left edge. */
+  left?: number;
+  [key: string]: unknown;
+};
 
 /// An imported file living under the project's `assets/` directory.
 export type Asset = {

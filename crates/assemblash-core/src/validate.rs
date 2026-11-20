@@ -69,6 +69,46 @@ fn check_canvas(document: &Document, errors: &mut Vec<ValidationError>) {
         }
     }
 
+    for (field, insets) in [
+        ("bleed", &document.canvas.bleed),
+        ("margins", &document.canvas.margins),
+    ] {
+        let Some(insets) = insets else { continue };
+        for (side, value) in insets.sides() {
+            if !value.is_finite() || value < 0.0 {
+                errors.push(ValidationError::InvalidCanvasInset { field, side, value });
+            }
+        }
+    }
+    if let Some(margins) = &document.canvas.margins {
+        for (dimension, first, second, total, size) in [
+            (
+                "width",
+                "left",
+                "right",
+                margins.left + margins.right,
+                document.canvas.width,
+            ),
+            (
+                "height",
+                "top",
+                "bottom",
+                margins.top + margins.bottom,
+                document.canvas.height,
+            ),
+        ] {
+            if total.is_finite() && size.is_finite() && total >= size {
+                errors.push(ValidationError::CanvasMarginsTooLarge {
+                    dimension,
+                    first,
+                    second,
+                    total,
+                    size,
+                });
+            }
+        }
+    }
+
     if let Some(background) = &document.canvas.background {
         check_color(background, "canvas background", errors);
     }
@@ -750,6 +790,44 @@ mod tests {
         doc.canvas.width = 0.0;
         doc.canvas.height = f64::NAN;
         assert_eq!(errors(&doc).len(), 2);
+    }
+
+    #[test]
+    fn canvas_bleed_and_margins_are_checked() {
+        let mut doc = document();
+        doc.canvas.bleed = Some(crate::document::Insets::uniform(9.0));
+        doc.canvas.margins = Some(crate::document::Insets::uniform(12.0));
+        assert!(validate(&doc).is_ok());
+
+        doc.canvas.bleed = Some(crate::document::Insets {
+            left: -1.0,
+            top: f64::NAN,
+            ..crate::document::Insets::default()
+        });
+        let found = errors(&doc);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|error| matches!(
+            error,
+            ValidationError::InvalidCanvasInset { field: "bleed", .. }
+        )));
+    }
+
+    #[test]
+    fn canvas_margins_must_leave_a_safe_area() {
+        let mut doc = document();
+        let width = doc.canvas.width;
+        doc.canvas.margins = Some(crate::document::Insets {
+            left: width / 2.0,
+            right: width / 2.0,
+            ..crate::document::Insets::default()
+        });
+        assert!(matches!(
+            errors(&doc).as_slice(),
+            [ValidationError::CanvasMarginsTooLarge {
+                dimension: "width",
+                ..
+            }]
+        ));
     }
 
     #[test]
