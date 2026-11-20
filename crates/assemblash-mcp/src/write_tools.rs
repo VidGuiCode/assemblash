@@ -548,12 +548,27 @@ pub struct UpdateCanvasArgs {
     pub clear_background_image: bool,
     #[serde(default)]
     pub anchor: Option<CanvasAnchor>,
+    /// Print bleed: `top`, `right`, `bottom`, `left` in pixels, outward from
+    /// the canvas edge. Omit to preserve it; pass null to clear it.
+    #[serde(default, deserialize_with = "nullable")]
+    pub bleed: Option<Option<assemblash_core::Insets>>,
+    /// Print margins: `top`, `right`, `bottom`, `left` in pixels, inward
+    /// from the canvas edge. Omit to preserve them; pass null to clear them.
+    #[serde(default, deserialize_with = "nullable")]
+    pub margins: Option<Option<assemblash_core::Insets>>,
 }
 fn nullable_color<'de, D>(deserializer: D) -> Result<Option<Option<Color>>, D::Error>
 where
     D: Deserializer<'de>,
 {
     Ok(Some(Option::<Color>::deserialize(deserializer)?))
+}
+fn nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1289,7 +1304,7 @@ impl AssemblashMcp {
 
     /// Changes canvas dimensions or background without scaling layers.
     #[tool(
-        description = "Update the canvas. Existing root layers translate only according to anchor; they never scale. Omit background to preserve it; pass null to clear it."
+        description = "Update the canvas. Existing root layers translate only according to anchor; they never scale. Omit background to preserve it; pass null to clear it. bleed and margins are print geometry ({top, right, bottom, left} in pixels): omit to preserve, null to clear. They never change a PNG or SVG export."
     )]
     async fn update_canvas(
         &self,
@@ -1304,6 +1319,8 @@ impl AssemblashMcp {
                 background_image: args.background_image,
                 clear_background_image: args.clear_background_image,
                 anchor: args.anchor,
+                bleed: args.bleed,
+                margins: args.margins,
             }),
         )
     }

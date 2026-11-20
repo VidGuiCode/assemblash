@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{
     BackgroundImage, BlendMode, Clip, Color, Crop, Document, Effect, Extras, FontStyle, GroupLayer,
-    ImageFit, ImageLayer, Layer, LayerKind, LineMarker, ShapeKind, ShapeLayer, Stroke, TextAlign,
-    TextLayer, Transform, VerticalAlign,
+    ImageFit, ImageLayer, Insets, Layer, LayerKind, LineMarker, ShapeKind, ShapeLayer, Stroke,
+    TextAlign, TextLayer, Transform, VerticalAlign,
 };
 use crate::ids::{AssetId, IdSource, LayerId};
 use crate::ops::error::OpError;
@@ -54,6 +54,20 @@ pub struct UpdateCanvas {
     pub clear_background_image: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CanvasAnchor>,
+    /// Print bleed. Absent preserves it; null clears it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_nullable"
+    )]
+    pub bleed: Option<Option<Insets>>,
+    /// Print margins. Absent preserves them; null clears them.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_nullable"
+    )]
+    pub margins: Option<Option<Insets>>,
 }
 
 fn deserialize_optional_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>

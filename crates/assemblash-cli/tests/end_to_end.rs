@@ -1138,6 +1138,61 @@ twice
 }
 
 #[test]
+fn canvas_set_sets_and_clears_bleed_and_margins_and_undoes() {
+    let scratch = tempfile::tempdir().unwrap();
+    let project = scratch.path().join("print");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "100"]);
+    let read = || -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(project.join("document.json")).unwrap())
+            .unwrap()
+    };
+    let before = std::fs::read(project.join("document.json")).unwrap();
+    let png = scratch.path().join("before.png");
+    run(&["export", project_arg, png.to_str().unwrap()]);
+
+    run(&[
+        "canvas",
+        "set",
+        project_arg,
+        "--bleed",
+        "9",
+        "--margins",
+        "10,12,10,12",
+    ]);
+    let canvas = read()["canvas"].clone();
+    assert_eq!(canvas["bleed"]["right"], 9.0);
+    assert_eq!(canvas["margins"]["right"], 12.0);
+    assert_eq!(canvas["margins"]["top"], 10.0);
+
+    // The PNG does not change.
+    let with = scratch.path().join("with.png");
+    run(&["export", project_arg, with.to_str().unwrap()]);
+    assert_eq!(std::fs::read(&png).unwrap(), std::fs::read(&with).unwrap());
+
+    // A malformed value and a margin with no safe area are refused.
+    let bad = run_failing(&["canvas", "set", project_arg, "--bleed", "1,2"]);
+    assert!(bad.contains("--bleed"), "{bad}");
+    run_failing(&["canvas", "set", project_arg, "--margins", "0,100,0,100"]);
+    run_failing(&["canvas", "set", project_arg, "--bleed", "9", "--no-bleed"]);
+
+    run(&["canvas", "set", project_arg, "--no-bleed", "--no-margins"]);
+    let canvas = read()["canvas"].clone();
+    assert!(
+        canvas.get("bleed").is_none() && canvas.get("margins").is_none(),
+        "{canvas}"
+    );
+
+    run(&["undo", project_arg]);
+    assert_eq!(read()["canvas"]["bleed"]["left"], 9.0);
+    run(&["undo", project_arg]);
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn canvas_set_resizes_clears_background_and_undoes() {
     let scratch = tempfile::tempdir().unwrap();
     let project = scratch.path().join("canvas");

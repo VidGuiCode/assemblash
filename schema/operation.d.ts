@@ -114,6 +114,22 @@ export type ImageFit = "fill" | "contain" | "cover";
 /// The point of the old canvas that stays fixed when its dimensions change.
 export type CanvasAnchor = "top-left" | "top" | "top-right" | "left" | "center" | "right" | "bottom-left" | "bottom" | "bottom-right";
 
+/// Four distances, one for each canvas edge, in canvas pixels.
+///
+/// A side that is not written is zero. Every side must be finite and zero or
+/// more.
+export type Insets = {
+  /** Distance at the top edge. */
+  top?: number;
+  /** Distance at the right edge. */
+  right?: number;
+  /** Distance at the bottom edge. */
+  bottom?: number;
+  /** Distance at the left edge. */
+  left?: number;
+  [key: string]: unknown;
+};
+
 /// Changes canvas properties without scaling any layer.
 export type UpdateCanvas = {
   width?: number | null;
@@ -125,6 +141,10 @@ export type UpdateCanvas = {
   /** Clears the canvas background image when true. */
   clearBackgroundImage?: boolean;
   anchor?: CanvasAnchor | null;
+  /** Print bleed. Absent preserves it; null clears it. */
+  bleed?: Insets | null;
+  /** Print margins. Absent preserves them; null clears them. */
+  margins?: Insets | null;
   [key: string]: unknown;
 };
 

@@ -59,6 +59,8 @@ fn set_background_image(image: BackgroundImage) -> Operation {
         background_image: Some(image),
         clear_background_image: false,
         anchor: None,
+        bleed: None,
+        margins: None,
     })
 }
 
@@ -70,6 +72,8 @@ fn clear_background_image() -> Operation {
         background_image: None,
         clear_background_image: true,
         anchor: None,
+        bleed: None,
+        margins: None,
     })
 }
 
@@ -81,6 +85,8 @@ fn set_canvas_width(width: f64) -> Operation {
         background_image: None,
         clear_background_image: false,
         anchor: None,
+        bleed: None,
+        margins: None,
     })
 }
 
@@ -214,6 +220,32 @@ fn canvas_update_undoes_and_redoes_byte_identically() {
         height: Some(500.0),
         background: Some(Some(Color::new("#12345678"))),
         anchor: Some(CanvasAnchor::Center),
+        ..UpdateCanvas::default()
+    }));
+    let after = project.document_bytes();
+    assert_ne!(after, before);
+
+    project
+        .session
+        .undo(&human(), Some(2), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), before);
+    project
+        .session
+        .redo(&human(), Some(3), &mut project.ids)
+        .unwrap();
+    assert_eq!(project.document_bytes(), after);
+}
+
+#[test]
+fn canvas_bleed_and_margins_undo_and_redo_byte_identically() {
+    let mut project = Project::new();
+    project.apply(new_text("print"));
+    let before = project.document_bytes();
+
+    project.apply(Operation::UpdateCanvas(UpdateCanvas {
+        bleed: Some(Some(assemblash_core::Insets::uniform(9.0))),
+        margins: Some(Some(assemblash_core::Insets::uniform(12.0))),
         ..UpdateCanvas::default()
     }));
     let after = project.document_bytes();

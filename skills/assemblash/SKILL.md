@@ -392,8 +392,9 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   refused. No page is dropped. No tool writes a set: write the file.
 - `canvas.bleed` and `canvas.margins` are optional `{top, right, bottom,
   left}` distances in pixels. The canvas is the trim box. Bleed goes outward,
-  margins go inward. A PNG or SVG export does not change with them. In this
-  release no operation sets them.
+  margins go inward. A PNG or SVG export does not change with them. Set them
+  with `updateCanvas` / MCP `update_canvas` (`bleed`, `margins`: omit to keep,
+  `null` to clear) or `assemblash canvas set --bleed 9 --margins 36`.
 - Exports are sRGB only. `colorSpace: "cmyk"` on an export is refused with
   `colorSpaceNotSupported`. Do not promise a CMYK file.
 

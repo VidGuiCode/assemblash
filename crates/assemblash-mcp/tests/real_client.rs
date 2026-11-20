@@ -1209,6 +1209,70 @@ async fn canvas_tool_preserves_omitted_background_and_clears_null_with_undo() {
     client.cancel().await.unwrap();
 }
 
+#[tokio::test]
+async fn canvas_tool_sets_preserves_and_clears_bleed_and_margins() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let path = root.join("projects/poster/document.json");
+    let read = || -> Value { serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap() };
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let set = client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({
+                "project": "poster",
+                "bleed": { "top": 9, "right": 9, "bottom": 9, "left": 9 },
+                "margins": { "top": 12, "right": 12, "bottom": 12, "left": 12 }
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(set.is_error, Some(true));
+    let document = read();
+    assert_eq!(document["canvas"]["bleed"]["left"], 9.0);
+    assert_eq!(document["canvas"]["margins"]["top"], 12.0);
+
+    // Omitted keeps both.
+    client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({ "project": "poster", "background": "#ffffff" })),
+        ))
+        .await
+        .unwrap();
+    let document = read();
+    assert_eq!(document["canvas"]["bleed"]["left"], 9.0);
+    assert_eq!(document["canvas"]["margins"]["top"], 12.0);
+
+    // A negative side is refused and nothing is written.
+    let unchanged = std::fs::read(&path).unwrap();
+    let refused = client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({ "project": "poster", "bleed": { "left": -1 } })),
+        ))
+        .await;
+    assert!(refused.is_err() || refused.as_ref().unwrap().is_error == Some(true));
+    assert_eq!(std::fs::read(&path).unwrap(), unchanged);
+
+    // Null clears.
+    client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({ "project": "poster", "bleed": null, "margins": null })),
+        ))
+        .await
+        .unwrap();
+    let document = read();
+    assert!(document["canvas"].get("bleed").is_none(), "{document}");
+    assert!(document["canvas"].get("margins").is_none(), "{document}");
+    client.cancel().await.unwrap();
+}
+
 /// DEF-29: markers and whole-geometry replacement over MCP.
 ///
 /// Before the repair, `update_layer {markerStart, markerEnd}` answered ok and

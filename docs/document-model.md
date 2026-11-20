@@ -70,7 +70,7 @@ assemblash canvas set ./poster --no-background
 assemblash undo ./poster
 ```
 
-MCP has `update_canvas` with `width`, `height`, `background`, `anchor`, `expectedVersion`, and `dryRun`. HTTP takes the same fields in an `updateCanvas` operation. Omit `background` to keep it. Send `null` to remove it.
+MCP has `update_canvas` with `width`, `height`, `background`, `anchor`, `bleed`, `margins`, `expectedVersion`, and `dryRun`. HTTP takes the same fields in an `updateCanvas` operation. Omit `background`, `bleed`, or `margins` to keep it. Send `null` to remove it.
 
 The engine refuses a resize that moves locked, protected, or read-only content. Nothing changes.
 
@@ -94,7 +94,15 @@ The engine refuses a resize that moves locked, protected, or read-only content. 
 
 A PNG or SVG export never reads `bleed` or `margins`. The exported bytes are the same with and without them. The fields enable the print-proofing warnings. See [Export warnings](paint-and-rendering.md#export-warnings).
 
-In this release, no operation sets `bleed` or `margins`. Add them to `document.json` while no process uses the project.
+Set them with the `updateCanvas` operation, the MCP tool `update_canvas`, or `canvas set`. Omit a field to keep it. Send `null` to remove it. The engine refuses a negative side, or margins that leave no safe area, and nothing changes. One undo reverts the change.
+
+```sh
+assemblash canvas set ./poster --bleed 9 --margins 36
+assemblash canvas set ./poster --margins 36,24,36,24
+assemblash canvas set ./poster --no-bleed --no-margins
+```
+
+`--bleed` and `--margins` take one number for all sides, or four numbers in the order `top,right,bottom,left`.
 
 ## Page sets
 

@@ -924,6 +924,20 @@ enum CanvasCommand {
         clear_background_image: bool,
         #[arg(long, value_enum)]
         anchor: Option<CanvasAnchorArg>,
+        /// Print bleed in pixels: one number for all sides, or
+        /// `top,right,bottom,left`. Never changes a PNG or SVG export.
+        #[arg(long, value_name = "PIXELS", conflicts_with = "no_bleed")]
+        bleed: Option<String>,
+        /// Remove the print bleed.
+        #[arg(long)]
+        no_bleed: bool,
+        /// Print margins in pixels: one number for all sides, or
+        /// `top,right,bottom,left`. Never changes a PNG or SVG export.
+        #[arg(long, value_name = "PIXELS", conflicts_with = "no_margins")]
+        margins: Option<String>,
+        /// Remove the print margins.
+        #[arg(long)]
+        no_margins: bool,
         #[command(flatten)]
         who: ActorArgs,
     },
@@ -1714,6 +1728,40 @@ fn parse_paint(raw: &str) -> Result<Color, CliError> {
 }
 
 /// Parses the CLI's nullable paint spelling. `none` clears an optional paint.
+/// Reads `--bleed`/`--margins` and their `--no-` flag into the request shape:
+/// absent keeps the value, the `--no-` flag clears it.
+fn optional_insets(
+    flag: &'static str,
+    raw: Option<String>,
+    clear: bool,
+) -> Result<Option<Option<assemblash_core::Insets>>, CliError> {
+    if clear {
+        return Ok(Some(None));
+    }
+    let Some(raw) = raw else { return Ok(None) };
+    let bad = || CliError::Insets {
+        flag,
+        value: raw.clone(),
+    };
+    let numbers = raw
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| bad())?;
+    let insets = match numbers.as_slice() {
+        [all] => assemblash_core::Insets::uniform(*all),
+        [top, right, bottom, left] => assemblash_core::Insets {
+            top: *top,
+            right: *right,
+            bottom: *bottom,
+            left: *left,
+            ..assemblash_core::Insets::default()
+        },
+        _ => return Err(bad()),
+    };
+    Ok(Some(Some(insets)))
+}
+
 fn optional_color(raw: String) -> Result<Option<Color>, CliError> {
     if raw == "none" {
         Ok(None)
@@ -1912,6 +1960,8 @@ enum CliError {
     Session(#[from] SessionError),
     #[error("{} ({})", .0, .0.code())]
     PageSet(#[from] assemblash_core::page_sets::PageSetError),
+    #[error("--{flag} takes one number or four numbers as top,right,bottom,left, got {value:?}")]
+    Insets { flag: &'static str, value: String },
     #[error("{0} (colorSpaceNotSupported)")]
     ColorSpace(#[from] assemblash_core::color_space::ColorSpaceNotSupported),
     #[error(transparent)]
@@ -2788,6 +2838,10 @@ fn run(command: Command) -> Result<(), CliError> {
             background_image_fit,
             clear_background_image,
             anchor,
+            bleed,
+            no_bleed,
+            margins,
+            no_margins,
             who,
         }) => {
             let mut session = Session::open(&project, now_millis())?;
@@ -2810,6 +2864,8 @@ fn run(command: Command) -> Result<(), CliError> {
                     background_image,
                     clear_background_image,
                     anchor: anchor.map(Into::into),
+                    bleed: optional_insets("bleed", bleed, no_bleed)?,
+                    margins: optional_insets("margins", margins, no_margins)?,
                 }),
                 &who.actor(),
                 now_millis(),
