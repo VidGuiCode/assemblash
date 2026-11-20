@@ -1,4 +1,7 @@
-//! The open project tabs of the reference interface (decision D33 (b)).
+//! The open project tabs of the reference interface.
+//!
+//! The workspace remembers the open tabs and their order, and the next start
+//! opens them again.
 //!
 //! The interface keeps one tab for each open project. The list of open tabs
 //! and its order is interface state, not document state: it lives in one

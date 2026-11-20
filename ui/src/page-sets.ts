@@ -34,8 +34,8 @@ export type PageSetPlan =
 /**
  * Plans the tabs for a page set.
  *
- * A page that already has a tab keeps it: it is never opened two times
- * (D33 (c)). The plan refuses a set with no pages, and a set whose new tabs
+ * A page that already has a tab keeps it: a project never has two tabs.
+ * The plan refuses a set with no pages, and a set whose new tabs
  * would go past the tab limit, so that nothing opens part of the way.
  */
 export function planPageSetOpen(

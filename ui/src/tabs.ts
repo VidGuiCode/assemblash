@@ -4,7 +4,7 @@
  * This module owns order and identity only. It knows nothing about the
  * engine, the page, or what a tab holds: the editor keeps its own record for
  * each tab and asks this list where that record sits. One tab exists for each
- * project (decision D33 (c)), so the project id is the tab id.
+ * project, and never two, so the project id is the tab id.
  */
 
 /** The page set a tab was opened with, and its page number in that set. */
@@ -24,7 +24,7 @@ export interface TabEntry<T> {
   readonly record: T;
   /**
    * Set when another client changed the project while the tab was not the
-   * visible one, and cleared when the person views the tab (D33 (a)).
+   * visible one, and cleared when the person views the tab.
    */
   changed: boolean;
   /** The page set of this tab, or `null` for a tab that is not in a set. */
@@ -95,7 +95,7 @@ export class TabList<T> {
 
   /**
    * Adds a tab at the end of the strip, or returns the tab that already shows
-   * this project. A second open never adds a second tab (D33 (c)).
+   * this project. A second open never adds a second tab.
    */
   open(id: string, create: () => T): { entry: TabEntry<T>; added: boolean } {
     const existing = this.find(id);

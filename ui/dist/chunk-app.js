@@ -11499,7 +11499,7 @@ class Bw {
   }
   /**
    * Adds a tab at the end of the strip, or returns the tab that already shows
-   * this project. A second open never adds a second tab (D33 (c)).
+   * this project. A second open never adds a second tab.
    */
   open(t, n) {
     const o = this.find(t);

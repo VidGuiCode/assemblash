@@ -3991,7 +3991,7 @@ function openFromQueue(project: string | null): void {
 
 // --- project tabs ----------------------------------------------------------------
 //
-// One tab for each open project (decision D33). Every tab action goes through
+// One tab for each open project, and never two. Every tab action goes through
 // the queue like an edit does: actions already waiting belong to the tab that
 // was visible when the person asked for them, so they run first, on their own
 // project, and the switch follows them.
@@ -4076,7 +4076,8 @@ function refreshTabThumbnail(entry: TabEntry<TabRecord>): void {
  * typed refusal and no tab opens. Each new page is read before any tab is
  * added: a page that does not read opens no tab, and the pages read before
  * it give their locks back. A page that already has a tab keeps it and moves
- * into the run (D33 (c)). The first page becomes the visible tab.
+ * into the run: a project never has two tabs. The first page becomes the
+ * visible tab.
  */
 async function openPageSet(name: string): Promise<void> {
   const resolved = await api.getPageSet(name);
@@ -4181,8 +4182,8 @@ function adoptTab(entry: TabEntry<TabRecord> | null): void {
 }
 
 /**
- * Shows a project: focuses its tab when one is open (D33 (c)), else opens a
- * new tab for it. `null` shows no project.
+ * Shows a project: focuses its tab when one is open, else opens a new tab
+ * for it. A project never has two tabs. `null` shows no project.
  */
 async function openTab(project: string | null): Promise<void> {
   const previous = tabs.active;
@@ -4297,7 +4298,7 @@ async function forgetTab(id: string): Promise<void> {
 }
 
 /**
- * Opens the tabs the workspace remembers, in their order (D33 (b)). Each
+ * Opens the tabs the workspace remembers, in their order. Each
  * tab reads its document, so each one follows other clients from the start;
  * only the active one renders. A project that is gone, or will not open, is
  * left out and the next save forgets it.
@@ -5385,7 +5386,8 @@ async function followOtherClients(): Promise<void> {
 }
 
 /**
- * Brings hidden tabs up to date with other clients (D33 (a)).
+ * Brings hidden tabs up to date with other clients: every open tab follows
+ * changes, and a hidden tab that changed shows a marker.
  *
  * The project list already carries each project's version, so finding a
  * changed tab costs no extra request. A changed tab reads its document — not
