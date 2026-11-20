@@ -1120,6 +1120,10 @@ fn io(path: &Path, operation: &'static str, source: std::io::Error) -> ApiError 
 }
 
 /// A file stem a caller may choose, with anything path-shaped refused.
+///
+/// A Windows device name (`NUL`, `CON`, `COM1`, and the others of
+/// [`assemblash_core::workspace::is_reserved_name`]) is refused on every
+/// platform, by the same rule as a project id.
 pub fn safe_stem(name: &str) -> Result<String, ApiError> {
     let trimmed = name.trim();
     let usable = !trimmed.is_empty()
@@ -1127,7 +1131,8 @@ pub fn safe_stem(name: &str) -> Result<String, ApiError> {
         && !trimmed.starts_with('.')
         && trimmed
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        && !assemblash_core::workspace::is_reserved_name(trimmed);
     if usable {
         Ok(trimmed.to_owned())
     } else {
@@ -1136,7 +1141,7 @@ pub fn safe_stem(name: &str) -> Result<String, ApiError> {
             "invalidExportName",
             format!(
                 "{name:?} is not a usable export name: letters, digits, hyphens, \
-                 and underscores only"
+                 and underscores only, and not a device name such as NUL or COM1"
             ),
         ))
     }
@@ -1386,6 +1391,19 @@ mod tests {
             PageRequest::parse("").unwrap_err().code(),
             "invalidPageSetName"
         );
+    }
+
+    #[test]
+    fn an_export_name_is_never_a_device_name_on_any_platform() {
+        for name in [
+            "NUL", "nul", "Con", "PRN", "aux", "COM1", "com9", "LPT1", "lpt9",
+        ] {
+            let error = safe_stem(name).unwrap_err();
+            assert_eq!(error.code(), "invalidExportName", "{name}");
+        }
+        for name in ["null", "console", "com10", "nul_1", "lpt"] {
+            assert_eq!(safe_stem(name).unwrap(), name);
+        }
     }
 
     #[test]

@@ -39,6 +39,20 @@ pub const FONTS_DIR: &str = "fonts";
 /// Environment variable that overrides the workspace location.
 pub const WORKSPACE_ENV: &str = "ASSEMBLASH_WORKSPACE";
 
+/// Whether Windows reserves this name for a device, whatever its extension.
+///
+/// `CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, and `LPT1` to `LPT9`, in any
+/// case, alone or before a `.`. Checked on every platform: a name written on
+/// Linux must still work when the same workspace is opened on Windows.
+pub fn is_reserved_name(name: &str) -> bool {
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    RESERVED.contains(&stem.as_str())
+}
+
 /// Something that went wrong opening or using a workspace.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -174,13 +188,7 @@ impl ProjectId {
                 ));
             }
         }
-        // Names Windows reserves whatever the extension is.
-        const RESERVED: [&str; 22] = [
-            "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-            "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-        ];
-        let stem = id.split('.').next().unwrap_or(&id).to_ascii_uppercase();
-        if RESERVED.contains(&stem.as_str()) {
+        if is_reserved_name(&id) {
             return Err(refuse("it is a name the operating system reserves"));
         }
 

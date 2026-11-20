@@ -84,6 +84,7 @@ page-set exports.
 - MCP: the output schema of `get_document_state` no longer refers to itself. In that schema, the `children` of a group is also an untyped object. The returned document does not change.
 - MCP: `insert_layer_tree` accepts the same input as before. Groups in groups still work. `schemaVersion` stays 1.
 - A `path` shape now paints its stroke. Before, the SVG export omitted the `stroke` and `stroke-width` attributes on the path element, so a stroked path showed no outline. The stroke is centred on the path edge, which is the SVG default. Exports of stroked paths change. No document field or operation changes.
+- An export name or a variant name that is a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`, in any case) is now refused with `invalidExportName` on every platform. Before, the engine accepted such a name, which Windows reserves for a device and not for a file. Project ids already use the same rule. The CLI, HTTP, and MCP use one rule.
 
 ## [1.13.1] — 2026-11-11
 

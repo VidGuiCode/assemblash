@@ -608,26 +608,10 @@ fn ids(layers: &[LayerId]) -> Vec<String> {
 }
 
 /// A file stem a caller may choose, with anything path-shaped refused.
+///
+/// The one rule every transport uses: [`assemblash_server::render::safe_stem`].
 fn safe_stem(name: &str) -> Result<String, ApiError> {
-    let trimmed = name.trim();
-    let usable = !trimmed.is_empty()
-        && trimmed.len() <= 60
-        && !trimmed.starts_with('.')
-        && trimmed
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
-    if usable {
-        Ok(trimmed.to_owned())
-    } else {
-        Err(ApiError::new(
-            assemblash_server::StatusCode::BAD_REQUEST,
-            "invalidExportName",
-            format!(
-                "{name:?} is not a usable export name: letters, digits, hyphens, \
-                 and underscores only"
-            ),
-        ))
-    }
+    assemblash_server::render::safe_stem(name)
 }
 
 #[cfg(test)]
@@ -678,6 +662,10 @@ mod tests {
             "C:evil",
             "with space",
             "nul\0",
+            "NUL",
+            "con",
+            "COM1",
+            "lpt9",
         ] {
             assert!(safe_stem(bad).is_err(), "{bad:?} should have been refused");
         }
