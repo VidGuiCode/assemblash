@@ -63,6 +63,25 @@ impl CancelToken {
     }
 }
 
+/// How long a render waits before it starts. Always `None` in a release build.
+///
+/// Debug builds only: a test that must see a render under way sets
+/// `ASSEMBLASH_MCP_TEST_RENDER_HOLD_MS`, so the render time does not depend on
+/// the speed of the runner.
+fn render_hold() -> Option<std::time::Duration> {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("ASSEMBLASH_MCP_TEST_RENDER_HOLD_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(std::time::Duration::from_millis)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
 /// The error a cancelled request is answered with.
 pub(crate) fn cancelled() -> ApiError {
     ApiError::new(
@@ -402,12 +421,25 @@ impl Loaded {
     /// render is left to finish on its own into a result nobody reads. This
     /// is what keeps a target switch from waiting out a long export.
     pub(crate) fn preview(&self, scale: f32, cancel: &CancelToken) -> Result<Preview, ApiError> {
+        self.preview_with_hold(scale, cancel, render_hold())
+    }
+
+    /// [`Loaded::preview`], with the render thread first held for `hold`.
+    fn preview_with_hold(
+        &self,
+        scale: f32,
+        cancel: &CancelToken,
+        hold: Option<std::time::Duration>,
+    ) -> Result<Preview, ApiError> {
         let hrefs = assemblash_renderer::data_uris(&self.document, &self.directory)?;
         let render = {
             let document = self.document.clone();
             let fonts = self.fonts.clone();
             let hrefs = hrefs.clone();
             std::thread::spawn(move || {
+                if let Some(hold) = hold {
+                    std::thread::sleep(hold);
+                }
                 document_to_png(
                     &document,
                     &fonts,
@@ -1164,4 +1196,40 @@ fn axum_status_not_found() -> assemblash_server::StatusCode {
 
 fn axum_status_internal() -> assemblash_server::StatusCode {
     assemblash_server::StatusCode::INTERNAL_SERVER_ERROR
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    /// A render under way is refused as soon as the flag goes up.
+    ///
+    /// The hold keeps the render running for a minute, so only the
+    /// cancellation can end this call early. If the hold is ignored, the
+    /// small render finishes first and the call answers with a PNG.
+    #[test]
+    fn a_render_under_way_is_refused_when_cancelled() {
+        let loaded = Loaded {
+            document: Document::new(&mut UlidIdSource, 100.0, 100.0),
+            directory: std::env::temp_dir(),
+            fonts: LoadedFonts::from_bytes(Vec::new()),
+        };
+        let cancel = CancelToken::default();
+        let flag = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            flag.cancel();
+        });
+        let started = Instant::now();
+        let error = loaded
+            .preview_with_hold(1.0, &cancel, Some(Duration::from_secs(60)))
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), "requestCancelled");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
 }
