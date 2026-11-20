@@ -169,6 +169,8 @@ impl AssemblashMcp {
         project: Option<&str>,
         scale: f32,
         variants: &[serde_json::Value],
+        settings: assemblash_server::render::ExportSettings,
+        name: Option<&str>,
     ) -> Result<Json<assemblash_server::render::RenderedVariants>, ErrorData> {
         // Reparsed into the server crate's own type so there is one definition
         // of what a variant is, rather than a second that could drift.
@@ -178,7 +180,7 @@ impl AssemblashMcp {
             .collect::<Result<_, _>>()
             .map_err(|error| ErrorData::invalid_request(error.to_string(), None))?;
         self.backend
-            .render_variants(project, scale, &parsed)
+            .render_variants_with(project, scale, &parsed, settings, name)
             .map(Json)
             .map_err(to_error)
     }

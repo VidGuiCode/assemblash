@@ -1241,7 +1241,8 @@ pub fn variants_pdf_name(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             VARIANTS_NAME_NEEDS_PDF,
             format!(
-                "a {} batch names each file after its variant;                  name applies to a pdf batch only, so omit it",
+                "a {} batch names each file after its variant; \
+                 name applies to a pdf batch only, so omit it",
                 settings.format().as_str()
             ),
         ));

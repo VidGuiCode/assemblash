@@ -77,18 +77,35 @@ impl Backend {
         scale: f32,
         variants: &[assemblash_server::render::Variant],
     ) -> Result<assemblash_server::render::RenderedVariants, ApiError> {
+        self.render_variants_with(
+            project,
+            scale,
+            variants,
+            assemblash_server::render::ExportSettings::default(),
+            None,
+        )
+    }
+
+    /// Renders a template once per set of values in any export format. A
+    /// PDF holds one page for each variant and is named `name`, or
+    /// `variants` when no name is given.
+    pub fn render_variants_with(
+        &self,
+        project: Option<&str>,
+        scale: f32,
+        variants: &[assemblash_server::render::Variant],
+        settings: assemblash_server::render::ExportSettings,
+        name: Option<&str>,
+    ) -> Result<assemblash_server::render::RenderedVariants, ApiError> {
         let opened = self.open(project)?;
         let session = assemblash_server::state::lock_project(&opened)?;
         let document = session.document().clone();
         let directory = session.project_dir().to_path_buf();
         drop(session);
 
-        assemblash_server::render::render_variants(
-            &document,
-            &directory,
-            &self.font_store()?,
-            scale,
-            variants,
+        let fonts = assemblash_server::render::fonts_for(&document, &self.font_store()?)?;
+        assemblash_server::render::render_variants_as(
+            &document, &directory, &fonts, scale, variants, settings, name,
         )
     }
 }

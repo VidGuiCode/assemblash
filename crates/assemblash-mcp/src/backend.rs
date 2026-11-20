@@ -407,6 +407,38 @@ pub struct OverlapReport {
     pub pairs: Vec<(LayerId, LayerId)>,
 }
 
+/// Runs `work` on its own thread and watches `cancel` while it runs.
+///
+/// When the flag goes up, the caller is refused at once and the work is left
+/// to finish on its own into a result nobody reads. In a debug build the
+/// thread first waits for the test hold, as a preview does.
+pub(crate) fn run_cancellable<T, F>(cancel: &CancelToken, work: F) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+{
+    let hold = render_hold();
+    let running = std::thread::spawn(move || {
+        if let Some(hold) = hold {
+            std::thread::sleep(hold);
+        }
+        work()
+    });
+    while !running.is_finished() {
+        if cancel.is_cancelled() {
+            return Err(cancelled());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    running.join().map_err(|_| {
+        ApiError::new(
+            assemblash_server::StatusCode::INTERNAL_SERVER_ERROR,
+            "renderFailed",
+            "the renderer stopped while it was drawing the canvas",
+        )
+    })?
+}
+
 /// A document, where it lives, and exactly the fonts it names.
 ///
 /// The three things every render needs, gathered once. Resolving them
@@ -476,6 +508,29 @@ impl Loaded {
         let width = (f64::from(scale) * self.document.canvas.width).round() as u32;
         let height = (f64::from(scale) * self.document.canvas.height).round() as u32;
         Ok(Preview { png, width, height })
+    }
+
+    /// The canvas in any export format, watched for `cancel` the same way
+    /// as [`Loaded::preview`].
+    pub(crate) fn encode(
+        &self,
+        scale: f32,
+        settings: assemblash_server::render::ExportSettings,
+        cancel: &CancelToken,
+    ) -> Result<assemblash_server::render::Rendered, ApiError> {
+        let hrefs = assemblash_renderer::data_uris(&self.document, &self.directory)?;
+        let document = self.document.clone();
+        let fonts = self.fonts.clone();
+        run_cancellable(cancel, move || {
+            assemblash_server::render::encode_document(
+                &document,
+                &fonts,
+                &hrefs,
+                scale,
+                settings,
+                &PngMetadata::for_document(&document),
+            )
+        })
     }
 
     /// What an export of this document would want to say (FR-11).
@@ -725,6 +780,24 @@ impl Backend {
             Root::SingleProject { .. } => {
                 Err(assemblash_core::page_sets::PageSetError::NotFound { name }.into())
             }
+        }
+    }
+
+    /// The pages of a page-set export, read and checked against the format.
+    ///
+    /// A server opened for one project has no workspace and so no page sets:
+    /// the set is not found.
+    pub fn export_pages(
+        &self,
+        pages: &assemblash_server::render::PageRequest,
+        settings: assemblash_server::render::ExportSettings,
+    ) -> Result<Vec<assemblash_server::render::OwnedPage>, ApiError> {
+        match &self.root {
+            Root::Workspace(state) => state.export_pages(pages, settings),
+            Root::SingleProject { .. } => Err(assemblash_core::page_sets::PageSetError::NotFound {
+                name: pages.set.clone(),
+            }
+            .into()),
         }
     }
 
