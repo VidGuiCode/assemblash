@@ -163,6 +163,7 @@ name = "assemblash-renderer"
 version = "1.13.1"
 dependencies = [
  "assemblash-core",
+ "assemblash-export",
  "harfrust",
  "png",
  "resvg",
