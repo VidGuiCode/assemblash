@@ -650,6 +650,9 @@ pub struct InsertLayerTreeArgs {
     /// The layers to insert, as document layer objects — a pasted subtree.
     /// Ids in them are replaced; assets they name must already be in the
     /// document.
+    // The advertised schema breaks the layer `$ref` cycle (see
+    // `crate::layer_schema`). The input is still the full layer tree.
+    #[schemars(schema_with = "crate::layer_schema::layer_list_schema")]
     pub layers: Vec<assemblash_core::Layer>,
     /// Group to put the top-level layers in. Omit for the document root.
     #[serde(default)]

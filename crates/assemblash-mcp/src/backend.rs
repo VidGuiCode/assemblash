@@ -279,6 +279,7 @@ pub struct DocumentState {
     /// The version to send back with a mutation, once mutations exist.
     pub version: u64,
     /// The document itself.
+    #[schemars(schema_with = "crate::layer_schema::document_schema")]
     pub document: Document,
 }
 

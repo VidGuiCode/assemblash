@@ -24,6 +24,12 @@ schema change is always noted explicitly.
 - The lock-recovery prompt names the tab it belongs to.
 - EN, FR, and DE strings for the tab strip.
 
+### Fixed
+
+- MCP: the input schema of `insert_layer_tree` no longer refers to itself. Before, MCP clients that validate tool schemas strictly (Moonshot/Kimi) refused the full tool list. Now the `children` of a group in that schema is an untyped object.
+- MCP: the output schema of `get_document_state` no longer refers to itself. In that schema, the `children` of a group is also an untyped object. The returned document does not change.
+- MCP: `insert_layer_tree` accepts the same input as before. Groups in groups still work. `schemaVersion` stays 1.
+
 ## [1.13.1] — 2026-11-11
 
 **Security release: dependency advisories.** This release contains only two

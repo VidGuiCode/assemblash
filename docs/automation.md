@@ -213,6 +213,8 @@ The server has read tools for documents, layers, validation, history, and render
 | Analysis | `find_overlaps`, `list_capabilities` |
 | Fonts | `list_fonts`, `install_font_pack`, `remove_font_family` |
 
+In the `insert_layer_tree` input schema and the `get_document_state` output schema, the `children` of a group is an untyped object. Each child has the same layer shape as an item of `layers`. A group can hold more groups. This prevents a schema that refers to itself, which some MCP clients refuse.
+
 `create_project` creates a project. These tools have behaviour that their names do not tell:
 
 - `set_layer_box` sets absolute position, size, and rotation in one undoable change.

@@ -23,6 +23,7 @@
 
 pub mod backend;
 pub mod hosted;
+pub mod layer_schema;
 pub mod relay;
 pub mod server;
 pub mod templates;

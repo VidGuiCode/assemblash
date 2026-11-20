@@ -407,6 +407,9 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   removes one family, and `delete_project` / `rename_project` manage
   projects — a project another process holds is refused `projectLocked`,
   never deleted or renamed past. The tool surface holds 53 tools.
+- In the `insert_layer_tree` input schema and the `get_document_state` output
+  schema, the `children` of a group is an untyped object. Each child has the
+  same layer shape as an item of `layers`.
 
 ## HTTP notes
 
