@@ -90,6 +90,7 @@ name = "assemblash-cli"
 version = "1.13.1"
 dependencies = [
  "assemblash-core",
+ "assemblash-export",
  "assemblash-mcp",
  "assemblash-renderer",
  "assemblash-server",
