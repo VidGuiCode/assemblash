@@ -260,6 +260,7 @@ An export reports problems that did not stop it:
 | `cannotMeasureText` | The engine cannot measure a text layer. |
 | `lockReclaimed` | The server cleared a stale project lock before the export. HTTP and MCP only. |
 | `contentOutsideMargins` | Print proofing. Text leaves the safe area, or other content crosses a margin line and stops before the trim edge. |
+| `marginsLeaveNoSafeArea` | Print proofing. The margins of one axis add up to the canvas size or more. The export gives this warning one time and no `contentOutsideMargins` warning. |
 | `contentInsideBleed` | Print proofing. Content touches or crosses a trim edge and stops before the bleed edge. |
 | `assetBelowTargetResolution` | Print proofing. An image has fewer source pixels than the output pixels that it covers. |
 
@@ -275,7 +276,7 @@ An SVG export measures its warnings at scale 1. The other formats measure them a
 
 ### Print proofing
 
-The three print-proofing warnings come only from a document that has `canvas.bleed` or `canvas.margins`. A document without these fields gets the same warnings as before 1.14.0. See [Print geometry](document-model.md#print-geometry).
+The four print-proofing warnings come only from a document that has `canvas.bleed` or `canvas.margins`. A document without these fields gets the same warnings as before 1.14.0. See [Print geometry](document-model.md#print-geometry).
 
 - The engine checks each visible layer that is not a group. It uses the box of the layer on the canvas, with its rotation.
 - A shape or an image that reaches the trim edge is art that runs to the edge. `contentOutsideMargins` does not report it on that side. `contentInsideBleed` checks it.

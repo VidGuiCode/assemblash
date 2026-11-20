@@ -285,11 +285,29 @@ impl OpOutcome {
 }
 
 /// Applies an operation, or leaves the document untouched and says why not.
+///
+/// An `updateCanvas` also gets the bleed and margins checks of
+/// [`crate::validate::check_canvas_update`]. A history replay does not make
+/// them: it calls [`apply_with_semantics`] and repeats operations that were
+/// accepted when they were applied, some by a release that had no such
+/// checks.
 pub fn apply(
     document: &mut Document,
     operation: &Operation,
     ids: &mut dyn IdSource,
 ) -> Result<OpOutcome, OpError> {
+    if let Operation::UpdateCanvas(request) = operation {
+        let mut candidate = document.clone();
+        let outcome = apply_with_semantics(
+            &mut candidate,
+            operation,
+            ids,
+            OperationSemantics::StyledRunsV1,
+        )?;
+        crate::validate::check_canvas_update(request, &candidate.canvas)?;
+        *document = candidate;
+        return Ok(outcome);
+    }
     apply_with_semantics(document, operation, ids, OperationSemantics::StyledRunsV1)
 }
 
@@ -709,8 +727,8 @@ fn update_canvas(document: &mut Document, request: &UpdateCanvas) -> Result<OpOu
     } else if request.clear_background_image {
         document.canvas.background_image = None;
     }
-    // Checked with the rest of the document after the change: a negative
-    // side, or margins that leave no safe area, refuse the operation.
+    // Checked after the change, by `apply`: a negative side, or margins that
+    // leave no safe area, refuse the operation.
     if let Some(bleed) = &request.bleed {
         document.canvas.bleed = bleed.clone();
     }

@@ -227,3 +227,34 @@ fn a_crop_counts_only_the_cropped_source_pixels() {
         warnings[0].message
     );
 }
+
+#[test]
+fn margins_that_leave_no_safe_area_are_one_warning_and_never_a_panic() {
+    // A release before 1.14.0 can resize a canvas below its margins, and such
+    // a document loads. Its export says so once, instead of a margin warning
+    // for every layer.
+    let mut document = with_margins(
+        document(serde_json::json!([
+            text(1, 10.0, 10.0, 50.0, 20.0),
+            rect(2, 0.0, 0.0, 10.0, 10.0)
+        ])),
+        150.0,
+    );
+    assert_eq!(
+        codes(&document, 1.0),
+        [assemblash_renderer::proofing::MARGINS_LEAVE_NO_SAFE_AREA]
+    );
+    let warning = &print_warnings(&document, 1.0)[0];
+    assert!(
+        warning.message.contains("updateCanvas"),
+        "{}",
+        warning.message
+    );
+
+    // A negative bleed from a hand-written file is not a panic either.
+    document.canvas.bleed = Some(Insets {
+        left: -5.0,
+        ..Insets::default()
+    });
+    let _ = print_warnings(&document, 1.0);
+}

@@ -1,4 +1,4 @@
-//! Print proofing: three warnings about a document meant for print.
+//! Print proofing: warnings about a document meant for print.
 //!
 //! The warnings use the same channel as the other export warnings. They say
 //! something about the document, not about the file format, so a PNG export
@@ -26,6 +26,14 @@ pub const CONTENT_OUTSIDE_MARGINS: &str = "contentOutsideMargins";
 /// Content goes to or past a trim edge but stops before the bleed edge.
 pub const CONTENT_INSIDE_BLEED: &str = "contentInsideBleed";
 
+/// The margins leave no safe area: left plus right is not less than the
+/// canvas width, or top plus bottom is not less than the canvas height.
+///
+/// A document like this loads: a release before 1.14.0 can resize a canvas
+/// below its margins. The export reports it once and does not check each
+/// layer against the margins.
+pub const MARGINS_LEAVE_NO_SAFE_AREA: &str = "marginsLeaveNoSafeArea";
+
 /// The print-proofing warnings for an export at `scale`.
 ///
 /// Empty when the document has neither `bleed` nor `margins`. Layers are
@@ -40,6 +48,11 @@ pub fn print_warnings(document: &Document, scale: f32) -> Vec<ExportWarning> {
     visible_leaves(&document.layers, &mut leaves);
 
     let mut warnings = Vec::new();
+    let mut margins = canvas.margins.as_ref();
+    if let Some(warning) = margins.and_then(|margins| no_safe_area(document, margins)) {
+        warnings.push(warning);
+        margins = None;
+    }
     for layer in leaves {
         let Ok(bounds) = layer_bounds(document, &layer.id) else {
             continue;
@@ -47,7 +60,7 @@ pub fn print_warnings(document: &Document, scale: f32) -> Vec<ExportWarning> {
         if bounds.width <= 0.0 || bounds.height <= 0.0 {
             continue;
         }
-        if let Some(margins) = &canvas.margins {
+        if let Some(margins) = margins {
             if let Some(warning) = outside_margins(document, layer, &bounds, margins) {
                 warnings.push(warning);
             }
@@ -62,6 +75,42 @@ pub fn print_warnings(document: &Document, scale: f32) -> Vec<ExportWarning> {
         }
     }
     warnings
+}
+
+/// The one warning for margins that leave no safe area, if they do.
+fn no_safe_area(document: &Document, margins: &Insets) -> Option<ExportWarning> {
+    let canvas = &document.canvas;
+    let across = margins.left + margins.right;
+    let down = margins.top + margins.bottom;
+    // A comparison with NaN is false, so a value that is not a number is not
+    // reported here.
+    let mut axes = Vec::new();
+    if across >= canvas.width {
+        axes.push(format!(
+            "left plus right is {}, and the width is {}",
+            number(across),
+            number(canvas.width)
+        ));
+    }
+    if down >= canvas.height {
+        axes.push(format!(
+            "top plus bottom is {}, and the height is {}",
+            number(down),
+            number(canvas.height)
+        ));
+    }
+    if axes.is_empty() {
+        return None;
+    }
+    Some(ExportWarning {
+        code: MARGINS_LEAVE_NO_SAFE_AREA,
+        message: format!(
+            "the canvas margins leave no safe area ({}); set smaller margins with updateCanvas",
+            axes.join("; ")
+        ),
+        layer_id: None,
+        project: None,
+    })
 }
 
 fn visible_leaves<'a>(layers: &'a [Layer], out: &mut Vec<&'a Layer>) {

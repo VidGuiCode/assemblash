@@ -82,6 +82,7 @@ The engine refuses a resize that moves locked, protected, or read-only content. 
 - `margins` go inward from each canvas edge. The area inside the margins is the safe area.
 - A side that you do not write is `0`. Each side must be a finite number of `0` or more.
 - The two margins of one axis must be less than the canvas size on that axis.
+- `updateCanvas` applies these two rules. Loading a document does not apply them. Thus a document always opens, whatever its `bleed` and `margins` hold.
 
 ```json
 "canvas": {
@@ -96,7 +97,12 @@ A PNG, SVG, JPEG, or WebP export never reads `bleed` or `margins`. A PDF without
 
 A print PDF reads `bleed`. It uses the bleed for its bleed box, its trim box, and its crop marks. The bleed area holds no rendered content in this release. A print PDF does not read `margins`. See [Print PDF](paint-and-rendering.md#print-pdf).
 
-Set them with the `updateCanvas` operation, the MCP tool `update_canvas`, or `canvas set`. Omit a field to keep it. Send `null` to remove it. The engine refuses a negative side, or margins that leave no safe area, and nothing changes. One undo reverts the change.
+Set them with the `updateCanvas` operation, the MCP tool `update_canvas`, or `canvas set`. Omit a field to keep it. Send `null` to remove it. One undo reverts the change. The engine refuses these requests with `operationRefused`, and nothing changes:
+
+- a `bleed` or `margins` with a negative side;
+- a `margins`, `width`, or `height` that leaves the margins with no safe area.
+
+A request that changes neither the insets nor the canvas size keeps the insets as they are, also when they do not fit. A release before 1.14.0 keeps `margins` as an unknown field and can resize the canvas below them. Such a document opens in 1.14.0. Its export gives one `marginsLeaveNoSafeArea` warning and no margin warning for each layer. Set smaller margins with `updateCanvas` to fix it.
 
 ```sh
 assemblash canvas set ./poster --bleed 9 --margins 36
