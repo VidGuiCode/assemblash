@@ -1030,19 +1030,28 @@ struct PageSetList {
 
 /// The page sets of the workspace, by name. Read-only; the files are not
 /// opened, so a malformed set is listed and reported when it is read.
+///
+/// The directory scan runs on the blocking pool, not on the thread that
+/// serves the other connections.
 async fn list_page_sets(State(state): State<AppState>) -> Result<Json<PageSetList>, ApiError> {
-    Ok(Json(PageSetList {
-        page_sets: state.workspace().page_sets()?,
-    }))
+    let page_sets = tokio::task::spawn_blocking(move || state.workspace().page_sets())
+        .await
+        .map_err(join_error)??;
+    Ok(Json(PageSetList { page_sets }))
 }
 
 /// One page set, with its flat, ordered page list. Read-only.
+///
+/// Resolving reads every nested set file, so it runs on the blocking pool.
 async fn get_page_set(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<assemblash_core::page_sets::ResolvedPageSet>, ApiError> {
     let name = assemblash_core::page_sets::PageSetName::new(name)?;
-    Ok(Json(state.workspace().resolve_page_set(&name)?))
+    let resolved = tokio::task::spawn_blocking(move || state.workspace().resolve_page_set(&name))
+        .await
+        .map_err(join_error)??;
+    Ok(Json(resolved))
 }
 
 async fn list_projects(
@@ -2295,12 +2304,16 @@ async fn export_page_set(
 ) -> Result<Json<render::Exported>, ApiError> {
     // The name is checked before any page is read.
     render::export_stem(name.as_deref())?;
-    let sources = state.export_pages(pages, settings)?;
     let project = id.clone();
-    let target = project_directory(state, id)?;
     let loader = state.clone();
+    let pages = pages.clone();
+    // Everything after the checks reads files, locks projects, or loads
+    // fonts, so all of it runs on the blocking pool, not on the thread that
+    // serves the other connections.
     let mut exported =
         tokio::task::spawn_blocking(move || -> Result<render::Exported, ApiError> {
+            let sources = loader.export_pages(&pages, settings)?;
+            let target = project_directory(&loader, id)?;
             render::export_pages_into_project(
                 &target,
                 &sources,
