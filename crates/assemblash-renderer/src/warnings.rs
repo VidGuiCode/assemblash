@@ -190,6 +190,24 @@ pub fn export_warnings(
     warnings
 }
 
+/// Everything an export at `scale` would want to say, print proofing included.
+///
+/// [`export_warnings`] plus the print-proofing warnings of
+/// [`crate::proofing::print_warnings`], in that order. The three export paths
+/// call this one, so they report the same list. A document without
+/// `canvas.bleed` and `canvas.margins` gets exactly what [`export_warnings`]
+/// returns.
+pub fn export_warnings_at(
+    document: &Document,
+    fonts: &FontSet,
+    project_dir: &Path,
+    scale: f32,
+) -> Vec<ExportWarning> {
+    let mut warnings = export_warnings(document, fonts, project_dir);
+    warnings.extend(crate::proofing::print_warnings(document, scale));
+    warnings
+}
+
 /// How much of a text layer another layer must cover before it is worth
 /// saying. Below this, an overlapping corner is usually the design.
 const COVERED_ENOUGH: f64 = 0.55;

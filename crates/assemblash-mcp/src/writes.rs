@@ -466,7 +466,7 @@ impl Backend {
             replaced: existed,
             // Measured after the file is written, on purpose: an export that
             // has something to say is still an export that happened.
-            warnings: loaded.warnings(),
+            warnings: loaded.warnings(scale),
         })
     }
 

@@ -301,7 +301,12 @@ pub fn export_into_project_loaded(
         height: rendered.height,
         // Measured after the file is written, on purpose: an export that has
         // something to say is still an export that happened.
-        warnings: assemblash_renderer::export_warnings(document, fonts.font_set(), project_dir),
+        warnings: assemblash_renderer::export_warnings_at(
+            document,
+            fonts.font_set(),
+            project_dir,
+            scale,
+        ),
     })
 }
 

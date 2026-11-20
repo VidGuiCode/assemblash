@@ -850,6 +850,76 @@ fn preset_define_reads_properties_from_a_file() {
 /// FR-11 on the command line: an export says what it noticed, and succeeds
 /// anyway. A warning is not a failure — the file is exactly what the document
 /// says; it is the document that is surprising.
+/// Adds `canvas.margins` to a project on disk, as a hand edit would.
+fn set_margins(project: &Path, margin: f64) {
+    let path = project.join("document.json");
+    let mut document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document["canvas"]["margins"] =
+        serde_json::json!({ "top": margin, "right": margin, "bottom": margin, "left": margin });
+    std::fs::write(&path, serde_json::to_string_pretty(&document).unwrap()).unwrap();
+}
+
+#[test]
+fn text_across_the_margin_warns_on_export_and_the_png_does_not_change() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "100"]);
+    let layer = run(&[
+        "add-text",
+        project_arg,
+        "--text",
+        "Hi",
+        "--font",
+        "Noto Sans",
+        "--size",
+        "12",
+        "--x",
+        "4",
+        "--y",
+        "20",
+        "--width",
+        "100",
+        "--height",
+        "40",
+    ])
+    .trim()
+    .to_owned();
+
+    let export = |name: &str| {
+        let png = workspace.path().join(name);
+        let (printed, _) = run_output(&[
+            "export",
+            project_arg,
+            png.to_str().unwrap(),
+            "--warnings-json",
+            "--font-dir",
+            font_dir().to_str().unwrap(),
+        ]);
+        let warnings: serde_json::Value =
+            serde_json::from_str(printed.lines().nth(1).unwrap_or_default()).unwrap();
+        (std::fs::read(png).unwrap(), warnings)
+    };
+
+    let (before, quiet) = export("before.png");
+    assert!(
+        !quiet.to_string().contains("contentOutsideMargins"),
+        "no margins, no margin warning: {quiet}"
+    );
+
+    set_margins(&project, 10.0);
+    let (after, noticed) = export("after.png");
+    let warning = noticed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|warning| warning["code"] == "contentOutsideMargins")
+        .unwrap_or_else(|| panic!("no contentOutsideMargins in {noticed}"));
+    assert_eq!(warning["layerId"], layer.as_str());
+    assert_eq!(before, after, "margins never change the PNG bytes");
+}
+
 #[test]
 fn overflowing_text_warns_on_stderr_and_still_exits_zero() {
     let workspace = tempfile::tempdir().unwrap();

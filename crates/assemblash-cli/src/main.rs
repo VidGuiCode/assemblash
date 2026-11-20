@@ -2315,8 +2315,12 @@ fn run(command: Command) -> Result<(), CliError> {
             write_file(&out, svg.as_bytes())?;
             // The CLI has its own export path, so it asks the renderer for
             // the warnings itself rather than inheriting the server's.
-            let noticed =
-                assemblash_renderer::export_warnings(&document, loaded.font_set(), &project);
+            let noticed = assemblash_renderer::export_warnings_at(
+                &document,
+                loaded.font_set(),
+                &project,
+                1.0,
+            );
             report_written(&out, svg.as_bytes(), &noticed, &warnings)
         }
 
@@ -2339,8 +2343,12 @@ fn run(command: Command) -> Result<(), CliError> {
             metadata.created = timestamp;
             let png = assemblash_renderer::pixmap_to_png(&pixmap, &metadata)?;
             write_file(&out, &png)?;
-            let noticed =
-                assemblash_renderer::export_warnings(&document, loaded.font_set(), &project);
+            let noticed = assemblash_renderer::export_warnings_at(
+                &document,
+                loaded.font_set(),
+                &project,
+                scale,
+            );
             report_written(&out, &png, &noticed, &warnings)
         }
 

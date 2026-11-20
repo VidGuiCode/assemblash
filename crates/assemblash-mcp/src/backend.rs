@@ -483,8 +483,13 @@ impl Loaded {
     /// Produced here rather than taken from a response type, because the three
     /// export paths — the command line's, the HTTP API's, and this one — each
     /// write their own file and would otherwise each notice different things.
-    pub(crate) fn warnings(&self) -> Vec<ExportWarning> {
-        assemblash_renderer::export_warnings(&self.document, self.fonts.font_set(), &self.directory)
+    pub(crate) fn warnings(&self, scale: f32) -> Vec<ExportWarning> {
+        assemblash_renderer::export_warnings_at(
+            &self.document,
+            self.fonts.font_set(),
+            &self.directory,
+            scale,
+        )
     }
 }
 

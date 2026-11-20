@@ -8,6 +8,7 @@ pub mod assets;
 pub mod error;
 pub mod fonts;
 pub mod install;
+pub mod proofing;
 pub mod raster;
 pub mod store;
 pub mod svg;
@@ -26,7 +27,7 @@ pub use text::{
     check_text_fonts, layout_text_layer, text_font_families, text_font_requirements,
     TextFailureKind, TextFontRequirement, TextGlyph, TextLayerLayout, TextLayoutError, TextLine,
 };
-pub use warnings::{export_warnings, ExportWarning};
+pub use warnings::{export_warnings, export_warnings_at, ExportWarning};
 
 /// Version of the rendering pipeline, recorded in exported image metadata
 /// (FR-11) so a rendered file can be traced back to the code that produced it.

@@ -1432,6 +1432,53 @@ fn svg_asset_text_with_no_loaded_font_is_refused() {
 }
 
 #[test]
+fn text_across_the_margin_exports_with_content_outside_margins() {
+    let harness = Harness::start();
+    install_test_font(&harness);
+    // Written on disk before the server opens it: no operation sets margins.
+    let project = harness.root().join(PROJECTS_DIR).join("print");
+    std::fs::create_dir_all(&project).unwrap();
+    let document: assemblash_core::Document = serde_json::from_value(json!({
+        "schemaVersion": 1,
+        "id": "doc_01M61CXXZ0X2V89DQ9T8Z3VF00",
+        "version": 0,
+        "canvas": {
+            "width": 400.0,
+            "height": 200.0,
+            "margins": { "top": 20, "right": 20, "bottom": 20, "left": 20 }
+        },
+        "assets": [],
+        "layers": [{
+            "id": "layer_01M61CXXZ0X2V89DQ9T8Z3VF01",
+            "transform": { "x": 8.0, "y": 40.0, "width": 300.0, "height": 60.0, "rotation": 0.0 },
+            "type": "text",
+            "text": "Across the margin",
+            "fontFamily": "Noto Sans",
+            "fontSize": 24.0,
+            "color": "#101820",
+            "align": "left",
+            "lineHeight": 1.2
+        }]
+    }))
+    .unwrap();
+    assemblash_core::storage::save(&document, &project).unwrap();
+
+    let exported = http::post_json(
+        &harness.url("/api/projects/print/export"),
+        &json!({ "name": "proof" }),
+    );
+    assert_eq!(exported.status, 200, "{}", exported.json());
+    let warnings = exported.json()["warnings"].clone();
+    assert!(
+        warnings.as_array().unwrap().iter().any(|warning| {
+            warning["code"] == "contentOutsideMargins"
+                && warning["layerId"] == "layer_01M61CXXZ0X2V89DQ9T8Z3VF01"
+        }),
+        "{warnings}"
+    );
+}
+
+#[test]
 fn a_document_with_nothing_to_say_exports_an_empty_warnings_array() {
     let harness = Harness::start();
     install_test_font(&harness);

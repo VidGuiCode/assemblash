@@ -1131,6 +1131,57 @@ async fn create_project_makes_an_openable_project() {
 /// a refusal (see `tests/svg_asset_text.rs`); an over-tall text layer is a
 /// warning that still fires, so the channel is still tested here.
 #[tokio::test]
+async fn export_document_reports_content_outside_margins() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    // No operation sets margins in this build, so add them as a hand edit
+    // before the server opens the project.
+    let path = root.join("projects/poster/document.json");
+    let mut document: Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document["canvas"]["margins"] = json!({ "top": 10, "right": 10, "bottom": 10, "left": 10 });
+    std::fs::write(&path, serde_json::to_string_pretty(&document).unwrap()).unwrap();
+
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+    let added = structured(
+        &client
+            .call_tool(call(
+                "add_text_layer",
+                args(json!({
+                    "text": "edge",
+                    "x": 4.0, "y": 40.0, "width": 120.0, "height": 40.0,
+                    "fontFamily": "Noto Sans",
+                    "fontSize": 12.0
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let created = added["created"][0].as_str().unwrap().to_owned();
+
+    let exported = structured(
+        &client
+            .call_tool(call("export_document", args(json!({ "name": "proof" }))))
+            .await
+            .unwrap(),
+    );
+    let warnings = exported["warnings"].as_array().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning["code"] == "contentOutsideMargins"
+                && warning["layerId"] == created.as_str()),
+        "{warnings:#?}"
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
 async fn export_document_reports_export_warnings() {
     let scratch = tempfile::tempdir().unwrap();
     let root = scratch.path().join("workspace");
