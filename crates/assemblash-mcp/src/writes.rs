@@ -117,6 +117,9 @@ pub struct ExportWarningShape {
     pub message: String,
     /// The layer responsible, when one layer is.
     pub layer_id: Option<String>,
+    /// The project of the page the warning is about. Only a page-set export
+    /// sets it.
+    pub project: Option<String>,
 }
 
 /// Which project later calls should assume.
@@ -577,6 +580,7 @@ mod tests {
             code: assemblash_renderer::warnings::TEXT_OVERFLOWS_BOX,
             message: "the text spills past the bottom".to_owned(),
             layer_id: Some(assemblash_core::LayerId::new("layer_1")),
+            project: Some("poster".to_owned()),
         };
         let sent = serde_json::to_value(&warning).unwrap();
         let described = serde_json::to_value(schemars::schema_for!(ExportWarningShape)).unwrap();

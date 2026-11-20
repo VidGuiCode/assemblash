@@ -11,6 +11,7 @@ authors.workspace = true
 [dependencies]
 assemblash-core.workspace = true
 assemblash-renderer.workspace = true
+assemblash-export.workspace = true
 # Randomness for access tokens, from the operating system.
 getrandom = "0.3.4"
 schemars = "1.2.2"

@@ -138,6 +138,19 @@ mod http {
     pub struct Response {
         pub status: u16,
         pub body: Vec<u8>,
+        /// The response head, status line included.
+        pub headers: String,
+    }
+
+    impl Response {
+        /// The value of one header, by name, any case.
+        pub fn header(&self, name: &str) -> Option<String> {
+            let name = name.to_ascii_lowercase();
+            self.headers.lines().find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                (key.trim().to_ascii_lowercase() == name).then(|| value.trim().to_owned())
+            })
+        }
     }
 
     impl Response {
@@ -202,7 +215,11 @@ mod http {
         {
             body = dechunk(&body);
         }
-        Response { status, body }
+        Response {
+            status,
+            body,
+            headers,
+        }
     }
 
     /// Reads exactly one HTTP response, and stops there.
@@ -1476,6 +1493,16 @@ fn text_across_the_margin_exports_with_content_outside_margins() {
         }),
         "{warnings}"
     );
+
+    // Every new format reports the same warnings as the PNG.
+    for format in ["pdf", "jpeg", "webp"] {
+        let other = http::post_json(
+            &harness.url("/api/projects/print/export"),
+            &json!({ "name": format!("proof-{format}"), "format": format }),
+        );
+        assert_eq!(other.status, 200, "{format}: {}", other.json());
+        assert_eq!(other.json()["warnings"], warnings, "{format}");
+    }
 }
 
 #[test]
@@ -2696,4 +2723,552 @@ fn the_open_tab_list_is_kept_in_the_workspace() {
         &json!({ "projects": [], "extra": true }),
     );
     assert_eq!(unknown.status, 400, "{}", unknown.json());
+}
+
+// ---------------------------------------------------------------------------
+// Export formats, page sets and print geometry.
+// ---------------------------------------------------------------------------
+
+fn create_coloured(harness: &Harness, id: &str, colour: &str) {
+    let response = http::post_json(
+        &harness.url("/api/projects"),
+        &json!({ "id": id, "width": 120.0, "height": 80.0, "background": colour }),
+    );
+    assert_eq!(response.status, 201, "{}", response.json());
+}
+
+fn write_page_set(harness: &Harness, name: &str, manifest: &str) {
+    let sets = harness.root().join("page-sets");
+    std::fs::create_dir_all(&sets).unwrap();
+    std::fs::write(sets.join(format!("{name}.json")), manifest).unwrap();
+}
+
+fn decode_png(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder.read_info().unwrap();
+    let mut buffer = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buffer).unwrap();
+    buffer.truncate(info.buffer_size());
+    (info.width, info.height, buffer)
+}
+
+/// The file names in a project's `exports/`, sorted. Empty when there is no
+/// such directory.
+fn export_files(harness: &Harness, project: &str) -> Vec<String> {
+    let directory = harness
+        .root()
+        .join(PROJECTS_DIR)
+        .join(project)
+        .join("exports");
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// Three visibly different pages, and a deck whose middle page comes from a
+/// nested set.
+fn three_page_deck(harness: &Harness) {
+    create_coloured(harness, "cover", "#c0392b");
+    create_coloured(harness, "inside", "#27ae60");
+    create_coloured(harness, "back", "#2980b9");
+    write_page_set(harness, "middle", r#"{"pages":[{"project":"inside"}]}"#);
+    write_page_set(
+        harness,
+        "deck",
+        r#"{"pages":[{"project":"cover"},{"set":"middle"},{"project":"back"}]}"#,
+    );
+}
+
+fn post_export(harness: &Harness, project: &str, body: Value) -> http::Response {
+    http::post_json(
+        &harness.url(&format!("/api/projects/{project}/export")),
+        &body,
+    )
+}
+
+fn read_export(harness: &Harness, project: &str, path: &str) -> Vec<u8> {
+    std::fs::read(harness.root().join(PROJECTS_DIR).join(project).join(path)).unwrap()
+}
+
+#[test]
+fn an_export_without_the_new_fields_is_the_png_export_it_always_was() {
+    let harness = Harness::start();
+    create_coloured(&harness, "poster", "#c0392b");
+    let exported = post_export(&harness, "poster", json!({}));
+    assert_eq!(exported.status, 200, "{}", exported.json());
+    let body = exported.json();
+    let mut keys: Vec<&String> = body.as_object().unwrap().keys().collect();
+    keys.sort();
+    assert_eq!(keys, ["bytes", "height", "path", "warnings", "width"]);
+    assert_eq!(body["path"], "exports/export.png");
+
+    // The same bytes as the direct PNG path of the renderer.
+    let directory = harness.root().join(PROJECTS_DIR).join("poster");
+    let document: assemblash_core::Document =
+        serde_json::from_slice(&http::get(&harness.url("/api/projects/poster/document")).body)
+            .unwrap();
+    let store =
+        assemblash_renderer::store::FontStore::open(harness.root().join(FONTS_DIR)).unwrap();
+    let direct = assemblash_server::render::png_for(&document, &directory, &store, 1.0).unwrap();
+    let written = read_export(&harness, "poster", "exports/export.png");
+    assert_eq!(written, direct.bytes);
+
+    // An explicit png with print false is the same request.
+    let explicit = post_export(
+        &harness,
+        "poster",
+        json!({ "name": "explicit", "format": "png", "print": false }),
+    );
+    assert_eq!(explicit.status, 200, "{}", explicit.json());
+    assert_eq!(
+        read_export(&harness, "poster", "exports/explicit.png"),
+        written
+    );
+}
+
+#[test]
+fn each_new_format_is_written_and_served_with_its_media_type() {
+    let harness = Harness::start();
+    create_coloured(&harness, "poster", "#c0392b");
+    for (format, file, media_type) in [
+        ("pdf", "out-pdf.pdf", "application/pdf"),
+        ("jpeg", "out-jpeg.jpg", "image/jpeg"),
+        ("jpg", "out-jpg.jpg", "image/jpeg"),
+        ("webp", "out-webp.webp", "image/webp"),
+        ("svg", "out-svg.svg", "image/svg+xml"),
+    ] {
+        let exported = post_export(
+            &harness,
+            "poster",
+            json!({ "name": format!("out-{format}"), "format": format }),
+        );
+        assert_eq!(exported.status, 200, "{format}: {}", exported.json());
+        let body = exported.json();
+        assert_eq!(body["path"], format!("exports/{file}"), "{format}");
+        assert!(body.get("pages").is_none(), "{format}: {body}");
+        assert_eq!(body["warnings"], json!([]), "{format}");
+
+        let served = http::get(&harness.url(&format!("/api/projects/poster/exports/{file}")));
+        assert_eq!(served.status, 200, "{file}");
+        assert_eq!(served.header("content-type").as_deref(), Some(media_type));
+        assert_eq!(served.body.len(), body["bytes"].as_u64().unwrap() as usize);
+        let bytes = &served.body;
+        match format {
+            "pdf" => assert!(bytes.starts_with(b"%PDF-"), "{format}"),
+            "jpeg" | "jpg" => assert!(bytes.starts_with(&[0xFF, 0xD8, 0xFF]), "{format}"),
+            "webp" => {
+                assert!(bytes.starts_with(b"RIFF"), "{format}");
+                assert_eq!(&bytes[8..12], b"WEBP", "{format}");
+            }
+            _ => assert!(String::from_utf8_lossy(bytes).contains("<svg"), "{format}"),
+        }
+    }
+
+    // `.jpeg` is a name the route accepts; nothing of that name was written.
+    let missing = http::get(&harness.url("/api/projects/poster/exports/out-jpeg.jpeg"));
+    assert_eq!(missing.status, 404);
+    assert_eq!(error_code(&missing), "noSuchExport");
+    let unknown = http::get(&harness.url("/api/projects/poster/exports/out.gif"));
+    assert_eq!(unknown.status, 400);
+    assert_eq!(error_code(&unknown), "invalidExportName");
+}
+
+#[test]
+fn every_export_refusal_is_typed_and_writes_nothing() {
+    let harness = Harness::start();
+    three_page_deck(&harness);
+    for (body, status, code) in [
+        (json!({ "format": "gif" }), 422, "exportFormatNotSupported"),
+        (
+            json!({ "format": "webp", "quality": 80 }),
+            422,
+            "lossyWebpNotSupported",
+        ),
+        (
+            json!({ "format": "jpeg", "quality": 0 }),
+            422,
+            "exportQualityOutOfRange",
+        ),
+        (
+            json!({ "format": "jpeg", "quality": 101 }),
+            422,
+            "exportQualityOutOfRange",
+        ),
+        (json!({ "quality": 80 }), 422, "exportQualityNotApplicable"),
+        (json!({ "print": true }), 422, "printNeedsPdf"),
+        (
+            json!({ "format": "jpeg", "print": true }),
+            422,
+            "printNeedsPdf",
+        ),
+        (
+            json!({ "format": "pdf", "pages": "deck:x" }),
+            422,
+            "invalidPageSelection",
+        ),
+        (
+            json!({ "format": "pdf", "pages": "deck:0" }),
+            422,
+            "invalidPageSelection",
+        ),
+        (
+            json!({ "format": "pdf", "pages": "deck:2-9" }),
+            422,
+            "invalidPageSelection",
+        ),
+        (
+            json!({ "format": "pdf", "pages": "deck:" }),
+            422,
+            "invalidPageSelection",
+        ),
+        (
+            json!({ "format": "pdf", "pages": "deck:3-1" }),
+            422,
+            "invalidPageSelection",
+        ),
+        (json!({ "pages": "deck" }), 422, "pagesNeedPdf"),
+        (
+            json!({ "format": "jpeg", "pages": "deck:1,3" }),
+            422,
+            "pagesNeedPdf",
+        ),
+        (
+            json!({ "format": "pdf", "pages": "nope" }),
+            404,
+            "pageSetNotFound",
+        ),
+        (
+            json!({ "format": "pdf", "pages": "CON" }),
+            400,
+            "invalidPageSetName",
+        ),
+    ] {
+        let refused = post_export(&harness, "cover", body.clone());
+        assert_eq!(refused.status, status, "{body}: {}", refused.json());
+        assert_eq!(error_code(&refused), code, "{body}");
+        let message = refused.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        if code == "lossyWebpNotSupported" {
+            assert!(message.contains("lossless WebP"), "{message}");
+            assert!(message.contains("jpeg"), "{message}");
+        }
+        if code == "pagesNeedPdf" {
+            assert!(message.contains("use format pdf"), "{message}");
+            assert!(message.contains("select one page"), "{message}");
+        }
+        for project in ["cover", "inside", "back"] {
+            assert_eq!(
+                export_files(&harness, project),
+                Vec::<String>::new(),
+                "{body} wrote into {project}"
+            );
+        }
+    }
+}
+
+/// Rung exit test 2: a three-page page set exported to PDF.
+#[test]
+fn a_page_set_exports_to_one_pdf_whose_pages_are_the_png_exports() {
+    let harness = Harness::start();
+    three_page_deck(&harness);
+    // The target project is not a member of the set.
+    create_coloured(&harness, "office", "#ffffff");
+
+    let exported = post_export(
+        &harness,
+        "office",
+        json!({ "name": "deck", "format": "pdf", "pages": "deck" }),
+    );
+    assert_eq!(exported.status, 200, "{}", exported.json());
+    let body = exported.json();
+    assert_eq!(body["path"], "exports/deck.pdf");
+    assert_eq!(body["pages"], 3);
+    assert_eq!(body["width"], 120);
+    assert_eq!(body["height"], 80);
+    let pdf = read_export(&harness, "office", "exports/deck.pdf");
+    let images = assemblash_export::pdf::extract_page_images(&pdf).unwrap();
+    assert_eq!(images.len(), 3);
+
+    let mut seen = Vec::new();
+    for (page, project) in ["cover", "inside", "back"].iter().enumerate() {
+        let png = post_export(&harness, project, json!({ "name": "page" }));
+        assert_eq!(png.status, 200, "{}", png.json());
+        let decoded = decode_png(&read_export(&harness, project, "exports/page.png"));
+        assert_eq!(images[page], decoded, "page {page}");
+        seen.push(decoded.2);
+    }
+    assert_ne!(seen[0], seen[1]);
+    assert_ne!(seen[1], seen[2]);
+
+    // A selection keeps manifest order, and a page named twice counts once.
+    let picked = post_export(
+        &harness,
+        "office",
+        json!({ "name": "picked", "format": "pdf", "pages": "deck:3,1,3" }),
+    );
+    assert_eq!(picked.status, 200, "{}", picked.json());
+    assert_eq!(picked.json()["pages"], 2);
+    let pdf = read_export(&harness, "office", "exports/picked.pdf");
+    let images = assemblash_export::pdf::extract_page_images(&pdf).unwrap();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].2, seen[0]);
+    assert_eq!(images[1].2, seen[2]);
+
+    // One page with a single-image format is exported as usual.
+    let one = post_export(
+        &harness,
+        "office",
+        json!({ "name": "second", "format": "webp", "pages": "deck:2" }),
+    );
+    assert_eq!(one.status, 200, "{}", one.json());
+    assert_eq!(one.json()["path"], "exports/second.webp");
+    assert_eq!(one.json()["pages"], 1);
+}
+
+/// Rung exit test 4: crop marks with print, none without, and the PNG keeps
+/// its bytes.
+#[test]
+fn print_gives_crop_marks_from_the_bleed_and_the_png_does_not_change() {
+    let harness = Harness::start();
+    create_coloured(&harness, "poster", "#c0392b");
+    let before = post_export(&harness, "poster", json!({ "name": "before" }));
+    assert_eq!(before.status, 200, "{}", before.json());
+
+    let bleed = http::post_json(
+        &harness.url("/api/projects/poster/operations"),
+        &json!({ "operation": {
+            "op": "updateCanvas",
+            "bleed": { "top": 9, "right": 9, "bottom": 9, "left": 9 }
+        }}),
+    );
+    assert_eq!(bleed.status, 200, "{}", bleed.json());
+
+    let after = post_export(&harness, "poster", json!({ "name": "after" }));
+    assert_eq!(after.status, 200, "{}", after.json());
+    assert_eq!(
+        read_export(&harness, "poster", "exports/before.png"),
+        read_export(&harness, "poster", "exports/after.png"),
+        "bleed never changes the PNG"
+    );
+
+    let marked = post_export(
+        &harness,
+        "poster",
+        json!({ "name": "marked", "format": "pdf", "print": true }),
+    );
+    assert_eq!(marked.status, 200, "{}", marked.json());
+    let pdf = read_export(&harness, "poster", "exports/marked.pdf");
+    let streams = assemblash_export::pdf::page_content_streams(&pdf).unwrap();
+    assert!(
+        streams[0].contains(" m ") && streams[0].contains(" l S"),
+        "{}",
+        streams[0]
+    );
+    let dictionaries = assemblash_export::pdf::page_dictionaries(&pdf).unwrap();
+    assert!(dictionaries[0].contains("/TrimBox"), "{}", dictionaries[0]);
+    assert!(dictionaries[0].contains("/BleedBox"), "{}", dictionaries[0]);
+
+    let plain = post_export(
+        &harness,
+        "poster",
+        json!({ "name": "plain", "format": "pdf" }),
+    );
+    assert_eq!(plain.status, 200, "{}", plain.json());
+    let pdf = read_export(&harness, "poster", "exports/plain.pdf");
+    let streams = assemblash_export::pdf::page_content_streams(&pdf).unwrap();
+    assert!(!streams[0].contains(" l S"), "{}", streams[0]);
+    let dictionaries = assemblash_export::pdf::page_dictionaries(&pdf).unwrap();
+    assert!(!dictionaries[0].contains("/TrimBox"), "{}", dictionaries[0]);
+}
+
+#[test]
+fn a_page_set_pdf_and_a_jpeg_are_the_same_bytes_every_time() {
+    let harness = Harness::start();
+    three_page_deck(&harness);
+    for (name, body) in [
+        ("deck", json!({ "format": "pdf", "pages": "deck" })),
+        ("photo", json!({ "format": "jpeg", "quality": 75 })),
+    ] {
+        let mut runs = Vec::new();
+        for run in 0..2 {
+            let mut request = body.clone();
+            request["name"] = json!(format!("{name}-{run}"));
+            let exported = post_export(&harness, "cover", request);
+            assert_eq!(exported.status, 200, "{}", exported.json());
+            let path = exported.json()["path"].as_str().unwrap().to_owned();
+            runs.push(read_export(&harness, "cover", &path));
+        }
+        assert_eq!(runs[0], runs[1], "{name}");
+    }
+}
+
+#[test]
+fn a_page_set_pdf_reports_the_warnings_of_its_pages_in_page_order() {
+    let harness = Harness::start();
+    install_test_font(&harness);
+    // Two pages with text across the margin, written before the server opens
+    // them.
+    for (id, layer) in [
+        ("first", "layer_01M61CXXZ0X2V89DQ9T8Z3VF11"),
+        ("second", "layer_01M61CXXZ0X2V89DQ9T8Z3VF22"),
+    ] {
+        let project = harness.root().join(PROJECTS_DIR).join(id);
+        std::fs::create_dir_all(&project).unwrap();
+        let document: assemblash_core::Document = serde_json::from_value(json!({
+            "schemaVersion": 1,
+            "id": "doc_01M61CXXZ0X2V89DQ9T8Z3VF00",
+            "version": 0,
+            "canvas": {
+                "width": 400.0,
+                "height": 200.0,
+                "margins": { "top": 20, "right": 20, "bottom": 20, "left": 20 }
+            },
+            "assets": [],
+            "layers": [{
+                "id": layer,
+                "transform": { "x": 8.0, "y": 40.0, "width": 300.0, "height": 60.0, "rotation": 0.0 },
+                "type": "text",
+                "text": "Across the margin",
+                "fontFamily": "Noto Sans",
+                "fontSize": 24.0,
+                "color": "#101820",
+                "align": "left",
+                "lineHeight": 1.2
+            }]
+        }))
+        .unwrap();
+        assemblash_core::storage::save(&document, &project).unwrap();
+    }
+    write_page_set(
+        &harness,
+        "proofs",
+        r#"{"pages":[{"project":"second"},{"project":"first"}]}"#,
+    );
+
+    let exported = post_export(
+        &harness,
+        "first",
+        json!({ "name": "proofs", "format": "pdf", "pages": "proofs" }),
+    );
+    assert_eq!(exported.status, 200, "{}", exported.json());
+    let warnings = exported.json()["warnings"].as_array().unwrap().clone();
+    let outside: Vec<(String, String)> = warnings
+        .iter()
+        .filter(|warning| warning["code"] == "contentOutsideMargins")
+        .map(|warning| {
+            (
+                warning["project"].as_str().unwrap().to_owned(),
+                warning["layerId"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        outside,
+        [
+            (
+                "second".to_owned(),
+                "layer_01M61CXXZ0X2V89DQ9T8Z3VF22".to_owned()
+            ),
+            (
+                "first".to_owned(),
+                "layer_01M61CXXZ0X2V89DQ9T8Z3VF11".to_owned()
+            ),
+        ],
+        "{warnings:#?}"
+    );
+    // Every warning of a page-set export names its page.
+    assert!(warnings
+        .iter()
+        .all(|warning| warning["project"].is_string()));
+
+    // A single-project export never names a project.
+    let single = post_export(&harness, "first", json!({ "format": "pdf" }));
+    assert_eq!(single.status, 200, "{}", single.json());
+    assert!(single.json()["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|warning| warning.get("project").is_none()));
+}
+
+#[test]
+fn variants_as_a_pdf_are_one_page_each_in_the_order_asked_for() {
+    let harness = Harness::start();
+    install_test_font(&harness);
+    write_template(&harness, "flyer", "Noto Sans");
+    let variants = json!([
+        { "name": "one", "values": { "headline": "First" } },
+        { "name": "two", "values": { "headline": "Second" } },
+        { "name": "three", "values": { "headline": "Third" } }
+    ]);
+
+    let pngs = http::post_json(
+        &harness.url("/api/projects/flyer/variants"),
+        &json!({ "variants": variants }),
+    );
+    assert_eq!(pngs.status, 200, "{}", pngs.json());
+    assert!(pngs.json()["variants"][0].get("page").is_none());
+
+    let pdf = http::post_json(
+        &harness.url("/api/projects/flyer/variants"),
+        &json!({ "variants": variants, "format": "pdf", "name": "batch" }),
+    );
+    assert_eq!(pdf.status, 200, "{}", pdf.json());
+    let batch = pdf.json();
+    let bytes = read_export(&harness, "flyer", "exports/batch.pdf");
+    let images = assemblash_export::pdf::extract_page_images(&bytes).unwrap();
+    assert_eq!(images.len(), 3);
+    for (index, name) in ["one", "two", "three"].iter().enumerate() {
+        let entry = &batch["variants"][index];
+        assert_eq!(entry["name"], *name);
+        assert_eq!(entry["path"], "exports/batch.pdf");
+        assert_eq!(entry["page"], index + 1);
+        let png = read_export(&harness, "flyer", &format!("exports/{name}.png"));
+        assert_eq!(images[index], decode_png(&png), "{name}");
+    }
+    assert_ne!(images[0].2, images[1].2);
+
+    // Without a name the PDF is `variants.pdf`.
+    let unnamed = http::post_json(
+        &harness.url("/api/projects/flyer/variants"),
+        &json!({ "variants": variants, "format": "pdf" }),
+    );
+    assert_eq!(unnamed.status, 200, "{}", unnamed.json());
+    assert_eq!(
+        unnamed.json()["variants"][0]["path"],
+        "exports/variants.pdf"
+    );
+
+    // JPEG writes one file for each variant.
+    let jpegs = http::post_json(
+        &harness.url("/api/projects/flyer/variants"),
+        &json!({ "variants": variants, "format": "jpeg" }),
+    );
+    assert_eq!(jpegs.status, 200, "{}", jpegs.json());
+    assert_eq!(jpegs.json()["variants"][1]["path"], "exports/two.jpg");
+
+    // A refused format and a name without pdf write nothing.
+    let before = export_files(&harness, "flyer");
+    for (body, code) in [
+        (
+            json!({ "variants": variants, "format": "webp", "quality": 50 }),
+            "lossyWebpNotSupported",
+        ),
+        (
+            json!({ "variants": variants, "format": "png", "name": "batch2" }),
+            "variantsNameNeedsPdf",
+        ),
+    ] {
+        let refused = http::post_json(&harness.url("/api/projects/flyer/variants"), &body);
+        assert_eq!(refused.status, 422, "{}", refused.json());
+        assert_eq!(error_code(&refused), code);
+    }
+    assert_eq!(export_files(&harness, "flyer"), before);
 }

@@ -38,6 +38,7 @@ pub fn cannot_measure_text(layer: LayerId, reason: impl std::fmt::Display) -> Ex
         code: CANNOT_MEASURE_TEXT,
         message: format!("layer {layer}: cannot measure text: {reason}"),
         layer_id: Some(layer),
+        project: None,
     }
 }
 
@@ -106,6 +107,12 @@ pub struct ExportWarning {
     /// The layer it happened on, when one layer is responsible.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer_id: Option<LayerId>,
+    /// The project of the page the warning is about.
+    ///
+    /// Set only by an export of a page set, which holds the pages of several
+    /// projects. A single-project export leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// Everything an export of this document would want to say.
@@ -159,6 +166,7 @@ pub fn export_warnings(
                         number(layer.transform.width)
                     ),
                     layer_id: Some(layer.id.clone()),
+                    project: None,
                 });
             }
             if rounded(height) > rounded(layer.transform.height) {
@@ -172,6 +180,7 @@ pub fn export_warnings(
                         number(layer.transform.height)
                     ),
                     layer_id: Some(layer.id.clone()),
+                    project: None,
                 });
             }
         }
@@ -252,6 +261,7 @@ fn covered_text_warnings(layers: &[assemblash_core::Layer]) -> Vec<ExportWarning
                     number((share * 100.0).round())
                 ),
                 layer_id: Some(layer.id.clone()),
+                project: None,
             });
             break;
         }
@@ -341,6 +351,7 @@ fn svg_asset_warning(
             layer.id
         ),
         layer_id: Some(layer.id.clone()),
+        project: None,
     })
 }
 
@@ -486,6 +497,7 @@ mod tests {
             code: TEXT_OVERFLOWS_BOX,
             message: "too tall".to_owned(),
             layer_id: Some(LayerId::new("layer_one")),
+            project: None,
         };
         let value = serde_json::to_value(&warning).unwrap();
         assert_eq!(value["code"], "textOverflowsBox");
@@ -493,6 +505,7 @@ mod tests {
 
         let general = ExportWarning {
             layer_id: None,
+            project: None,
             ..warning
         };
         let value = serde_json::to_value(&general).unwrap();

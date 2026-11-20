@@ -56,6 +56,9 @@ pub struct Exported {
     /// changes a pixel and never changes the outcome: the file above was
     /// written either way.
     pub warnings: Vec<ExportWarning>,
+    /// The number of pages, for an export of a page set. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pages: Option<usize>,
 }
 
 /// Every font family the document asks for, sorted and deduplicated.
@@ -282,20 +285,44 @@ pub fn export_into_project_loaded(
     scale: f32,
     name: Option<&str>,
 ) -> Result<Exported, ApiError> {
-    let stem = match name {
-        Some(name) => safe_stem(name)?,
-        None => "export".to_owned(),
-    };
-    let rendered = png_for_loaded(document, fonts, hrefs, scale)?;
+    export_into_project_as(
+        document,
+        project_dir,
+        fonts,
+        hrefs,
+        scale,
+        name,
+        ExportSettings::default(),
+    )
+}
 
-    let directory = project_dir.join(EXPORTS_DIR);
-    std::fs::create_dir_all(&directory).map_err(|source| io(&directory, "creating", source))?;
-    let file = format!("{stem}.png");
-    let path = directory.join(&file);
-    std::fs::write(&path, &rendered.bytes).map_err(|source| io(&path, "writing", source))?;
-
+/// Renders an export in any format into the project's own `exports/`
+/// directory.
+///
+/// With the default settings this is exactly the PNG export: the same bytes,
+/// the same file name, and the same response.
+pub fn export_into_project_as(
+    document: &Document,
+    project_dir: &Path,
+    fonts: &LoadedFonts,
+    hrefs: &assemblash_renderer::AssetHrefs,
+    scale: f32,
+    name: Option<&str>,
+    settings: ExportSettings,
+) -> Result<Exported, ApiError> {
+    let stem = export_stem(name)?;
+    let rendered = encode_document(
+        document,
+        fonts,
+        hrefs,
+        scale,
+        settings,
+        // No timestamp: two renders of an unchanged document are identical.
+        &PngMetadata::for_document(document),
+    )?;
+    let path = write_export(project_dir, &stem, settings.format(), &rendered.bytes)?;
     Ok(Exported {
-        path: format!("{EXPORTS_DIR}/{file}"),
+        path,
         bytes: rendered.bytes.len(),
         width: rendered.width,
         height: rendered.height,
@@ -305,9 +332,579 @@ pub fn export_into_project_loaded(
             document,
             fonts.font_set(),
             project_dir,
-            scale,
+            settings.warning_scale(scale),
         ),
+        pages: None,
     })
+}
+
+/// Renders the pages of a page set into the `exports/` directory of
+/// `target_dir`, the project the request was sent to.
+///
+/// A PDF holds every page. Any other format holds one page, and the caller
+/// checks with [`check_page_count`] that there is exactly one.
+pub fn export_pages_into_project(
+    target_dir: &Path,
+    pages: &[OwnedPage],
+    scale: f32,
+    name: Option<&str>,
+    settings: ExportSettings,
+) -> Result<Exported, ApiError> {
+    let stem = export_stem(name)?;
+    let rendered = encode_pages(pages, scale, settings)?;
+    let path = write_export(target_dir, &stem, settings.format(), &rendered.bytes)?;
+    Ok(Exported {
+        path,
+        bytes: rendered.bytes.len(),
+        width: rendered.width,
+        height: rendered.height,
+        warnings: page_warnings(pages, settings.warning_scale(scale)),
+        pages: Some(pages.len()),
+    })
+}
+
+/// The file stem of an export: the caller's name, checked, or `export`.
+pub fn export_stem(name: Option<&str>) -> Result<String, ApiError> {
+    match name {
+        Some(name) => safe_stem(name),
+        None => Ok("export".to_owned()),
+    }
+}
+
+/// Writes export bytes to `exports/<stem>.<extension>` in a project, and
+/// gives the `/`-separated path inside the project.
+pub fn write_export(
+    project_dir: &Path,
+    stem: &str,
+    format: ExportFormat,
+    bytes: &[u8],
+) -> Result<String, ApiError> {
+    let directory = project_dir.join(EXPORTS_DIR);
+    std::fs::create_dir_all(&directory).map_err(|source| io(&directory, "creating", source))?;
+    let file = export_file_name(stem, format);
+    let path = directory.join(&file);
+    std::fs::write(&path, bytes).map_err(|source| io(&path, "writing", source))?;
+    Ok(format!("{EXPORTS_DIR}/{file}"))
+}
+
+/// The file name of an export: `<stem>.<extension>`, `jpg` for JPEG.
+pub fn export_file_name(stem: &str, format: ExportFormat) -> String {
+    format!("{stem}.{}", format.extension())
+}
+
+pub use assemblash_export::{EncodeSettings, ExportFormat};
+
+/// The code for `print` with a format other than PDF.
+pub const PRINT_NEEDS_PDF: &str = "printNeedsPdf";
+/// The code for a page selection that cannot be used.
+pub const INVALID_PAGE_SELECTION: &str = "invalidPageSelection";
+/// The code for more than one page with a format that holds one image.
+pub const PAGES_NEED_PDF: &str = "pagesNeedPdf";
+
+/// How an export is encoded, after the request is checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportSettings {
+    /// The format and its quality.
+    pub encode: EncodeSettings,
+    /// Print geometry: trim and bleed boxes and crop marks. PDF only.
+    pub print: bool,
+}
+
+impl Default for ExportSettings {
+    /// A PNG, which is what an export request without a format asks for.
+    fn default() -> Self {
+        Self {
+            encode: EncodeSettings::Png,
+            print: false,
+        }
+    }
+}
+
+impl ExportSettings {
+    /// Checks the format fields of a request.
+    ///
+    /// Every refusal happens here, before anything is read or written:
+    /// an unknown format, a quality the format cannot use, and `print` with
+    /// a format other than PDF.
+    pub fn from_request(
+        format: Option<&str>,
+        quality: Option<u32>,
+        print: Option<bool>,
+    ) -> Result<Self, ApiError> {
+        let format = ExportFormat::from_request(format)?;
+        let encode = assemblash_export::resolve_quality(format, quality)?;
+        let print = print.unwrap_or(false);
+        if print && format != ExportFormat::Pdf {
+            return Err(ApiError::new(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                PRINT_NEEDS_PDF,
+                format!(
+                    "print adds trim and bleed boxes and crop marks, which only a PDF has; \
+                     use format pdf, or omit print for format {}",
+                    format.as_str()
+                ),
+            )
+            .with_details(serde_json::json!({ "format": format.as_str() })));
+        }
+        Ok(Self { encode, print })
+    }
+
+    /// The format of these settings.
+    pub fn format(&self) -> ExportFormat {
+        self.encode.format()
+    }
+
+    /// Whether these are the settings of a request without format fields.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The scale the warnings are measured at.
+    ///
+    /// SVG has no scale, so its warnings are measured at 1, as for `render`.
+    pub fn warning_scale(&self, scale: f32) -> f32 {
+        if self.format() == ExportFormat::Svg {
+            1.0
+        } else {
+            scale
+        }
+    }
+}
+
+/// A rasterized canvas as straight-alpha RGBA: the pixels the PNG export
+/// stores.
+fn rgba_for(
+    document: &Document,
+    fonts: &LoadedFonts,
+    hrefs: &assemblash_renderer::AssetHrefs,
+    scale: f32,
+) -> Result<(u32, u32, Vec<u8>), ApiError> {
+    let svg = doc_to_svg(document, fonts.font_set(), hrefs)?;
+    let pixmap = assemblash_renderer::svg_to_pixmap(&svg, fonts, scale)?;
+    Ok((
+        pixmap.width(),
+        pixmap.height(),
+        assemblash_renderer::pixmap_to_rgba(&pixmap),
+    ))
+}
+
+/// The print geometry of a document: its bleed, 1 canvas pixel to 1 point.
+///
+/// `None` when the document has no bleed or a bleed of zero on every side:
+/// such a page is a plain page.
+pub fn print_geometry(document: &Document) -> Option<assemblash_export::pdf::PrintGeometry> {
+    let bleed = document.canvas.bleed.as_ref()?;
+    let sides = [bleed.top, bleed.right, bleed.bottom, bleed.left];
+    if sides.iter().all(|side| *side == 0.0) {
+        return None;
+    }
+    Some(assemblash_export::pdf::PrintGeometry {
+        bleed: sides.map(|side| side as f32),
+    })
+}
+
+/// One PDF page of a document, prepared, with its pixel size.
+fn pdf_page(
+    document: &Document,
+    fonts: &LoadedFonts,
+    hrefs: &assemblash_renderer::AssetHrefs,
+    scale: f32,
+    print: bool,
+) -> Result<(assemblash_export::pdf::PdfPage, u32, u32), ApiError> {
+    let (width, height, rgba) = rgba_for(document, fonts, hrefs, scale)?;
+    let geometry = if print {
+        print_geometry(document)
+    } else {
+        None
+    };
+    // The trim size is the canvas size in points, whatever the scale: the
+    // scale changes the image resolution only.
+    let page = assemblash_export::pdf::PdfPage::new(
+        width,
+        height,
+        &rgba,
+        document.canvas.width as f32,
+        document.canvas.height as f32,
+        geometry,
+    )?;
+    Ok((page, width, height))
+}
+
+/// Renders a document to the bytes of one export format.
+///
+/// The one function every transport encodes a single document with. A PNG
+/// goes through [`document_to_png`] with `metadata`, as it always did; the
+/// other raster formats start from the same pixels.
+pub fn encode_document(
+    document: &Document,
+    fonts: &LoadedFonts,
+    hrefs: &assemblash_renderer::AssetHrefs,
+    scale: f32,
+    settings: ExportSettings,
+    metadata: &PngMetadata,
+) -> Result<Rendered, ApiError> {
+    match settings.encode {
+        EncodeSettings::Png => {
+            let png = document_to_png(document, fonts, hrefs, scale, metadata)?;
+            Ok(Rendered {
+                bytes: png,
+                width: (f64::from(scale) * document.canvas.width).round() as u32,
+                height: (f64::from(scale) * document.canvas.height).round() as u32,
+            })
+        }
+        EncodeSettings::Svg => svg_for_loaded(document, fonts, hrefs),
+        EncodeSettings::Jpeg { quality } => {
+            let (width, height, rgba) = rgba_for(document, fonts, hrefs, scale)?;
+            let bytes = assemblash_export::encode_jpeg(width, height, &rgba, quality)?;
+            Ok(Rendered {
+                bytes,
+                width,
+                height,
+            })
+        }
+        EncodeSettings::WebpLossless => {
+            let (width, height, rgba) = rgba_for(document, fonts, hrefs, scale)?;
+            let bytes = assemblash_export::encode_webp_lossless(width, height, &rgba)?;
+            Ok(Rendered {
+                bytes,
+                width,
+                height,
+            })
+        }
+        EncodeSettings::Pdf => {
+            let (page, width, height) = pdf_page(document, fonts, hrefs, scale, settings.print)?;
+            Ok(Rendered {
+                bytes: assemblash_export::pdf::write_pdf(&[page]),
+                width,
+                height,
+            })
+        }
+    }
+}
+
+/// One page to render, by reference.
+#[derive(Debug, Clone, Copy)]
+pub struct PageInput<'a> {
+    /// The document of the page.
+    pub document: &'a Document,
+    /// The fonts the document names.
+    pub fonts: &'a LoadedFonts,
+    /// The asset hrefs of the document's own project.
+    pub hrefs: &'a assemblash_renderer::AssetHrefs,
+}
+
+/// Renders pages into one PDF, one page each, in the order given.
+///
+/// The pages are rendered and prepared on several threads, at most
+/// [`std::thread::available_parallelism`]. The results are put back in page
+/// order, so the bytes do not depend on thread timing. When pages fail, the
+/// error of the lowest page index is given.
+///
+/// The width and height are the pixel size of the first page.
+pub fn pages_to_pdf(
+    pages: &[PageInput<'_>],
+    scale: f32,
+    print: bool,
+) -> Result<Rendered, ApiError> {
+    let prepared = parallel_in_order(pages, |page| {
+        pdf_page(page.document, page.fonts, page.hrefs, scale, print)
+    })?;
+    let (width, height) = prepared
+        .first()
+        .map_or((0, 0), |(_, width, height)| (*width, *height));
+    let pdf_pages: Vec<_> = prepared.into_iter().map(|(page, ..)| page).collect();
+    Ok(Rendered {
+        bytes: assemblash_export::pdf::write_pdf(&pdf_pages),
+        width,
+        height,
+    })
+}
+
+/// Runs `work` on every item on a bounded set of threads, and gives the
+/// results in item order. The first error in item order wins.
+fn parallel_in_order<T, R, F>(items: &[T], work: F) -> Result<Vec<R>, ApiError>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&T) -> Result<R, ApiError> + Sync,
+{
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(items.len());
+    if workers <= 1 {
+        return items.iter().map(&work).collect();
+    }
+
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut slots: Vec<Option<Result<R, ApiError>>> = Vec::with_capacity(items.len());
+    slots.resize_with(items.len(), || None);
+    let mut stopped = false;
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(item) = items.get(index) else {
+                            break;
+                        };
+                        done.push((index, work(item)));
+                    }
+                    done
+                })
+            })
+            .collect();
+        for handle in handles {
+            match handle.join() {
+                Ok(done) => {
+                    for (index, result) in done {
+                        if let Some(slot) = slots.get_mut(index) {
+                            *slot = Some(result);
+                        }
+                    }
+                }
+                Err(_) => stopped = true,
+            }
+        }
+    });
+
+    let lost = || {
+        ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "renderFailed",
+            "the renderer stopped while it was drawing a page",
+        )
+    };
+    // In item order: the first error found is the error of the lowest index.
+    let mut results = Vec::with_capacity(slots.len());
+    for slot in slots {
+        match slot {
+            Some(result) => results.push(result?),
+            None => return Err(lost()),
+        }
+    }
+    if stopped {
+        return Err(lost());
+    }
+    Ok(results)
+}
+
+/// One page of a page set, read and ready to render.
+#[derive(Debug, Clone)]
+pub struct OwnedPage {
+    /// The project that is this page.
+    pub project: String,
+    /// The project's current document.
+    pub document: Document,
+    /// The project's directory, where its assets are.
+    pub directory: PathBuf,
+    /// The fonts the document names.
+    pub fonts: LoadedFonts,
+    /// The asset hrefs of the document.
+    pub hrefs: std::sync::Arc<assemblash_renderer::AssetHrefs>,
+}
+
+impl OwnedPage {
+    /// The page by reference.
+    pub fn input(&self) -> PageInput<'_> {
+        PageInput {
+            document: &self.document,
+            fonts: &self.fonts,
+            hrefs: &self.hrefs,
+        }
+    }
+}
+
+/// Renders the pages of a page set to the bytes of one export format.
+///
+/// A PDF holds every page. Any other format renders the first page: the
+/// caller checks with [`check_page_count`] that there is only one.
+pub fn encode_pages(
+    pages: &[OwnedPage],
+    scale: f32,
+    settings: ExportSettings,
+) -> Result<Rendered, ApiError> {
+    if settings.format() == ExportFormat::Pdf {
+        let inputs: Vec<_> = pages.iter().map(OwnedPage::input).collect();
+        return pages_to_pdf(&inputs, scale, settings.print);
+    }
+    check_page_count(settings, pages.len())?;
+    let Some(page) = pages.first() else {
+        return Err(no_pages());
+    };
+    encode_document(
+        &page.document,
+        &page.fonts,
+        &page.hrefs,
+        scale,
+        settings,
+        &PngMetadata::for_document(&page.document),
+    )
+}
+
+/// The export warnings of every page, in page order, each with its project.
+pub fn page_warnings(pages: &[OwnedPage], scale: f32) -> Vec<ExportWarning> {
+    let mut warnings = Vec::new();
+    for page in pages {
+        let found = assemblash_renderer::export_warnings_at(
+            &page.document,
+            page.fonts.font_set(),
+            &page.directory,
+            scale,
+        );
+        warnings.extend(found.into_iter().map(|mut warning| {
+            warning.project = Some(page.project.clone());
+            warning
+        }));
+    }
+    warnings
+}
+
+/// Refuses more than one page with a format that holds one image, and a
+/// selection of no pages.
+pub fn check_page_count(settings: ExportSettings, count: usize) -> Result<(), ApiError> {
+    if count == 0 {
+        return Err(no_pages());
+    }
+    let format = settings.format();
+    if format != ExportFormat::Pdf && count != 1 {
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            PAGES_NEED_PDF,
+            format!(
+                "a {} export holds one page, and these pages are {count}; \
+                 use format pdf, or select one page (for example deck:2)",
+                format.as_str()
+            ),
+        )
+        .with_details(serde_json::json!({ "format": format.as_str(), "pages": count })));
+    }
+    Ok(())
+}
+
+fn no_pages() -> ApiError {
+    invalid_selection("", "the pages select no page")
+}
+
+fn invalid_selection(pages: &str, reason: impl Into<String>) -> ApiError {
+    let reason = reason.into();
+    ApiError::new(
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        INVALID_PAGE_SELECTION,
+        format!("{pages:?} is not a usable page selection: {reason}"),
+    )
+    .with_details(serde_json::json!({ "pages": pages, "reason": reason }))
+}
+
+/// The `pages` field of an export request: a page set, and which of its
+/// pages.
+///
+/// `deck` is every page of the set `deck`. `deck:1-3,5` is pages 1, 2, 3 and
+/// 5. Pages are numbered from 1, in manifest order with nested sets
+/// expanded. A set name cannot hold `:`, so the first `:` ends the name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageRequest {
+    /// The text of the request, as written.
+    pub text: String,
+    /// The page set.
+    pub set: assemblash_core::page_sets::PageSetName,
+    /// The selected page numbers as inclusive ranges, from 1. `None` is
+    /// every page.
+    pub selection: Option<Vec<(usize, usize)>>,
+}
+
+impl PageRequest {
+    /// Reads the `pages` field. Nothing is read from the workspace here.
+    pub fn parse(text: &str) -> Result<Self, ApiError> {
+        let (name, selection) = match text.split_once(':') {
+            Some((name, selection)) => (name, Some(selection)),
+            None => (text, None),
+        };
+        let set = assemblash_core::page_sets::PageSetName::new(name)?;
+        let selection = match selection {
+            Some(selection) => Some(parse_selection(text, selection)?),
+            None => None,
+        };
+        Ok(Self {
+            text: text.to_owned(),
+            set,
+            selection,
+        })
+    }
+
+    /// The selected pages of a resolved set, in manifest order. A page
+    /// named twice is selected once.
+    pub fn select<'a>(
+        &self,
+        resolved: &'a assemblash_core::page_sets::ResolvedPageSet,
+    ) -> Result<Vec<&'a assemblash_core::page_sets::ResolvedPage>, ApiError> {
+        let count = resolved.pages.len();
+        let Some(ranges) = &self.selection else {
+            return Ok(resolved.pages.iter().collect());
+        };
+        let mut chosen = std::collections::BTreeSet::new();
+        for &(first, last) in ranges {
+            if last > count {
+                return Err(invalid_selection(
+                    &self.text,
+                    format!("page {last} is above the page count, {count}"),
+                ));
+            }
+            chosen.extend(first..=last);
+        }
+        Ok(chosen
+            .into_iter()
+            .filter_map(|number| resolved.pages.get(number - 1))
+            .collect())
+    }
+}
+
+fn parse_selection(text: &str, selection: &str) -> Result<Vec<(usize, usize)>, ApiError> {
+    if selection.trim().is_empty() {
+        return Err(invalid_selection(
+            text,
+            "the selection after ':' is empty; name pages, for example deck:1-3,5",
+        ));
+    }
+    let number = |value: &str| -> Result<usize, ApiError> {
+        let value = value.trim();
+        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(invalid_selection(
+                text,
+                format!("{value:?} is not a page number"),
+            ));
+        }
+        match value.parse::<usize>() {
+            Ok(0) => Err(invalid_selection(text, "pages are numbered from 1")),
+            Ok(number) => Ok(number),
+            Err(_) => Err(invalid_selection(
+                text,
+                format!("{value:?} is not a page number"),
+            )),
+        }
+    };
+    let mut ranges = Vec::new();
+    for item in selection.split(',') {
+        let range = match item.split_once('-') {
+            Some((first, last)) => {
+                let (first, last) = (number(first)?, number(last)?);
+                if first > last {
+                    return Err(invalid_selection(
+                        text,
+                        format!("the range {first}-{last} goes down"),
+                    ));
+                }
+                (first, last)
+            }
+            None => {
+                let page = number(item)?;
+                (page, page)
+            }
+        };
+        ranges.push(range);
+    }
+    Ok(ranges)
 }
 
 fn io(path: &Path, operation: &'static str, source: std::io::Error) -> ApiError {
@@ -370,6 +967,50 @@ mod tests {
     }
 
     #[test]
+    fn parallel_work_keeps_item_order_and_reports_the_lowest_failing_index() {
+        let items: Vec<usize> = (0..64).collect();
+        let doubled = parallel_in_order(&items, |item| Ok(item * 2)).unwrap();
+        assert_eq!(
+            doubled,
+            items.iter().map(|item| item * 2).collect::<Vec<_>>()
+        );
+
+        // Items 7, 20 and 50 fail; the error is always the one of item 7,
+        // whatever thread finished first.
+        for _ in 0..20 {
+            let error = parallel_in_order(&items, |item| {
+                if matches!(item, 7 | 20 | 50) {
+                    Err(ApiError::bad_request(format!("item {item}")))
+                } else {
+                    Ok(*item)
+                }
+            })
+            .unwrap_err();
+            assert_eq!(error.message(), "item 7");
+        }
+    }
+
+    #[test]
+    fn a_page_request_names_a_set_and_an_optional_selection() {
+        let every = PageRequest::parse("deck").unwrap();
+        assert_eq!(every.set.as_str(), "deck");
+        assert_eq!(every.selection, None);
+        let some = PageRequest::parse("deck:1-3, 5").unwrap();
+        assert_eq!(some.selection, Some(vec![(1, 3), (5, 5)]));
+        for bad in [
+            "deck:", "deck: ", "deck:0", "deck:1,", "deck:a", "deck:3-1", "deck:-2", "deck:1-",
+            "deck:1:2",
+        ] {
+            let error = PageRequest::parse(bad).unwrap_err();
+            assert_eq!(error.code(), INVALID_PAGE_SELECTION, "{bad}");
+        }
+        assert_eq!(
+            PageRequest::parse("").unwrap_err().code(),
+            "invalidPageSetName"
+        );
+    }
+
+    #[test]
     fn an_export_name_is_a_name_and_never_a_path() {
         for good in ["poster", "poster-2", "final_v3", "A1"] {
             assert!(safe_stem(good).is_ok(), "{good}");
@@ -416,11 +1057,15 @@ pub struct RenderedVariant {
     pub width: u32,
     /// Pixel height.
     pub height: u32,
-    /// Content hash of the PNG, `sha256:<hex>`.
+    /// Content hash of the file, `sha256:<hex>`. For a PDF batch, the hash
+    /// of the one PDF.
     ///
     /// Two runs of the same template with the same values produce the same
     /// hash — which is what makes a batch as checkable as a single render.
     pub hash: String,
+    /// The page of this variant in the PDF, from 1. Only a PDF batch sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<usize>,
 }
 
 /// A batch of variants, and what they came from.
@@ -464,9 +1109,44 @@ pub fn render_variants_loaded(
     scale: f32,
     variants: &[Variant],
 ) -> Result<RenderedVariants, ApiError> {
+    render_variants_as(
+        template,
+        project_dir,
+        fonts,
+        scale,
+        variants,
+        ExportSettings::default(),
+        None,
+    )
+}
+
+/// The file stem of a batch of variants written as one PDF, when the request
+/// gives no name.
+pub const VARIANTS_PDF_STEM: &str = "variants";
+
+/// Renders template variants in any export format.
+///
+/// PNG (the default), SVG, JPEG and WebP write one file for each variant,
+/// `exports/<variant name>.<extension>`, exactly as the PNG batch always did.
+/// PDF writes one file, `exports/<name>.pdf` (`variants.pdf` when `name` is
+/// `None`), with one page for each variant in the order asked for: the
+/// variants as one page set. `name` is used only for PDF.
+pub fn render_variants_as(
+    template: &Document,
+    project_dir: &Path,
+    fonts: &LoadedFonts,
+    scale: f32,
+    variants: &[Variant],
+    settings: ExportSettings,
+    name: Option<&str>,
+) -> Result<RenderedVariants, ApiError> {
     // Checked once, before anything renders: a broken template should be one
     // clear error rather than the same error N times.
     assemblash_core::templates::validate_slots(template).map_err(template_error)?;
+    let pdf_stem = match name {
+        Some(name) => safe_stem(name)?,
+        None => VARIANTS_PDF_STEM.to_owned(),
+    };
 
     let directory = project_dir.join(EXPORTS_DIR);
     std::fs::create_dir_all(&directory).map_err(|source| io(&directory, "creating", source))?;
@@ -475,37 +1155,68 @@ pub fn render_variants_loaded(
     // template's own hrefs: read and encoded once for the whole batch.
     let hrefs = assemblash_renderer::data_uris(template, project_dir)?;
 
+    if settings.format() == ExportFormat::Pdf {
+        // Every variant is filled first, so a refused variant writes nothing.
+        let filled = variants
+            .iter()
+            .map(|variant| {
+                safe_stem(&variant.name)?;
+                fill_variant(template, variant)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let inputs: Vec<_> = filled
+            .iter()
+            .map(|document| PageInput {
+                document,
+                fonts,
+                hrefs: &hrefs,
+            })
+            .collect();
+        let pdf = pages_to_pdf(&inputs, scale, false)?;
+        let path = write_export(project_dir, &pdf_stem, ExportFormat::Pdf, &pdf.bytes)?;
+        let hash = assemblash_core::storage::hash_bytes(&pdf.bytes);
+        let rendered = variants
+            .iter()
+            .enumerate()
+            .map(|(index, variant)| RenderedVariant {
+                name: variant.name.clone(),
+                path: path.clone(),
+                bytes: pdf.bytes.len(),
+                width: pdf.width,
+                height: pdf.height,
+                hash: hash.clone(),
+                page: Some(index + 1),
+            })
+            .collect();
+        return Ok(RenderedVariants {
+            template: template.id.to_string(),
+            template_version: template.version,
+            variants: rendered,
+        });
+    }
+
     let mut rendered = Vec::with_capacity(variants.len());
     for variant in variants {
         let stem = safe_stem(&variant.name)?;
-
-        let mut filled = template.clone();
-        let operations = assemblash_core::templates::fill_operations(template, &variant.values)
-            .map_err(template_error)?;
-        for operation in &operations {
-            // The same entry point every transport uses. A protected layer
-            // refuses here, and the copy is left untouched because applying is
-            // transactional.
-            assemblash_core::ops::apply(
-                &mut filled,
-                operation,
-                &mut assemblash_core::ids::UlidIdSource,
-            )
-            .map_err(|source| ApiError::from(SessionError::from(source)))?;
-        }
-
-        let png = png_for_loaded(&filled, fonts, &hrefs, scale)?;
-        let file = format!("{stem}.png");
-        let path = directory.join(&file);
-        std::fs::write(&path, &png.bytes).map_err(|source| io(&path, "writing", source))?;
+        let filled = fill_variant(template, variant)?;
+        let output = encode_document(
+            &filled,
+            fonts,
+            &hrefs,
+            scale,
+            settings,
+            &PngMetadata::for_document(&filled),
+        )?;
+        let path = write_export(project_dir, &stem, settings.format(), &output.bytes)?;
 
         rendered.push(RenderedVariant {
             name: variant.name.clone(),
-            path: format!("{EXPORTS_DIR}/{file}"),
-            bytes: png.bytes.len(),
-            width: png.width,
-            height: png.height,
-            hash: assemblash_core::storage::hash_bytes(&png.bytes),
+            path,
+            bytes: output.bytes.len(),
+            width: output.width,
+            height: output.height,
+            hash: assemblash_core::storage::hash_bytes(&output.bytes),
+            page: None,
         });
     }
 
@@ -514,6 +1225,47 @@ pub fn render_variants_loaded(
         template_version: template.version,
         variants: rendered,
     })
+}
+
+/// The code for a variants `name` with a format other than PDF.
+pub const VARIANTS_NAME_NEEDS_PDF: &str = "variantsNameNeedsPdf";
+
+/// The PDF name of a variants request: refused with any format but PDF, where
+/// each file is named after its variant.
+pub fn variants_pdf_name(
+    settings: ExportSettings,
+    name: Option<String>,
+) -> Result<Option<String>, ApiError> {
+    if name.is_some() && settings.format() != ExportFormat::Pdf {
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            VARIANTS_NAME_NEEDS_PDF,
+            format!(
+                "a {} batch names each file after its variant;                  name applies to a pdf batch only, so omit it",
+                settings.format().as_str()
+            ),
+        ));
+    }
+    Ok(name)
+}
+
+/// A copy of the template with one variant's values filled in.
+fn fill_variant(template: &Document, variant: &Variant) -> Result<Document, ApiError> {
+    let mut filled = template.clone();
+    let operations = assemblash_core::templates::fill_operations(template, &variant.values)
+        .map_err(template_error)?;
+    for operation in &operations {
+        // The same entry point every transport uses. A protected layer
+        // refuses here, and the copy is left untouched because applying is
+        // transactional.
+        assemblash_core::ops::apply(
+            &mut filled,
+            operation,
+            &mut assemblash_core::ids::UlidIdSource,
+        )
+        .map_err(|source| ApiError::from(SessionError::from(source)))?;
+    }
+    Ok(filled)
 }
 
 fn template_error(error: assemblash_core::TemplateError) -> ApiError {
@@ -549,5 +1301,6 @@ pub fn note_lock_reclaimed(exported: &mut Exported, pid: u32, host: &str) {
              which is no longer running; it was cleared and the project reopened"
         ),
         layer_id: None,
+        project: None,
     });
 }

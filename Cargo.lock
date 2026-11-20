@@ -185,6 +185,7 @@ name = "assemblash-server"
 version = "1.13.1"
 dependencies = [
  "assemblash-core",
+ "assemblash-export",
  "assemblash-renderer",
  "axum",
  "getrandom 0.3.4",

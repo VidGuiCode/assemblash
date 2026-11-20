@@ -160,6 +160,48 @@ impl From<assemblash_core::color_space::ColorSpaceNotSupported> for ApiError {
     }
 }
 
+impl From<assemblash_export::ExportFormatNotSupported> for ApiError {
+    fn from(error: assemblash_export::ExportFormatNotSupported) -> Self {
+        let supported: Vec<&str> = assemblash_export::ExportFormat::ALL
+            .iter()
+            .map(|format| format.as_str())
+            .collect();
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            assemblash_export::ExportFormatNotSupported::CODE,
+            error.to_string(),
+        )
+        .with_details(json!({ "requested": error.requested, "supported": supported }))
+    }
+}
+
+impl From<assemblash_export::QualityError> for ApiError {
+    fn from(error: assemblash_export::QualityError) -> Self {
+        use assemblash_export::QualityError;
+        let quality = match &error {
+            QualityError::OutOfRange { quality }
+            | QualityError::LossyWebpNotSupported { quality }
+            | QualityError::NotApplicable { quality, .. } => *quality,
+        };
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.code(),
+            error.to_string(),
+        )
+        .with_details(json!({ "quality": quality }))
+    }
+}
+
+impl From<assemblash_export::EncodeError> for ApiError {
+    fn from(error: assemblash_export::EncodeError) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            assemblash_export::EncodeError::CODE,
+            error.to_string(),
+        )
+    }
+}
+
 impl From<PageSetError> for ApiError {
     fn from(error: PageSetError) -> Self {
         let message = error.to_string();

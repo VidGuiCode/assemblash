@@ -2213,9 +2213,23 @@ struct ExportRequest {
     /// `cmyk` included, is refused with `colorSpaceNotSupported`.
     #[serde(default)]
     color_space: Option<String>,
+    /// The file format: `png` (the default), `svg`, `pdf`, `jpeg` (or
+    /// `jpg`), or `webp`.
+    #[serde(default)]
+    format: Option<String>,
+    /// JPEG quality, 1 to 100. JPEG only.
+    #[serde(default)]
+    quality: Option<u32>,
+    /// Pages of a page set: `<set>` or `<set>:<selection>`, for example
+    /// `deck:1-3,5`.
+    #[serde(default)]
+    pages: Option<String>,
+    /// Trim and bleed boxes and crop marks. PDF only.
+    #[serde(default)]
+    print: Option<bool>,
 }
 
-/// Writes a PNG into the project's own `exports/` directory.
+/// Writes an export into the project's own `exports/` directory.
 async fn export_document(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -2223,6 +2237,19 @@ async fn export_document(
 ) -> Result<Json<render::Exported>, ApiError> {
     // Refused before anything is read or written.
     assemblash_core::color_space::ColorSpace::from_request(request.color_space.as_deref())?;
+    let settings = render::ExportSettings::from_request(
+        request.format.as_deref(),
+        request.quality,
+        request.print,
+    )?;
+    let pages = request
+        .pages
+        .as_deref()
+        .map(render::PageRequest::parse)
+        .transpose()?;
+    if let Some(pages) = pages {
+        return export_page_set(&state, id, &pages, settings, request.scale, request.name).await;
+    }
     let project = id.clone();
     let (document, directory) = read_for_render(&state, id)?;
     let fonts = state.fonts_for(&document)?;
@@ -2231,13 +2258,14 @@ async fn export_document(
     let name = request.name;
     let mut exported =
         tokio::task::spawn_blocking(move || -> Result<render::Exported, ApiError> {
-            render::export_into_project_loaded(
+            render::export_into_project_as(
                 &document,
                 &directory,
                 &fonts,
                 &hrefs,
                 scale,
                 name.as_deref(),
+                settings,
             )
         })
         .await
@@ -2251,23 +2279,70 @@ async fn export_document(
     Ok(Json(exported))
 }
 
-/// Reads back a PNG the engine wrote into a project's `exports/`.
+/// Writes an export of a page set into the `exports/` directory of the
+/// project in the URL.
+///
+/// The set is resolved in this server's workspace. The project in the URL is
+/// where the file goes and where it is served from; it need not be a page of
+/// the set. Member projects are read without a lock.
+async fn export_page_set(
+    state: &AppState,
+    id: String,
+    pages: &render::PageRequest,
+    settings: render::ExportSettings,
+    scale: f32,
+    name: Option<String>,
+) -> Result<Json<render::Exported>, ApiError> {
+    // The name is checked before any page is read.
+    render::export_stem(name.as_deref())?;
+    let sources = state.export_pages(pages, settings)?;
+    let project = id.clone();
+    let target = project_directory(state, id)?;
+    let mut exported =
+        tokio::task::spawn_blocking(move || -> Result<render::Exported, ApiError> {
+            render::export_pages_into_project(&target, &sources, scale, name.as_deref(), settings)
+        })
+        .await
+        .map_err(join_error)??;
+    if let Some(event) = state.reclaim_event(&project) {
+        render::note_lock_reclaimed(&mut exported, event.pid, &event.host);
+    }
+    Ok(Json(exported))
+}
+
+/// Reads back an export the engine wrote into a project's `exports/`.
 ///
 /// Needed because a batch of variants leaves its results on disk and the page
 /// has no other way to show what it just made. The caller supplies a *file
 /// name*, never a path: the stem goes through the same [`render::safe_stem`]
-/// that named it in the first place, and the extension is not the caller's to
-/// choose. So the only files reachable here are ones this engine wrote, in the
+/// that named it in the first place, and the extension must be one this engine
+/// writes. So the only files reachable here are ones this engine wrote, in the
 /// one directory it writes them to (PRD §10.1, FR-13).
 async fn get_export(
     State(state): State<AppState>,
     Path((id, file)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let stem = file.strip_suffix(".png").ok_or_else(|| {
+    // The extensions this engine writes, and `jpeg` as a second name for
+    // `jpg`. Anything else is not a file this engine wrote.
+    let (stem, extension, media_type) = [
+        ("png", "image/png"),
+        ("svg", "image/svg+xml"),
+        ("pdf", "application/pdf"),
+        ("jpg", "image/jpeg"),
+        ("jpeg", "image/jpeg"),
+        ("webp", "image/webp"),
+    ]
+    .into_iter()
+    .find_map(|(extension, media_type)| {
+        file.strip_suffix(extension)
+            .and_then(|rest| rest.strip_suffix('.'))
+            .map(|stem| (stem, extension, media_type))
+    })
+    .ok_or_else(|| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalidExportName",
-            format!("{file:?} is not a PNG this engine writes"),
+            format!("{file:?} is not an export this engine writes"),
         )
     })?;
     let stem = render::safe_stem(stem)?;
@@ -2275,7 +2350,7 @@ async fn get_export(
     let directory = project_directory(&state, id)?;
     let path = directory
         .join(render::EXPORTS_DIR)
-        .join(format!("{stem}.png"));
+        .join(format!("{stem}.{extension}"));
     let bytes = std::fs::read(&path).map_err(|_| {
         ApiError::new(
             StatusCode::NOT_FOUND,
@@ -2285,7 +2360,7 @@ async fn get_export(
     })?;
     Ok((
         [
-            (header::CONTENT_TYPE, "image/png"),
+            (header::CONTENT_TYPE, media_type),
             // An export is rewritten in place under the same name, so a cached
             // copy would show the previous batch's picture.
             (header::CACHE_CONTROL, "no-store"),
@@ -2346,6 +2421,17 @@ struct VariantsRequest {
     /// Multiplier on the canvas size.
     #[serde(default = "one")]
     scale: f32,
+    /// The file format: `png` (the default), `svg`, `jpeg` (or `jpg`) and
+    /// `webp` write one file for each variant; `pdf` writes one PDF with one
+    /// page for each variant.
+    #[serde(default)]
+    format: Option<String>,
+    /// JPEG quality, 1 to 100. JPEG only.
+    #[serde(default)]
+    quality: Option<u32>,
+    /// File stem of the PDF. PDF only; `variants` when omitted.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 /// Renders a template once per set of slot values (PRD use case C).
@@ -2357,13 +2443,25 @@ async fn render_variants(
     Path(id): Path<String>,
     ApiJson(request): ApiJson<VariantsRequest>,
 ) -> Result<Json<render::RenderedVariants>, ApiError> {
+    // Refused before anything is read or written.
+    let settings =
+        render::ExportSettings::from_request(request.format.as_deref(), request.quality, None)?;
+    let name = render::variants_pdf_name(settings, request.name)?;
     let (document, directory) = read_for_render(&state, id)?;
     let fonts = state.fonts_for(&document)?;
     let scale = request.scale;
     let variants = request.variants;
     let rendered =
         tokio::task::spawn_blocking(move || -> Result<render::RenderedVariants, ApiError> {
-            render::render_variants_loaded(&document, &directory, &fonts, scale, &variants)
+            render::render_variants_as(
+                &document,
+                &directory,
+                &fonts,
+                scale,
+                &variants,
+                settings,
+                name.as_deref(),
+            )
         })
         .await
         .map_err(join_error)??;

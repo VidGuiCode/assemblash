@@ -135,6 +135,7 @@ fn outside_margins(
             side_list(&sides)
         ),
         layer_id: Some(layer.id.clone()),
+        project: None,
     })
 }
 
@@ -165,6 +166,7 @@ fn inside_bleed(
             side_list(&sides)
         ),
         layer_id: Some(layer.id.clone()),
+        project: None,
     })
 }
 
@@ -223,5 +225,6 @@ fn below_resolution(document: &Document, layer: &Layer, scale: f32) -> Option<Ex
             number((ratio * 100.0).round() / 100.0)
         ),
         layer_id: Some(layer.id.clone()),
+        project: None,
     })
 }

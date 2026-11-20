@@ -438,6 +438,70 @@ impl AppState {
         Ok(session)
     }
 
+    /// A project's current document and directory, read without a lock.
+    ///
+    /// A project this server has open answers from its session: that is the
+    /// current document, edits not yet seen by any other reader included.
+    /// Any other project is read from disk with
+    /// [`Session::open_read_only`], which takes no lock and opens no
+    /// session, so a page-set export never locks a member project.
+    pub fn current_document(
+        &self,
+        id: &ProjectId,
+    ) -> Result<(Document, std::path::PathBuf), ApiError> {
+        let open = {
+            let registry = self.lock_registry()?;
+            registry.get(id.as_str()).map(Arc::clone)
+        };
+        if let Some(project) = open {
+            let session = lock_project(&project)?;
+            return Ok((
+                session.document().clone(),
+                session.project_dir().to_path_buf(),
+            ));
+        }
+        let directory = self.inner.workspace.existing_project_dir(id)?;
+        let session = Session::open_read_only(&directory)?;
+        Ok((session.document().clone(), directory))
+    }
+
+    /// Every page of a page-set export, read and ready to render.
+    ///
+    /// Each page has its own project's document, fonts and assets.
+    pub fn page_sources(
+        &self,
+        pages: &[&assemblash_core::page_sets::ResolvedPage],
+    ) -> Result<Vec<crate::render::OwnedPage>, ApiError> {
+        pages
+            .iter()
+            .map(|page| {
+                let (document, directory) = self.current_document(&page.project)?;
+                let fonts = self.fonts_for(&document)?;
+                let hrefs = self.asset_hrefs(&document, &directory)?;
+                Ok(crate::render::OwnedPage {
+                    project: page.project.to_string(),
+                    document,
+                    directory,
+                    fonts,
+                    hrefs,
+                })
+            })
+            .collect()
+    }
+
+    /// Resolves the `pages` field of an export in this workspace, and checks
+    /// the selection against the format.
+    pub fn export_pages(
+        &self,
+        request: &crate::render::PageRequest,
+        settings: crate::render::ExportSettings,
+    ) -> Result<Vec<crate::render::OwnedPage>, ApiError> {
+        let resolved = self.inner.workspace.resolve_page_set(&request.set)?;
+        let selected = request.select(&resolved)?;
+        crate::render::check_page_count(settings, selected.len())?;
+        self.page_sources(&selected)
+    }
+
     /// Removes the exact project lock an interactive client already saw.
     ///
     /// Holding the registry while comparing and removing prevents this server
