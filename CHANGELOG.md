@@ -45,7 +45,7 @@ page-set exports.
 - EN, FR, and DE strings for the tab strip.
 - Page sets. A page set is an ordered list of projects, in one file for each set: `page-sets/<name>.json` in the workspace, beside `projects/`. An entry names one project or one other set. A nested set adds its pages in place. The file is new. It is not a document field.
 - The engine resolves a set to a flat, ordered page list and never drops a page. It refuses a loop and names it (`pageSetLoop`). It lists every missing member (`pageSetMemberMissing`). It refuses a project on two pages (`pageSetDuplicatePage`). It refuses sets nested more than 32 deep and names the chain (`pageSetTooDeep`). Other codes: `pageSetMalformed`, `pageSetNotFound`, `invalidPageSetName`. A set with no pages is valid.
-- CLI: new read-only commands `page-set list` and `page-set show <name>`, each with `--json`.
+- CLI: new read-only commands `page-set list` and `page-set show <name>`, each with `--json`. These commands and `export --pages` refuse a `--workspace` directory that holds no workspace (no `projects` directory), and create nothing.
 - HTTP: new additive read-only routes `GET /api/page-sets` and `GET /api/page-sets/{name}`.
 - MCP: new read-only tools `list_page_sets` and `get_page_set`. The tool count goes from 53 to 55.
 - Two optional canvas fields, `bleed` and `margins`. Each holds `top`, `right`, `bottom`, and `left` in pixels. The canvas is the trim box. Bleed goes outward and margins go inward. A PNG or SVG export does not read them, and its bytes do not change. An older 1.x release keeps the fields as unknown canvas fields. `schemaVersion` stays 1. The document schema and its TypeScript declarations are regenerated.

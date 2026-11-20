@@ -159,6 +159,8 @@ Export the pages of a set with `pages`, for example `deck:1-3,5`. A PDF holds on
 
 Read page sets with `assemblash page-set list` and `assemblash page-set show <name>`, with `GET /api/page-sets` and `GET /api/page-sets/{name}`, or with the MCP tools `list_page_sets` and `get_page_set`. No interface writes a page-set file. Write the file to make or change a set.
 
+The CLI commands only read. A `--workspace` directory without a `projects` directory is refused, and the CLI creates nothing there. `export --pages` applies the same rule.
+
 ## Layer kinds
 
 | Kind | It draws | Main payload |

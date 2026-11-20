@@ -1320,3 +1320,32 @@ fn canvas_background_image_flags_set_default_clear_and_refuse_bad_requests() {
         before
     );
 }
+
+#[test]
+fn read_only_page_set_commands_refuse_a_missing_workspace_and_create_nothing() {
+    let scratch = tempfile::tempdir().unwrap();
+    let missing = scratch.path().join("typo");
+    let missing_arg = missing.to_str().unwrap();
+    let out = scratch.path().join("deck.pdf");
+    let out_arg = out.to_str().unwrap();
+
+    for args in [
+        vec!["page-set", "list", "--workspace", missing_arg],
+        vec!["page-set", "show", "deck", "--workspace", missing_arg],
+        vec![
+            "export",
+            "--pages",
+            "deck",
+            "--format",
+            "pdf",
+            "--workspace",
+            missing_arg,
+            out_arg,
+        ],
+    ] {
+        let error = run_failing(&args);
+        assert!(error.contains("no workspace"), "{args:?}: {error}");
+        assert!(!missing.exists(), "{args:?} created {}", missing.display());
+        assert!(!out.exists(), "{args:?} wrote {}", out.display());
+    }
+}

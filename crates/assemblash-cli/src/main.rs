@@ -2539,7 +2539,7 @@ fn run(command: Command) -> Result<(), CliError> {
                     settings,
                     scale,
                     &out,
-                    open_workspace(workspace)?,
+                    open_existing_workspace(workspace)?,
                     fonts,
                     &warnings,
                 );
@@ -3617,6 +3617,16 @@ fn open_workspace(explicit: Option<PathBuf>) -> Result<Workspace, CliError> {
     Ok(Workspace::open_or_create(root)?)
 }
 
+/// The workspace a read-only command reads. A missing workspace is an
+/// error, and nothing is created.
+fn open_existing_workspace(explicit: Option<PathBuf>) -> Result<Workspace, CliError> {
+    let root = match explicit {
+        Some(path) => path,
+        None => Workspace::default_dir()?,
+    };
+    Ok(Workspace::open_existing(root)?)
+}
+
 /// Refuses a font family the store does not have, and says what it does.
 ///
 /// The store is the authority on what a render may use, so naming something
@@ -3648,7 +3658,7 @@ fn run_page_set(command: PageSetCommand) -> Result<(), CliError> {
     use assemblash_core::page_sets::PageSetName;
     match command {
         PageSetCommand::List { workspace, json } => {
-            let names = open_workspace(workspace)?.page_sets()?;
+            let names = open_existing_workspace(workspace)?.page_sets()?;
             if json {
                 println!(
                     "{}",
@@ -3666,7 +3676,7 @@ fn run_page_set(command: PageSetCommand) -> Result<(), CliError> {
             workspace,
             json,
         } => {
-            let workspace = open_workspace(workspace)?;
+            let workspace = open_existing_workspace(workspace)?;
             let resolved = workspace.resolve_page_set(&PageSetName::new(name)?)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&resolved)?);

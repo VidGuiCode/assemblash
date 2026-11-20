@@ -97,6 +97,17 @@ pub enum WorkspaceError {
         path: PathBuf,
     },
 
+    /// A command that only reads was given a directory that holds no
+    /// workspace.
+    #[error(
+        "no workspace at {path}: it has no {PROJECTS_DIR} directory; \
+         check the path, or create the workspace with `assemblash workspace`"
+    )]
+    NoWorkspace {
+        /// The directory that was given.
+        path: PathBuf,
+    },
+
     /// A project of that name is already there.
     #[error("a project named {id:?} already exists")]
     ProjectExists {
@@ -333,6 +344,31 @@ impl Workspace {
             config
         };
 
+        Ok(Self { root, config })
+    }
+
+    /// Opens a workspace that is already there, and creates nothing.
+    ///
+    /// For a command that only reads. A directory without a `projects`
+    /// directory is refused with [`WorkspaceError::NoWorkspace`], so a
+    /// mistyped path does not become a new, empty workspace. A missing
+    /// `config.toml` reads as the default configuration and is not written.
+    pub fn open_existing(root: impl Into<PathBuf>) -> Result<Self, WorkspaceError> {
+        let root = root.into();
+        if !root.join(PROJECTS_DIR).is_dir() {
+            return Err(WorkspaceError::NoWorkspace { path: root });
+        }
+        let config_path = root.join(CONFIG_FILE);
+        let config = if config_path.is_file() {
+            let text = std::fs::read_to_string(&config_path)
+                .map_err(|e| WorkspaceError::io("reading", &config_path, e))?;
+            toml::from_str(&text).map_err(|source| WorkspaceError::MalformedConfig {
+                path: config_path.clone(),
+                source,
+            })?
+        } else {
+            Config::default()
+        };
         Ok(Self { root, config })
     }
 
