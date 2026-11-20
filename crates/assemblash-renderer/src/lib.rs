@@ -20,7 +20,9 @@ pub use assets::data_uris;
 pub use error::RenderError;
 pub use fonts::{FontFaceData, FontMetrics, FontSet};
 pub use install::{FontFetcher, HttpFetcher, InstallError, Manifest};
-pub use raster::{document_to_png, pixmap_to_png, svg_to_pixmap, LoadedFonts, PngMetadata};
+pub use raster::{
+    document_to_png, pixmap_to_png, pixmap_to_rgba, svg_to_pixmap, LoadedFonts, PngMetadata,
+};
 pub use store::{FontRecord, FontStore, FontStoreError};
 pub use svg::{doc_to_svg, layout_text, AssetHrefs, TextLayout};
 pub use text::{
