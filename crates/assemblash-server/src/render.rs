@@ -1352,6 +1352,23 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_variants_pdf_is_refused_and_writes_nothing() {
+        let directory = tempfile::tempdir().unwrap();
+        let error = render_variants_as(
+            &template(10.0, 10.0),
+            directory.path(),
+            &LoadedFonts::from_bytes([]),
+            1.0,
+            &[],
+            pdf(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), INVALID_PAGE_SELECTION);
+        assert!(!directory.path().join(EXPORTS_DIR).exists());
+    }
+
+    #[test]
     fn a_page_request_names_a_set_and_an_optional_selection() {
         let every = PageRequest::parse("deck").unwrap();
         assert_eq!(every.set.as_str(), "deck");
@@ -1505,6 +1522,16 @@ pub fn render_variants_as(
     // clear error rather than the same error N times.
     assemblash_core::templates::validate_slots(template).map_err(template_error)?;
     if settings.format() == ExportFormat::Pdf {
+        // A PDF with no page is not a file a reader can open, so an empty
+        // batch is refused like an empty page selection, and writes nothing.
+        if variants.is_empty() {
+            return Err(ApiError::new(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                INVALID_PAGE_SELECTION,
+                "a pdf batch has one page for each variant, and this batch has no variant;                  send at least one variant",
+            )
+            .with_details(serde_json::json!({ "variants": 0 })));
+        }
         check_pdf_page_count(variants.len())?;
     }
     let pdf_stem = match name {

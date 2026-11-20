@@ -225,6 +225,7 @@ A batch of variants takes `format` and `quality`, with the same rules.
 - `pdf` writes one PDF, `exports/<name>.pdf`, with one page for each variant in the order of the request. Without `name`, the file is `exports/variants.pdf`. Each variant in the result has its `page` number and the hash of the PDF.
 - `name` applies to `pdf` only. `name` with another format is refused with `variantsNameNeedsPdf`.
 - A variants PDF has no print geometry.
+- A `pdf` batch with no variant is refused with `invalidPageSelection`, and no file is written.
 
 ### Refusals
 
