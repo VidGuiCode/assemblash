@@ -68,6 +68,7 @@ The main commands:
 | `undo`, `redo`, `history` | Read or move through the history. |
 | `align`, `center`, `distribute`, `snap`, `bounds`, `overlaps` | Measure and place layers. |
 | `preset`, `slot`, `slots`, `variants` | Define and fill templates. |
+| `page-set list`, `page-set show` | List and resolve the page sets of a workspace. |
 | `font`, `token`, `workspace` | Manage local state. |
 | `serve`, `mcp` | Start an interface. |
 | `unlock`, `upgrade`, `styles` | Recover, update, and inspect the build. |
@@ -94,6 +95,7 @@ Important flags:
 | `--scale <N>` | Multiply the canvas size. `export` and `variants` only. |
 | `--timestamp <TIME>` | Record a timestamp in PNG metadata. |
 | `--warnings-json` | Print export warnings as JSON on standard output. |
+| `--color-space <SPACE>` | Name the colour space of `export`. Only `srgb` is accepted. |
 
 `render` and `export` take the output path positionally as well as through `--out`. Both print the written path and its `sha256:` digest as one tab-separated line. A script can compare two interfaces without hashing the file itself.
 
@@ -124,6 +126,7 @@ The main routes:
 | --- | --- |
 | `GET /api/version`, `GET /api/schema/document`, `GET /api/schema/operation`, `GET /api/capabilities` | Report the version, serve the JSON Schemas, and serve the capability listing. |
 | `GET, POST /api/projects` | List projects and create a project. |
+| `GET /api/page-sets`, `GET /api/page-sets/{name}` | List the page sets and resolve one set to its ordered pages. Read-only. |
 | `GET, DELETE /api/projects/{id}`, `POST /api/projects/{id}/rename` | Read a project summary, delete a project, and rename a project. |
 | `GET /api/projects/{id}/document` | Read the document. |
 | `GET /api/projects/{id}/validate` | Validate the document. |
@@ -166,7 +169,8 @@ An error has one envelope. The common codes are:
 - `400` for a malformed request.
 - `401` for a missing or wrong token.
 - `409` for `versionConflict` or `projectLocked`.
-- `422` for `operationRefused` or `renderFailed`.
+- `404` for `pageSetNotFound`.
+- `422` for `operationRefused`, `renderFailed`, `colorSpaceNotSupported`, or a page-set refusal such as `pageSetLoop`.
 
 ## MCP
 
@@ -208,6 +212,7 @@ The server has read tools for documents, layers, validation, history, and render
 | Tool family | Examples |
 | --- | --- |
 | Projects | `create_project`, `list_projects`, `rename_project`, `delete_project` |
+| Page sets | `list_page_sets`, `get_page_set` |
 | Layers | `add_text_layer`, `add_shape_layer`, `add_svg_layer`, `update_layer`, `set_layer_box`, `insert_layer_tree` |
 | Rendering and export | `render_document`, `export_document` |
 | Analysis | `find_overlaps`, `list_capabilities` |
@@ -224,11 +229,13 @@ In the `insert_layer_tree` input schema and the `get_document_state` output sche
 - `update_layer` sets `lineHeight` and the other text properties.
 - `add_shape_layer` takes `path` for a path and `markerStart` and `markerEnd` for a line. `update_layer` replaces the geometry with `shape` and `path`, and sets the line markers.
 
-`export_document` returns the same `warnings` array as the other interfaces. It refuses to replace a file of the same name unless the call passes `overwrite`.
+`export_document` returns the same `warnings` array as the other interfaces. It refuses to replace a file of the same name unless the call passes `overwrite`. It takes an optional `colorSpace`. Only `srgb` is accepted.
+
+`list_page_sets` and `get_page_set` only read. `get_page_set` returns the same JSON as `GET /api/page-sets/{name}`. A server started with `--project` has no page sets.
 
 A change to a text layer reports the same warnings immediately, in the `warnings` field of the result. An agent cannot see its own render. Thus the agent learns three things at once: the text does not fit its layer box, a word was split, or another layer covers the text.
 
-While an agent is connected, the editor shows "1 AI agent connected" in its status bar. The MCP server provides 53 tools.
+While an agent is connected, the editor shows "1 AI agent connected" in its status bar. The MCP server provides 55 tools.
 
 For agents that work in a checkout of this repository, the skill is `skills/assemblash/SKILL.md`. It explains the document-first workflow and the guarantees that an integration must keep.
 

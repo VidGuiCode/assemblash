@@ -55,6 +55,8 @@ The canvas is the fixed-size surface under the layers.
 | `height` | Positive finite number, in pixels. |
 | `background` | A solid colour, a gradient, or `null` for transparency. |
 | `backgroundImage` | An asset and a fit. The image is above the background colour and below every layer. |
+| `bleed` | Optional. Print bleed: `top`, `right`, `bottom`, and `left`, in pixels. |
+| `margins` | Optional. Print margins: `top`, `right`, `bottom`, and `left`, in pixels. |
 
 A canvas change does not scale the layers. The layers keep their sizes. The `anchor` sets the point of the old canvas that stays fixed. The anchor changes only the positions of the layers.
 
@@ -71,6 +73,72 @@ assemblash undo ./poster
 MCP has `update_canvas` with `width`, `height`, `background`, `anchor`, `expectedVersion`, and `dryRun`. HTTP takes the same fields in an `updateCanvas` operation. Omit `background` to keep it. Send `null` to remove it.
 
 The engine refuses a resize that moves locked, protected, or read-only content. Nothing changes.
+
+### Print geometry
+
+`bleed` and `margins` describe a document for print. The canvas is the trim box: the paper size after the cut.
+
+- `bleed` goes outward from each canvas edge. Content in the bleed is cut off after printing.
+- `margins` go inward from each canvas edge. The area inside the margins is the safe area.
+- A side that you do not write is `0`. Each side must be a finite number of `0` or more.
+- The two margins of one axis must be less than the canvas size on that axis.
+
+```json
+"canvas": {
+  "width": 1080,
+  "height": 1350,
+  "bleed": { "top": 9, "right": 9, "bottom": 9, "left": 9 },
+  "margins": { "top": 36, "right": 36, "bottom": 36, "left": 36 }
+}
+```
+
+A PNG or SVG export never reads `bleed` or `margins`. The exported bytes are the same with and without them. The fields enable the print-proofing warnings. See [Export warnings](paint-and-rendering.md#export-warnings).
+
+In this release, no operation sets `bleed` or `margins`. Add them to `document.json` while no process uses the project.
+
+## Page sets
+
+A page set is an ordered list of projects, for example the pages of a carousel or a deck. A page set is not a document field. Each set is one file in the workspace, beside `projects/`:
+
+```text
+workspace/
+├── projects/
+│   ├── cover/
+│   ├── inside/
+│   └── back/
+└── page-sets/
+    ├── deck.json
+    └── middle.json
+```
+
+The name of the set is the file name without `.json`. Each entry names one project or one other set:
+
+```json
+{
+  "pages": [
+    { "project": "cover" },
+    { "set": "middle" },
+    { "project": "back" }
+  ]
+}
+```
+
+A nested set adds its pages in the place where you name it. Thus `deck` above has the page `cover`, then the pages of `middle`, then the page `back`. Unknown keys stay in the file.
+
+The engine resolves a set to a flat, ordered page list. It never drops a page. It refuses these sets with a typed error:
+
+| Code | Cause |
+| --- | --- |
+| `pageSetLoop` | A set contains itself, directly or through other sets. The error names the loop, for example `a -> b -> a`. |
+| `pageSetMemberMissing` | An entry names a project or a set that does not exist. The error lists every missing member. |
+| `pageSetDuplicatePage` | One project is two pages of the set. A project can be one page only. |
+| `pageSetMalformed` | The file is not valid JSON of this shape, or an entry names zero or two members. |
+| `pageSetNotFound` | No set has this name. |
+| `invalidPageSetName` | The name is not one path segment. |
+
+A set with no pages is valid. It resolves to no pages.
+
+Read page sets with `assemblash page-set list` and `assemblash page-set show <name>`, with `GET /api/page-sets` and `GET /api/page-sets/{name}`, or with the MCP tools `list_page_sets` and `get_page_set`. No interface writes a page-set file. Write the file to make or change a set.
 
 ## Layer kinds
 
@@ -206,6 +274,8 @@ A document written by release 1.0 stays readable by every 1.x release. The schem
 - Releases 1.6.0 to 1.9.x keep a path shape or a path clip as written. They refuse to draw it and refuse an update that touches it.
 - Gradient paints need 1.11.0. See [Paint and rendering](paint-and-rendering.md).
 - Canvas editing needs 1.4.0 or newer. When a project history contains `updateCanvas`, 1.3.1 refuses `show` and `history`, also after undo. Continue to use the newer executable.
+- `canvas.bleed` and `canvas.margins` need 1.14.0 or newer. An older 1.x release keeps them as unknown canvas fields, and its exports are the same.
+- Page sets need 1.14.0 or newer. An older release does not read `page-sets/`. It opens each member project unchanged.
 - Unknown fields survive load and save at every level of the document. This includes the inside of `clip`, `crop`, `stroke`, `shape`, and the effect stack.
 - The stroke of a shape is painted inside its layer box. Thus the layer box is the visible size. A stroke narrower than 1 is a hairline on the edge and can extend half a pixel outside the layer box.
 

@@ -159,12 +159,28 @@ An export reports problems that did not stop it:
 | `textCoveredByLayer` | A later sibling layer covers the text. |
 | `cannotMeasureText` | The engine cannot measure a text layer. |
 | `lockReclaimed` | The server cleared a stale project lock before the export. HTTP and MCP only. |
+| `contentOutsideMargins` | Print proofing. Text leaves the safe area, or other content crosses a margin line and stops before the trim edge. |
+| `contentInsideBleed` | Print proofing. Content touches or crosses a trim edge and stops before the bleed edge. |
+| `assetBelowTargetResolution` | Print proofing. An image has fewer source pixels than the output pixels that it covers. |
 
 Each warning has a `code`, a `message`, and a `layerId` when a layer applies. A warning changes no pixel and no exit status.
 
 - The CLI prints one line for each warning on standard error.
 - With `--warnings-json`, the CLI prints the array as JSON on standard output.
 - The HTTP export response and the MCP `export_document` result contain a `warnings` array.
+
+### Print proofing
+
+The three print-proofing warnings come only from a document that has `canvas.bleed` or `canvas.margins`. A document without these fields gets the same warnings as before 1.14.0. See [Print geometry](document-model.md#print-geometry).
+
+- The engine checks each visible layer that is not a group. It uses the box of the layer on the canvas, with its rotation.
+- A shape or an image that reaches the trim edge is art that runs to the edge. `contentOutsideMargins` does not report it on that side. `contentInsideBleed` checks it.
+- Text does not run to the edge on purpose. Thus `contentOutsideMargins` reports text that is past the margin line, also when it is past the trim edge.
+- `assetBelowTargetResolution` uses the crop and the fit of the image, and the export scale. The target is one source pixel for each output pixel. The engine does not check an asset with no recorded size.
+
+### Colour space
+
+Every export is sRGB. Professional print colour management, CMYK included, is out of scope. An export request can name its colour space: `--color-space` on the CLI `export`, and `colorSpace` on the HTTP export and on the MCP `export_document`. The only accepted value is `srgb`. Any other value, `cmyk` included, is refused with `colorSpaceNotSupported`, and no file is written. The engine never converts colours to another colour space.
 
 ## The SVG asset text rule
 

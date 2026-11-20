@@ -366,6 +366,10 @@ Every export reports what it could not do well, with these codes:
 - `svgAssetTextWithoutFont` — still a defined code, but from 1.5.0 no longer
   produced for the case it was added for. That render refuses instead; see
   "SVG asset text" above.
+- `contentOutsideMargins`, `contentInsideBleed`, `assetBelowTargetResolution`
+  — print proofing (1.14.0 and newer). They come only from a document that
+  has `canvas.bleed` or `canvas.margins`. See "Page sets and print geometry"
+  below.
 
 Each warning is `{ code, message, layerId? }`. **A warning is not a failure.**
 It changes no pixel and no exit status; the file is written either way. Report
@@ -374,6 +378,24 @@ it and fix the document. Do not treat the export as failed.
 array. The CLI prints one line per warning on stderr as
 `code<TAB>layerId<TAB>message`; `--warnings-json` on `render` and `export`
 prints the whole array as JSON on stdout instead and leaves stderr quiet.
+
+## Page sets and print geometry (1.14.0 and newer)
+
+- A page set is an ordered list of projects in
+  `<workspace>/page-sets/<name>.json`:
+  `{"pages":[{"project":"cover"},{"set":"middle"},{"project":"back"}]}`.
+  A nested set adds its pages in place.
+- Read a set with `get_page_set` (MCP), `GET /api/page-sets/{name}`, or
+  `assemblash page-set show <name>`. The answer is the flat page list in
+  order. A loop (`pageSetLoop`), a missing member (`pageSetMemberMissing`,
+  all of them listed), or a project on two pages (`pageSetDuplicatePage`) is
+  refused. No page is dropped. No tool writes a set: write the file.
+- `canvas.bleed` and `canvas.margins` are optional `{top, right, bottom,
+  left}` distances in pixels. The canvas is the trim box. Bleed goes outward,
+  margins go inward. A PNG or SVG export does not change with them. In this
+  release no operation sets them.
+- Exports are sRGB only. `colorSpace: "cmyk"` on an export is refused with
+  `colorSpaceNotSupported`. Do not promise a CMYK file.
 
 ## MCP tools beyond the read/mutate set
 
@@ -406,7 +428,8 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   default pack (a network action only on this call), `remove_font_family`
   removes one family, and `delete_project` / `rename_project` manage
   projects — a project another process holds is refused `projectLocked`,
-  never deleted or renamed past. The tool surface holds 53 tools.
+  never deleted or renamed past. The tool surface holds 53 tools. 1.14.0
+  adds the read-only `list_page_sets` and `get_page_set`: 55 tools.
 - In the `insert_layer_tree` input schema and the `get_document_state` output
   schema, the `children` of a group is an untyped object. Each child has the
   same layer shape as an item of `layers`.
