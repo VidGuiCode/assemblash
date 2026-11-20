@@ -613,6 +613,11 @@ pub struct ExportArgs {
     /// lose work nobody asked to lose.
     #[serde(default)]
     pub overwrite: Option<bool>,
+    /// The colour space to write. `srgb` is the only one. Any other value,
+    /// `cmyk` included, is refused with `colorSpaceNotSupported`:
+    /// professional print colour management is out of scope.
+    #[serde(default)]
+    pub color_space: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -1362,6 +1367,8 @@ impl AssemblashMcp {
         &self,
         Parameters(args): Parameters<ExportArgs>,
     ) -> Result<Json<ExportResult>, ErrorData> {
+        assemblash_core::color_space::ColorSpace::from_request(args.color_space.as_deref())
+            .map_err(|error| to_error(error.into()))?;
         let project = self.resolve_project(args.project.clone());
         self.backend()
             .export(

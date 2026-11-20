@@ -2186,6 +2186,10 @@ struct ExportRequest {
     /// Multiplier on the canvas size.
     #[serde(default = "one")]
     scale: f32,
+    /// The colour space to write. `srgb` is the only one; any other value,
+    /// `cmyk` included, is refused with `colorSpaceNotSupported`.
+    #[serde(default)]
+    color_space: Option<String>,
 }
 
 /// Writes a PNG into the project's own `exports/` directory.
@@ -2194,6 +2198,8 @@ async fn export_document(
     Path(id): Path<String>,
     ApiJson(request): ApiJson<ExportRequest>,
 ) -> Result<Json<render::Exported>, ApiError> {
+    // Refused before anything is read or written.
+    assemblash_core::color_space::ColorSpace::from_request(request.color_space.as_deref())?;
     let project = id.clone();
     let (document, directory) = read_for_render(&state, id)?;
     let fonts = state.fonts_for(&document)?;

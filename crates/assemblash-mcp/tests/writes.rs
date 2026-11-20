@@ -1131,6 +1131,28 @@ async fn create_project_makes_an_openable_project() {
 /// a refusal (see `tests/svg_asset_text.rs`); an over-tall text layer is a
 /// warning that still fires, so the channel is still tested here.
 #[tokio::test]
+async fn export_document_refuses_cmyk() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let client = connect(&root).await;
+    client
+        .call_tool(call("open_project", args(json!({ "project": "poster" }))))
+        .await
+        .unwrap();
+    let refused = client
+        .call_tool(call(
+            "export_document",
+            args(json!({ "name": "cmyk", "colorSpace": "cmyk" })),
+        ))
+        .await;
+    let text = format!("{refused:?}");
+    assert!(text.contains("colorSpaceNotSupported"), "{text}");
+    assert!(!root.join("projects/poster/exports/cmyk.png").exists());
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
 async fn export_document_reports_content_outside_margins() {
     let scratch = tempfile::tempdir().unwrap();
     let root = scratch.path().join("workspace");

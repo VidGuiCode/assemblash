@@ -921,6 +921,38 @@ fn text_across_the_margin_warns_on_export_and_the_png_does_not_change() {
 }
 
 #[test]
+fn a_cmyk_export_is_refused_and_writes_nothing() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "20", "--height", "10"]);
+
+    let refused = workspace.path().join("cmyk.png");
+    let complaint = run_failing(&[
+        "export",
+        project_arg,
+        refused.to_str().unwrap(),
+        "--color-space",
+        "cmyk",
+    ]);
+    assert!(complaint.contains("colorSpaceNotSupported"), "{complaint}");
+    assert!(complaint.contains("out of scope"), "{complaint}");
+    assert!(!refused.exists(), "a refused export writes no file");
+
+    let plain = workspace.path().join("plain.png");
+    let srgb = workspace.path().join("srgb.png");
+    run(&["export", project_arg, plain.to_str().unwrap()]);
+    run(&[
+        "export",
+        project_arg,
+        srgb.to_str().unwrap(),
+        "--color-space",
+        "srgb",
+    ]);
+    assert_eq!(std::fs::read(plain).unwrap(), std::fs::read(srgb).unwrap());
+}
+
+#[test]
 fn overflowing_text_warns_on_stderr_and_still_exits_zero() {
     let workspace = tempfile::tempdir().unwrap();
     let project = workspace.path().join("p");

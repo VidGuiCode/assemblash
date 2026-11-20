@@ -11,6 +11,7 @@
 //! ```
 
 pub mod capabilities;
+pub mod color_space;
 pub mod document;
 pub mod error;
 pub mod history;

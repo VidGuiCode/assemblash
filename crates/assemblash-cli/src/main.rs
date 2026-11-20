@@ -303,6 +303,11 @@ enum Command {
         /// Multiplier on the canvas size.
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+        /// Colour space to write. `srgb` is the only one. Any other value,
+        /// `cmyk` included, is refused: professional print colour management
+        /// is out of scope.
+        #[arg(long, value_name = "SPACE")]
+        color_space: Option<String>,
         /// Timestamp to record in the PNG metadata. Omitted by default so
         /// that two exports of the same document are byte-identical.
         #[arg(long)]
@@ -1907,6 +1912,8 @@ enum CliError {
     Session(#[from] SessionError),
     #[error("{} ({})", .0, .0.code())]
     PageSet(#[from] assemblash_core::page_sets::PageSetError),
+    #[error("{0} (colorSpaceNotSupported)")]
+    ColorSpace(#[from] assemblash_core::color_space::ColorSpaceNotSupported),
     #[error(transparent)]
     FontStore(#[from] FontStoreError),
     #[error(transparent)]
@@ -2329,10 +2336,13 @@ fn run(command: Command) -> Result<(), CliError> {
             output,
             out,
             scale,
+            color_space,
             timestamp,
             warnings,
             fonts,
         } => {
+            // Refused before anything is read or written.
+            assemblash_core::color_space::ColorSpace::from_request(color_space.as_deref())?;
             let out = output.or(out).ok_or(CliError::NoOutput)?;
             let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assemblash_renderer::data_uris(&document, &project)?;

@@ -149,6 +149,17 @@ impl From<WorkspaceError> for ApiError {
     }
 }
 
+impl From<assemblash_core::color_space::ColorSpaceNotSupported> for ApiError {
+    fn from(error: assemblash_core::color_space::ColorSpaceNotSupported) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            assemblash_core::color_space::ColorSpaceNotSupported::CODE,
+            error.to_string(),
+        )
+        .with_details(json!({ "requested": error.requested, "supported": ["srgb"] }))
+    }
+}
+
 impl From<PageSetError> for ApiError {
     fn from(error: PageSetError) -> Self {
         let message = error.to_string();

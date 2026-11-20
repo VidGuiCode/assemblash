@@ -1479,6 +1479,33 @@ fn text_across_the_margin_exports_with_content_outside_margins() {
 }
 
 #[test]
+fn a_cmyk_export_is_refused_typed() {
+    let harness = Harness::start();
+    create_project(&harness, "poster");
+    let refused = http::post_json(
+        &harness.url("/api/projects/poster/export"),
+        &json!({ "name": "cmyk", "colorSpace": "cmyk" }),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.json());
+    assert_eq!(error_code(&refused), "colorSpaceNotSupported");
+    assert!(refused.json()["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("out of scope"));
+    assert!(!harness
+        .root()
+        .join(PROJECTS_DIR)
+        .join("poster/exports/cmyk.png")
+        .exists());
+
+    let accepted = http::post_json(
+        &harness.url("/api/projects/poster/export"),
+        &json!({ "name": "srgb", "colorSpace": "srgb" }),
+    );
+    assert_eq!(accepted.status, 200, "{}", accepted.json());
+}
+
+#[test]
 fn a_document_with_nothing_to_say_exports_an_empty_warnings_array() {
     let harness = Harness::start();
     install_test_font(&harness);
