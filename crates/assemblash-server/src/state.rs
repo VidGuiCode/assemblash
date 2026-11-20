@@ -9,7 +9,7 @@
 //! Another process holding the same project is a structured conflict, never a
 //! wait and never a second writer (PRD §10.3).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use assemblash_core::session::{Reclaim, Session};
@@ -23,6 +23,34 @@ use crate::error::ApiError;
 
 /// One open project, guarded so only one request mutates it at a time.
 pub type OpenProject = Arc<Mutex<Session>>;
+
+/// How long a close waits for running requests to let go of a project.
+const CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The projects this server holds, and the projects it is closing.
+///
+/// A project that is closing is in `closing` and not in `open`. Its session
+/// can still be alive: a running request holds its own handle. While the
+/// project is in `closing`, no request opens a second session for it and the
+/// lock recovery route refuses it. The close takes the project out of
+/// `closing` when the session is gone, or puts it back in `open` when the
+/// wait runs out. The registry never forgets a session that is still alive.
+#[derive(Debug, Default)]
+struct Registry {
+    open: BTreeMap<String, OpenProject>,
+    closing: BTreeSet<String>,
+}
+
+/// What [`AppState::close_and_wait`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloseOutcome {
+    /// The project was not open here.
+    NotOpen,
+    /// The session is gone and its lock file is removed.
+    Closed,
+    /// A request still holds the session. The project stays open.
+    InUse,
+}
 
 /// Where the install route gets its bytes.
 ///
@@ -70,7 +98,7 @@ struct Inner {
     index: Option<Mutex<assemblash_core::index::Index>>,
     /// Sessions opened so far. A `BTreeMap` rather than a hash map so that
     /// anything derived from iterating it is in the same order every run.
-    open: Mutex<BTreeMap<String, OpenProject>>,
+    open: Mutex<Registry>,
     /// Parsed font databases and measured glyph advances, keyed by the exact
     /// content-addressed font records used to build them.
     ///
@@ -200,7 +228,7 @@ impl AppState {
             inner: Arc::new(Inner {
                 workspace,
                 index,
-                open: Mutex::new(BTreeMap::new()),
+                open: Mutex::new(Registry::default()),
                 fonts: Mutex::new(BTreeMap::new()),
                 font_writes: Mutex::new(()),
                 hrefs: crate::render::HrefCache::default(),
@@ -412,11 +440,30 @@ impl AppState {
     ///
     /// The project must already exist: creating one is an explicit request, so
     /// that a typo in a URL cannot leave an empty directory behind.
+    ///
+    /// A project that is closing is waited for. When the close ends, the
+    /// request either gets the session back (the close ran out of time) or
+    /// opens the project again. It never opens a second session while the
+    /// first one is still alive.
     pub fn project(&self, id: &ProjectId, now: Option<u64>) -> Result<OpenProject, ApiError> {
-        let mut open = self.lock_registry()?;
-        if let Some(session) = open.get(id.as_str()) {
-            return Ok(Arc::clone(session));
-        }
+        // The close itself is bounded by CLOSE_TIMEOUT plus one second, so
+        // this wait ends after the close does.
+        let deadline =
+            std::time::Instant::now() + CLOSE_TIMEOUT * 2 + std::time::Duration::from_secs(1);
+        let mut open = loop {
+            let open = self.lock_registry()?;
+            if let Some(session) = open.open.get(id.as_str()) {
+                return Ok(Arc::clone(session));
+            }
+            if !open.closing.contains(id.as_str()) {
+                break open;
+            }
+            drop(open);
+            if std::time::Instant::now() >= deadline {
+                return Err(project_in_use(id));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
 
         let directory = self.inner.workspace.existing_project_dir(id)?;
         let session = if self.inner.reclaim_stale_locks {
@@ -434,7 +481,7 @@ impl AppState {
             Session::open(&directory, now)?
         };
         let session = Arc::new(Mutex::new(session));
-        open.insert(id.to_string(), Arc::clone(&session));
+        open.open.insert(id.to_string(), Arc::clone(&session));
         Ok(session)
     }
 
@@ -451,7 +498,7 @@ impl AppState {
     ) -> Result<(Document, std::path::PathBuf), ApiError> {
         let open = {
             let registry = self.lock_registry()?;
-            registry.get(id.as_str()).map(Arc::clone)
+            registry.open.get(id.as_str()).map(Arc::clone)
         };
         if let Some(project) = open {
             let session = lock_project(&project)?;
@@ -506,7 +553,8 @@ impl AppState {
     ///
     /// Holding the registry while comparing and removing prevents this server
     /// from opening the project between those two steps. A project this server
-    /// already owns is never unlocked through the recovery route.
+    /// already owns, or is closing, is never unlocked through the recovery
+    /// route: its session can still be alive.
     pub fn recover_project_lock(
         &self,
         id: &ProjectId,
@@ -514,7 +562,7 @@ impl AppState {
     ) -> Result<bool, ApiError> {
         let open = self.lock_registry()?;
         let directory = self.inner.workspace.existing_project_dir(id)?;
-        if open.contains_key(id.as_str()) {
+        if open.open.contains_key(id.as_str()) || open.closing.contains(id.as_str()) {
             return Err(assemblash_core::SessionError::Locked {
                 pid: std::process::id(),
                 path: directory.join(assemblash_core::session::LOCK_FILE),
@@ -539,7 +587,7 @@ impl AppState {
     /// consequence of ownership working out.
     pub fn close_all(&self) {
         if let Ok(mut open) = self.inner.open.lock() {
-            open.clear();
+            open.open.clear();
         }
     }
 
@@ -559,6 +607,7 @@ impl AppState {
         ) = match self.inner.open.lock() {
             Ok(mut open) => {
                 let locks = open
+                    .open
                     .keys()
                     .filter_map(|id| ProjectId::new(id).ok())
                     .map(|id| {
@@ -568,8 +617,8 @@ impl AppState {
                             .join(assemblash_core::session::LOCK_FILE)
                     })
                     .collect();
-                let handles = open.values().map(Arc::downgrade).collect();
-                open.clear();
+                let handles = open.open.values().map(Arc::downgrade).collect();
+                open.open.clear();
                 (handles, locks)
             }
             Err(_) => return false,
@@ -591,13 +640,54 @@ impl AppState {
     /// another program (the CLI, a second server) can write the project.
     /// Answers `false` when the project is not open here. A request that is
     /// still running keeps its own handle; this waits up to five seconds for
-    /// it, then refuses with `projectOpen` and leaves the project closed in
-    /// the registry, so the lock goes when that request ends. A later request
-    /// opens the project again, exactly as the first one did.
+    /// it. When that wait runs out, the project stays open in this server and
+    /// the close refuses with `projectOpen`. Nothing is left without an owner:
+    /// the session and its lock stay registered, and a later close can try
+    /// again. A request for the project during the wait waits for the close.
     pub fn close_project(&self, id: &ProjectId) -> Result<bool, ApiError> {
-        let open = self.lock_registry()?.remove(id.as_str());
-        let Some(session) = open else {
-            return Ok(false);
+        self.close_project_within(id, CLOSE_TIMEOUT)
+    }
+
+    /// [`AppState::close_project`] with an explicit wait, for tests.
+    #[doc(hidden)]
+    pub fn close_project_within(
+        &self,
+        id: &ProjectId,
+        timeout: std::time::Duration,
+    ) -> Result<bool, ApiError> {
+        match self.close_and_wait(id, timeout)? {
+            CloseOutcome::NotOpen => Ok(false),
+            CloseOutcome::Closed => Ok(true),
+            CloseOutcome::InUse => Err(project_in_use(id)),
+        }
+    }
+
+    /// Marks a project as closing, waits until its session is gone, and
+    /// takes the mark away again.
+    ///
+    /// When the wait runs out, the session goes back into the registry as an
+    /// open project. A second close of the same project waits for the first.
+    fn close_and_wait(
+        &self,
+        id: &ProjectId,
+        timeout: std::time::Duration,
+    ) -> Result<CloseOutcome, ApiError> {
+        let deadline = std::time::Instant::now() + timeout;
+        let session = loop {
+            let mut registry = self.lock_registry()?;
+            if registry.closing.contains(id.as_str()) {
+                drop(registry);
+                if std::time::Instant::now() >= deadline {
+                    return Ok(CloseOutcome::InUse);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                continue;
+            }
+            let Some(session) = registry.open.remove(id.as_str()) else {
+                return Ok(CloseOutcome::NotOpen);
+            };
+            registry.closing.insert(id.to_string());
+            break session;
         };
         let lock = self
             .inner
@@ -608,25 +698,47 @@ impl AppState {
         // would keep the session alive and the wait would always run out.
         let handle = Arc::downgrade(&session);
         drop(session);
-        let timeout = std::time::Duration::from_secs(5);
-        if !wait_until_dropped(&[handle], timeout) || !wait_until_locks_released(&[lock], timeout) {
-            return Err(ApiError::new(
-                axum::http::StatusCode::CONFLICT,
-                "projectOpen",
-                format!(
-                    "project {} is being used by a request in this server; it closes when that request has finished",
-                    id.as_str()
-                ),
-            )
-            .with_details(serde_json::json!({ "id": id.as_str() })));
+        let dropped = wait_until_dropped(
+            std::slice::from_ref(&handle),
+            deadline.saturating_duration_since(std::time::Instant::now()),
+        );
+        let released = dropped
+            && wait_until_locks_released(
+                std::slice::from_ref(&lock),
+                deadline.saturating_duration_since(std::time::Instant::now()),
+            );
+
+        // The mark goes even when the registry is poisoned: a request that
+        // waits for it must not wait for a close that has ended.
+        let mut registry = match self.inner.open.lock() {
+            Ok(registry) => registry,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        registry.closing.remove(id.as_str());
+        if released {
+            return Ok(CloseOutcome::Closed);
         }
-        Ok(true)
+        if let Some(session) = handle.upgrade() {
+            // A request still holds the session. It stays this server's
+            // project, so the server stays its single writer.
+            registry.open.insert(id.to_string(), session);
+            return Ok(CloseOutcome::InUse);
+        }
+        drop(registry);
+        // The last handle went after the wait ran out. Its drop is what
+        // removes the lock file, so give that one short moment.
+        if wait_until_locks_released(&[lock], std::time::Duration::from_secs(1)) {
+            Ok(CloseOutcome::Closed)
+        } else {
+            Ok(CloseOutcome::InUse)
+        }
     }
 
     /// Registers a session for a project that has just been created.
     pub fn adopt(&self, id: &ProjectId, session: Session) -> Result<OpenProject, ApiError> {
         let session = Arc::new(Mutex::new(session));
         self.lock_registry()?
+            .open
             .insert(id.to_string(), Arc::clone(&session));
         Ok(session)
     }
@@ -689,26 +801,17 @@ impl AppState {
     /// the wait below refuses instead of racing it.
     fn closed_project_dir(&self, id: &ProjectId) -> Result<std::path::PathBuf, ApiError> {
         let directory = self.inner.workspace.existing_project_dir(id)?;
-        let open = self.lock_registry()?.remove(id.as_str());
-        if let Some(session) = open {
-            // Downgraded *before* the strong handle is dropped: the local
-            // binding would keep the strong count above zero and the wait
-            // below would always run out.
-            let handle = std::sync::Arc::downgrade(&session);
-            drop(session);
-            let wait = wait_until_dropped(&[handle], std::time::Duration::from_secs(5));
-            if !wait || directory.join(assemblash_core::session::LOCK_FILE).exists() {
-                return Err(ApiError::new(
-                    axum::http::StatusCode::CONFLICT,
-                    "projectOpen",
-                    format!(
-                        "project {} is being used by a request in this server; try again \
-                         when it has finished",
-                        id.as_str()
-                    ),
-                )
-                .with_details(serde_json::json!({ "id": id.as_str() })));
-            }
+        if self.close_and_wait(id, CLOSE_TIMEOUT)? == CloseOutcome::InUse {
+            return Err(ApiError::new(
+                axum::http::StatusCode::CONFLICT,
+                "projectOpen",
+                format!(
+                    "project {} is being used by a request in this server; try again \
+                     when it has finished",
+                    id.as_str()
+                ),
+            )
+            .with_details(serde_json::json!({ "id": id.as_str() })));
         }
         if directory.join(assemblash_core::session::LOCK_FILE).exists() {
             return Err(ApiError::new(
@@ -724,9 +827,7 @@ impl AppState {
         Ok(directory)
     }
 
-    fn lock_registry(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, OpenProject>>, ApiError> {
+    fn lock_registry(&self) -> Result<std::sync::MutexGuard<'_, Registry>, ApiError> {
         self.inner.open.lock().map_err(|_| {
             ApiError::new(
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -735,6 +836,19 @@ impl AppState {
             )
         })
     }
+}
+
+/// The refusal for a project that a running request in this server holds.
+fn project_in_use(id: &ProjectId) -> ApiError {
+    ApiError::new(
+        axum::http::StatusCode::CONFLICT,
+        "projectOpen",
+        format!(
+            "project {} is being used by a request in this server; it closes when that request has finished",
+            id.as_str()
+        ),
+    )
+    .with_details(serde_json::json!({ "id": id.as_str() }))
 }
 
 /// Waits until nothing holds any of these sessions any more.

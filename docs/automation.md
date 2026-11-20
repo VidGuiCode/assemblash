@@ -160,7 +160,7 @@ The main routes:
 | `GET /api/projects/{id}/presets`, `.../slots` | List presets and slots. |
 | `POST /api/projects/{id}/variants` | Render variant batches. |
 | `POST /api/projects/{id}/recover-lock` | Recover a project lock. |
-| `POST /api/projects/{id}/close` | Close one project and release its lock. The next request opens it again. |
+| `POST /api/projects/{id}/close` | Close one project and release its lock. The next request opens it again. If a running request holds the project for more than 5 seconds, the route answers `409 projectOpen` and the project stays open. |
 | `GET, PUT /api/open-tabs` | Read and write the open project tabs of the reference interface. |
 | `GET, POST /api/fonts`, `POST /api/fonts/install`, `DELETE /api/fonts/{family}` | List the font store, import a font, install a family, and remove a family. |
 | `GET /api/update-status`, `POST /api/update-consent`, `GET /api/agent-sessions`, `POST /api/shutdown` | Read and set the update choice, count the connected agents, and stop the server. |

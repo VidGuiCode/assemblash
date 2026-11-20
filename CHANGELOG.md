@@ -39,6 +39,7 @@ page-set exports.
 - The open tabs and their order persist in `open-tabs.json` in the workspace, and the next start restores them.
 - HTTP: new additive route `GET` and `PUT /api/open-tabs`. It reads and writes the open-tab list in `open-tabs.json` in the workspace.
 - HTTP: new additive route `POST /api/projects/{id}/close`. It closes one project and releases its lock. The next request opens the project again.
+- If a running request holds the project for more than 5 seconds, the close route answers `409 projectOpen`. The project then stays open in the server, with its lock, and a later close can try again. A request for a project that is closing waits for the close. The lock-recovery route refuses a project that is closing.
 - The two routes are interface routes only. No document field, operation, or MCP tool changes. `schemaVersion` stays 1.
 - The lock-recovery prompt names the tab it belongs to.
 - EN, FR, and DE strings for the tab strip.

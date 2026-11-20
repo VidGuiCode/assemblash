@@ -108,6 +108,13 @@ struct ProjectLock {
     /// False when the session was opened without taking the lock, so dropping
     /// it must not delete someone else's file.
     owned: bool,
+    /// The exact bytes this lock wrote.
+    ///
+    /// Dropping the lock removes the file only while it still holds these
+    /// bytes. A person can clear a lock and another owner can take the
+    /// project while this session still lives. That new claim is not this
+    /// session's to remove.
+    contents: String,
 }
 
 impl ProjectLock {
@@ -130,7 +137,11 @@ impl ProjectLock {
             Ok(mut file) => {
                 use std::io::Write as _;
                 let _ = file.write_all(contents.as_bytes());
-                Ok(Self { path, owned: true })
+                Ok(Self {
+                    path,
+                    owned: true,
+                    contents,
+                })
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let pid = std::fs::read_to_string(&path)
@@ -151,13 +162,22 @@ impl ProjectLock {
         Self {
             path: PathBuf::new(),
             owned: false,
+            contents: String::new(),
         }
     }
 }
 
 impl Drop for ProjectLock {
     fn drop(&mut self) {
-        if self.owned {
+        if !self.owned {
+            return;
+        }
+        // Compare, then remove. Another owner can only write a new lock after
+        // the file is gone, so a file that holds this lock's bytes is this
+        // lock's file.
+        let still_ours =
+            std::fs::read_to_string(&self.path).is_ok_and(|text| text == self.contents);
+        if still_ours {
             let _ = std::fs::remove_file(&self.path);
         }
     }
