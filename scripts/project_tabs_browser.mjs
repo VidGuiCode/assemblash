@@ -147,6 +147,31 @@ async function api(path, init) {
 const version = async (id) => (await api(`/api/projects/${id}/document`)).version;
 const lockFile = (id) => join(workspace, "projects", id, ".assemblash-lock");
 
+/**
+ * Waits until `read()` gives `expected`, compared as deep-equal JSON values.
+ *
+ * Every read after a click goes through this. The page applies a click before
+ * it paints the next frame, but not always before the next protocol command
+ * reads the page. A bounded wait reads the state that a person sees. It fails
+ * with the last value it saw.
+ */
+async function expectState(read, expected, what, ms = 5000) {
+  const end = Date.now() + ms;
+  let last;
+  for (;;) {
+    last = await read();
+    try {
+      assert.deepEqual(last, expected);
+      return last;
+    } catch {
+      if (Date.now() >= end) {
+        throw new Error(`Timeout after ${ms} ms: ${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(last)}`);
+      }
+    }
+    await pause(50);
+  }
+}
+
 let page;
 const tabOrder = () => page.evaluate(`[...document.querySelectorAll("[data-tab-id]")].map((tab) => tab.dataset.tabId)`);
 const activeTab = () => page.evaluate(`document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tabId ?? null`);
@@ -178,9 +203,9 @@ try {
   // --- one tab for each project --------------------------------------------
   await openFromPicker("alpha");
   await openFromPicker("beta");
-  assert.deepEqual(await tabOrder(), ["alpha", "beta"]);
+  await expectState(tabOrder, ["alpha", "beta"], "one tab for each project");
   await openFromPicker("alpha");
-  assert.deepEqual(await tabOrder(), ["alpha", "beta"], "a second open focuses the existing tab");
+  await expectState(tabOrder, ["alpha", "beta"], "a second open focuses the existing tab");
   await switchTo("beta");
   result.checks.secondOpenFocuses = true;
 
@@ -211,6 +236,7 @@ try {
   await page.evaluate(`document.querySelector("#canvas").focus({ preventScroll: true })`);
   const betaLayer = (await api("/api/projects/beta/document")).layers[0].id;
   await page.click(`#layers .layer[data-id="${betaLayer}"]`);
+  await page.waitFor(`document.querySelector('#layers .layer.selected[data-id="${betaLayer}"]')`, "the beta layer selected");
   await page.evaluate(`document.querySelector("#canvas").focus({ preventScroll: true })`);
   await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
@@ -236,7 +262,7 @@ try {
 
   // Reorder from the keyboard, then relaunch: the same tabs in the same order.
   await openFromPicker("alpha");
-  assert.deepEqual(await tabOrder(), ["beta", "gamma", "alpha"]);
+  await expectState(tabOrder, ["beta", "gamma", "alpha"], "alpha opens at the end");
   await page.evaluate(`document.querySelector('[data-tab-id="alpha"]').focus()`);
   await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37, modifiers: 9 });
   await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37, modifiers: 9 });
@@ -253,8 +279,7 @@ try {
   browser = await startBrowser(base);
   page = browser.page;
   await page.waitFor(`document.querySelectorAll("[data-tab-id]").length === 3`, "restored tabs");
-  const after = { order: await tabOrder(), active: await activeTab() };
-  assert.deepEqual(after, before, "a relaunch restores the same tabs in the same order");
+  const after = await expectState(async () => ({ order: await tabOrder(), active: await activeTab() }), before, "a relaunch restores the same tabs in the same order", 15000);
   await page.waitFor(`document.querySelector("#canvas-image")?.naturalWidth > 0`, "the restored active tab renders");
   result.checks.relaunchRestores = true;
   result.restored = after;

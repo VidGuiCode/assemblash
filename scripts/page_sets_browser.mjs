@@ -30,6 +30,33 @@ const env = { ...process.env };
 for (const key of ["ASSEMBLASH_WORKSPACE", "ASSEMBLASH_FONT_STORE", "ASSEMBLASH_BIND", "ASSEMBLASH_TOKEN"]) delete env[key];
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 
+/**
+ * Waits until `read()` gives `expected`, compared as deep-equal JSON values.
+ *
+ * Every read after a click goes through this. The page applies a click before
+ * it paints the next frame, but not always before the next protocol command
+ * reads the page. A bounded wait reads the state that a person sees. It fails
+ * with the last value it saw.
+ */
+async function expectState(read, expected, what, ms = 5000) {
+  const end = Date.now() + ms;
+  let last;
+  for (;;) {
+    last = await read();
+    try {
+      assert.deepEqual(last, expected);
+      return last;
+    } catch {
+      if (Date.now() >= end) {
+        throw new Error(`Timeout after ${ms} ms: ${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(last)}`);
+      }
+    }
+    await pause(50);
+  }
+}
+/** Waits two animation frames: by then the page has applied what came before. */
+const settle = () => page.evaluate(`new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))))`);
+
 function cliOk(...args) {
   const run = spawnSync(binary, args, { env, encoding: "utf8", windowsHide: true, timeout: 30000 });
   assert.equal(run.status, 0, `${args[0]}: ${run.stderr}`);
@@ -151,21 +178,21 @@ try {
   await openSet("deck");
   await page.waitFor(`document.querySelectorAll("[data-tab-id]").length === 3`, "three tabs for the deck");
   await page.waitFor(`document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tabId === "cover"`, "page 1 visible");
-  assert.deepEqual(await tabOrder(), ["cover", "middle", "back"], "manifest order");
-  assert.deepEqual(await pageNumbers(), [["cover", "deck", 1], ["middle", "deck", 2], ["back", "deck", 3]]);
-  assert.equal(await page.evaluate(`document.querySelectorAll("[data-group-label]").length`), 1, "one group label for the run");
+  await expectState(tabOrder, ["cover", "middle", "back"], "manifest order");
+  await expectState(pageNumbers, [["cover", "deck", 1], ["middle", "deck", 2], ["back", "deck", 3]], "page numbers of the deck");
+  await expectState(() => page.evaluate(`document.querySelectorAll("[data-group-label]").length`), 1, "one group label for the run");
   await page.waitFor(`[...document.querySelectorAll("[data-tab-thumbnail]")].filter((image) => image.complete && image.naturalWidth > 0).length === 3`, "a thumbnail on each page tab", 15000);
   await page.waitFor(`document.querySelector("#canvas-image")?.naturalWidth > 0`, "page 1 preview");
   result.checks.threePageSetOpensThreeTabsInOrder = true;
 
   // --- a page that is already open joins the run and is not opened twice ------
   await openProject("notes");
-  assert.deepEqual(await tabOrder(), ["cover", "middle", "back", "notes"]);
+  await expectState(tabOrder, ["cover", "middle", "back", "notes"], "notes opens after the deck");
   await openSet("reprise");
   await page.waitFor(`document.querySelectorAll("[data-tab-id]").length === 5`, "one new tab for the reprise");
   await page.waitFor(`document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tabId === "extra"`, "reprise page 1 visible");
-  assert.deepEqual(await tabOrder(), ["cover", "middle", "back", "extra", "notes"], "the open page moved into the run");
-  assert.deepEqual((await pageNumbers()).slice(3), [["extra", "reprise", 1], ["notes", "reprise", 2]]);
+  await expectState(tabOrder, ["cover", "middle", "back", "extra", "notes"], "the open page moved into the run");
+  await expectState(async () => (await pageNumbers()).slice(3), [["extra", "reprise", 1], ["notes", "reprise", 2]], "page numbers of the reprise");
   result.checks.openPageJoinsRunNotTwice = true;
   await page.waitFor(`[...document.querySelectorAll("[data-tab-thumbnail]")].filter((image) => image.complete && image.naturalWidth > 0).length === 5`, "a thumbnail on each page tab", 15000);
   const strip = await page.send("Page.captureScreenshot", { format: "png" });
@@ -175,11 +202,11 @@ try {
   const before = await tabOrder();
   await openSet("loopy");
   await page.waitFor(`document.querySelector("#status")?.dataset.kind === "error" && document.querySelector("#status").textContent.includes("contains itself")`, "the loop message");
-  assert.match((await status()).text, /^Page set loopy contains itself: loopy → loopy-inner → loopy\.$/);
+  await expectState(async () => (await status()).text, "Page set loopy contains itself: loopy → loopy-inner → loopy.", "the loop message text");
   assert.deepEqual(await tabOrder(), before, "a loop opens no tab");
   await openSet("holey");
   await page.waitFor(`document.querySelector("#status")?.textContent.includes("do not exist")`, "the missing-page message");
-  assert.equal((await status()).text, "Page set holey names pages that do not exist: ghost.");
+  await expectState(async () => (await status()).text, "Page set holey names pages that do not exist: ghost.", "the missing-page message text");
   assert.deepEqual(await tabOrder(), before, "a missing page opens no tab");
   // The lock file is no evidence here: the start page's recent-project
   // thumbnails already open every project on the server.
@@ -190,18 +217,20 @@ try {
   // --- the dialog shows each control only with its format --------------------
   await switchTo("cover");
   await openExport();
-  assert.deepEqual(await dialogState(), { quality: false, print: false, pages: false, confirm: "Export PNG" });
+  await expectState(dialogState, { quality: false, print: false, pages: false, confirm: "Export PNG" }, "the PNG controls");
   await page.click('#export-formats [data-format="jpeg"]');
-  assert.deepEqual(await dialogState(), { quality: true, print: false, pages: false, confirm: "Export JPEG" });
+  await expectState(dialogState, { quality: true, print: false, pages: false, confirm: "Export JPEG" }, "the JPEG controls");
   await page.click('#export-formats [data-format="pdf"]');
-  assert.deepEqual(await dialogState(), { quality: false, print: true, pages: true, confirm: "Export PDF" });
+  await expectState(dialogState, { quality: false, print: true, pages: true, confirm: "Export PDF" }, "the PDF controls");
   result.checks.controlsFollowTheFormat = true;
 
   // --- one PDF of the whole set ----------------------------------------------
   await page.click('#export-pages [data-pages="set"]');
+  await page.waitFor(`document.querySelector('#export-pages [data-pages="set"]')?.getAttribute("aria-checked") === "true"`, "the whole set selected");
   await page.click("#export-print");
   await page.waitFor(`document.querySelector("#export-print").checked`, "print marks on");
   await setName("deck-print");
+  await settle();
   await page.click("#export-confirm");
   await page.waitFor(`!document.querySelector("#export-download").hidden`, "the PDF download", 60000);
   const pdfSummary = await page.evaluate(`document.querySelector("#export-summary").textContent`);
@@ -218,6 +247,7 @@ try {
   // --- a refused export: the set changed into a loop after it opened ---------
   writeSet("deck", [...deck, { set: "deck" }]);
   await setName("deck-loop");
+  await settle();
   await page.click("#export-confirm");
   await page.waitFor(`document.querySelector("#export-error")`, "the refusal in the dialog", 30000);
   const refusal = await page.evaluate(`({ code: document.querySelector("#export-error").dataset.errorCode, text: document.querySelector("#export-error").textContent, download: !document.querySelector("#export-download").hidden })`);
@@ -229,6 +259,7 @@ try {
 
   // --- a JPEG at a chosen quality --------------------------------------------
   await page.click('#export-formats [data-format="jpeg"]');
+  await page.waitFor(`document.querySelector("#export-quality")`, "the quality control for JPEG");
   await page.evaluate(`(() => {
     const input = document.querySelector("#export-quality");
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "55");
@@ -236,7 +267,9 @@ try {
   })()`);
   await page.waitFor(`document.querySelector("#export-quality").value === "55"`, "quality 55");
   await page.click('#export-options [data-resolution="original"]');
+  await page.waitFor(`document.querySelector('#export-options [data-resolution="original"]')?.getAttribute("aria-checked") === "true"`, "the original resolution selected");
   await setName("cover-q55");
+  await settle();
   await page.click("#export-confirm");
   await page.waitFor(`!document.querySelector("#export-download").hidden`, "the JPEG download", 30000);
   assert.equal(await page.evaluate(`document.querySelector("#export-download").download`), "cover-q55.jpg");
