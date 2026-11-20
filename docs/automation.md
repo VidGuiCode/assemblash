@@ -54,7 +54,7 @@ A launch without arguments creates the workspace, starts the server, and opens t
 Builds need Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.13.1 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.14.0 assemblash-cli
 ```
 
 The main commands:
@@ -64,10 +64,11 @@ The main commands:
 | `new`, `canvas set` | Create a project and change the canvas. |
 | `add-text`, `add-rect`, `add-ellipse`, `add-line`, `add-path`, `add-image`, `add-svg` | Add a layer. |
 | `set`, `style` | Change layer properties, the blend mode, and the effect stack. |
-| `show`, `render`, `export` | Print or write the document, SVG, or PNG. |
+| `show`, `render`, `export` | Print or write the document, SVG, PNG, PDF, JPEG, or WebP. |
 | `undo`, `redo`, `history` | Read or move through the history. |
 | `align`, `center`, `distribute`, `snap`, `bounds`, `overlaps` | Measure and place layers. |
 | `preset`, `slot`, `slots`, `variants` | Define and fill templates. |
+| `page-set list`, `page-set show` | List and resolve the page sets of a workspace. |
 | `font`, `token`, `workspace` | Manage local state. |
 | `serve`, `mcp` | Start an interface. |
 | `unlock`, `upgrade`, `styles` | Recover, update, and inspect the build. |
@@ -92,8 +93,15 @@ Important flags:
 | `--font-store <DIR>` | Use this font store. |
 | `--font <FILE>`, `--font-dir <DIR>` | Load font files directly on `render` and `export`. |
 | `--scale <N>` | Multiply the canvas size. `export` and `variants` only. |
-| `--timestamp <TIME>` | Record a timestamp in PNG metadata. |
+| `--timestamp <TIME>` | Record a timestamp in PNG metadata. PNG only. |
 | `--warnings-json` | Print export warnings as JSON on standard output. |
+| `--color-space <SPACE>` | Name the colour space of `export`. Only `srgb` is accepted. |
+| `--format <FORMAT>` | Write `png` (the default), `svg`, `pdf`, `jpeg` (or `jpg`), or `webp`. `export` and `variants` only. |
+| `--quality <N>` | JPEG quality, 1 to 100. The default is 90. `export` and `variants` only. |
+| `--pages <SET[:PAGES]>` | Export pages of a page set, for example `deck:1-3,5`. `export` only. |
+| `--workspace <DIR>` | The workspace that holds the page set. `export --pages` only. |
+| `--print` | Add trim and bleed boxes and crop marks to a PDF. `export` only. |
+| `--name <NAME>` | The file stem of a variants PDF. `variants --format pdf` only. |
 
 `render` and `export` take the output path positionally as well as through `--out`. Both print the written path and its `sha256:` digest as one tab-separated line. A script can compare two interfaces without hashing the file itself.
 
@@ -104,6 +112,18 @@ assemblash add-text ./poster --text "Hello" --font "Noto Sans" --size 64 --x 40 
 assemblash add-rect ./poster --x 40 --y 200 --width 240 --height 96 --fill '#1d1d1f' --corner-radius 12
 assemblash export ./poster --out poster.png --font-store ./assemblash-fonts
 ```
+
+`--format` selects another export format. With `--pages`, the pages come from a page set of the workspace, and the one path is the output file:
+
+```sh
+assemblash export ./poster poster.jpg --format jpeg --quality 80 --font-store ./assemblash-fonts
+assemblash export ./poster poster.webp --format webp --font-store ./assemblash-fonts
+assemblash export ./poster poster.pdf --format pdf --print --font-store ./assemblash-fonts
+assemblash export --workspace ./workspace --pages deck --format pdf deck.pdf
+assemblash export --workspace ./workspace --pages deck:2 --format png page-2.png
+```
+
+Without a font flag, `export --pages` uses the font store of the workspace. See [Export formats](paint-and-rendering.md#export-formats) for the rules of each format.
 
 `add-ellipse` and `add-line` take the same layer box flags. The layer box of a line is the line. Thus `--width` is its length and `--rotation` its angle.
 
@@ -124,6 +144,7 @@ The main routes:
 | --- | --- |
 | `GET /api/version`, `GET /api/schema/document`, `GET /api/schema/operation`, `GET /api/capabilities` | Report the version, serve the JSON Schemas, and serve the capability listing. |
 | `GET, POST /api/projects` | List projects and create a project. |
+| `GET /api/page-sets`, `GET /api/page-sets/{name}` | List the page sets and resolve one set to its ordered pages. Read-only. |
 | `GET, DELETE /api/projects/{id}`, `POST /api/projects/{id}/rename` | Read a project summary, delete a project, and rename a project. |
 | `GET /api/projects/{id}/document` | Read the document. |
 | `GET /api/projects/{id}/validate` | Validate the document. |
@@ -139,6 +160,8 @@ The main routes:
 | `GET /api/projects/{id}/presets`, `.../slots` | List presets and slots. |
 | `POST /api/projects/{id}/variants` | Render variant batches. |
 | `POST /api/projects/{id}/recover-lock` | Recover a project lock. |
+| `POST /api/projects/{id}/close` | Close one project and release its lock. The next request opens it again. If a running request holds the project for more than 5 seconds, the route answers `409 projectOpen` and the project stays open. |
+| `GET, PUT /api/open-tabs` | Read and write the open project tabs of the reference interface. |
 | `GET, POST /api/fonts`, `POST /api/fonts/install`, `DELETE /api/fonts/{family}` | List the font store, import a font, install a family, and remove a family. |
 | `GET /api/update-status`, `POST /api/update-consent`, `GET /api/agent-sessions`, `POST /api/shutdown` | Read and set the update choice, count the connected agents, and stop the server. |
 
@@ -155,6 +178,37 @@ An operation request has this shape:
 
 The response has `version`, `dryRun`, an optional `transaction` ID, the outcome, optional `warnings`, and an optional `document`. Add `?includeDocument=true` to an operation request to receive the document as `GET .../document` serves it. A dry run returns no transaction and no warnings.
 
+An export request has this shape. Every field is optional:
+
+```json
+{
+  "name": "deck",
+  "scale": 1,
+  "colorSpace": "srgb",
+  "format": "pdf",
+  "pages": "deck:1-3,5",
+  "print": false
+}
+```
+
+- `format` is `png` (the default), `svg`, `pdf`, `jpeg` (or `jpg`), or `webp`.
+- `quality` is the JPEG quality, 1 to 100. The default is 90.
+- `pages` selects pages of a page set. The file goes to the `exports/` directory of the project in the URL.
+- `print` adds trim and bleed boxes and crop marks. PDF only.
+
+The response has `path`, `bytes`, `width`, `height`, and `warnings`. A page-set export also has `pages`, the number of pages. `width` and `height` are the pixel size of the first page.
+
+```sh
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"format":"pdf","pages":"deck","name":"deck"}' \
+  http://127.0.0.1:8787/api/projects/cover/export
+curl -o deck.pdf http://127.0.0.1:8787/api/projects/cover/exports/deck.pdf
+```
+
+`GET .../exports/{file}` serves the `.png`, `.svg`, `.pdf`, `.jpg`, and `.webp` files of the `exports/` directory, with the media type of the format. A JPEG export is always `<name>.jpg`.
+
+`POST .../variants` takes `variants`, `scale`, `format`, `quality`, and `name`. A `pdf` batch writes one PDF with one page for each variant. See [Variants](paint-and-rendering.md#variants).
+
 An error has one envelope. The common codes are:
 
 ```json
@@ -164,7 +218,8 @@ An error has one envelope. The common codes are:
 - `400` for a malformed request.
 - `401` for a missing or wrong token.
 - `409` for `versionConflict` or `projectLocked`.
-- `422` for `operationRefused` or `renderFailed`.
+- `404` for `pageSetNotFound`.
+- `422` for `operationRefused`, `renderFailed`, `colorSpaceNotSupported`, an export refusal such as `lossyWebpNotSupported`, or a page-set refusal such as `pageSetLoop`. See [Refusals](paint-and-rendering.md#refusals).
 
 ## MCP
 
@@ -206,10 +261,13 @@ The server has read tools for documents, layers, validation, history, and render
 | Tool family | Examples |
 | --- | --- |
 | Projects | `create_project`, `list_projects`, `rename_project`, `delete_project` |
+| Page sets | `list_page_sets`, `get_page_set` |
 | Layers | `add_text_layer`, `add_shape_layer`, `add_svg_layer`, `update_layer`, `set_layer_box`, `insert_layer_tree` |
 | Rendering and export | `render_document`, `export_document` |
 | Analysis | `find_overlaps`, `list_capabilities` |
 | Fonts | `list_fonts`, `install_font_pack`, `remove_font_family` |
+
+In the `insert_layer_tree` input schema and the `get_document_state` output schema, the `children` of a group is an untyped object. Each child has the same layer shape as an item of `layers`. A group can hold more groups. This prevents a schema that refers to itself, which some MCP clients refuse.
 
 `create_project` creates a project. These tools have behaviour that their names do not tell:
 
@@ -220,11 +278,19 @@ The server has read tools for documents, layers, validation, history, and render
 - `update_layer` sets `lineHeight` and the other text properties.
 - `add_shape_layer` takes `path` for a path and `markerStart` and `markerEnd` for a line. `update_layer` replaces the geometry with `shape` and `path`, and sets the line markers.
 
-`export_document` returns the same `warnings` array as the other interfaces. It refuses to replace a file of the same name unless the call passes `overwrite`.
+`export_document` returns the same `warnings` array as the other interfaces. It refuses to replace a file of the same name unless the call passes `overwrite`. It takes an optional `colorSpace`. Only `srgb` is accepted.
+
+`export_document` also takes `format`, `quality`, `pages`, and `print`, with the same rules as HTTP. A page-set export writes to the exports of `project`. That project does not have to be a page of the set. `render_variants` takes `format`, `quality`, and `name`.
+
+```json
+{ "project": "cover", "format": "pdf", "pages": "deck:1,3", "name": "deck" }
+```
+
+`list_page_sets` and `get_page_set` only read. `get_page_set` returns the same JSON as `GET /api/page-sets/{name}`. A server started with `--project` has no page sets.
 
 A change to a text layer reports the same warnings immediately, in the `warnings` field of the result. An agent cannot see its own render. Thus the agent learns three things at once: the text does not fit its layer box, a word was split, or another layer covers the text.
 
-While an agent is connected, the editor shows "1 AI agent connected" in its status bar. The MCP server provides 53 tools.
+While an agent is connected, the editor shows "1 AI agent connected" in its status bar. The MCP server provides 55 tools.
 
 For agents that work in a checkout of this repository, the skill is `skills/assemblash/SKILL.md`. It explains the document-first workflow and the guarantees that an integration must keep.
 

@@ -548,12 +548,27 @@ pub struct UpdateCanvasArgs {
     pub clear_background_image: bool,
     #[serde(default)]
     pub anchor: Option<CanvasAnchor>,
+    /// Print bleed: `top`, `right`, `bottom`, `left` in pixels, outward from
+    /// the canvas edge. Omit to preserve it; pass null to clear it.
+    #[serde(default, deserialize_with = "nullable")]
+    pub bleed: Option<Option<assemblash_core::Insets>>,
+    /// Print margins: `top`, `right`, `bottom`, `left` in pixels, inward
+    /// from the canvas edge. Omit to preserve them; pass null to clear them.
+    #[serde(default, deserialize_with = "nullable")]
+    pub margins: Option<Option<assemblash_core::Insets>>,
 }
 fn nullable_color<'de, D>(deserializer: D) -> Result<Option<Option<Color>>, D::Error>
 where
     D: Deserializer<'de>,
 {
     Ok(Some(Option::<Color>::deserialize(deserializer)?))
+}
+fn nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -613,6 +628,30 @@ pub struct ExportArgs {
     /// lose work nobody asked to lose.
     #[serde(default)]
     pub overwrite: Option<bool>,
+    /// The colour space to write. `srgb` is the only one. Any other value,
+    /// `cmyk` included, is refused with `colorSpaceNotSupported`:
+    /// professional print colour management is out of scope.
+    #[serde(default)]
+    pub color_space: Option<String>,
+    /// The file format: `png` (the default), `svg`, `pdf`, `jpeg` (or `jpg`),
+    /// or `webp`. The file is `<name>.<extension>`, `jpg` for JPEG. Any other
+    /// value is refused with `exportFormatNotSupported`.
+    #[serde(default)]
+    pub format: Option<String>,
+    /// JPEG quality, 1 to 100; 90 when omitted. JPEG only: a quality with
+    /// `webp` asks for lossy WebP and is refused with `lossyWebpNotSupported`.
+    #[serde(default)]
+    pub quality: Option<u32>,
+    /// Pages of a page set of the workspace: `<set>` for every page, or
+    /// `<set>:<selection>` such as `deck:1-3,5`. Pages are numbered from 1 in
+    /// manifest order. With `pdf` the file has one page for each selected
+    /// page; any other format needs exactly one page. The file goes into the
+    /// exports of `project`, which need not be a page of the set.
+    #[serde(default)]
+    pub pages: Option<String>,
+    /// Trim and bleed boxes and crop marks, from the canvas bleed. PDF only.
+    #[serde(default)]
+    pub print: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -650,6 +689,9 @@ pub struct InsertLayerTreeArgs {
     /// The layers to insert, as document layer objects — a pasted subtree.
     /// Ids in them are replaced; assets they name must already be in the
     /// document.
+    // The advertised schema breaks the layer `$ref` cycle (see
+    // `crate::layer_schema`). The input is still the full layer tree.
+    #[schemars(schema_with = "crate::layer_schema::layer_list_schema")]
     pub layers: Vec<assemblash_core::Layer>,
     /// Group to put the top-level layers in. Omit for the document root.
     #[serde(default)]
@@ -1281,7 +1323,7 @@ impl AssemblashMcp {
 
     /// Changes canvas dimensions or background without scaling layers.
     #[tool(
-        description = "Update the canvas. Existing root layers translate only according to anchor; they never scale. Omit background to preserve it; pass null to clear it."
+        description = "Update the canvas. Existing root layers translate only according to anchor; they never scale. Omit background to preserve it; pass null to clear it. bleed and margins are print geometry ({top, right, bottom, left} in pixels): omit to preserve, null to clear. They never change a PNG or SVG export."
     )]
     async fn update_canvas(
         &self,
@@ -1296,6 +1338,8 @@ impl AssemblashMcp {
                 background_image: args.background_image,
                 clear_background_image: args.clear_background_image,
                 anchor: args.anchor,
+                bleed: args.bleed,
+                margins: args.margins,
             }),
         )
     }
@@ -1352,20 +1396,38 @@ impl AssemblashMcp {
 
     /// Exports a PNG into the project.
     #[tool(
-        description = "Render the project to a PNG file inside the project's exports \
-                       directory and report the path. The directory is not yours to choose."
+        description = "Render the project to a file inside the project's exports directory \
+                       and report the path. PNG by default; format also takes svg, pdf, jpeg \
+                       and webp, and pages exports pages of a page set as one PDF. The \
+                       directory is not yours to choose."
     )]
     async fn export_document(
         &self,
         Parameters(args): Parameters<ExportArgs>,
     ) -> Result<Json<ExportResult>, ErrorData> {
+        assemblash_core::color_space::ColorSpace::from_request(args.color_space.as_deref())
+            .map_err(|error| to_error(error.into()))?;
+        let settings = assemblash_server::render::ExportSettings::from_request(
+            args.format.as_deref(),
+            args.quality,
+            args.print,
+        )
+        .map_err(to_error)?;
+        let pages = args
+            .pages
+            .as_deref()
+            .map(assemblash_server::render::PageRequest::parse)
+            .transpose()
+            .map_err(to_error)?;
         let project = self.resolve_project(args.project.clone());
         self.backend()
-            .export(
+            .export_as(
                 project.as_deref(),
                 args.scale.unwrap_or(1.0),
                 args.name.as_deref(),
                 args.overwrite.unwrap_or(false),
+                settings,
+                pages.as_ref(),
             )
             .map(Json)
             .map_err(to_error)
@@ -1543,6 +1605,17 @@ pub struct RenderVariantsArgs {
     /// Multiplier on the canvas size.
     #[serde(default)]
     pub scale: Option<f32>,
+    /// The file format: `png` (the default), `svg`, `jpeg` (or `jpg`) and
+    /// `webp` write one file for each variant; `pdf` writes one PDF with one
+    /// page for each variant, in the order given.
+    #[serde(default)]
+    pub format: Option<String>,
+    /// JPEG quality, 1 to 100; 90 when omitted. JPEG only.
+    #[serde(default)]
+    pub quality: Option<u32>,
+    /// File stem of the PDF; `variants` when omitted. PDF only.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -1573,8 +1646,9 @@ impl AssemblashMcp {
 
     /// Renders a template once per set of values.
     #[tool(
-        description = "Render a template once for each set of slot values and write the PNGs \
-                       into the project's exports directory. The template is not modified, \
+        description = "Render a template once for each set of slot values and write the files \
+                       into the project's exports directory: PNGs by default, or one PDF with \
+                       a page for each variant when format is pdf. The template is not modified, \
                        and the same values always produce the same bytes."
     )]
     async fn render_variants(
@@ -1587,7 +1661,21 @@ impl AssemblashMcp {
             .iter()
             .map(|variant| serde_json::json!({ "name": variant.name, "values": variant.values }))
             .collect();
-        self.variants(project.as_deref(), args.scale.unwrap_or(1.0), &variants)
+        let settings = assemblash_server::render::ExportSettings::from_request(
+            args.format.as_deref(),
+            args.quality,
+            None,
+        )
+        .map_err(to_error)?;
+        let name =
+            assemblash_server::render::variants_pdf_name(settings, args.name).map_err(to_error)?;
+        self.variants(
+            project.as_deref(),
+            args.scale.unwrap_or(1.0),
+            &variants,
+            settings,
+            name.as_deref(),
+        )
     }
 
     /// What a template offers.

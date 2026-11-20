@@ -749,13 +749,22 @@ fn write_shape(
                 None => "none".to_owned(),
             };
             let stroke = match &shape.stroke {
+                // With no stroke, or a width of zero, there is nothing to
+                // draw — the same rule as `shape_paint`.
                 None => String::new(),
+                Some(stroke) if stroke.width <= 0.0 => String::new(),
                 // A path's outline cannot be inset the way a rect's or an
                 // ellipse's can — insetting means offsetting the silhouette,
                 // and inventing that geometry here is exactly what this
                 // engine does not do. The stroke sits centred on the path
-                // edge, which is SVG's own default.
-                Some(_) => stroke_paint(shape, &layer.id)?,
+                // edge, which is SVG's own default. Colour and width come
+                // first, then dash, cap and join, as `shape_paint` emits them.
+                Some(stroke) => format!(
+                    " stroke=\"{}\" stroke-width=\"{}\"{}",
+                    paint_value(&stroke.color, &format!("{}-stroke", layer.id), &layer.id)?,
+                    number(stroke.width),
+                    stroke_paint(shape, &layer.id)?
+                ),
             };
             // The path carries its own transform, composed in box space, so
             // the standard trailing attributes are rebuilt here *without*
@@ -2826,6 +2835,37 @@ mod tests {
             svg.contains("transform=\"translate(20 20) rotate(30 80 80)\""),
             "{svg}"
         );
+    }
+
+    #[test]
+    fn a_stroked_path_emits_its_stroke_colour_and_width_centred() {
+        let d = "M 10 0 L 90 0 L 90 80 L 10 80 Z";
+        let kind = || ShapeKind::Path {
+            d: d.to_owned(),
+            extra: assemblash_core::document::Extras::new(),
+        };
+        let stroke = Stroke {
+            dash_array: Some(vec![4.0, 2.0]),
+            line_cap: Some(LineCap::Round),
+            line_join: Some(LineJoin::Bevel),
+            ..solid_stroke(6.0)
+        };
+        let svg = paint_svg(kind(), Some("#3366cc"), Some(stroke));
+        // The colour and the width come first, then dash, cap and join. The
+        // `d` is not changed: the stroke is centred on the path edge, with no
+        // inset.
+        assert!(
+            svg.contains(&format!(
+                "<path d=\"{d}\" fill=\"#3366cc\" stroke=\"#101820\" stroke-width=\"6\" \
+                 stroke-dasharray=\"4 2\" stroke-linecap=\"round\" \
+                 stroke-linejoin=\"bevel\" transform=\"translate(20 20)\""
+            )),
+            "{svg}"
+        );
+
+        // A stroke of width zero draws nothing, so no stroke is emitted.
+        let svg = paint_svg(kind(), Some("#3366cc"), Some(solid_stroke(0.0)));
+        assert!(!svg.contains("stroke"), "{svg}");
     }
 
     #[test]

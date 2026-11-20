@@ -323,3 +323,33 @@ fn open_reclaiming_reports_an_unlocked_project_as_not_locked() {
     assert_eq!(outcome, Reclaim::NotLocked);
     drop(session);
 }
+
+// ------------------------------------------------------ dropping a session
+
+#[test]
+fn dropping_a_session_keeps_a_lock_it_no_longer_owns() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("project");
+    let document = Document::new(&mut SequentialIdSource::new(), 1080.0, 1080.0);
+    let session = Session::create(&path, document, Some(1)).expect("creating the project");
+
+    // Someone cleared this session's lock and another owner took the project.
+    // The first session's drop must leave the new owner's claim in place.
+    let other = format!(r#"{{"pid":{},"since":2,"host":"{}"}}"#, dead_pid(), host());
+    std::fs::write(path.join(LOCK_FILE), &other).expect("replacing the lock");
+    drop(session);
+
+    let left = std::fs::read_to_string(path.join(LOCK_FILE)).expect("the other lock is kept");
+    assert_eq!(left, other);
+}
+
+#[test]
+fn dropping_a_session_removes_its_own_lock() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("project");
+    let document = Document::new(&mut SequentialIdSource::new(), 1080.0, 1080.0);
+    let session = Session::create(&path, document, Some(1)).expect("creating the project");
+    assert!(lock_exists(&path));
+    drop(session);
+    assert!(!lock_exists(&path), "the session's own lock goes with it");
+}

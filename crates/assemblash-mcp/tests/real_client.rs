@@ -354,6 +354,52 @@ async fn a_real_mcp_client_inspects_a_document() {
 }
 
 #[tokio::test]
+async fn page_sets_are_listed_and_resolved_over_mcp() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let sets = root.join("page-sets");
+    std::fs::create_dir_all(&sets).unwrap();
+    std::fs::write(
+        sets.join("deck.json"),
+        r#"{"pages":[{"project":"poster"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(sets.join("ring.json"), r#"{"pages":[{"set":"loop"}]}"#).unwrap();
+    std::fs::write(sets.join("loop.json"), r#"{"pages":[{"set":"ring"}]}"#).unwrap();
+
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let listed = structured(
+        &client
+            .call_tool(call("list_page_sets", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(listed["pageSets"], json!(["deck", "loop", "ring"]));
+
+    let deck = structured(
+        &client
+            .call_tool(call("get_page_set", arguments(json!({ "name": "deck" }))))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(deck["pages"][0]["project"], "poster");
+    assert_eq!(deck["pages"][0]["via"], json!(["deck"]));
+
+    let looped = client
+        .call_tool(call("get_page_set", arguments(json!({ "name": "ring" }))))
+        .await;
+    let text = format!("{looped:?}");
+    assert!(text.contains("pageSetLoop"), "{text}");
+    assert!(text.contains("ring -> loop -> ring"), "{text}");
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
 async fn a_single_project_server_needs_no_project_name() {
     let scratch = tempfile::tempdir().unwrap();
     let project = scratch.path().join("standalone");
@@ -487,9 +533,11 @@ async fn every_new_tool_is_advertised_and_callable() {
     // 1.10.0 added six parity tools by maintainer ruling — `insert_layer_tree`,
     // `install_font_pack`, `remove_font_family`, `list_fonts`,
     // `delete_project`, and `rename_project`: 53.
+    // 1.14.0 added two read-only page-set tools, `list_page_sets` and
+    // `get_page_set`: 55.
     assert_eq!(
         tools.len(),
-        53,
+        55,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 
@@ -650,6 +698,75 @@ async fn the_parity_tools_behave_like_their_http_siblings() {
         "{pasted:#?}"
     );
 
+    // insert_layer_tree with groups in groups: the advertised schema leaves
+    // `children` untyped, but the input is still the full layer tree. A
+    // group holding a group holding a line lands with its shape intact.
+    let nested = structured(
+        &client
+            .call_tool(call(
+                "insert_layer_tree",
+                arguments(json!({
+                    "project": "poster",
+                    "expectedVersion": pasted["version"].as_u64().unwrap(),
+                    "layers": [{
+                        "id": "layer_00000000000000000000000010",
+                        "name": "outer",
+                        "transform": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0 },
+                        "type": "group",
+                        "children": [{
+                            "id": "layer_00000000000000000000000011",
+                            "name": "inner",
+                            "transform": { "x": 0.0, "y": 0.0, "width": 50.0, "height": 50.0 },
+                            "type": "group",
+                            "children": [{
+                                "id": "layer_00000000000000000000000012",
+                                "name": "leaf",
+                                "transform": { "x": 0.0, "y": 0.0, "width": 40.0, "height": 4.0 },
+                                "type": "shape",
+                                "shape": { "kind": "line" }
+                            }]
+                        }]
+                    }]
+                })),
+            ))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        nested["created"].as_array().unwrap().len(),
+        3,
+        "{nested:#?}"
+    );
+    let state = structured(
+        &client
+            .call_tool(call(
+                "get_document_state",
+                arguments(json!({ "project": "poster" })),
+            ))
+            .await
+            .unwrap(),
+    );
+    let document: Document = serde_json::from_value(state["document"].clone()).unwrap();
+    let outer = document
+        .layers
+        .iter()
+        .find(|layer| layer.name.as_deref() == Some("outer"))
+        .expect("the outer group is at the document root");
+    let LayerKind::Group(outer) = &outer.kind else {
+        panic!("outer is not a group: {outer:#?}");
+    };
+    assert_eq!(outer.children.len(), 1, "{outer:#?}");
+    assert_eq!(outer.children[0].name.as_deref(), Some("inner"));
+    let LayerKind::Group(inner) = &outer.children[0].kind else {
+        panic!("inner is not a group: {outer:#?}");
+    };
+    assert_eq!(inner.children.len(), 1, "{inner:#?}");
+    assert_eq!(inner.children[0].name.as_deref(), Some("leaf"));
+    assert!(
+        matches!(inner.children[0].kind, LayerKind::Shape(_)),
+        "{inner:#?}"
+    );
+
     // rename_project: the directory moves, and the new name is the name.
     let created = structured(
         &client
@@ -762,6 +879,174 @@ async fn every_tool_schema_is_an_object() {
             tool.name
         );
     }
+
+    client.cancel().await.unwrap();
+}
+
+/// The `$defs` names that `node` refers to with `#/$defs/<name>`.
+fn defs_refs(node: &Value, out: &mut Vec<String>) {
+    match node {
+        Value::Object(map) => {
+            if let Some(target) = map.get("$ref").and_then(Value::as_str) {
+                let name = target
+                    .strip_prefix("#/$defs/")
+                    .unwrap_or_else(|| panic!("a $ref outside #/$defs: {target}"));
+                out.push(name.to_owned());
+            }
+            for value in map.values() {
+                defs_refs(value, out);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                defs_refs(value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The first `$ref` cycle reachable from the root of `schema`, as a path of
+/// definition names, or `None` when there is none.
+fn ref_cycle(schema: &Map<String, Value>) -> Option<Vec<String>> {
+    fn visit(
+        name: &str,
+        defs: &Map<String, Value>,
+        path: &mut Vec<String>,
+        done: &mut std::collections::HashSet<String>,
+    ) -> Option<Vec<String>> {
+        if let Some(start) = path.iter().position(|seen| seen == name) {
+            let mut cycle = path[start..].to_vec();
+            cycle.push(name.to_owned());
+            return Some(cycle);
+        }
+        if done.contains(name) {
+            return None;
+        }
+        let body = defs
+            .get(name)
+            .unwrap_or_else(|| panic!("a $ref to a missing definition: {name}"));
+        let mut targets = Vec::new();
+        defs_refs(body, &mut targets);
+        path.push(name.to_owned());
+        for target in &targets {
+            if let Some(cycle) = visit(target, defs, path, done) {
+                return Some(cycle);
+            }
+        }
+        path.pop();
+        done.insert(name.to_owned());
+        None
+    }
+
+    let empty = Map::new();
+    let defs = schema
+        .get("$defs")
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
+    let mut roots = Vec::new();
+    for (key, value) in schema {
+        if key != "$defs" {
+            defs_refs(value, &mut roots);
+        }
+    }
+    let mut done = std::collections::HashSet::new();
+    roots
+        .iter()
+        .find_map(|root| visit(root, defs, &mut Vec::new(), &mut done))
+}
+
+/// No tool's `inputSchema` or `outputSchema` refers to itself.
+///
+/// A layer holds layers, so the derived layer schema is recursive:
+/// `Layer` → the `group` variant → `GroupLayer.children.items` → `Layer`.
+/// Strict tool-schema validators (Moonshot/Kimi) refuse a `$ref` cycle with
+/// HTTP 400, and they refuse the whole tool list with it, so one recursive
+/// tool made every request fail. `insert_layer_tree` (input) and
+/// `get_document_state` (output) advertise group children as a plain object
+/// instead; this keeps every tool that way.
+#[tokio::test]
+async fn no_tool_schema_has_a_ref_cycle() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let tools = client.list_all_tools().await.unwrap();
+    assert_eq!(tools.len(), 55, "the tool surface holds 55 tools");
+    for tool in &tools {
+        assert_eq!(
+            ref_cycle(&tool.input_schema),
+            None,
+            "{}: inputSchema has a $ref cycle",
+            tool.name
+        );
+        if let Some(output) = &tool.output_schema {
+            assert_eq!(
+                ref_cycle(output),
+                None,
+                "{}: outputSchema has a $ref cycle",
+                tool.name
+            );
+        }
+    }
+    let plain_child = json!({
+        "type": "object",
+        "description": assemblash_mcp::layer_schema::LAYER_CHILD_DESCRIPTION,
+    });
+
+    // The cycle was broken where it sat, and the rest of the layer shape is
+    // still typed: the top-level items are the full layer definition, and a
+    // group's children are a described plain object.
+    let insert = tools
+        .iter()
+        .find(|tool| tool.name == "insert_layer_tree")
+        .expect("insert_layer_tree is listed");
+    let schema = Value::Object((*insert.input_schema).clone());
+    assert_eq!(
+        schema["properties"]["layers"]["items"]["$ref"], "#/$defs/Layer",
+        "{schema:#}"
+    );
+    assert!(
+        schema["$defs"]["Layer"]["oneOf"]
+            .as_array()
+            .is_some_and(|variants| variants.len() == 5),
+        "{schema:#}"
+    );
+    assert_eq!(
+        schema["$defs"]["GroupLayer"]["properties"]["children"]["items"], plain_child,
+        "{schema:#}"
+    );
+
+    // The same in the document that `get_document_state` returns: the
+    // document's own layer list stays typed, and only the group children
+    // inside the layer definition are the plain object.
+    let state = tools
+        .iter()
+        .find(|tool| tool.name == "get_document_state")
+        .expect("get_document_state is listed");
+    let schema = Value::Object(
+        (**state
+            .output_schema
+            .as_ref()
+            .expect("get_document_state has an outputSchema"))
+        .clone(),
+    );
+    assert_eq!(
+        schema["properties"]["document"]["$ref"], "#/$defs/Document",
+        "{schema:#}"
+    );
+    assert_eq!(
+        schema["$defs"]["Document"]["properties"]["layers"]["items"]["$ref"], "#/$defs/Layer",
+        "{schema:#}"
+    );
+    assert_eq!(
+        schema["$defs"]["GroupLayer"]["properties"]["children"]["items"], plain_child,
+        "{schema:#}"
+    );
 
     client.cancel().await.unwrap();
 }
@@ -921,6 +1206,70 @@ async fn canvas_tool_preserves_omitted_background_and_clears_null_with_undo() {
         .await
         .unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn canvas_tool_sets_preserves_and_clears_bleed_and_margins() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    workspace_with_project(&root);
+    let path = root.join("projects/poster/document.json");
+    let read = || -> Value { serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap() };
+    let mut command = tokio::process::Command::new(binary());
+    command.arg("mcp").arg("--workspace").arg(&root);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let set = client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({
+                "project": "poster",
+                "bleed": { "top": 9, "right": 9, "bottom": 9, "left": 9 },
+                "margins": { "top": 12, "right": 12, "bottom": 12, "left": 12 }
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(set.is_error, Some(true));
+    let document = read();
+    assert_eq!(document["canvas"]["bleed"]["left"], 9.0);
+    assert_eq!(document["canvas"]["margins"]["top"], 12.0);
+
+    // Omitted keeps both.
+    client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({ "project": "poster", "background": "#ffffff" })),
+        ))
+        .await
+        .unwrap();
+    let document = read();
+    assert_eq!(document["canvas"]["bleed"]["left"], 9.0);
+    assert_eq!(document["canvas"]["margins"]["top"], 12.0);
+
+    // A negative side is refused and nothing is written.
+    let unchanged = std::fs::read(&path).unwrap();
+    let refused = client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({ "project": "poster", "bleed": { "left": -1 } })),
+        ))
+        .await;
+    assert!(refused.is_err() || refused.as_ref().unwrap().is_error == Some(true));
+    assert_eq!(std::fs::read(&path).unwrap(), unchanged);
+
+    // Null clears.
+    client
+        .call_tool(call(
+            "update_canvas",
+            arguments(json!({ "project": "poster", "bleed": null, "margins": null })),
+        ))
+        .await
+        .unwrap();
+    let document = read();
+    assert!(document["canvas"].get("bleed").is_none(), "{document}");
+    assert!(document["canvas"].get("margins").is_none(), "{document}");
     client.cancel().await.unwrap();
 }
 

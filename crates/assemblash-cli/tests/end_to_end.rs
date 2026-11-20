@@ -850,6 +850,108 @@ fn preset_define_reads_properties_from_a_file() {
 /// FR-11 on the command line: an export says what it noticed, and succeeds
 /// anyway. A warning is not a failure — the file is exactly what the document
 /// says; it is the document that is surprising.
+/// Adds `canvas.margins` to a project on disk, as a hand edit would.
+fn set_margins(project: &Path, margin: f64) {
+    let path = project.join("document.json");
+    let mut document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document["canvas"]["margins"] =
+        serde_json::json!({ "top": margin, "right": margin, "bottom": margin, "left": margin });
+    std::fs::write(&path, serde_json::to_string_pretty(&document).unwrap()).unwrap();
+}
+
+#[test]
+fn text_across_the_margin_warns_on_export_and_the_png_does_not_change() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "100"]);
+    let layer = run(&[
+        "add-text",
+        project_arg,
+        "--text",
+        "Hi",
+        "--font",
+        "Noto Sans",
+        "--size",
+        "12",
+        "--x",
+        "4",
+        "--y",
+        "20",
+        "--width",
+        "100",
+        "--height",
+        "40",
+    ])
+    .trim()
+    .to_owned();
+
+    let export = |name: &str| {
+        let png = workspace.path().join(name);
+        let (printed, _) = run_output(&[
+            "export",
+            project_arg,
+            png.to_str().unwrap(),
+            "--warnings-json",
+            "--font-dir",
+            font_dir().to_str().unwrap(),
+        ]);
+        let warnings: serde_json::Value =
+            serde_json::from_str(printed.lines().nth(1).unwrap_or_default()).unwrap();
+        (std::fs::read(png).unwrap(), warnings)
+    };
+
+    let (before, quiet) = export("before.png");
+    assert!(
+        !quiet.to_string().contains("contentOutsideMargins"),
+        "no margins, no margin warning: {quiet}"
+    );
+
+    set_margins(&project, 10.0);
+    let (after, noticed) = export("after.png");
+    let warning = noticed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|warning| warning["code"] == "contentOutsideMargins")
+        .unwrap_or_else(|| panic!("no contentOutsideMargins in {noticed}"));
+    assert_eq!(warning["layerId"], layer.as_str());
+    assert_eq!(before, after, "margins never change the PNG bytes");
+}
+
+#[test]
+fn a_cmyk_export_is_refused_and_writes_nothing() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("p");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "20", "--height", "10"]);
+
+    let refused = workspace.path().join("cmyk.png");
+    let complaint = run_failing(&[
+        "export",
+        project_arg,
+        refused.to_str().unwrap(),
+        "--color-space",
+        "cmyk",
+    ]);
+    assert!(complaint.contains("colorSpaceNotSupported"), "{complaint}");
+    assert!(complaint.contains("out of scope"), "{complaint}");
+    assert!(!refused.exists(), "a refused export writes no file");
+
+    let plain = workspace.path().join("plain.png");
+    let srgb = workspace.path().join("srgb.png");
+    run(&["export", project_arg, plain.to_str().unwrap()]);
+    run(&[
+        "export",
+        project_arg,
+        srgb.to_str().unwrap(),
+        "--color-space",
+        "srgb",
+    ]);
+    assert_eq!(std::fs::read(plain).unwrap(), std::fs::read(srgb).unwrap());
+}
+
 #[test]
 fn overflowing_text_warns_on_stderr_and_still_exits_zero() {
     let workspace = tempfile::tempdir().unwrap();
@@ -948,6 +1050,146 @@ fn overflowing_text_warns_on_stderr_and_still_exits_zero() {
     ]);
     assert_eq!(printed.lines().nth(1), Some("[]"), "{printed:?}");
     assert!(complaints.is_empty(), "{complaints:?}");
+}
+
+#[test]
+fn page_set_commands_list_and_resolve_a_workspace_set() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("workspace");
+    let root_arg = root.to_str().unwrap();
+    for id in ["cover", "inside", "back"] {
+        let project = root.join("projects").join(id);
+        run(&[
+            "new",
+            project.to_str().unwrap(),
+            "--width",
+            "10",
+            "--height",
+            "10",
+        ]);
+    }
+    let sets = root.join("page-sets");
+    std::fs::create_dir_all(&sets).unwrap();
+    std::fs::write(
+        sets.join("middle.json"),
+        r#"{"pages":[{"project":"inside"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sets.join("deck.json"),
+        r#"{"pages":[{"project":"cover"},{"set":"middle"},{"project":"back"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sets.join("twice.json"),
+        r#"{"pages":[{"project":"cover"},{"project":"cover"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(sets.join("holes.json"), r#"{"pages":[{"project":"gone"}]}"#).unwrap();
+
+    assert_eq!(
+        run(&["page-set", "list", "--workspace", root_arg]),
+        "deck
+holes
+middle
+twice
+"
+    );
+    let listed: serde_json::Value = serde_json::from_str(&run(&[
+        "page-set",
+        "list",
+        "--workspace",
+        root_arg,
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(listed["pageSets"][0], "deck");
+
+    assert_eq!(
+        run(&["page-set", "show", "deck", "--workspace", root_arg]),
+        "0	cover
+1	inside
+2	back
+"
+    );
+    let shown: serde_json::Value = serde_json::from_str(&run(&[
+        "page-set",
+        "show",
+        "deck",
+        "--workspace",
+        root_arg,
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(
+        shown["pages"][1]["via"],
+        serde_json::json!(["deck", "middle"])
+    );
+
+    let twice = run_failing(&["page-set", "show", "twice", "--workspace", root_arg]);
+    assert!(twice.contains("pageSetDuplicatePage"), "{twice}");
+    let holes = run_failing(&["page-set", "show", "holes", "--workspace", root_arg]);
+    assert!(
+        holes.contains("pageSetMemberMissing") && holes.contains("gone"),
+        "{holes}"
+    );
+    let none = run_failing(&["page-set", "show", "none", "--workspace", root_arg]);
+    assert!(none.contains("pageSetNotFound"), "{none}");
+}
+
+#[test]
+fn canvas_set_sets_and_clears_bleed_and_margins_and_undoes() {
+    let scratch = tempfile::tempdir().unwrap();
+    let project = scratch.path().join("print");
+    let project_arg = project.to_str().unwrap();
+    run(&["new", project_arg, "--width", "200", "--height", "100"]);
+    let read = || -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(project.join("document.json")).unwrap())
+            .unwrap()
+    };
+    let before = std::fs::read(project.join("document.json")).unwrap();
+    let png = scratch.path().join("before.png");
+    run(&["export", project_arg, png.to_str().unwrap()]);
+
+    run(&[
+        "canvas",
+        "set",
+        project_arg,
+        "--bleed",
+        "9",
+        "--margins",
+        "10,12,10,12",
+    ]);
+    let canvas = read()["canvas"].clone();
+    assert_eq!(canvas["bleed"]["right"], 9.0);
+    assert_eq!(canvas["margins"]["right"], 12.0);
+    assert_eq!(canvas["margins"]["top"], 10.0);
+
+    // The PNG does not change.
+    let with = scratch.path().join("with.png");
+    run(&["export", project_arg, with.to_str().unwrap()]);
+    assert_eq!(std::fs::read(&png).unwrap(), std::fs::read(&with).unwrap());
+
+    // A malformed value and a margin with no safe area are refused.
+    let bad = run_failing(&["canvas", "set", project_arg, "--bleed", "1,2"]);
+    assert!(bad.contains("--bleed"), "{bad}");
+    run_failing(&["canvas", "set", project_arg, "--margins", "0,100,0,100"]);
+    run_failing(&["canvas", "set", project_arg, "--bleed", "9", "--no-bleed"]);
+
+    run(&["canvas", "set", project_arg, "--no-bleed", "--no-margins"]);
+    let canvas = read()["canvas"].clone();
+    assert!(
+        canvas.get("bleed").is_none() && canvas.get("margins").is_none(),
+        "{canvas}"
+    );
+
+    run(&["undo", project_arg]);
+    assert_eq!(read()["canvas"]["bleed"]["left"], 9.0);
+    run(&["undo", project_arg]);
+    assert_eq!(
+        std::fs::read(project.join("document.json")).unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -1077,4 +1319,33 @@ fn canvas_background_image_flags_set_default_clear_and_refuse_bad_requests() {
         std::fs::read(project.join("document.json")).unwrap(),
         before
     );
+}
+
+#[test]
+fn read_only_page_set_commands_refuse_a_missing_workspace_and_create_nothing() {
+    let scratch = tempfile::tempdir().unwrap();
+    let missing = scratch.path().join("typo");
+    let missing_arg = missing.to_str().unwrap();
+    let out = scratch.path().join("deck.pdf");
+    let out_arg = out.to_str().unwrap();
+
+    for args in [
+        vec!["page-set", "list", "--workspace", missing_arg],
+        vec!["page-set", "show", "deck", "--workspace", missing_arg],
+        vec![
+            "export",
+            "--pages",
+            "deck",
+            "--format",
+            "pdf",
+            "--workspace",
+            missing_arg,
+            out_arg,
+        ],
+    ] {
+        let error = run_failing(&args);
+        assert!(error.contains("no workspace"), "{args:?}: {error}");
+        assert!(!missing.exists(), "{args:?} created {}", missing.display());
+        assert!(!out.exists(), "{args:?} wrote {}", out.display());
+    }
 }

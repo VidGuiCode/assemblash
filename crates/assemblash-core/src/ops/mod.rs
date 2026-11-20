@@ -285,11 +285,29 @@ impl OpOutcome {
 }
 
 /// Applies an operation, or leaves the document untouched and says why not.
+///
+/// An `updateCanvas` also gets the bleed and margins checks of
+/// [`crate::validate::check_canvas_update`]. A history replay does not make
+/// them: it calls [`apply_with_semantics`] and repeats operations that were
+/// accepted when they were applied, some by a release that had no such
+/// checks.
 pub fn apply(
     document: &mut Document,
     operation: &Operation,
     ids: &mut dyn IdSource,
 ) -> Result<OpOutcome, OpError> {
+    if let Operation::UpdateCanvas(request) = operation {
+        let mut candidate = document.clone();
+        let outcome = apply_with_semantics(
+            &mut candidate,
+            operation,
+            ids,
+            OperationSemantics::StyledRunsV1,
+        )?;
+        crate::validate::check_canvas_update(request, &candidate.canvas)?;
+        *document = candidate;
+        return Ok(outcome);
+    }
     apply_with_semantics(document, operation, ids, OperationSemantics::StyledRunsV1)
 }
 
@@ -708,6 +726,14 @@ fn update_canvas(document: &mut Document, request: &UpdateCanvas) -> Result<OpOu
         document.canvas.background_image = Some(background.clone());
     } else if request.clear_background_image {
         document.canvas.background_image = None;
+    }
+    // Checked after the change, by `apply`: a negative side, or margins that
+    // leave no safe area, refuse the operation.
+    if let Some(bleed) = &request.bleed {
+        document.canvas.bleed = bleed.clone();
+    }
+    if let Some(margins) = &request.margins {
+        document.canvas.margins = margins.clone();
     }
     let mut changed = Vec::new();
     if moves_layers {
@@ -1606,6 +1632,93 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&cleared).unwrap()["background"],
             serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn canvas_bleed_and_margins_set_preserve_clear_and_refuse() {
+        let omitted: UpdateCanvas = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(
+            (omitted.bleed.clone(), omitted.margins.clone()),
+            (None, None)
+        );
+        let cleared: UpdateCanvas =
+            serde_json::from_value(serde_json::json!({ "bleed": null, "margins": null })).unwrap();
+        assert_eq!(
+            (cleared.bleed.clone(), cleared.margins.clone()),
+            (Some(None), Some(None))
+        );
+
+        let mut doc = document();
+        let set: UpdateCanvas = serde_json::from_value(serde_json::json!({
+            "bleed": { "top": 9, "right": 9, "bottom": 9, "left": 9 },
+            "margins": { "left": 4 }
+        }))
+        .unwrap();
+        apply(
+            &mut doc,
+            &Operation::UpdateCanvas(set),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            doc.canvas.bleed,
+            Some(crate::document::Insets::uniform(9.0))
+        );
+        assert_eq!(doc.canvas.margins.as_ref().unwrap().left, 4.0);
+
+        // Absent keeps both.
+        let width = doc.canvas.width;
+        apply(
+            &mut doc,
+            &Operation::UpdateCanvas(UpdateCanvas {
+                width: Some(width),
+                ..UpdateCanvas::default()
+            }),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        assert!(doc.canvas.bleed.is_some() && doc.canvas.margins.is_some());
+
+        // A negative side is refused, and nothing changes.
+        let before = doc.clone();
+        let refused = apply(
+            &mut doc,
+            &Operation::UpdateCanvas(UpdateCanvas {
+                bleed: Some(Some(crate::document::Insets::uniform(-1.0))),
+                ..UpdateCanvas::default()
+            }),
+            &mut SequentialIdSource::new(),
+        );
+        assert!(refused.is_err());
+        assert_eq!(doc, before);
+
+        // Margins that leave no safe area are refused.
+        let width = doc.canvas.width;
+        let refused = apply(
+            &mut doc,
+            &Operation::UpdateCanvas(UpdateCanvas {
+                margins: Some(Some(crate::document::Insets {
+                    left: width,
+                    ..crate::document::Insets::default()
+                })),
+                ..UpdateCanvas::default()
+            }),
+            &mut SequentialIdSource::new(),
+        );
+        assert!(refused.is_err());
+        assert_eq!(doc, before);
+
+        // Null clears.
+        apply(
+            &mut doc,
+            &Operation::UpdateCanvas(cleared),
+            &mut SequentialIdSource::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            (doc.canvas.bleed.clone(), doc.canvas.margins.clone()),
+            (None, None)
         );
     }
 

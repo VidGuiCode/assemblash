@@ -44,8 +44,8 @@ appearance, open **Settings** → **Application** and select Light, Dark, or
 System. The browser stores this choice locally. It does not change document
 colours.
 
-**Current release: 1.13.1.** The document schema and the operation API are
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.13.1)
+**Current release: 1.14.0.** The document schema and the operation API are
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.14.0)
 or the [changelog](CHANGELOG.md).
 
 ## What one document can hold
@@ -85,8 +85,8 @@ do not install anything else.
 | Mac with an Intel processor | `assemblash-<version>-macos-x86_64.tar.gz` |
 | Debian or Ubuntu | `assemblash_<version>_amd64.deb` (on ARM: `arm64`) |
 
-For example, the Windows file of release 1.13.1 is
-`assemblash-v1.13.1-windows-x86_64.exe`.
+For example, the Windows file of release 1.14.0 is
+`assemblash-v1.14.0-windows-x86_64.exe`.
 
 ### 2. Start Assemblash
 
@@ -124,9 +124,41 @@ editor that already runs.
    downloads something.
 4. Click a layer on the canvas to select it. Drag it to move it. Change its
    properties in the panel. Use **Undo** and **Redo** at the top.
-5. Click **Export** and select PNG or SVG.
+5. Click **Export** and select a format: PNG, SVG, PDF, JPEG, or WebP. PNG is
+   the default. For JPEG, set the quality from 1 to 100. WebP is lossless.
+   For a PDF of a document with bleed, select **Add crop marks and bleed** to
+   get a trim box, a bleed box, and crop marks.
 
 Assemblash saves every change immediately. There is no **Save** button.
+
+To work on more than one project, open each one from the project search. Each
+project opens in its own tab under the top bar. Click a tab to show its
+project. Each tab keeps its own selection, zoom, scroll position, panels, and
+undo history. Drag a tab to move it, or press Alt+Shift+Left Arrow or
+Alt+Shift+Right Arrow. Click × on a tab to close it.
+
+- A project has one tab only. If you open it again, its tab comes to the front.
+- When an AI agent changes a project in a hidden tab, the tab shows a dot. The
+  dot goes when you show the tab, and the tab shows the change.
+- When you close a tab, Assemblash releases the lock on that project. Other
+  programs, for example the `assemblash` command line, can then change it.
+- The open tabs and their order are stored in the workspace. The next start
+  opens the same tabs.
+
+A page set is an ordered list of projects, for example the pages of a
+carousel. Each set is one file, `page-sets/<name>.json`, in the workspace. The
+project search shows the page sets under **Page sets**. Click a page set to
+open its pages:
+
+- Each page opens in a tab, in the order of the file. The tabs of the set open
+  side by side in the strip. Each tab shows its page number and a small
+  thumbnail.
+- A page that is already open keeps its tab and moves into the set. It does
+  not open a second time.
+- If the set contains itself, or names a project that does not exist, the
+  status bar shows the problem. No tab opens.
+- To export all pages as one PDF, show a page of the set, click **Export**,
+  select **PDF**, and then select the choice for all pages of the set.
 
 ### 4. Let an AI agent work with you
 
@@ -204,6 +236,7 @@ operations. The API and the MCP server contain no document logic of their own:
 
 - `assemblash-core` does the validation and the operations.
 - `assemblash-renderer` does the rendering.
+- `assemblash-export` writes the PDF, JPEG, and WebP files from the rendered pixels.
 - The server, MCP, and CLI crates give these functions to different clients.
 
 Rust programs can use the same crates directly. They are in [`crates/`](crates/).
@@ -221,6 +254,14 @@ assemblash add-rect ./poster --x 40 --y 200 --width 240 --height 96 --fill '#1d1
 assemblash export ./poster --out poster.png --font-store ./assemblash-fonts
 ```
 
+`export` also writes PDF, JPEG, and lossless WebP with `--format`. With
+`--pages`, it writes the pages of a page set into one PDF:
+
+```sh
+assemblash export ./poster poster.pdf --format pdf --font-store ./assemblash-fonts
+assemblash export --workspace ./workspace --pages deck --format pdf deck.pdf
+```
+
 `render` and `export` print the written path and its `sha256:` digest as one
 tab-separated line. A script can compare what two interfaces produced without
 hashing the file itself.
@@ -234,7 +275,7 @@ it once, and one undo reverts it. Run `assemblash --help` or
 Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.13.1 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.14.0 assemblash-cli
 ```
 
 ## Why Assemblash
@@ -307,9 +348,10 @@ The important limits:
 - Assemblash contains no AI image generator or AI provider adapter.
 - Fourteen blend modes are supported. `color-dodge` and `color-burn` are
   refused because they are not bit-identical across every target.
-- The stroke of a shape is painted inside its box, so the box is the visible
-  size. A stroke narrower than 1 is a hairline on the edge.
-- A path shape paints its fill. In 1.13.1 it does not paint its stroke.
+- The stroke of a rectangle or an ellipse is painted inside its box, so the
+  box is the visible size. A stroke narrower than 1 is a hairline on the edge.
+- The stroke of a path is centred on the path edge, so half of the stroke
+  width is outside the path.
 - Built-in authentication is one shared token. Accounts, roles, OIDC, SSO,
   TLS, and per-user audit identity belong in a reverse proxy.
 - The editor is a reference client. It is not a complete professional design

@@ -6,12 +6,15 @@ import { Button, TextInput } from "@mantine/core";
 import { mountMantinePortal, useLocaleRevision } from "./mantine-root.js";
 import * as api from "./api.js";
 import { formatCount, t } from "./i18n.js";
+import { matchingPageSets } from "./page-sets.js";
 
 export interface ProjectPickerHost {
   /** Open a selected project through the editor's serialized project queue. */
   openProject(projectId: string): void;
   /** Ask app.ts to search the engine's project list after its debounce. */
   search(query: string): void;
+  /** Open every page of a page set as tabs, through the editor's queue. */
+  openPageSet(name: string): void;
 }
 
 export interface ProjectPicker {
@@ -23,6 +26,8 @@ export interface ProjectPicker {
   ): void;
   /** Update the selected id after an app-side project change. */
   setCurrentProject(projectId: string | null): void;
+  /** Replace the page-set names from app.ts's latest API response. */
+  setPageSets(names: readonly string[]): void;
   /** Focus the search input. */
   focus(): void;
   /** Release the React root and global listeners. */
@@ -36,8 +41,11 @@ type PickerState = {
 };
 
 type Controller = {
+  /** The latest page-set names, kept also while the view is not mounted. */
+  pageSets: readonly string[];
   setProjects(state: PickerState): void;
   setCurrentProject(projectId: string | null): void;
+  setPageSets(names: readonly string[]): void;
   focus(): void;
 };
 
@@ -68,6 +76,7 @@ function ProjectPickerView({ host, controller, boundary }: {
   const [placeholder, setPlaceholder] = useState(t("projects.searchPlaceholder"));
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [pageSets, setPageSets] = useState<readonly string[]>(controller.pageSets);
   const localeVersion = useLocaleRevision();
   const inputRef = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<number | undefined>(undefined);
@@ -100,11 +109,14 @@ function ProjectPickerView({ host, controller, boundary }: {
         previous.projects.length ? t("projects.searchPlaceholder") : t("projects.none")
       ));
     };
+    controller.setPageSets = (names) => setPageSets(names);
+    setPageSets(controller.pageSets);
     controller.focus = () => inputRef.current?.focus();
     return () => {
       window.clearTimeout(searchTimer.current);
       controller.setProjects = () => {};
       controller.setCurrentProject = () => {};
+      controller.setPageSets = () => {};
       controller.focus = () => {};
     };
   }, [controller]);
@@ -155,24 +167,40 @@ function ProjectPickerView({ host, controller, boundary }: {
     searchTimer.current = window.setTimeout(() => host.search(value.trim()), 150);
   }
 
+  function choosePageSet(name: string): void {
+    queryRef.current = "";
+    setQuery("");
+    if (inputRef.current) inputRef.current.value = "";
+    inputRef.current?.blur();
+    setMenuOpen(false);
+    host.openPageSet(name);
+  }
+
+  // The options in keyboard order: the projects, then the page sets.
+  const sets = matchingPageSets(pageSets, query);
+  const optionCount = state.projects.length + sets.length;
+  const optionId = (index: number): string => index < state.projects.length
+    ? `project-option-${index}`
+    : `page-set-option-${index - state.projects.length}`;
+
   function moveActive(direction: -1 | 1): void {
     if (!open) setMenuOpen(true);
-    if (state.projects.length === 0) return;
-    const first = direction > 0 ? 0 : state.projects.length - 1;
+    if (optionCount === 0) return;
+    const first = direction > 0 ? 0 : optionCount - 1;
     const next = activeIndex < 0
       ? first
-      : Math.max(0, Math.min(state.projects.length - 1, activeIndex + direction));
+      : Math.max(0, Math.min(optionCount - 1, activeIndex + direction));
     setActiveIndex(next);
     window.requestAnimationFrame(() => {
-      document.getElementById(`project-option-${next}`)?.scrollIntoView({ block: "nearest" });
+      document.getElementById(optionId(next))?.scrollIntoView({ block: "nearest" });
     });
   }
 
-  const matched = state.projects.length === 0
+  const matched = state.projects.length === 0 && sets.length === 0
     ? state.query ? t("projects.noMatching") : t("projects.none")
     : "";
-  const activeDescendant = open && activeIndex >= 0 && state.projects[activeIndex]
-    ? `project-option-${activeIndex}`
+  const activeDescendant = open && activeIndex >= 0 && activeIndex < optionCount
+    ? optionId(activeIndex)
     : undefined;
 
   return (
@@ -209,6 +237,12 @@ function ProjectPickerView({ host, controller, boundary }: {
           if (inputValue !== queryRef.current) {
             queryRef.current = inputValue;
             setQuery(inputValue);
+          }
+          const highlightedSet = activeIndex >= state.projects.length ? sets[activeIndex - state.projects.length] : undefined;
+          if (highlightedSet) {
+            event.preventDefault();
+            choosePageSet(highlightedSet);
+            return;
           }
           const highlighted = state.projects[activeIndex];
           const value = inputValue.trim().toLocaleLowerCase();
@@ -268,6 +302,27 @@ function ProjectPickerView({ host, controller, boundary }: {
             </span>
           </Button>
         ))}
+        {sets.length > 0
+          ? <p className="project-options-heading" role="presentation">{t("pageSets.heading")}</p>
+          : null}
+        {sets.map((name, index) => (
+          <Button
+            key={`set:${name}`}
+            id={`page-set-option-${index}`}
+            className={`project-option page-set-option${state.projects.length + index === activeIndex ? " active" : ""}`}
+            styles={projectOptionStyles}
+            type="button"
+            variant="subtle"
+            title={t("pageSets.openLabel", { set: name })}
+            data-page-set={name}
+            role="option"
+            aria-selected={false}
+            onClick={() => choosePageSet(name)}
+          >
+            <strong><i className="ph ph-files" aria-hidden="true" /> {name}</strong>
+            <span className="project-option-count">{t("pageSets.option")}</span>
+          </Button>
+        ))}
         {matched ? <p className="project-options-empty">{matched}</p> : null}
       </div>
     </>
@@ -281,8 +336,10 @@ export function mountProjectPicker(
 ): ProjectPicker {
   target.replaceChildren();
   const controller: Controller = {
+    pageSets: [],
     setProjects: () => {},
     setCurrentProject: () => {},
+    setPageSets: () => {},
     focus: () => {},
   };
   const unmount = mountMantinePortal("project-picker", target,
@@ -300,6 +357,10 @@ export function mountProjectPicker(
     setProjects,
     setCurrentProject(projectId): void {
       controller.setCurrentProject(projectId);
+    },
+    setPageSets(names): void {
+      controller.pageSets = names;
+      controller.setPageSets(names);
     },
     focus: () => controller.focus(),
     destroy: unmount,

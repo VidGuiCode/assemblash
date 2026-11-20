@@ -38,6 +38,7 @@ workspace = true
 # crash-recovery tests can kill it at an exact point. Release builds never see
 # it.
 assemblash-core = { workspace = true, features = ["fault-injection"] }
+assemblash-export.workspace = true
 png = "0.18.1"
 serde_json = "1.0.151"
 tempfile = "3.27.0"

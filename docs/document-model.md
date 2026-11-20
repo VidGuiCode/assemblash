@@ -55,6 +55,8 @@ The canvas is the fixed-size surface under the layers.
 | `height` | Positive finite number, in pixels. |
 | `background` | A solid colour, a gradient, or `null` for transparency. |
 | `backgroundImage` | An asset and a fit. The image is above the background colour and below every layer. |
+| `bleed` | Optional. Print bleed: `top`, `right`, `bottom`, and `left`, in pixels. |
+| `margins` | Optional. Print margins: `top`, `right`, `bottom`, and `left`, in pixels. |
 
 A canvas change does not scale the layers. The layers keep their sizes. The `anchor` sets the point of the old canvas that stays fixed. The anchor changes only the positions of the layers.
 
@@ -68,9 +70,96 @@ assemblash canvas set ./poster --no-background
 assemblash undo ./poster
 ```
 
-MCP has `update_canvas` with `width`, `height`, `background`, `anchor`, `expectedVersion`, and `dryRun`. HTTP takes the same fields in an `updateCanvas` operation. Omit `background` to keep it. Send `null` to remove it.
+MCP has `update_canvas` with `width`, `height`, `background`, `anchor`, `bleed`, `margins`, `expectedVersion`, and `dryRun`. HTTP takes the same fields in an `updateCanvas` operation. Omit `background`, `bleed`, or `margins` to keep it. Send `null` to remove it.
 
 The engine refuses a resize that moves locked, protected, or read-only content. Nothing changes.
+
+### Print geometry
+
+`bleed` and `margins` describe a document for print. The canvas is the trim box: the paper size after the cut.
+
+- `bleed` goes outward from each canvas edge. Content in the bleed is cut off after printing.
+- `margins` go inward from each canvas edge. The area inside the margins is the safe area.
+- A side that you do not write is `0`. Each side must be a finite number of `0` or more.
+- The two margins of one axis must be less than the canvas size on that axis.
+- `updateCanvas` applies these two rules. Loading a document does not apply them. Thus a document always opens, whatever its `bleed` and `margins` hold.
+
+```json
+"canvas": {
+  "width": 1080,
+  "height": 1350,
+  "bleed": { "top": 9, "right": 9, "bottom": 9, "left": 9 },
+  "margins": { "top": 36, "right": 36, "bottom": 36, "left": 36 }
+}
+```
+
+A PNG, SVG, JPEG, or WebP export never reads `bleed` or `margins`. A PDF without `print` does not read them either. The exported bytes are the same with and without them. The fields enable the print-proofing warnings. See [Export warnings](paint-and-rendering.md#export-warnings).
+
+A print PDF reads `bleed`. It uses the bleed for its bleed box, its trim box, and its crop marks. The bleed area holds no rendered content in this release. A print PDF does not read `margins`. See [Print PDF](paint-and-rendering.md#print-pdf).
+
+Set them with the `updateCanvas` operation, the MCP tool `update_canvas`, or `canvas set`. Omit a field to keep it. Send `null` to remove it. One undo reverts the change. The engine refuses these requests with `operationRefused`, and nothing changes:
+
+- a `bleed` or `margins` with a negative side;
+- a `margins`, `width`, or `height` that leaves the margins with no safe area.
+
+A request that changes neither the insets nor the canvas size keeps the insets as they are, also when they do not fit. A release before 1.14.0 keeps `margins` as an unknown field and can resize the canvas below them. Such a document opens in 1.14.0. Its export gives one `marginsLeaveNoSafeArea` warning and no margin warning for each layer. Set smaller margins with `updateCanvas` to fix it.
+
+```sh
+assemblash canvas set ./poster --bleed 9 --margins 36
+assemblash canvas set ./poster --margins 36,24,36,24
+assemblash canvas set ./poster --no-bleed --no-margins
+```
+
+`--bleed` and `--margins` take one number for all sides, or four numbers in the order `top,right,bottom,left`.
+
+## Page sets
+
+A page set is an ordered list of projects, for example the pages of a carousel or a deck. A page set is not a document field. Each set is one file in the workspace, beside `projects/`:
+
+```text
+workspace/
+├── projects/
+│   ├── cover/
+│   ├── inside/
+│   └── back/
+└── page-sets/
+    ├── deck.json
+    └── middle.json
+```
+
+The name of the set is the file name without `.json`. Each entry names one project or one other set:
+
+```json
+{
+  "pages": [
+    { "project": "cover" },
+    { "set": "middle" },
+    { "project": "back" }
+  ]
+}
+```
+
+A nested set adds its pages in the place where you name it. Thus `deck` above has the page `cover`, then the pages of `middle`, then the page `back`. Unknown keys stay in the file.
+
+The engine resolves a set to a flat, ordered page list. It never drops a page. It refuses these sets with a typed error:
+
+| Code | Cause |
+| --- | --- |
+| `pageSetLoop` | A set contains itself, directly or through other sets. The error names the loop, for example `a -> b -> a`. |
+| `pageSetMemberMissing` | An entry names a project or a set that does not exist. The error lists every missing member. |
+| `pageSetDuplicatePage` | One project is two pages of the set. A project can be one page only. |
+| `pageSetTooDeep` | Sets are nested more than 32 deep, the resolved set included. The error names the chain, for example `a -> b -> c`. |
+| `pageSetMalformed` | The file is not valid JSON of this shape, or an entry names zero or two members. |
+| `pageSetNotFound` | No set has this name. |
+| `invalidPageSetName` | The name is not one path segment. |
+
+A set with no pages is valid. It resolves to no pages.
+
+Export the pages of a set with `pages`, for example `deck:1-3,5`. A PDF holds one page for each selected page. See [Page sets](paint-and-rendering.md#page-sets) in the export formats.
+
+Read page sets with `assemblash page-set list` and `assemblash page-set show <name>`, with `GET /api/page-sets` and `GET /api/page-sets/{name}`, or with the MCP tools `list_page_sets` and `get_page_set`. No interface writes a page-set file. Write the file to make or change a set.
+
+The CLI commands only read. A `--workspace` directory without a `projects` directory is refused, and the CLI creates nothing there. `export --pages` applies the same rule.
 
 ## Layer kinds
 
@@ -172,7 +261,7 @@ Presets carry `dashArray`, `lineCap`, and `lineJoin`. Markers belong to the line
 
 The CLI has `add-path` and `set --path --dash --cap --join --marker-start --marker-end`. The reference editor has shape rows in the properties panel. MCP has the `path` argument of `add_shape_layer` and the `shape`, `path`, and marker arguments of `update_layer`.
 
-In 1.13.1, a path shape paints its fill and never its stroke. The document keeps the stroke values, but the SVG export omits the `stroke` and `stroke-width` attributes on the path element. Thus a stroked path shows no outline in an export.
+A path shape paints its fill and its stroke. The stroke of a path is centred on the path edge, so half of the stroke width is outside the path. A path does not get the inset that a rectangle or an ellipse gets. Before 1.14.0, a path did not paint its stroke.
 
 ## Layer resizing
 
@@ -206,6 +295,9 @@ A document written by release 1.0 stays readable by every 1.x release. The schem
 - Releases 1.6.0 to 1.9.x keep a path shape or a path clip as written. They refuse to draw it and refuse an update that touches it.
 - Gradient paints need 1.11.0. See [Paint and rendering](paint-and-rendering.md).
 - Canvas editing needs 1.4.0 or newer. When a project history contains `updateCanvas`, 1.3.1 refuses `show` and `history`, also after undo. Continue to use the newer executable.
+- `canvas.bleed` and `canvas.margins` need 1.14.0 or newer. An older 1.x release keeps them as unknown canvas fields, and its exports are the same.
+- Page sets need 1.14.0 or newer. An older release does not read `page-sets/`. It opens each member project unchanged.
+- The export of a page set, the PDF, JPEG, and WebP exports, and the print PDF need 1.14.0 or newer. They add no document field. Release 1.13.1 opens each exported project unchanged, but it cannot write these formats.
 - Unknown fields survive load and save at every level of the document. This includes the inside of `clip`, `crop`, `stroke`, `shape`, and the effect stack.
 - The stroke of a shape is painted inside its layer box. Thus the layer box is the visible size. A stroke narrower than 1 is a hairline on the edge and can extend half a pixel outside the layer box.
 

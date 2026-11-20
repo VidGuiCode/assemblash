@@ -10,6 +10,82 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.14.0] — 2026-11-20
+
+**Project tabs, page sets, print geometry, and PDF, JPEG, and WebP export.**
+
+The reference interface opens projects in tabs. A page set puts projects in
+one ordered list. A canvas can hold bleed and margins for print. The engine
+exports PDF, JPEG, and lossless WebP, and it exports a page set as one PDF.
+A new workspace crate, `assemblash-export`, holds the encoders. The MCP tool
+count goes from 53 to 55. A `path` shape now paints its stroke.
+
+`schemaVersion` stays 1. The operation API stays compatible with 1.0. Every
+change is additive.
+
+**Oldest build that opens a 1.14.0 document: 1.0.** Older 1.x builds keep
+`bleed` and `margins` as unknown canvas fields, and their exports are the
+same. Older builds ignore a page-set file and still open each member project.
+Only 1.14.0 or newer reads a page set and writes the PDF, JPEG, WebP, and
+page-set exports.
+
+### Added
+
+- Project tabs in the reference interface. Open, show, close, and reorder projects in a tab strip under the top bar. Reorder with a drag or with Alt+Shift+Left Arrow and Alt+Shift+Right Arrow.
+- Each tab keeps its own selection, zoom, scroll position, panels, template draft, and undo history. Undo in a tab changes only the project of that tab.
+- Every open tab follows changes from other clients. Only the visible tab renders previews. A hidden tab that another client changes shows a marker until you show it, and then it shows the change without a page reload.
+- A project has one tab only. A second open of the same project shows its tab.
+- Closing a tab releases the project lock, so the CLI or another program can write the project.
+- The open tabs and their order persist in `open-tabs.json` in the workspace, and the next start restores them.
+- HTTP: new additive route `GET` and `PUT /api/open-tabs`. It reads and writes the open-tab list in `open-tabs.json` in the workspace. Each write uses its own temporary file. Keys of the file that this build does not know stay in the file. The request body accepts only `projects` and `active`.
+- HTTP: new additive route `POST /api/projects/{id}/close`. It closes one project and releases its lock. The next request opens the project again.
+- If a running request holds the project for more than 5 seconds, the close route answers `409 projectOpen`. The project then stays open in the server, with its lock, and a later close can try again. A request for a project that is closing waits for the close. The lock-recovery route refuses a project that is closing.
+- The two routes are interface routes only. No document field, operation, or MCP tool changes. `schemaVersion` stays 1.
+- The lock-recovery prompt names the tab it belongs to.
+- EN, FR, and DE strings for the tab strip.
+- Page sets. A page set is an ordered list of projects, in one file for each set: `page-sets/<name>.json` in the workspace, beside `projects/`. An entry names one project or one other set. A nested set adds its pages in place. The file is new. It is not a document field.
+- The engine resolves a set to a flat, ordered page list and never drops a page. It refuses a loop and names it (`pageSetLoop`). It lists every missing member (`pageSetMemberMissing`). It refuses a project on two pages (`pageSetDuplicatePage`). It refuses sets nested more than 32 deep and names the chain (`pageSetTooDeep`). Other codes: `pageSetMalformed`, `pageSetNotFound`, `invalidPageSetName`. A set with no pages is valid.
+- CLI: new read-only commands `page-set list` and `page-set show <name>`, each with `--json`. These commands and `export --pages` refuse a `--workspace` directory that holds no workspace (no `projects` directory), and create nothing.
+- HTTP: new additive read-only routes `GET /api/page-sets` and `GET /api/page-sets/{name}`.
+- MCP: new read-only tools `list_page_sets` and `get_page_set`. The tool count goes from 53 to 55.
+- Two optional canvas fields, `bleed` and `margins`. Each holds `top`, `right`, `bottom`, and `left` in pixels. The canvas is the trim box. Bleed goes outward and margins go inward. A PNG or SVG export does not read them, and its bytes do not change. An older 1.x release keeps the fields as unknown canvas fields. `schemaVersion` stays 1. The document schema and its TypeScript declarations are regenerated.
+- Loading a document never refuses it for its `bleed` or `margins`. A release before 1.14.0 keeps `margins` as an unknown field and can resize the canvas below them, and such a project opens. `updateCanvas` refuses a negative side, and a `margins`, `width`, or `height` that leaves the margins with no safe area. A request that changes neither the insets nor the canvas size keeps them as they are. History replay does not apply these checks. The export of a document whose margins leave no safe area gives one `marginsLeaveNoSafeArea` warning.
+- `updateCanvas` takes two new optional fields, `bleed` and `margins`. Omit a field to keep it, and send `null` to remove it, as for `background`. The same fields are on the MCP `update_canvas`. The CLI `canvas set` takes `--bleed`, `--no-bleed`, `--margins`, and `--no-margins`. A value is one number for all sides, or `top,right,bottom,left`. One undo reverts the change. The operation schema and its TypeScript declarations are regenerated. No existing field changes.
+- Print proofing: four new export warning codes, `contentOutsideMargins`, `contentInsideBleed`, `assetBelowTargetResolution`, and `marginsLeaveNoSafeArea`, on the CLI, HTTP, and MCP. They come only from a document with `bleed` or `margins`. A document without these fields gets the same warnings as before.
+- An optional colour space on the CLI `export` (`--color-space`), the HTTP export (`colorSpace`), and the MCP `export_document` (`colorSpace`). Only `srgb` is accepted. `cmyk` and every other value is refused with `colorSpaceNotSupported`, because professional print colour management is out of scope. No file is written.
+- Export formats. The CLI `export`, the HTTP export, and the MCP `export_document` take a new optional `format` field: `png`, `svg`, `pdf`, `jpeg` (or `jpg`), or `webp`. `png` stays the default. A request without the new fields gives the same PNG bytes as before. The CLI takes `--format`.
+- Raster PDF. Each page is one image: the PNG pixels of that page. 1 canvas pixel is 1 point. The scale changes the image resolution and not the page size. The file has no date and no XMP metadata, its `/ID` comes from its content, and its producer is `Assemblash`. Text is part of the image and cannot be selected.
+- JPEG with a new optional `quality`, 1 to 100, default 90 (`--quality` on the CLI). JPEG has no transparency, so the engine flattens the pixels onto white.
+- Lossless WebP, with transparency. A `quality` with `webp` is refused with `lossyWebpNotSupported`, because lossy WebP bytes are not the same on all targets.
+- Every format keeps the byte-identity promise: PNG, SVG, raster PDF, JPEG, and lossless WebP.
+- Print PDF: a new optional `print` field (`--print` on the CLI), for PDF only. The page gets a trim box, a bleed box from `canvas.bleed`, an 18 pt mark zone, and crop marks. The image covers the trim box only. The bleed area holds no rendered content in this release.
+- Page-set export: a new optional `pages` field (`--pages` on the CLI), `<set>` or `<set>:<selection>`, for example `deck:1-3,5`. Pages are numbered from 1 in manifest order, with nested sets expanded. A PDF holds every selected page. Its pages render in parallel and stay in page order. Any other format needs exactly one page. The CLI writes the file to the given path and takes `--workspace`. HTTP and MCP write it to the `exports/` directory of the project in the request. The response gets a `pages` count.
+- Limits for a page-set PDF and a variants PDF. One PDF holds at most 200 pages (`pdfPageLimitExceeded`). One PDF renders at most 400 000 000 output pixels, all pages together (`pdfPixelLimitExceeded`). The engine checks both limits before it renders a page. At most 4 threads render PDF pages at one time in one process, and two exports at the same time share them. Each thread loads the fonts and assets of its page. The PDF bytes do not change.
+- Page-set exports report the warnings of each page in page order. Each warning gets an optional `project` field. The CLI prints the project as a fourth column.
+- Variants (`variants` on the CLI, `POST /api/projects/{id}/variants`, and MCP `render_variants`) take `format`, `quality`, and `name`. `pdf` writes one PDF, `exports/<name>.pdf` or `exports/variants.pdf`, with one page for each variant in order. Each variant in the result gets its `page` number. A `pdf` batch with no variant is refused with `invalidPageSelection` and writes no file.
+- `GET /api/projects/{id}/exports/{file}` also serves `.pdf`, `.jpg`, and `.webp` files with their media types.
+- New typed refusals: `exportFormatNotSupported`, `lossyWebpNotSupported`, `exportQualityOutOfRange`, `exportQualityNotApplicable`, `printNeedsPdf`, `invalidPageSelection`, `pagesNeedPdf`, `pdfPageLimitExceeded`, `pdfPixelLimitExceeded`, `variantsNameNeedsPdf`, `timestampNeedsPng` (CLI only), and `exportEncodingFailed`. HTTP answers `422`. A refused export writes no file.
+- The new formats add no document field and no operation. Release 1.13.1 opens every exported project unchanged. Release 1.13.1 has no `--format`, `--quality`, `--pages`, or `--print`. Its HTTP export and variants routes refuse the new body fields with `400 malformedRequest`. Its MCP `export_document` and `render_variants` ignore the new arguments and write PNG files. `schemaVersion` stays 1. The MCP tool count stays 55.
+- New workspace crate `assemblash-export` (Apache-2.0): the raster PDF writer and the JPEG and lossless WebP encoders. The workspace has seven crates.
+- The export dialog of the reference interface offers PNG, SVG, PDF, JPEG, and lossless WebP. PNG stays the default and sends the same request as before. A quality control shows for JPEG only. A print option shows for PDF only, and only when the document has bleed.
+- The export dialog shows a refusal from the engine as a readable message, for example `lossyWebpNotSupported` or `pageSetLoop`. A refused export offers no download.
+- Page sets in the reference interface. The project search lists the page sets of the workspace. Opening a set opens its pages as tabs in manifest order, as one run in the tab strip. Each tab of the set shows its page number and the engine thumbnail of the project.
+- A page that already has a tab keeps it and moves into the run. It does not open a second time.
+- A set with a loop, a missing page, or another refusal shows a readable message, and no tab opens. A set that would open more than 64 tabs is refused before any page is read.
+- From a tab of a page set, the export dialog exports all pages of the set as one PDF (`pages` on the HTTP export).
+- EN, FR, and DE strings for page sets, the export formats, and the readable refusals.
+- `scripts/page_sets_browser.mjs`: a browser journey for page sets as tabs, one page-set PDF export, one JPEG export, and one refused export. CI runs it on the candidate binary.
+- `scripts/ui_latency_benchmark.mjs --export-pages N`: measures a one-page PNG export and an N-page page-set PDF export from the export dialog, and the same PDF request without a browser.
+- New third-party dependencies: `image` 0.25.10 (MIT OR Apache-2.0), with only its JPEG and WebP codecs, and `moxcms` 0.8.1 (BSD-3-Clause OR Apache-2.0) and `pxfm` 0.1.30 (BSD-3-Clause OR Apache-2.0), which `image` brings in. `DEPENDENCIES.md` is regenerated.
+
+### Fixed
+
+- MCP: the input schema of `insert_layer_tree` no longer refers to itself. Before, MCP clients that validate tool schemas strictly (Moonshot/Kimi) refused the full tool list. Now the `children` of a group in that schema is an untyped object.
+- MCP: the output schema of `get_document_state` no longer refers to itself. In that schema, the `children` of a group is also an untyped object. The returned document does not change.
+- MCP: `insert_layer_tree` accepts the same input as before. Groups in groups still work. `schemaVersion` stays 1.
+- A `path` shape now paints its stroke. Before, the SVG export omitted the `stroke` and `stroke-width` attributes on the path element, so a stroked path showed no outline. The stroke is centred on the path edge, which is the SVG default. Exports of stroked paths change. No document field or operation changes.
+- An export name or a variant name that is a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`, in any case) is now refused with `invalidExportName` on every platform. Before, the engine accepted such a name, which Windows reserves for a device and not for a file. Project ids already use the same rule. The CLI, HTTP, and MCP use one rule.
+
 ## [1.13.1] — 2026-11-11
 
 **Security release: dependency advisories.** This release contains only two

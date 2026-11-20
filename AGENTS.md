@@ -16,8 +16,11 @@ refuses to become — scope, requirements, safety model, and the phase plan.
 Both apply to you. This file only adds what is specific to agents and stated
 nowhere else.
 
-The project is **released at 1.13.1**.
-It contains a Rust workspace of six crates and a reference interface in `ui/`.
+The project is **released at 1.14.0**.
+It contains a Rust workspace of seven crates and a reference interface in `ui/`.
+The crates are `assemblash-core`, `assemblash-renderer`, `assemblash-export`,
+`assemblash-server`, `assemblash-mcp`, `assemblash-cli`, and
+`assemblash-liveness`.
 Released binaries support six targets.
 `1.0.0` established the document schema and operation API stability promise, so
 a change that breaks either is a MAJOR release and needs a migration — say so

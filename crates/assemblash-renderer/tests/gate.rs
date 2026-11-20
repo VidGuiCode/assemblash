@@ -34,8 +34,10 @@ use assemblash_core::document::{
 use assemblash_core::ids::{AssetId, LayerId, SequentialIdSource};
 use assemblash_core::storage::{self, hash_bytes};
 use assemblash_core::{Color, Document, Layer, LayerKind};
+use assemblash_export::pdf::{self, write_pdf, PdfPage, PrintGeometry};
+use assemblash_export::{encode_jpeg, encode_webp_lossless};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
-use assemblash_renderer::{doc_to_svg, document_to_png, svg_to_pixmap, AssetHrefs};
+use assemblash_renderer::{doc_to_svg, document_to_png, pixmap_to_rgba, svg_to_pixmap, AssetHrefs};
 
 const FIXED_BACKGROUND_PNG: &[u8] = include_bytes!("../examples/fixtures/gradient-background.png");
 
@@ -2312,6 +2314,8 @@ fn g2_reference_documents_match_the_committed_hashes() {
         }
     }
 
+    export_format_hashes(&fonts, &mut computed);
+
     write_hashes(&computed);
 
     if updating() {
@@ -2324,6 +2328,132 @@ fn g2_reference_documents_match_the_committed_hashes() {
         computed, expected,
         "rendered output differs from the committed goldens on this platform"
     );
+}
+
+/// Reference documents that are also exported as JPEG, lossless WebP and
+/// PDF: the mixed document, a transparent canvas, a gradient, and styled
+/// text.
+const EXPORT_DOCUMENTS: [&str; 4] = ["mixed", "hue-rotation", "gradient-linear", "styled-runs"];
+
+/// The documents of the three-page PDF, in page order.
+const PDF_PAGE_DOCUMENTS: [&str; 3] = ["mixed", "gradient-linear", "latin"];
+
+/// Keys of the export goldens. The coverage test requires each of them.
+fn export_golden_keys() -> Vec<String> {
+    let mut keys = Vec::new();
+    for name in EXPORT_DOCUMENTS {
+        for kind in ["q90.jpg", "q75.jpg", "webp", "pdf"] {
+            keys.push(format!("{name}.{kind}"));
+        }
+    }
+    keys.push("pages-three.pdf".to_owned());
+    keys.push("print-bleed.pdf".to_owned());
+    keys
+}
+
+/// Renders a reference document at scale 1 and gives its straight-alpha
+/// pixels and its trim size in points (1 canvas pixel = 1 point).
+fn export_pixels(
+    fonts: &LoadedFonts,
+    document: &Document,
+    hrefs: &AssetHrefs,
+) -> (u32, u32, Vec<u8>, f32, f32) {
+    let svg = doc_to_svg(document, fonts.font_set(), hrefs).unwrap();
+    let pixmap = svg_to_pixmap(&svg, fonts, 1.0).unwrap();
+    let rgba = pixmap_to_rgba(&pixmap);
+
+    // The export pixels are exactly the pixels of the PNG export.
+    let png =
+        assemblash_renderer::pixmap_to_png(&pixmap, &gate_metadata("doc_gate_export")).unwrap();
+    let (_, _, png_pixels) = decode(&png);
+    assert_eq!(rgba, png_pixels, "pixmap_to_rgba must give the PNG pixels");
+
+    (
+        pixmap.width(),
+        pixmap.height(),
+        rgba,
+        document.canvas.width as f32,
+        document.canvas.height as f32,
+    )
+}
+
+/// G2 for the export encoders: JPEG at quality 90 and 75, lossless WebP and
+/// raster PDF bytes, computed from the same pixels as the PNG goldens.
+fn export_format_hashes(fonts: &LoadedFonts, computed: &mut BTreeMap<String, String>) {
+    let documents: BTreeMap<&str, (Document, AssetHrefs)> = reference_documents()
+        .into_iter()
+        .map(|(name, document, hrefs)| (name, (document, hrefs)))
+        .collect();
+    let mut record = |key: String, bytes: &[u8]| {
+        computed.insert(key.clone(), hash_bytes(bytes));
+        if updating() {
+            std::fs::write(preview_dir().join(&key), bytes).unwrap();
+        }
+    };
+
+    for name in EXPORT_DOCUMENTS {
+        let (document, hrefs) = &documents[name];
+        let (width, height, rgba, trim_w, trim_h) = export_pixels(fonts, document, hrefs);
+
+        for quality in [90, 75] {
+            let jpeg = encode_jpeg(width, height, &rgba, quality).unwrap();
+            record(format!("{name}.q{quality}.jpg"), &jpeg);
+        }
+
+        let webp = encode_webp_lossless(width, height, &rgba).unwrap();
+        record(format!("{name}.webp"), &webp);
+
+        let page = PdfPage::new(width, height, &rgba, trim_w, trim_h, None).unwrap();
+        let pdf = write_pdf(&[page]);
+        assert_eq!(
+            pdf::extract_page_images(&pdf).unwrap(),
+            [(width, height, rgba)],
+            "the PDF of {name} must hold the PNG pixels"
+        );
+        record(format!("{name}.pdf"), &pdf);
+    }
+
+    let pages: Vec<PdfPage> = PDF_PAGE_DOCUMENTS
+        .iter()
+        .map(|name| {
+            let (document, hrefs) = &documents[name];
+            let (width, height, rgba, trim_w, trim_h) = export_pixels(fonts, document, hrefs);
+            PdfPage::new(width, height, &rgba, trim_w, trim_h, None).unwrap()
+        })
+        .collect();
+    let pdf = write_pdf(&pages);
+    assert_eq!(pdf::extract_page_images(&pdf).unwrap().len(), 3);
+    record("pages-three.pdf".to_owned(), &pdf);
+
+    // A print PDF: the mixed document with a different bleed on each side.
+    let (mut document, hrefs) = mixed_document();
+    document.canvas.bleed = Some(assemblash_core::document::Insets {
+        top: 12.0,
+        right: 9.0,
+        bottom: 6.0,
+        left: 3.0,
+        ..Default::default()
+    });
+    let bleed = document.canvas.bleed.clone().unwrap();
+    let print = PrintGeometry {
+        bleed: [
+            bleed.top as f32,
+            bleed.right as f32,
+            bleed.bottom as f32,
+            bleed.left as f32,
+        ],
+    };
+    let (width, height, rgba, trim_w, trim_h) = export_pixels(fonts, &document, &hrefs);
+    let page = PdfPage::new(width, height, &rgba, trim_w, trim_h, Some(print)).unwrap();
+    let pdf = write_pdf(&[page]);
+    let content = &pdf::page_content_streams(&pdf).unwrap()[0];
+    assert_eq!(content.matches(" l S\n").count(), 8, "eight crop marks");
+    assert_eq!(
+        pdf::extract_page_images(&pdf).unwrap(),
+        [(width, height, rgba)],
+        "the print PDF draws the trim image only"
+    );
+    record("print-bleed.pdf".to_owned(), &pdf);
 }
 
 /// G3 — non-Latin text is shaped, not dropped: Arabic joins and runs
@@ -2481,6 +2611,9 @@ fn goldens_cover_every_reference_document() {
             "no golden for {name}"
         );
         assert!(goldens.contains_key(&format!("{name}.png")));
+    }
+    for key in export_golden_keys() {
+        assert!(goldens.contains_key(&key), "no export golden {key}");
     }
 }
 

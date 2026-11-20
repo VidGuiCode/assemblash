@@ -467,3 +467,61 @@ fn malformed_svg_is_a_typed_error() {
         "{error:?}"
     );
 }
+
+/// A stroked path paints its outline. The stroke is centred on the path
+/// edge: half of it is outside the box and half is inside. A path with no
+/// fill shows only the outline, so the centre stays the background colour.
+#[test]
+fn a_stroked_path_paints_its_outline() {
+    use assemblash_core::document::{ShapeKind, ShapeLayer, Stroke};
+
+    let mut document = Document::new(&mut SequentialIdSource::new(), 200.0, 120.0);
+    document.canvas.background = Some(Color::new("#ffffff"));
+    document.layers.push(Layer::new(
+        LayerId::new("layer_1"),
+        Transform::new(20.0, 20.0, 160.0, 80.0),
+        LayerKind::Shape(ShapeLayer {
+            shape: ShapeKind::Path {
+                d: "M 0 0 L 160 0 L 160 80 L 0 80 Z".to_owned(),
+                extra: Extras::new(),
+            },
+            fill: None,
+            stroke: Some(Stroke {
+                color: Color::new("#000000"),
+                width: 6.0,
+                dash_array: None,
+                line_cap: None,
+                line_join: None,
+                extra: Extras::new(),
+            }),
+            extra: Extras::new(),
+        }),
+    ));
+
+    let svg = doc_to_svg(&document, fonts().font_set(), &AssetHrefs::new()).unwrap();
+    assert!(
+        svg.contains("stroke=\"#000000\" stroke-width=\"6\""),
+        "{svg}"
+    );
+
+    let metadata = PngMetadata {
+        document_id: document.id.to_string(),
+        schema_version: assemblash_core::SCHEMA_VERSION,
+        renderer_version: "test".to_owned(),
+        created: None,
+    };
+    let png = document_to_png(&document, &fonts(), &AssetHrefs::new(), 1.0, &metadata).unwrap();
+    let (width, _, pixels) = decode(&png);
+    let at = |x: u32, y: u32| {
+        let offset = ((y * width + x) * 4) as usize;
+        [pixels[offset], pixels[offset + 1], pixels[offset + 2]]
+    };
+
+    // The outline: the left edge at x = 20 runs from x = 17 to x = 23. One
+    // pixel just outside the box and one just inside are both painted.
+    assert_eq!(at(18, 60), [0, 0, 0], "outside half of the left edge");
+    assert_eq!(at(21, 60), [0, 0, 0], "inside half of the left edge");
+    assert_eq!(at(100, 21), [0, 0, 0], "top edge");
+    // The centre has no fill.
+    assert_eq!(at(100, 60), [255, 255, 255], "the centre is not painted");
+}

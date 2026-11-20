@@ -63,6 +63,25 @@ impl CancelToken {
     }
 }
 
+/// How long a render waits before it starts. Always `None` in a release build.
+///
+/// Debug builds only: a test that must see a render under way sets
+/// `ASSEMBLASH_MCP_TEST_RENDER_HOLD_MS`, so the render time does not depend on
+/// the speed of the runner.
+fn render_hold() -> Option<std::time::Duration> {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("ASSEMBLASH_MCP_TEST_RENDER_HOLD_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(std::time::Duration::from_millis)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
 /// The error a cancelled request is answered with.
 pub(crate) fn cancelled() -> ApiError {
     ApiError::new(
@@ -279,6 +298,7 @@ pub struct DocumentState {
     /// The version to send back with a mutation, once mutations exist.
     pub version: u64,
     /// The document itself.
+    #[schemars(schema_with = "crate::layer_schema::document_schema")]
     pub document: Document,
 }
 
@@ -314,6 +334,14 @@ pub struct HistoryReport {
 pub struct ProjectList {
     /// The projects, sorted by name.
     pub projects: Vec<ProjectSummary>,
+}
+
+/// The page sets of a workspace.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSetList {
+    /// The set names, sorted. A name is the file name without `.json`.
+    pub page_sets: Vec<assemblash_core::page_sets::PageSetName>,
 }
 
 /// A document's layers, flattened.
@@ -379,6 +407,38 @@ pub struct OverlapReport {
     pub pairs: Vec<(LayerId, LayerId)>,
 }
 
+/// Runs `work` on its own thread and watches `cancel` while it runs.
+///
+/// When the flag goes up, the caller is refused at once and the work is left
+/// to finish on its own into a result nobody reads. In a debug build the
+/// thread first waits for the test hold, as a preview does.
+pub(crate) fn run_cancellable<T, F>(cancel: &CancelToken, work: F) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+{
+    let hold = render_hold();
+    let running = std::thread::spawn(move || {
+        if let Some(hold) = hold {
+            std::thread::sleep(hold);
+        }
+        work()
+    });
+    while !running.is_finished() {
+        if cancel.is_cancelled() {
+            return Err(cancelled());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    running.join().map_err(|_| {
+        ApiError::new(
+            assemblash_server::StatusCode::INTERNAL_SERVER_ERROR,
+            "renderFailed",
+            "the renderer stopped while it was drawing the canvas",
+        )
+    })?
+}
+
 /// A document, where it lives, and exactly the fonts it names.
 ///
 /// The three things every render needs, gathered once. Resolving them
@@ -401,12 +461,25 @@ impl Loaded {
     /// render is left to finish on its own into a result nobody reads. This
     /// is what keeps a target switch from waiting out a long export.
     pub(crate) fn preview(&self, scale: f32, cancel: &CancelToken) -> Result<Preview, ApiError> {
+        self.preview_with_hold(scale, cancel, render_hold())
+    }
+
+    /// [`Loaded::preview`], with the render thread first held for `hold`.
+    fn preview_with_hold(
+        &self,
+        scale: f32,
+        cancel: &CancelToken,
+        hold: Option<std::time::Duration>,
+    ) -> Result<Preview, ApiError> {
         let hrefs = assemblash_renderer::data_uris(&self.document, &self.directory)?;
         let render = {
             let document = self.document.clone();
             let fonts = self.fonts.clone();
             let hrefs = hrefs.clone();
             std::thread::spawn(move || {
+                if let Some(hold) = hold {
+                    std::thread::sleep(hold);
+                }
                 document_to_png(
                     &document,
                     &fonts,
@@ -437,13 +510,41 @@ impl Loaded {
         Ok(Preview { png, width, height })
     }
 
+    /// The canvas in any export format, watched for `cancel` the same way
+    /// as [`Loaded::preview`].
+    pub(crate) fn encode(
+        &self,
+        scale: f32,
+        settings: assemblash_server::render::ExportSettings,
+        cancel: &CancelToken,
+    ) -> Result<assemblash_server::render::Rendered, ApiError> {
+        let hrefs = assemblash_renderer::data_uris(&self.document, &self.directory)?;
+        let document = self.document.clone();
+        let fonts = self.fonts.clone();
+        run_cancellable(cancel, move || {
+            assemblash_server::render::encode_document(
+                &document,
+                &fonts,
+                &hrefs,
+                scale,
+                settings,
+                &PngMetadata::for_document(&document),
+            )
+        })
+    }
+
     /// What an export of this document would want to say (FR-11).
     ///
     /// Produced here rather than taken from a response type, because the three
     /// export paths — the command line's, the HTTP API's, and this one — each
     /// write their own file and would otherwise each notice different things.
-    pub(crate) fn warnings(&self) -> Vec<ExportWarning> {
-        assemblash_renderer::export_warnings(&self.document, self.fonts.font_set(), &self.directory)
+    pub(crate) fn warnings(&self, scale: f32) -> Vec<ExportWarning> {
+        assemblash_renderer::export_warnings_at(
+            &self.document,
+            self.fonts.font_set(),
+            &self.directory,
+            scale,
+        )
     }
 }
 
@@ -653,6 +754,51 @@ impl Backend {
                     projects: vec![summarise(name, &document)],
                 })
             }
+        }
+    }
+
+    /// The page sets of the workspace, by name.
+    ///
+    /// A server opened for one project has no workspace, so it has no page
+    /// sets: the list is empty.
+    pub fn list_page_sets(&self) -> Result<PageSetList, ApiError> {
+        let page_sets = match &self.root {
+            Root::Workspace(state) => state.workspace().page_sets()?,
+            Root::SingleProject { .. } => Vec::new(),
+        };
+        Ok(PageSetList { page_sets })
+    }
+
+    /// One page set, resolved to its flat, ordered page list.
+    pub fn get_page_set(
+        &self,
+        name: &str,
+    ) -> Result<assemblash_core::page_sets::ResolvedPageSet, ApiError> {
+        let name = assemblash_core::page_sets::PageSetName::new(name)?;
+        match &self.root {
+            Root::Workspace(state) => Ok(state.workspace().resolve_page_set(&name)?),
+            Root::SingleProject { .. } => {
+                Err(assemblash_core::page_sets::PageSetError::NotFound { name }.into())
+            }
+        }
+    }
+
+    /// The pages of a page-set export, read and checked against the format,
+    /// and the state that loads the fonts and assets of each page.
+    ///
+    /// A server opened for one project has no workspace and so no page sets:
+    /// the set is not found.
+    pub fn export_pages(
+        &self,
+        pages: &assemblash_server::render::PageRequest,
+        settings: assemblash_server::render::ExportSettings,
+    ) -> Result<(Vec<assemblash_server::render::PageSource>, AppState), ApiError> {
+        match &self.root {
+            Root::Workspace(state) => Ok((state.export_pages(pages, settings)?, (**state).clone())),
+            Root::SingleProject { .. } => Err(assemblash_core::page_sets::PageSetError::NotFound {
+                name: pages.set.clone(),
+            }
+            .into()),
         }
     }
 
@@ -1163,4 +1309,40 @@ fn axum_status_not_found() -> assemblash_server::StatusCode {
 
 fn axum_status_internal() -> assemblash_server::StatusCode {
     assemblash_server::StatusCode::INTERNAL_SERVER_ERROR
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    /// A render under way is refused as soon as the flag goes up.
+    ///
+    /// The hold keeps the render running for a minute, so only the
+    /// cancellation can end this call early. If the hold is ignored, the
+    /// small render finishes first and the call answers with a PNG.
+    #[test]
+    fn a_render_under_way_is_refused_when_cancelled() {
+        let loaded = Loaded {
+            document: Document::new(&mut UlidIdSource, 100.0, 100.0),
+            directory: std::env::temp_dir(),
+            fonts: LoadedFonts::from_bytes(Vec::new()),
+        };
+        let cancel = CancelToken::default();
+        let flag = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            flag.cancel();
+        });
+        let started = Instant::now();
+        let error = loaded
+            .preview_with_hold(1.0, &cancel, Some(Duration::from_secs(60)))
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), "requestCancelled");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
 }

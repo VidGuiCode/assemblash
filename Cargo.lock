@@ -87,9 +87,10 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "assemblash-cli"
-version = "1.13.1"
+version = "1.14.0"
 dependencies = [
  "assemblash-core",
+ "assemblash-export",
  "assemblash-mcp",
  "assemblash-renderer",
  "assemblash-server",
@@ -103,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-core"
-version = "1.13.1"
+version = "1.14.0"
 dependencies = [
  "assemblash-liveness",
  "proptest",
@@ -120,8 +121,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "assemblash-export"
+version = "1.14.0"
+dependencies = [
+ "image",
+ "miniz_oxide",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "assemblash-liveness"
-version = "1.13.1"
+version = "1.14.0"
 dependencies = [
  "libc",
  "serde",
@@ -131,9 +142,10 @@ dependencies = [
 
 [[package]]
 name = "assemblash-mcp"
-version = "1.13.1"
+version = "1.14.0"
 dependencies = [
  "assemblash-core",
+ "assemblash-export",
  "assemblash-renderer",
  "assemblash-server",
  "png",
@@ -150,9 +162,10 @@ dependencies = [
 
 [[package]]
 name = "assemblash-renderer"
-version = "1.13.1"
+version = "1.14.0"
 dependencies = [
  "assemblash-core",
+ "assemblash-export",
  "harfrust",
  "png",
  "resvg",
@@ -171,9 +184,10 @@ dependencies = [
 
 [[package]]
 name = "assemblash-server"
-version = "1.13.1"
+version = "1.14.0"
 dependencies = [
  "assemblash-core",
+ "assemblash-export",
  "assemblash-renderer",
  "axum",
  "getrandom 0.3.4",
@@ -966,6 +980,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
+name = "image"
+version = "0.25.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
+dependencies = [
+ "bytemuck",
+ "byteorder-lite",
+ "image-webp",
+ "moxcms",
+ "num-traits",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
 name = "image-webp"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1106,6 +1135,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "moxcms"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
+dependencies = [
+ "num-traits",
+ "pxfm",
+]
+
+[[package]]
 name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1240,6 +1279,12 @@ dependencies = [
  "tempfile",
  "unarray",
 ]
+
+[[package]]
+name = "pxfm"
+version = "0.1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "quick-error"

@@ -41,6 +41,12 @@ wildcards = "deny"
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # chrono is unmaintained. This is not a vulnerability, and no maintained
+    # version exists. We do not use chrono directly: rmcp and schemars pull it
+    # in. Remove this entry when those crates stop using chrono.
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained, no fixed version; pulled in by rmcp and schemars" },
+]
 
 [sources]
 unknown-registry = "deny"

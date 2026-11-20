@@ -308,6 +308,18 @@ fn asset(index: usize) -> Asset {
     }
 }
 
+fn insets(max: f64) -> impl Strategy<Value = assemblash_core::Insets> {
+    (0.0..max, 0.0..max, 0.0..max, 0.0..max, extras()).prop_map(
+        |(top, right, bottom, left, extra)| assemblash_core::Insets {
+            top,
+            right,
+            bottom,
+            left,
+            extra,
+        },
+    )
+}
+
 fn document() -> impl Strategy<Value = Document> {
     (0usize..3).prop_flat_map(|asset_count| {
         let assets: Vec<Asset> = (0..asset_count).map(asset).collect();
@@ -321,6 +333,10 @@ fn document() -> impl Strategy<Value = Document> {
             extras(),
             extras(),
             presets(),
+            prop::option::of(insets(100.0)),
+            // Below half of the smallest canvas side, so any two margins
+            // still leave a safe area.
+            prop::option::of(insets(0.49)),
         )
             .prop_map(
                 move |(
@@ -332,6 +348,8 @@ fn document() -> impl Strategy<Value = Document> {
                     canvas_extra,
                     extra,
                     presets,
+                    bleed,
+                    margins,
                 )| {
                     let mut next = 0;
                     assign_ids(&mut layers, &mut next);
@@ -345,6 +363,8 @@ fn document() -> impl Strategy<Value = Document> {
                             height,
                             background,
                             background_image: None,
+                            bleed,
+                            margins,
                             extra: canvas_extra,
                         },
                         assets: assets.clone(),

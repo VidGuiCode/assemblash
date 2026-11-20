@@ -14,7 +14,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 ## Summary
 
-6 workspace crates, 267 third-party crates in the full dependency graph
+7 workspace crates, 270 third-party crates in the full dependency graph
 (all features, all targets).
 
 | Licence | Crates |
@@ -31,12 +31,13 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | BSD-2-Clause | 1 |
 | BSD-2-Clause OR Apache-2.0 OR MIT | 2 |
 | BSD-3-Clause | 4 |
+| BSD-3-Clause OR Apache-2.0 | 2 |
 | BSD-3-Clause/MIT | 1 |
 | CDLA-Permissive-2.0 | 1 |
 | ISC | 2 |
 | MIT | 47 |
 | MIT AND BSD-3-Clause | 1 |
-| MIT OR Apache-2.0 | 150 |
+| MIT OR Apache-2.0 | 151 |
 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | 2 |
 | MIT OR Apache-2.0 OR Zlib | 3 |
 | MIT OR Zlib OR Apache-2.0 | 1 |
@@ -49,12 +50,13 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 | Crate | Version | Licence |
 | ----- | ------- | ------- |
-| assemblash-cli | 1.13.1 | Apache-2.0 |
-| assemblash-core | 1.13.1 | Apache-2.0 |
-| assemblash-liveness | 1.13.1 | Apache-2.0 |
-| assemblash-mcp | 1.13.1 | Apache-2.0 |
-| assemblash-renderer | 1.13.1 | Apache-2.0 |
-| assemblash-server | 1.13.1 | Apache-2.0 |
+| assemblash-cli | 1.14.0 | Apache-2.0 |
+| assemblash-core | 1.14.0 | Apache-2.0 |
+| assemblash-export | 1.14.0 | Apache-2.0 |
+| assemblash-liveness | 1.14.0 | Apache-2.0 |
+| assemblash-mcp | 1.14.0 | Apache-2.0 |
+| assemblash-renderer | 1.14.0 | Apache-2.0 |
+| assemblash-server | 1.14.0 | Apache-2.0 |
 
 ## Dependencies
 
@@ -154,6 +156,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
 | iana-time-zone-haiku | 0.1.2 | MIT OR Apache-2.0 |
 | ident_case | 1.0.1 | MIT/Apache-2.0 |
+| image | 0.25.10 | MIT OR Apache-2.0 |
 | image-webp | 0.2.4 | MIT OR Apache-2.0 |
 | imagesize | 0.15.0 | MIT |
 | indexmap | 2.14.0 | Apache-2.0 OR MIT |
@@ -171,6 +174,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | mime | 0.3.17 | MIT OR Apache-2.0 |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | mio | 1.2.2 | MIT |
+| moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 |
 | nix | 0.31.3 | MIT |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
@@ -186,6 +190,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
 | process-wrap | 10.0.1 | Apache-2.0 OR MIT |
 | proptest | 1.11.0 | MIT OR Apache-2.0 |
+| pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 |
 | quick-error | 1.2.3 | MIT/Apache-2.0 |
 | quick-error | 2.0.1 | MIT/Apache-2.0 |
 | quote | 1.0.47 | MIT OR Apache-2.0 |

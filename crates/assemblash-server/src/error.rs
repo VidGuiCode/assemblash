@@ -15,6 +15,7 @@
 //! The `code` is the part a client should branch on: it is a closed set,
 //! and it does not change when a message is reworded.
 
+use assemblash_core::page_sets::PageSetError;
 use assemblash_core::session::SessionError;
 use assemblash_core::storage::StorageError;
 use assemblash_core::workspace::WorkspaceError;
@@ -144,6 +145,99 @@ impl From<WorkspaceError> for ApiError {
                     .with_details(json!({ "id": id }))
             }
             _ => Self::new(StatusCode::INTERNAL_SERVER_ERROR, "workspace", message),
+        }
+    }
+}
+
+impl From<assemblash_core::color_space::ColorSpaceNotSupported> for ApiError {
+    fn from(error: assemblash_core::color_space::ColorSpaceNotSupported) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            assemblash_core::color_space::ColorSpaceNotSupported::CODE,
+            error.to_string(),
+        )
+        .with_details(json!({ "requested": error.requested, "supported": ["srgb"] }))
+    }
+}
+
+impl From<assemblash_export::ExportFormatNotSupported> for ApiError {
+    fn from(error: assemblash_export::ExportFormatNotSupported) -> Self {
+        let supported: Vec<&str> = assemblash_export::ExportFormat::ALL
+            .iter()
+            .map(|format| format.as_str())
+            .collect();
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            assemblash_export::ExportFormatNotSupported::CODE,
+            error.to_string(),
+        )
+        .with_details(json!({ "requested": error.requested, "supported": supported }))
+    }
+}
+
+impl From<assemblash_export::QualityError> for ApiError {
+    fn from(error: assemblash_export::QualityError) -> Self {
+        use assemblash_export::QualityError;
+        let quality = match &error {
+            QualityError::OutOfRange { quality }
+            | QualityError::LossyWebpNotSupported { quality }
+            | QualityError::NotApplicable { quality, .. } => *quality,
+        };
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.code(),
+            error.to_string(),
+        )
+        .with_details(json!({ "quality": quality }))
+    }
+}
+
+impl From<assemblash_export::EncodeError> for ApiError {
+    fn from(error: assemblash_export::EncodeError) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            assemblash_export::EncodeError::CODE,
+            error.to_string(),
+        )
+    }
+}
+
+impl From<PageSetError> for ApiError {
+    fn from(error: PageSetError) -> Self {
+        let message = error.to_string();
+        let code = error.code();
+        match error {
+            PageSetError::InvalidName { name, reason } => {
+                Self::new(StatusCode::BAD_REQUEST, code, message)
+                    .with_details(json!({ "name": name, "reason": reason }))
+            }
+            PageSetError::NotFound { name } => Self::new(StatusCode::NOT_FOUND, code, message)
+                .with_details(json!({ "name": name })),
+            PageSetError::Malformed { set, reason } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "set": set, "reason": reason }))
+            }
+            PageSetError::MissingMembers { set, missing } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "set": set, "missing": missing }))
+            }
+            PageSetError::Loop { chain } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "chain": chain }))
+            }
+            PageSetError::TooDeep { chain, limit } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+                    .with_details(json!({ "chain": chain, "limit": limit }))
+            }
+            PageSetError::DuplicatePage {
+                set,
+                project,
+                first,
+                second,
+            } => Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message).with_details(
+                json!({ "set": set, "project": project, "first": first, "second": second }),
+            ),
+            _ => Self::new(StatusCode::INTERNAL_SERVER_ERROR, code, message),
         }
     }
 }

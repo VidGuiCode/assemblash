@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { FORMATS, RESOLUTIONS, dimensionsFor, downloadTargetFor } from "./.test-dist/export.js";
+import {
+  FORMATS,
+  RESOLUTIONS,
+  dimensionsFor,
+  downloadTargetFor,
+  exportOptionsFor,
+  extensionFor,
+  hasBleed,
+} from "./.test-dist/export.js";
 
 function resolution(id) {
   const found = RESOLUTIONS.find((one) => one.id === id);
@@ -52,8 +60,41 @@ test("non-standard canvases round to whole output pixels", () => {
   });
 });
 
-test("the dialog offers exactly the two renders the engine produces", () => {
-  assert.deepEqual(FORMATS.map((one) => one.id), ["png", "svg"]);
+test("the dialog offers the formats the engine produces, PNG first", () => {
+  assert.deepEqual(FORMATS.map((one) => one.id), ["png", "svg", "pdf", "jpeg", "webp"]);
+});
+
+test("PNG sends no format fields, so its request is the one from before the formats", () => {
+  const document = { canvas: { width: 100, height: 100 } };
+  const choice = { format: "png", quality: 40, print: true, pageSet: "deck" };
+  assert.deepEqual(exportOptionsFor(choice, document), {});
+  assert.deepEqual(exportOptionsFor({ ...choice, format: "svg" }, document), {});
+});
+
+test("each format field goes only with the format that can use it", () => {
+  const plain = { canvas: { width: 100, height: 100 } };
+  const bled = { canvas: { width: 100, height: 100, bleed: { top: 9, right: 9, bottom: 9, left: 9 } } };
+  const choice = { format: "jpeg", quality: 72.4, print: true, pageSet: "deck" };
+  assert.deepEqual(exportOptionsFor(choice, bled), { format: "jpeg", quality: 72 });
+  assert.deepEqual(exportOptionsFor({ ...choice, format: "webp" }, bled), { format: "webp" }, "WebP is lossless: no quality");
+  assert.deepEqual(exportOptionsFor({ ...choice, format: "pdf" }, bled), { format: "pdf", pages: "deck", print: true });
+  assert.deepEqual(exportOptionsFor({ ...choice, format: "pdf" }, plain), { format: "pdf", pages: "deck" }, "no print without bleed");
+  assert.deepEqual(exportOptionsFor({ ...choice, format: "pdf", pageSet: null, print: false }, bled), { format: "pdf" });
+});
+
+test("a bleed of zero on every side is no bleed", () => {
+  assert.equal(hasBleed({ canvas: { width: 1, height: 1 } }), false);
+  assert.equal(hasBleed({ canvas: { width: 1, height: 1, bleed: null } }), false);
+  assert.equal(hasBleed({ canvas: { width: 1, height: 1, bleed: { top: 0, right: 0, bottom: 0, left: 0 } } }), false);
+  assert.equal(hasBleed({ canvas: { width: 1, height: 1, bleed: { left: 3 } } }), true);
+});
+
+test("a JPEG downloads under its .jpg name, the other raster formats under their own", () => {
+  const document = { canvas: { width: 10, height: 10 }, version: 1 };
+  assert.equal(extensionFor("jpeg"), "jpg");
+  assert.deepEqual(downloadTargetFor("jpeg", "p", document, "card"), { url: "/api/projects/p/exports/card.jpg", filename: "card.jpg" });
+  assert.deepEqual(downloadTargetFor("pdf", "p", document, "card"), { url: "/api/projects/p/exports/card.pdf", filename: "card.pdf" });
+  assert.deepEqual(downloadTargetFor("webp", "p", document, "card"), { url: "/api/projects/p/exports/card.webp", filename: "card.webp" });
 });
 
 test("choosing SVG downloads the vector render, not a rasterized export", () => {

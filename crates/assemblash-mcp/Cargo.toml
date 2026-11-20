@@ -50,6 +50,7 @@ workspace = true
 # Cargo's artifact message. Relying on `cargo test --workspace` having built it
 # first let a `-p assemblash-mcp` run pass against a stale binary.
 [dev-dependencies]
+assemblash-export.workspace = true
 png = "0.18.1"
 rmcp = { version = "3.9.0", default-features = false, features = [
     "client",

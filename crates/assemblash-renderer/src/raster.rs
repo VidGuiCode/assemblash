@@ -204,11 +204,12 @@ pub fn svg_to_pixmap(
     Ok(pixmap)
 }
 
-/// Encodes a rasterized canvas as a PNG carrying its provenance.
-pub fn pixmap_to_png(
-    pixmap: &tiny_skia::Pixmap,
-    metadata: &PngMetadata,
-) -> Result<Vec<u8>, RenderError> {
+/// Gives the straight-alpha RGBA pixels of a rasterized canvas.
+///
+/// These are exactly the pixels that [`pixmap_to_png`] stores in the PNG.
+/// The other export encoders (JPEG, WebP, PDF) start from these bytes, so
+/// every format shows the same image.
+pub fn pixmap_to_rgba(pixmap: &tiny_skia::Pixmap) -> Vec<u8> {
     // tiny-skia stores premultiplied pixels; PNG wants straight alpha.
     let mut rgba = Vec::with_capacity(pixmap.data().len());
     for pixel in pixmap.pixels() {
@@ -220,6 +221,15 @@ pub fn pixmap_to_png(
             demultiplied.alpha(),
         ]);
     }
+    rgba
+}
+
+/// Encodes a rasterized canvas as a PNG carrying its provenance.
+pub fn pixmap_to_png(
+    pixmap: &tiny_skia::Pixmap,
+    metadata: &PngMetadata,
+) -> Result<Vec<u8>, RenderError> {
+    let rgba = pixmap_to_rgba(pixmap);
 
     let mut out = Vec::new();
     {

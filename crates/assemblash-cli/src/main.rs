@@ -288,14 +288,19 @@ enum Command {
         fonts: FontArgs,
     },
 
-    /// Writes the document as PNG.
+    /// Writes the document as PNG, or in another format with --format.
     ///
     /// Prints the file it wrote and that file's sha256, separated by a tab.
+    ///
+    /// With --pages, the pages come from a page set of the workspace, and the
+    /// one path is the output file: `export --pages deck --format pdf
+    /// deck.pdf`. The format never comes from the file extension.
     Export {
-        /// Project directory.
-        project: PathBuf,
+        /// Project directory. Not used with --pages.
+        #[arg(value_name = "PROJECT", required_unless_present = "pages")]
+        project: Option<PathBuf>,
         /// Where to write it.
-        #[arg(value_name = "OUT", required_unless_present = "out")]
+        #[arg(value_name = "OUT", required_unless_present_any = ["out", "pages"])]
         output: Option<PathBuf>,
         /// Where to write it. The older spelling of the same thing.
         #[arg(long, conflicts_with = "output")]
@@ -303,8 +308,34 @@ enum Command {
         /// Multiplier on the canvas size.
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+        /// Colour space to write. `srgb` is the only one. Any other value,
+        /// `cmyk` included, is refused: professional print colour management
+        /// is out of scope.
+        #[arg(long, value_name = "SPACE")]
+        color_space: Option<String>,
+        /// File format: png (the default), svg, pdf, jpeg (or jpg), or webp.
+        #[arg(long, value_name = "FORMAT")]
+        format: Option<String>,
+        /// JPEG quality, 1 to 100; 90 when omitted. JPEG only: WebP is
+        /// lossless only.
+        #[arg(long, value_name = "N")]
+        quality: Option<u32>,
+        /// Pages of a page set: `<set>` for every page, or `<set>:<pages>`
+        /// such as `deck:1-3,5`. A PDF holds every selected page; any other
+        /// format needs exactly one.
+        #[arg(long, value_name = "SET[:PAGES]")]
+        pages: Option<String>,
+        /// Workspace that holds the page set. Used with --pages only.
+        /// Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+        /// Add trim and bleed boxes and crop marks from the canvas bleed.
+        /// PDF only.
+        #[arg(long)]
+        print: bool,
         /// Timestamp to record in the PNG metadata. Omitted by default so
-        /// that two exports of the same document are byte-identical.
+        /// that two exports of the same document are byte-identical. PNG
+        /// only.
         #[arg(long)]
         timestamp: Option<String>,
         #[command(flatten)]
@@ -437,6 +468,18 @@ enum Command {
         /// Multiplier on the canvas size.
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+        /// File format: png (the default), svg, jpeg (or jpg) and webp write
+        /// one file for each variant into the project's exports; pdf writes
+        /// one PDF there, with one page for each variant in order.
+        #[arg(long, value_name = "FORMAT")]
+        format: Option<String>,
+        /// JPEG quality, 1 to 100; 90 when omitted. JPEG only.
+        #[arg(long, value_name = "N")]
+        quality: Option<u32>,
+        /// File stem of the PDF: `exports/<name>.pdf`. PDF only; `variants`
+        /// when omitted.
+        #[arg(long)]
+        name: Option<String>,
         /// Font store to render with.
         #[arg(long = "font-store", env = "ASSEMBLASH_FONT_STORE")]
         font_store: PathBuf,
@@ -535,6 +578,13 @@ enum Command {
         )]
         reclaim_stale_locks: bool,
     },
+
+    /// Lists and reads page sets: ordered lists of projects in a workspace.
+    ///
+    /// A page set is one file, `page-sets/<name>.json`, beside `projects/`.
+    /// These commands only read. Write the file to make or change a set.
+    #[command(subcommand, name = "page-set")]
+    PageSet(PageSetCommand),
 
     /// Manages the access token a non-loopback bind requires.
     #[command(subcommand)]
@@ -912,6 +962,20 @@ enum CanvasCommand {
         clear_background_image: bool,
         #[arg(long, value_enum)]
         anchor: Option<CanvasAnchorArg>,
+        /// Print bleed in pixels: one number for all sides, or
+        /// `top,right,bottom,left`. Never changes a PNG or SVG export.
+        #[arg(long, value_name = "PIXELS", conflicts_with = "no_bleed")]
+        bleed: Option<String>,
+        /// Remove the print bleed.
+        #[arg(long)]
+        no_bleed: bool,
+        /// Print margins in pixels: one number for all sides, or
+        /// `top,right,bottom,left`. Never changes a PNG or SVG export.
+        #[arg(long, value_name = "PIXELS", conflicts_with = "no_margins")]
+        margins: Option<String>,
+        /// Remove the print margins.
+        #[arg(long)]
+        no_margins: bool,
         #[command(flatten)]
         who: ActorArgs,
     },
@@ -1132,6 +1196,35 @@ enum TokenCommand {
         /// Workspace to change. Defaults to this machine's.
         #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
         workspace: Option<PathBuf>,
+    },
+}
+
+/// Reads the page sets of a workspace.
+#[derive(Debug, Subcommand)]
+enum PageSetCommand {
+    /// Prints the name of each page set, one on each line.
+    List {
+        /// Workspace to read. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+        /// Print the JSON that `GET /api/page-sets` serves.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolves one page set and prints its pages in order.
+    ///
+    /// Each line is the page index, a tab, and the project id. Nested sets add
+    /// their pages in place. A loop, a missing member, or a project on two
+    /// pages is an error, and nothing is printed.
+    Show {
+        /// Name of the set: its file name without `.json`.
+        name: String,
+        /// Workspace to read. Defaults to this machine's.
+        #[arg(long, env = "ASSEMBLASH_WORKSPACE")]
+        workspace: Option<PathBuf>,
+        /// Print the JSON that `GET /api/page-sets/{name}` serves.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1673,6 +1766,40 @@ fn parse_paint(raw: &str) -> Result<Color, CliError> {
 }
 
 /// Parses the CLI's nullable paint spelling. `none` clears an optional paint.
+/// Reads `--bleed`/`--margins` and their `--no-` flag into the request shape:
+/// absent keeps the value, the `--no-` flag clears it.
+fn optional_insets(
+    flag: &'static str,
+    raw: Option<String>,
+    clear: bool,
+) -> Result<Option<Option<assemblash_core::Insets>>, CliError> {
+    if clear {
+        return Ok(Some(None));
+    }
+    let Some(raw) = raw else { return Ok(None) };
+    let bad = || CliError::Insets {
+        flag,
+        value: raw.clone(),
+    };
+    let numbers = raw
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| bad())?;
+    let insets = match numbers.as_slice() {
+        [all] => assemblash_core::Insets::uniform(*all),
+        [top, right, bottom, left] => assemblash_core::Insets {
+            top: *top,
+            right: *right,
+            bottom: *bottom,
+            left: *left,
+            ..assemblash_core::Insets::default()
+        },
+        _ => return Err(bad()),
+    };
+    Ok(Some(Some(insets)))
+}
+
 fn optional_color(raw: String) -> Result<Option<Color>, CliError> {
     if raw == "none" {
         Ok(None)
@@ -1760,19 +1887,88 @@ fn report_written(
         println!("{}", serde_json::to_string(noticed)?);
     } else {
         for warning in noticed {
-            eprintln!(
-                "{}\t{}\t{}",
-                warning.code,
-                warning
-                    .layer_id
-                    .as_ref()
-                    .map(assemblash_core::LayerId::as_str)
-                    .unwrap_or_default(),
-                warning.message
-            );
+            let layer = warning
+                .layer_id
+                .as_ref()
+                .map(assemblash_core::LayerId::as_str)
+                .unwrap_or_default();
+            match &warning.project {
+                // A page of a page set: the project is a fourth column.
+                Some(project) => eprintln!(
+                    "{}\t{}\t{}\t{}",
+                    warning.code, layer, warning.message, project
+                ),
+                None => eprintln!("{}\t{}\t{}", warning.code, layer, warning.message),
+            }
         }
     }
     Ok(())
+}
+
+/// A refusal of the shared render module, in the CLI's `message (code)`
+/// shape.
+fn api_error(error: assemblash_server::ApiError) -> CliError {
+    CliError::Rendering {
+        code: error.code(),
+        message: error.message().to_owned(),
+    }
+}
+
+impl From<assemblash_server::ApiError> for CliError {
+    fn from(error: assemblash_server::ApiError) -> Self {
+        api_error(error)
+    }
+}
+
+/// `export --pages`: the pages of a page set, read from the workspace without
+/// a lock, into one file.
+///
+/// Each page renders with its own project's assets. With no font flag, the
+/// fonts come from the workspace's own font store.
+fn export_page_set(
+    pages: &assemblash_server::render::PageRequest,
+    settings: assemblash_server::render::ExportSettings,
+    scale: f32,
+    out: &Path,
+    workspace: Workspace,
+    fonts: FontArgs,
+    warnings: &WarningArgs,
+) -> Result<(), CliError> {
+    use assemblash_server::render;
+    let resolved = workspace.resolve_page_set(&pages.set)?;
+    let selected = pages.select(&resolved).map_err(api_error)?;
+    render::check_page_count(settings, selected.len()).map_err(api_error)?;
+    let fonts = if fonts.names_nothing() {
+        FontArgs {
+            font_dirs: Vec::new(),
+            font_files: Vec::new(),
+            font_store: Some(workspace.fonts_dir()),
+        }
+    } else {
+        fonts
+    };
+    let mut sources = Vec::with_capacity(selected.len());
+    for page in selected {
+        let directory = workspace.existing_project_dir(&page.project)?;
+        let document = Session::open_read_only(&directory)?.document().clone();
+        sources.push(render::PageSource {
+            project: page.project.to_string(),
+            document,
+            directory,
+        });
+    }
+    // The fonts and assets of a page are loaded on the thread that renders
+    // it, and let go when the page is done.
+    let load = |page: &render::PageSource| -> Result<render::PageAssets, CliError> {
+        let hrefs = assemblash_renderer::data_uris(&page.document, &page.directory)?;
+        Ok(render::PageAssets {
+            fonts: load_fonts(&fonts, &page.document)?,
+            hrefs: std::sync::Arc::new(hrefs),
+        })
+    };
+    let rendered = render::render_page_sources(&sources, load, scale, settings)?;
+    write_file(out, &rendered.rendered.bytes)?;
+    report_written(out, &rendered.rendered.bytes, &rendered.warnings, warnings)
 }
 
 /// Reads a file a flag named, saying which path failed and what it was for.
@@ -1869,6 +2065,12 @@ enum CliError {
     PaintJson { source: serde_json::Error },
     #[error(transparent)]
     Session(#[from] SessionError),
+    #[error("{} ({})", .0, .0.code())]
+    PageSet(#[from] assemblash_core::page_sets::PageSetError),
+    #[error("--{flag} takes one number or four numbers as top,right,bottom,left, got {value:?}")]
+    Insets { flag: &'static str, value: String },
+    #[error("{0} (colorSpaceNotSupported)")]
+    ColorSpace(#[from] assemblash_core::color_space::ColorSpaceNotSupported),
     #[error(transparent)]
     FontStore(#[from] FontStoreError),
     #[error(transparent)]
@@ -1879,6 +2081,16 @@ enum CliError {
     InstallTarget,
     #[error("say where to write it: a path, or --out")]
     NoOutput,
+    #[error(
+        "give a project directory or --pages, not both; with --pages, the one path is the \
+         output file"
+    )]
+    ProjectAndPages,
+    #[error(
+        "--timestamp records a time in the PNG metadata, and format {format} has no such \
+         field; omit --timestamp (timestampNeedsPng)"
+    )]
+    TimestampNeedsPng { format: &'static str },
     #[error("say which file to import: a path, or --file")]
     NoInput,
     #[error("say which path to draw: the d string, or --d")]
@@ -2277,8 +2489,12 @@ fn run(command: Command) -> Result<(), CliError> {
             write_file(&out, svg.as_bytes())?;
             // The CLI has its own export path, so it asks the renderer for
             // the warnings itself rather than inheriting the server's.
-            let noticed =
-                assemblash_renderer::export_warnings(&document, loaded.font_set(), &project);
+            let noticed = assemblash_renderer::export_warnings_at(
+                &document,
+                loaded.font_set(),
+                &project,
+                1.0,
+            );
             report_written(&out, svg.as_bytes(), &noticed, &warnings)
         }
 
@@ -2287,23 +2503,80 @@ fn run(command: Command) -> Result<(), CliError> {
             output,
             out,
             scale,
+            color_space,
+            format,
+            quality,
+            pages,
+            workspace,
+            print,
             timestamp,
             warnings,
             fonts,
         } => {
+            use assemblash_server::render::{ExportFormat, ExportSettings, PageRequest};
+            // Refused before anything is read or written.
+            assemblash_core::color_space::ColorSpace::from_request(color_space.as_deref())?;
+            let settings = ExportSettings::from_request(format.as_deref(), quality, Some(print))
+                .map_err(api_error)?;
+            if timestamp.is_some() && settings.format() != ExportFormat::Png {
+                return Err(CliError::TimestampNeedsPng {
+                    format: settings.format().as_str(),
+                });
+            }
+            let pages = pages
+                .as_deref()
+                .map(PageRequest::parse)
+                .transpose()
+                .map_err(api_error)?;
+            if let Some(pages) = pages {
+                let out = match (project, output.or(out)) {
+                    (Some(_), Some(_)) => return Err(CliError::ProjectAndPages),
+                    (Some(out), None) | (None, Some(out)) => out,
+                    (None, None) => return Err(CliError::NoOutput),
+                };
+                return export_page_set(
+                    &pages,
+                    settings,
+                    scale,
+                    &out,
+                    open_existing_workspace(workspace)?,
+                    fonts,
+                    &warnings,
+                );
+            }
+
+            let project = project.ok_or(CliError::NoOutput)?;
             let out = output.or(out).ok_or(CliError::NoOutput)?;
             let document = Session::open_read_only(&project)?.document().clone();
             let hrefs = assemblash_renderer::data_uris(&document, &project)?;
             let loaded = load_fonts(&fonts, &document)?;
-            let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
-            let pixmap = svg_to_pixmap(&svg, &loaded, scale)?;
-            let mut metadata = PngMetadata::for_document(&document);
-            metadata.created = timestamp;
-            let png = assemblash_renderer::pixmap_to_png(&pixmap, &metadata)?;
-            write_file(&out, &png)?;
-            let noticed =
-                assemblash_renderer::export_warnings(&document, loaded.font_set(), &project);
-            report_written(&out, &png, &noticed, &warnings)
+            let bytes = if settings.format() == ExportFormat::Png {
+                // The PNG path as it always was, timestamp included.
+                let svg = doc_to_svg(&document, loaded.font_set(), &hrefs)?;
+                let pixmap = svg_to_pixmap(&svg, &loaded, scale)?;
+                let mut metadata = PngMetadata::for_document(&document);
+                metadata.created = timestamp;
+                assemblash_renderer::pixmap_to_png(&pixmap, &metadata)?
+            } else {
+                assemblash_server::render::encode_document(
+                    &document,
+                    &loaded,
+                    &hrefs,
+                    scale,
+                    settings,
+                    &PngMetadata::for_document(&document),
+                )
+                .map_err(api_error)?
+                .bytes
+            };
+            write_file(&out, &bytes)?;
+            let noticed = assemblash_renderer::export_warnings_at(
+                &document,
+                loaded.font_set(),
+                &project,
+                settings.warning_scale(scale),
+            );
+            report_written(&out, &bytes, &noticed, &warnings)
         }
 
         Command::Show { project } => {
@@ -2485,21 +2758,35 @@ fn run(command: Command) -> Result<(), CliError> {
             project,
             values,
             scale,
+            format,
+            quality,
+            name,
             font_store,
         } => {
+            use assemblash_server::render;
+            // Refused before anything is read or written.
+            let settings = render::ExportSettings::from_request(format.as_deref(), quality, None)
+                .map_err(api_error)?;
+            let name = render::variants_pdf_name(settings, name).map_err(api_error)?;
             let text = read_text_file(&values)?;
-            let variants: Vec<assemblash_server::render::Variant> = serde_json::from_str(&text)?;
+            let variants: Vec<render::Variant> = serde_json::from_str(&text)?;
 
             let session = Session::open_read_only(&project)?;
             let document = session.document().clone();
             let store = FontStore::open(&font_store)?;
-            let rendered = assemblash_server::render::render_variants(
-                &document, &project, &store, scale, &variants,
-            )
-            .map_err(|error| CliError::Rendering {
-                code: error.code(),
-                message: error.message().to_owned(),
-            })?;
+            let rendered = render::fonts_for(&document, &store)
+                .and_then(|fonts| {
+                    render::render_variants_as(
+                        &document,
+                        &project,
+                        &fonts,
+                        scale,
+                        &variants,
+                        settings,
+                        name.as_deref(),
+                    )
+                })
+                .map_err(api_error)?;
 
             for variant in &rendered.variants {
                 println!("{}	{}	{}", variant.name, variant.path, variant.hash);
@@ -2508,6 +2795,8 @@ fn run(command: Command) -> Result<(), CliError> {
         }
 
         Command::Font(command) => run_font(command),
+
+        Command::PageSet(command) => run_page_set(command),
 
         Command::Token(command) => run_token(command),
 
@@ -2730,6 +3019,10 @@ fn run(command: Command) -> Result<(), CliError> {
             background_image_fit,
             clear_background_image,
             anchor,
+            bleed,
+            no_bleed,
+            margins,
+            no_margins,
             who,
         }) => {
             let mut session = Session::open(&project, now_millis())?;
@@ -2752,6 +3045,8 @@ fn run(command: Command) -> Result<(), CliError> {
                     background_image,
                     clear_background_image,
                     anchor: anchor.map(Into::into),
+                    bleed: optional_insets("bleed", bleed, no_bleed)?,
+                    margins: optional_insets("margins", margins, no_margins)?,
                 }),
                 &who.actor(),
                 now_millis(),
@@ -3322,6 +3617,16 @@ fn open_workspace(explicit: Option<PathBuf>) -> Result<Workspace, CliError> {
     Ok(Workspace::open_or_create(root)?)
 }
 
+/// The workspace a read-only command reads. A missing workspace is an
+/// error, and nothing is created.
+fn open_existing_workspace(explicit: Option<PathBuf>) -> Result<Workspace, CliError> {
+    let root = match explicit {
+        Some(path) => path,
+        None => Workspace::default_dir()?,
+    };
+    Ok(Workspace::open_existing(root)?)
+}
+
 /// Refuses a font family the store does not have, and says what it does.
 ///
 /// The store is the authority on what a render may use, so naming something
@@ -3347,6 +3652,42 @@ fn check_family_installed(directory: &Path, family: &str) -> Result<(), CliError
 fn new_token() -> Result<String, CliError> {
     assemblash_server::auth::generate_token()
         .map_err(|source| CliError::Serve(assemblash_server::ServeError::Access { source }))
+}
+
+fn run_page_set(command: PageSetCommand) -> Result<(), CliError> {
+    use assemblash_core::page_sets::PageSetName;
+    match command {
+        PageSetCommand::List { workspace, json } => {
+            let names = open_existing_workspace(workspace)?.page_sets()?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "pageSets": names }))?
+                );
+            } else {
+                for name in names {
+                    println!("{name}");
+                }
+            }
+            Ok(())
+        }
+        PageSetCommand::Show {
+            name,
+            workspace,
+            json,
+        } => {
+            let workspace = open_existing_workspace(workspace)?;
+            let resolved = workspace.resolve_page_set(&PageSetName::new(name)?)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resolved)?);
+            } else {
+                for page in &resolved.pages {
+                    println!("{}	{}", page.index, page.project);
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 fn run_token(command: TokenCommand) -> Result<(), CliError> {

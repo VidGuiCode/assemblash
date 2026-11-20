@@ -11,6 +11,7 @@
 //! ```
 
 pub mod capabilities;
+pub mod color_space;
 pub mod document;
 pub mod error;
 pub mod history;
@@ -20,6 +21,7 @@ pub mod index;
 pub mod inventory;
 pub mod layout;
 pub mod ops;
+pub mod page_sets;
 pub mod path;
 pub mod presets;
 pub mod schema;
@@ -41,7 +43,7 @@ pub mod workspace;
 pub use assemblash_liveness as liveness;
 pub use document::{
     Asset, BackgroundImage, BlendMode, Canvas, Color, Document, Extras, FontStyle, GradientCenter,
-    GradientStop, GroupLayer, ImageFit, ImageLayer, Layer, LayerKind, LineCap, LineJoin,
+    GradientStop, GroupLayer, ImageFit, ImageLayer, Insets, Layer, LayerKind, LineCap, LineJoin,
     LineMarker, LinearGradient, LinearTag, RadialGradient, RadialTag, ShapeKind, ShapeLayer,
     SolidColor, Stroke, SvgLayer, TextAlign, TextLayer, Transform, UnknownGradient, VerticalAlign,
     MAX_DASH_ENTRIES, MAX_GRADIENT_STOPS,

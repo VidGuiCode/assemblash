@@ -96,6 +96,9 @@ pub struct ExportResult {
     /// written either way.
     #[schemars(with = "Vec<ExportWarningShape>")]
     pub warnings: Vec<assemblash_renderer::ExportWarning>,
+    /// The number of pages, for an export of a page set. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pages: Option<usize>,
 }
 
 /// The shape of an [`ExportWarning`](assemblash_renderer::ExportWarning), for
@@ -117,6 +120,9 @@ pub struct ExportWarningShape {
     pub message: String,
     /// The layer responsible, when one layer is.
     pub layer_id: Option<String>,
+    /// The project of the page the warning is about. Only a page-set export
+    /// sets it.
+    pub project: Option<String>,
 }
 
 /// Which project later calls should assume.
@@ -413,6 +419,31 @@ impl Backend {
         name: Option<&str>,
         overwrite: bool,
     ) -> Result<ExportResult, ApiError> {
+        self.export_as(
+            project,
+            scale,
+            name,
+            overwrite,
+            assemblash_server::render::ExportSettings::default(),
+            None,
+        )
+    }
+
+    /// Renders a project, or pages of a page set, to a file of any export
+    /// format **inside the project**.
+    ///
+    /// With the default settings and no pages this is exactly
+    /// [`Backend::export`] as it always was. With `pages`, the pages come from
+    /// the workspace and the file goes into the exports of `project`.
+    pub fn export_as(
+        &self,
+        project: Option<&str>,
+        scale: f32,
+        name: Option<&str>,
+        overwrite: bool,
+        settings: assemblash_server::render::ExportSettings,
+        pages: Option<&assemblash_server::render::PageRequest>,
+    ) -> Result<ExportResult, ApiError> {
         let stem = match name {
             Some(name) => safe_stem(name)?,
             None => "export".to_owned(),
@@ -422,14 +453,52 @@ impl Backend {
         if self.cancel_token().is_cancelled() {
             return Err(crate::backend::cancelled());
         }
-        let loaded = self.loaded(project)?;
-        let preview = loaded.preview(scale, self.cancel_token())?;
+        let warning_scale = settings.warning_scale(scale);
+        let (project_dir, bytes, width, height, warnings, page_count) = match pages {
+            None => {
+                let loaded = self.loaded(project)?;
+                let (bytes, width, height) = if settings.is_default() {
+                    let preview = loaded.preview(scale, self.cancel_token())?;
+                    (preview.png, preview.width, preview.height)
+                } else {
+                    let rendered = loaded.encode(scale, settings, self.cancel_token())?;
+                    (rendered.bytes, rendered.width, rendered.height)
+                };
+                let warnings = loaded.warnings(warning_scale);
+                (loaded.directory, bytes, width, height, warnings, None)
+            }
+            Some(pages) => {
+                let (sources, loader) = self.export_pages(pages, settings)?;
+                let target = {
+                    let opened = self.open(project)?;
+                    let session = lock_project(&opened)?;
+                    session.project_dir().to_path_buf()
+                };
+                let count = sources.len();
+                let rendered = crate::backend::run_cancellable(self.cancel_token(), move || {
+                    assemblash_server::render::render_page_sources(
+                        &sources,
+                        |page| loader.page_assets(page),
+                        scale,
+                        settings,
+                    )
+                })?;
+                (
+                    target,
+                    rendered.rendered.bytes,
+                    rendered.rendered.width,
+                    rendered.rendered.height,
+                    rendered.warnings,
+                    Some(count),
+                )
+            }
+        };
         if self.cancel_token().is_cancelled() {
             return Err(crate::backend::cancelled());
         }
-        let directory = loaded.directory.join(EXPORTS_DIR);
+        let directory = project_dir.join(EXPORTS_DIR);
 
-        let file = format!("{stem}.png");
+        let file = assemblash_server::render::export_file_name(&stem, settings.format());
         std::fs::create_dir_all(&directory).map_err(|source| {
             ApiError::from(assemblash_core::storage::StorageError::Io {
                 operation: "creating",
@@ -450,7 +519,7 @@ impl Backend {
             )
             .with_details(serde_json::json!({ "path": format!("{EXPORTS_DIR}/{file}") })));
         }
-        std::fs::write(&path, &preview.png).map_err(|source| {
+        std::fs::write(&path, &bytes).map_err(|source| {
             ApiError::from(assemblash_core::storage::StorageError::Io {
                 operation: "writing",
                 path: path.clone(),
@@ -460,13 +529,14 @@ impl Backend {
 
         Ok(ExportResult {
             path: format!("{EXPORTS_DIR}/{file}"),
-            bytes: preview.png.len(),
-            width: preview.width,
-            height: preview.height,
+            bytes: bytes.len(),
+            width,
+            height,
             replaced: existed,
-            // Measured after the file is written, on purpose: an export that
-            // has something to say is still an export that happened.
-            warnings: loaded.warnings(),
+            // The same list whether it is read before or after the file is
+            // written: a warning never changes the outcome.
+            warnings,
+            pages: page_count,
         })
     }
 
@@ -538,26 +608,10 @@ fn ids(layers: &[LayerId]) -> Vec<String> {
 }
 
 /// A file stem a caller may choose, with anything path-shaped refused.
+///
+/// The one rule every transport uses: [`assemblash_server::render::safe_stem`].
 fn safe_stem(name: &str) -> Result<String, ApiError> {
-    let trimmed = name.trim();
-    let usable = !trimmed.is_empty()
-        && trimmed.len() <= 60
-        && !trimmed.starts_with('.')
-        && trimmed
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
-    if usable {
-        Ok(trimmed.to_owned())
-    } else {
-        Err(ApiError::new(
-            assemblash_server::StatusCode::BAD_REQUEST,
-            "invalidExportName",
-            format!(
-                "{name:?} is not a usable export name: letters, digits, hyphens, \
-                 and underscores only"
-            ),
-        ))
-    }
+    assemblash_server::render::safe_stem(name)
 }
 
 #[cfg(test)]
@@ -577,6 +631,7 @@ mod tests {
             code: assemblash_renderer::warnings::TEXT_OVERFLOWS_BOX,
             message: "the text spills past the bottom".to_owned(),
             layer_id: Some(assemblash_core::LayerId::new("layer_1")),
+            project: Some("poster".to_owned()),
         };
         let sent = serde_json::to_value(&warning).unwrap();
         let described = serde_json::to_value(schemars::schema_for!(ExportWarningShape)).unwrap();
@@ -607,6 +662,10 @@ mod tests {
             "C:evil",
             "with space",
             "nul\0",
+            "NUL",
+            "con",
+            "COM1",
+            "lpt9",
         ] {
             assert!(safe_stem(bad).is_err(), "{bad:?} should have been refused");
         }

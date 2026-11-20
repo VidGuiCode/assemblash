@@ -59,6 +59,67 @@ pub fn validate(document: &Document) -> Result<(), ValidationErrors> {
     }
 }
 
+/// The checks `updateCanvas` makes on the bleed and margins of the canvas
+/// it leaves.
+///
+/// * A `bleed` or `margins` that the request sets must have finite sides of
+///   zero or more.
+/// * When the request sets `margins`, `width`, or `height`, the margins must
+///   leave a safe area: left plus right is less than the width, and top plus
+///   bottom is less than the height.
+///
+/// [`validate`] does not make these checks, so a document never fails to
+/// load because of its bleed or margins. A request that changes neither the
+/// insets nor the size keeps the insets as they are.
+pub fn check_canvas_update(
+    request: &crate::ops::UpdateCanvas,
+    canvas: &crate::document::Canvas,
+) -> Result<(), ValidationErrors> {
+    let mut errors = Vec::new();
+    for (field, set) in [("bleed", &request.bleed), ("margins", &request.margins)] {
+        let Some(Some(insets)) = set else { continue };
+        for (side, value) in insets.sides() {
+            if !value.is_finite() || value < 0.0 {
+                errors.push(ValidationError::InvalidCanvasInset { field, side, value });
+            }
+        }
+    }
+    let resizes = request.width.is_some() || request.height.is_some();
+    if let (true, Some(margins)) = (resizes || request.margins.is_some(), &canvas.margins) {
+        for (dimension, first, second, total, size) in [
+            (
+                "width",
+                "left",
+                "right",
+                margins.left + margins.right,
+                canvas.width,
+            ),
+            (
+                "height",
+                "top",
+                "bottom",
+                margins.top + margins.bottom,
+                canvas.height,
+            ),
+        ] {
+            if total.is_finite() && size.is_finite() && total >= size {
+                errors.push(ValidationError::CanvasMarginsTooLarge {
+                    dimension,
+                    first,
+                    second,
+                    total,
+                    size,
+                });
+            }
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ValidationErrors::new(errors))
+    }
+}
+
 fn check_canvas(document: &Document, errors: &mut Vec<ValidationError>) {
     for (dimension, value) in [
         ("width", document.canvas.width),
@@ -68,6 +129,11 @@ fn check_canvas(document: &Document, errors: &mut Vec<ValidationError>) {
             errors.push(ValidationError::InvalidCanvasDimension { dimension, value });
         }
     }
+
+    // Bleed and margins are not checked here. Releases before 1.14.0 keep
+    // them as unknown canvas fields and can resize a canvas below its
+    // margins, and such a document must still load. `updateCanvas` checks
+    // them when it sets them: see [`check_canvas_update`].
 
     if let Some(background) = &document.canvas.background {
         check_color(background, "canvas background", errors);
@@ -750,6 +816,67 @@ mod tests {
         doc.canvas.width = 0.0;
         doc.canvas.height = f64::NAN;
         assert_eq!(errors(&doc).len(), 2);
+    }
+
+    #[test]
+    fn canvas_bleed_and_margins_are_checked_when_update_canvas_sets_them() {
+        let mut doc = document();
+        let bleed = crate::document::Insets {
+            left: -1.0,
+            top: f64::NAN,
+            ..crate::document::Insets::default()
+        };
+        doc.canvas.bleed = Some(bleed.clone());
+        // Loading never refuses bleed or margins values.
+        assert!(validate(&doc).is_ok());
+
+        let request = crate::ops::UpdateCanvas {
+            bleed: Some(Some(bleed)),
+            ..crate::ops::UpdateCanvas::default()
+        };
+        let found = check_canvas_update(&request, &doc.canvas)
+            .unwrap_err()
+            .into_inner();
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|error| matches!(
+            error,
+            ValidationError::InvalidCanvasInset { field: "bleed", .. }
+        )));
+        // A request that does not set the bleed keeps it as it is.
+        assert!(check_canvas_update(&crate::ops::UpdateCanvas::default(), &doc.canvas).is_ok());
+    }
+
+    #[test]
+    fn canvas_margins_must_leave_a_safe_area_after_update_canvas() {
+        let mut doc = document();
+        let width = doc.canvas.width;
+        doc.canvas.margins = Some(crate::document::Insets {
+            left: width / 2.0,
+            right: width / 2.0,
+            ..crate::document::Insets::default()
+        });
+        assert!(validate(&doc).is_ok());
+        for request in [
+            crate::ops::UpdateCanvas {
+                margins: Some(doc.canvas.margins.clone()),
+                ..crate::ops::UpdateCanvas::default()
+            },
+            crate::ops::UpdateCanvas {
+                width: Some(width),
+                ..crate::ops::UpdateCanvas::default()
+            },
+        ] {
+            let found = check_canvas_update(&request, &doc.canvas)
+                .unwrap_err()
+                .into_inner();
+            assert!(matches!(
+                found.as_slice(),
+                [ValidationError::CanvasMarginsTooLarge {
+                    dimension: "width",
+                    ..
+                }]
+            ));
+        }
     }
 
     #[test]

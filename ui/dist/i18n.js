@@ -521,7 +521,7 @@ const i = {
   "canvas.dashMaxError": "Use no more than {count} dash values.",
   "effects.moveEarlier": "Move {type} earlier",
   "effects.moveLater": "Move {type} later",
-  "projects.recoverLockConfirm": "Reclaim the lock held by process {pid}?",
+  "projects.recoverLockConfirm": "Tab {tab}: another process ({pid}) holds the lock of this project. Reclaim the lock?",
   "projects.reclaimedLock": "Recovered this project automatically after a stale lock from pid {pid} on {host}.",
   "fonts.installClickConfirm": "Install the font pack now? The download starts after you confirm.",
   "editor.addedText": "Added {preset} text.",
@@ -587,7 +587,50 @@ const i = {
   "runs.reload": "Discard draft and load current runs",
   "runs.notSent": "The project or selection changed. The draft was not sent.",
   "runs.committed": "The change is saved, but the document could not reload. Load current runs before another edit.",
-  "runs.failed": "The change could not be confirmed. Keep this draft or load current runs."
+  "runs.failed": "The change could not be confirmed. Keep this draft or load current runs.",
+  "tabs.label": "Open projects",
+  "tabs.close": "Close {name}",
+  "tabs.changed": "Changed by another client",
+  "tabs.reorderHint": "Drag a tab to move it. Or press Alt+Shift+Left Arrow or Alt+Shift+Right Arrow.",
+  "tabs.closed": "Closed {name}.",
+  "tabs.page": "Page {page} of {count} in {set}",
+  "tabs.groupLabel": "Page set {set}",
+  "export.pdfDetail": "Raster pages in one file",
+  "export.jpegDetail": "Lossy, with a quality setting",
+  "export.webpDetail": "Lossless, rasterized by the engine",
+  "export.quality": "JPEG quality",
+  "export.qualityHint": "1 gives the smallest file. 100 gives the best image.",
+  "export.print": "Add crop marks and bleed",
+  "export.printHint": "The PDF gets a trim box, a bleed box and crop marks.",
+  "export.pages": "Pages",
+  "export.pagesThis": "This page",
+  "export.pagesSet": "All {count} pages of {set}",
+  "export.rasterSummary": "Rendering {format} locally with the deterministic engine…",
+  "export.pageSetSummary": "{count} pages of {set} in one PDF",
+  "export.readyPages": "Export is ready: {format}, {pages} pages, {size}.",
+  "export.exportedPages": "Exported {pages} pages as {format}.",
+  "pageSets.heading": "Page sets",
+  "pageSets.option": "Page set",
+  "pageSets.openLabel": "Open page set {set}",
+  "pageSets.opened": "Opened page set {set}: {count} pages.",
+  "pageSets.empty": "Page set {set} has no pages.",
+  "pageSets.tooMany": "Page set {set} has {count} pages. At most {max} tabs can be open. Close tabs first.",
+  "refusals.exportFormatNotSupported": "The engine cannot export this format.",
+  "refusals.exportQualityOutOfRange": "Set a JPEG quality from 1 to 100.",
+  "refusals.lossyWebpNotSupported": "The engine exports lossless WebP only. For a smaller file, use JPEG.",
+  "refusals.exportQualityNotApplicable": "Quality applies to JPEG only.",
+  "refusals.printNeedsPdf": "Crop marks and bleed need the PDF format.",
+  "refusals.pagesNeedPdf": "More than one page needs the PDF format.",
+  "refusals.invalidPageSelection": "The page selection is not valid.",
+  "refusals.colorSpaceNotSupported": "The engine exports sRGB only. CMYK is not supported.",
+  "refusals.exportEncodingFailed": "The engine could not encode the export.",
+  "refusals.invalidPageSetName": "The page set name is not valid.",
+  "refusals.pageSetUnreadable": "The engine could not read the page set file.",
+  "refusals.pageSetNotFound": "Page set {set} does not exist.",
+  "refusals.pageSetMalformed": "The file of page set {set} is not valid.",
+  "refusals.pageSetMemberMissing": "Page set {set} names pages that do not exist: {names}.",
+  "refusals.pageSetLoop": "Page set {set} contains itself: {chain}.",
+  "refusals.pageSetDuplicatePage": "Page set {set} has project {project} as page {first} and page {second}. A project can be one page only."
 }, v = {
   "app.description": "Assemblash — composition visuelle structurée avec des modifications précises et réversibles.",
   "app.homeLabel": "Accueil Assemblash",
@@ -1111,7 +1154,7 @@ const i = {
   "canvas.dashMaxError": "Utilisez au maximum {count} valeurs de tirets.",
   "effects.moveEarlier": "Déplacer {type} plus haut",
   "effects.moveLater": "Déplacer {type} plus bas",
-  "projects.recoverLockConfirm": "Récupérer le verrou détenu par le processus {pid} ?",
+  "projects.recoverLockConfirm": "Onglet {tab} : un autre processus ({pid}) détient le verrou de ce projet. Récupérer le verrou ?",
   "projects.reclaimedLock": "Ce projet a été récupéré automatiquement après un verrou obsolète du processus {pid} sur {host}.",
   "fonts.installClickConfirm": "Installer le pack de polices maintenant ? Le téléchargement commence après votre confirmation.",
   "editor.addedText": "Texte {preset} ajouté.",
@@ -1177,7 +1220,50 @@ const i = {
   "runs.reload": "Abandonner le brouillon et charger les segments actuels",
   "runs.notSent": "Le projet ou la sélection a changé. Le brouillon n’a pas été envoyé.",
   "runs.committed": "La modification est enregistrée, mais le document ne se recharge pas. Chargez les segments actuels avant une autre modification.",
-  "runs.failed": "La modification ne peut pas être confirmée. Conservez ce brouillon ou chargez les segments actuels."
+  "runs.failed": "La modification ne peut pas être confirmée. Conservez ce brouillon ou chargez les segments actuels.",
+  "tabs.label": "Projets ouverts",
+  "tabs.close": "Fermer {name}",
+  "tabs.changed": "Modifié par un autre client",
+  "tabs.reorderHint": "Faites glisser un onglet pour le déplacer. Ou appuyez sur Alt+Maj+Flèche gauche ou Alt+Maj+Flèche droite.",
+  "tabs.closed": "{name} est fermé.",
+  "tabs.page": "Page {page} sur {count} dans {set}",
+  "tabs.groupLabel": "Jeu de pages {set}",
+  "export.pdfDetail": "Pages matricielles dans un seul fichier",
+  "export.jpegDetail": "Avec perte, qualité réglable",
+  "export.webpDetail": "Sans perte, matricialisé par le moteur",
+  "export.quality": "Qualité JPEG",
+  "export.qualityHint": "1 donne le plus petit fichier. 100 donne la meilleure image.",
+  "export.print": "Ajouter les traits de coupe et le fond perdu",
+  "export.printHint": "Le PDF reçoit une zone de coupe, une zone de fond perdu et des traits de coupe.",
+  "export.pages": "Pages",
+  "export.pagesThis": "Cette page",
+  "export.pagesSet": "Les {count} pages de {set}",
+  "export.rasterSummary": "Rendu {format} en local avec le moteur déterministe…",
+  "export.pageSetSummary": "{count} pages de {set} dans un seul PDF",
+  "export.readyPages": "L’export est prêt : {format}, {pages} pages, {size}.",
+  "export.exportedPages": "{pages} pages exportées en {format}.",
+  "pageSets.heading": "Jeux de pages",
+  "pageSets.option": "Jeu de pages",
+  "pageSets.openLabel": "Ouvrir le jeu de pages {set}",
+  "pageSets.opened": "Jeu de pages {set} ouvert : {count} pages.",
+  "pageSets.empty": "Le jeu de pages {set} ne contient aucune page.",
+  "pageSets.tooMany": "Le jeu de pages {set} contient {count} pages. Au plus {max} onglets peuvent être ouverts. Fermez d’abord des onglets.",
+  "refusals.exportFormatNotSupported": "Le moteur ne peut pas exporter ce format.",
+  "refusals.exportQualityOutOfRange": "Choisissez une qualité JPEG de 1 à 100.",
+  "refusals.lossyWebpNotSupported": "Le moteur exporte le WebP sans perte uniquement. Pour un fichier plus petit, utilisez JPEG.",
+  "refusals.exportQualityNotApplicable": "La qualité s’applique au JPEG uniquement.",
+  "refusals.printNeedsPdf": "Les traits de coupe et le fond perdu nécessitent le format PDF.",
+  "refusals.pagesNeedPdf": "Plusieurs pages nécessitent le format PDF.",
+  "refusals.invalidPageSelection": "La sélection de pages n’est pas valide.",
+  "refusals.colorSpaceNotSupported": "Le moteur exporte en sRGB uniquement. Le CMJN n’est pas pris en charge.",
+  "refusals.exportEncodingFailed": "Le moteur n’a pas pu encoder l’export.",
+  "refusals.invalidPageSetName": "Le nom du jeu de pages n’est pas valide.",
+  "refusals.pageSetUnreadable": "Le moteur n’a pas pu lire le fichier du jeu de pages.",
+  "refusals.pageSetNotFound": "Le jeu de pages {set} n’existe pas.",
+  "refusals.pageSetMalformed": "Le fichier du jeu de pages {set} n’est pas valide.",
+  "refusals.pageSetMemberMissing": "Le jeu de pages {set} nomme des pages qui n’existent pas : {names}.",
+  "refusals.pageSetLoop": "Le jeu de pages {set} se contient lui-même : {chain}.",
+  "refusals.pageSetDuplicatePage": "Le jeu de pages {set} contient le projet {project} en page {first} et en page {second}. Un projet ne peut être qu’une seule page."
 }, b = {
   "app.description": "Assemblash — strukturierte visuelle Gestaltung mit präzisen, umkehrbaren Änderungen.",
   "app.homeLabel": "Assemblash-Startseite",
@@ -1701,7 +1787,7 @@ const i = {
   "canvas.dashMaxError": "Verwenden Sie höchstens {count} Strichwerte.",
   "effects.moveEarlier": "{type} in der Effektreihenfolge nach oben verschieben",
   "effects.moveLater": "{type} in der Effektreihenfolge nach unten verschieben",
-  "projects.recoverLockConfirm": "Sperre des Prozesses {pid} übernehmen?",
+  "projects.recoverLockConfirm": "Tab {tab}: Ein anderer Prozess ({pid}) hält die Sperre dieses Projekts. Sperre übernehmen?",
   "projects.reclaimedLock": "Dieses Projekt wurde nach einer veralteten Sperre von Prozess {pid} auf {host} automatisch wiederhergestellt.",
   "fonts.installClickConfirm": "Schriftartenpaket jetzt installieren? Der Download beginnt nach Ihrer Bestätigung.",
   "editor.addedText": "Text mit der Voreinstellung {preset} hinzugefügt.",
@@ -1767,7 +1853,50 @@ const i = {
   "runs.reload": "Entwurf verwerfen und aktuelle Abschnitte laden",
   "runs.notSent": "Projekt oder Auswahl hat sich geändert. Der Entwurf wurde nicht gesendet.",
   "runs.committed": "Die Änderung ist gespeichert, aber das Dokument konnte nicht neu laden. Laden Sie vor einer weiteren Änderung die aktuellen Abschnitte.",
-  "runs.failed": "Die Änderung konnte nicht bestätigt werden. Behalten Sie den Entwurf oder laden Sie die aktuellen Abschnitte."
+  "runs.failed": "Die Änderung konnte nicht bestätigt werden. Behalten Sie den Entwurf oder laden Sie die aktuellen Abschnitte.",
+  "tabs.label": "Geöffnete Projekte",
+  "tabs.close": "{name} schließen",
+  "tabs.changed": "Von einem anderen Client geändert",
+  "tabs.reorderHint": "Ziehen Sie einen Tab, um ihn zu verschieben. Oder drücken Sie Alt+Umschalt+Pfeil links oder Alt+Umschalt+Pfeil rechts.",
+  "tabs.closed": "{name} ist geschlossen.",
+  "tabs.page": "Seite {page} von {count} in {set}",
+  "tabs.groupLabel": "Seitensatz {set}",
+  "export.pdfDetail": "Rasterseiten in einer Datei",
+  "export.jpegDetail": "Verlustbehaftet, mit Qualitätseinstellung",
+  "export.webpDetail": "Verlustfrei, von der Engine gerastert",
+  "export.quality": "JPEG-Qualität",
+  "export.qualityHint": "1 ergibt die kleinste Datei. 100 ergibt das beste Bild.",
+  "export.print": "Schnittmarken und Beschnitt hinzufügen",
+  "export.printHint": "Das PDF erhält einen Endformatrahmen, einen Beschnittrahmen und Schnittmarken.",
+  "export.pages": "Seiten",
+  "export.pagesThis": "Diese Seite",
+  "export.pagesSet": "Alle {count} Seiten von {set}",
+  "export.rasterSummary": "{format} wird lokal mit der deterministischen Engine gerendert…",
+  "export.pageSetSummary": "{count} Seiten von {set} in einem PDF",
+  "export.readyPages": "Export ist bereit: {format}, {pages} Seiten, {size}.",
+  "export.exportedPages": "{pages} Seiten als {format} exportiert.",
+  "pageSets.heading": "Seitensätze",
+  "pageSets.option": "Seitensatz",
+  "pageSets.openLabel": "Seitensatz {set} öffnen",
+  "pageSets.opened": "Seitensatz {set} geöffnet: {count} Seiten.",
+  "pageSets.empty": "Seitensatz {set} hat keine Seiten.",
+  "pageSets.tooMany": "Seitensatz {set} hat {count} Seiten. Höchstens {max} Tabs können geöffnet sein. Schließen Sie zuerst Tabs.",
+  "refusals.exportFormatNotSupported": "Die Engine kann dieses Format nicht exportieren.",
+  "refusals.exportQualityOutOfRange": "Wählen Sie eine JPEG-Qualität von 1 bis 100.",
+  "refusals.lossyWebpNotSupported": "Die Engine exportiert WebP nur verlustfrei. Für eine kleinere Datei verwenden Sie JPEG.",
+  "refusals.exportQualityNotApplicable": "Die Qualität gilt nur für JPEG.",
+  "refusals.printNeedsPdf": "Schnittmarken und Beschnitt benötigen das PDF-Format.",
+  "refusals.pagesNeedPdf": "Mehr als eine Seite benötigt das PDF-Format.",
+  "refusals.invalidPageSelection": "Die Seitenauswahl ist ungültig.",
+  "refusals.colorSpaceNotSupported": "Die Engine exportiert nur sRGB. CMYK wird nicht unterstützt.",
+  "refusals.exportEncodingFailed": "Die Engine konnte den Export nicht kodieren.",
+  "refusals.invalidPageSetName": "Der Name des Seitensatzes ist ungültig.",
+  "refusals.pageSetUnreadable": "Die Engine konnte die Datei des Seitensatzes nicht lesen.",
+  "refusals.pageSetNotFound": "Seitensatz {set} existiert nicht.",
+  "refusals.pageSetMalformed": "Die Datei von Seitensatz {set} ist ungültig.",
+  "refusals.pageSetMemberMissing": "Seitensatz {set} nennt Seiten, die nicht existieren: {names}.",
+  "refusals.pageSetLoop": "Seitensatz {set} enthält sich selbst: {chain}.",
+  "refusals.pageSetDuplicatePage": "Seitensatz {set} enthält Projekt {project} als Seite {first} und Seite {second}. Ein Projekt kann nur eine Seite sein."
 }, g = "assemblash.language", k = {
   en: i,
   fr: v,
@@ -1776,14 +1905,14 @@ const i = {
 function f(e) {
   return e === "fr" || e === "de" || e === "pseudo" ? e : "en";
 }
-function y() {
+function S() {
   try {
     return f(window.localStorage.getItem(g));
   } catch {
     return "en";
   }
 }
-let n = typeof window > "u" ? "en" : y();
+let n = typeof window > "u" ? "en" : S();
 function A() {
   return n;
 }
@@ -1795,7 +1924,7 @@ function C(e) {
   }
   document.documentElement.lang = n === "pseudo" ? "en" : n, u(), window.dispatchEvent(new Event("assemblash:localechange"));
 }
-function S(e) {
+function y(e) {
   return `⟦${e.replace(
     /\{[a-zA-Z][a-zA-Z0-9]*\}|[A-Za-z]/g,
     (t) => t.startsWith("{") ? t : `${t}${"aeiouAEIOU".includes(t) ? t : ""}`
@@ -1803,7 +1932,7 @@ function S(e) {
 }
 function p(e, t = {}) {
   const o = (n === "pseudo" ? i[e] : k[n][e]) ?? i[e] ?? `[${e}]`;
-  return (n === "pseudo" ? S(o) : o).replace(
+  return (n === "pseudo" ? y(o) : o).replace(
     /\{([a-zA-Z][a-zA-Z0-9]*)\}/g,
     (a, s) => Object.hasOwn(t, s) ? String(t[s]) : a
   );

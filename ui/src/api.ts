@@ -223,6 +223,71 @@ export async function recoverProjectLock(project: string, expectedPid: number): 
   return result.unlocked;
 }
 
+/** The project tabs the workspace remembers, in strip order. */
+export interface OpenTabsList {
+  projects: string[];
+  active: string | null;
+}
+
+/**
+ * Runs a request to a route an older server does not have. Such a server
+ * answers 404 or 405, and `missing` stands in for the answer.
+ */
+async function optionalRoute<T>(path: string, init: RequestInit | undefined, missing: T): Promise<T> {
+  const response = await fetch(path, { ...init, method: init?.method ?? "GET" });
+  if (response.status === 404 || response.status === 405) return missing;
+  if (response.status === 401) {
+    goToLogin();
+    throw new ApiError("unauthorized", "this server needs an access token", null);
+  }
+  if (!response.ok) {
+    let code = `http${response.status}`;
+    let message = response.statusText;
+    let details: unknown = null;
+    try {
+      const body = await response.json();
+      code = body?.error?.code ?? code;
+      message = body?.error?.message ?? message;
+      details = body?.error?.details ?? null;
+    } catch {
+      // Not the error envelope; the status is the code.
+    }
+    throw new ApiError(code, message, details);
+  }
+  return (await response.json()) as T;
+}
+
+/**
+ * Reads the open-tab list from the workspace. An older server, which keeps
+ * no list, reads as no tabs.
+ */
+export async function openTabs(): Promise<unknown> {
+  return optionalRoute<unknown>("/api/open-tabs", undefined, { projects: [], active: null });
+}
+
+/** Writes the open-tab list to the workspace. An older server ignores it. */
+export async function saveOpenTabs(list: OpenTabsList): Promise<void> {
+  await optionalRoute<unknown>("/api/open-tabs", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(list),
+  }, null);
+}
+
+/**
+ * Asks the server to close one project, which gives back its lock. A project
+ * the server does not hold answers `false`. An older server without the
+ * route also answers `false`, and the lock then stays until it stops.
+ */
+export async function closeProject(project: string): Promise<boolean> {
+  const result = await optionalRoute<{ closed: boolean }>(
+    `/api/projects/${encodeURIComponent(project)}/close`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+    { closed: false },
+  );
+  return result.closed;
+}
+
 /**
  * The journal, newest tail included.
  *
@@ -311,16 +376,81 @@ export async function redo(project: string): Promise<OperationResult> {
   });
 }
 
+/** The format fields of an export request. Each one is optional. */
+export interface ExportOptions {
+  /** `png` when absent. */
+  format?: "png" | "svg" | "pdf" | "jpeg" | "webp";
+  /** JPEG quality, 1 to 100. JPEG only. */
+  quality?: number;
+  /** The pages of a page set: `<set>` or `<set>:<selection>`. */
+  pages?: string;
+  /** Trim and bleed boxes and crop marks. PDF only. */
+  print?: boolean;
+}
+
+/** What the engine wrote for an export. */
+export interface ExportResult {
+  path: string;
+  bytes: number;
+  width: number;
+  height: number;
+  /** The number of pages, for an export of a page set. */
+  pages?: number;
+}
+
+/**
+ * Asks the engine to write an export into the project.
+ *
+ * Without options the body is `{ name, scale }`, the same request as before
+ * the export formats: a PNG.
+ */
 export async function exportDocument(
   project: string,
   name: string,
   scale: number,
-): Promise<{ path: string; bytes: number; width: number; height: number }> {
+  options: ExportOptions = {},
+): Promise<ExportResult> {
+  const body: Record<string, unknown> = { name, scale };
+  for (const key of ["format", "quality", "pages", "print"] as const) {
+    if (options[key] !== undefined) body[key] = options[key];
+  }
   return request(`/api/projects/${encodeURIComponent(project)}/export`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, scale }),
+    body: JSON.stringify(body),
   });
+}
+
+/** One page of a resolved page set. */
+export interface PageSetPage {
+  index: number;
+  project: string;
+  via: string[];
+}
+
+/** A page set with its flat page list, in manifest order. */
+export interface ResolvedPageSet {
+  name: string;
+  pages: PageSetPage[];
+}
+
+/**
+ * The names of the workspace's page sets. An older server, which has no page
+ * sets, reads as none.
+ */
+export async function listPageSets(): Promise<string[]> {
+  const body = await optionalRoute<{ pageSets?: unknown }>("/api/page-sets", undefined, { pageSets: [] });
+  return Array.isArray(body.pageSets)
+    ? body.pageSets.filter((name): name is string => typeof name === "string")
+    : [];
+}
+
+/**
+ * One page set, resolved by the engine: nested sets are expanded in place. A
+ * loop or a missing member comes back as a typed refusal.
+ */
+export async function getPageSet(name: string): Promise<ResolvedPageSet> {
+  return request<ResolvedPageSet>(`/api/page-sets/${encodeURIComponent(name)}`);
 }
 
 /**
@@ -722,8 +852,8 @@ export async function renderVariants(
  * A file name, never a path: the server validates the stem with the same rule
  * that produced it, so this cannot address anything the engine did not write.
  */
-export function exportUrl(project: string, name: string): string {
-  return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.png`;
+export function exportUrl(project: string, name: string, extension = "png"): string {
+  return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.${extension}`;
 }
 
 /** One face the font store holds, as the engine records it. */
