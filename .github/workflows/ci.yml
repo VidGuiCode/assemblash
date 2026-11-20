@@ -399,6 +399,20 @@ jobs:
           name: candidate-tabs-editor
           path: ${{ runner.temp }}/assemblash-candidate-tabs-editor-evidence/
           if-no-files-found: error
+      - name: Verify candidate page sets and export formats against the embedded server
+        if: matrix.target-name == 'linux-x86_64'
+        run: >-
+          node scripts/page_sets_browser.mjs
+          --binary target/release/assemblash
+          --workspace "${{ runner.temp }}/assemblash-candidate-page-sets-editor"
+          --output "${{ runner.temp }}/assemblash-candidate-page-sets-editor-evidence/result.json"
+      - name: Save page sets evidence
+        if: always() && matrix.target-name == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-page-sets-editor
+          path: ${{ runner.temp }}/assemblash-candidate-page-sets-editor-evidence/
+          if-no-files-found: error
       - name: Save the verified candidate binary
         uses: actions/upload-artifact@v4
         with:
