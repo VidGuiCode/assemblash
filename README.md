@@ -321,9 +321,10 @@ The important limits:
 - Assemblash contains no AI image generator or AI provider adapter.
 - Fourteen blend modes are supported. `color-dodge` and `color-burn` are
   refused because they are not bit-identical across every target.
-- The stroke of a shape is painted inside its box, so the box is the visible
-  size. A stroke narrower than 1 is a hairline on the edge.
-- A path shape paints its fill. In 1.13.1 it does not paint its stroke.
+- The stroke of a rectangle or an ellipse is painted inside its box, so the
+  box is the visible size. A stroke narrower than 1 is a hairline on the edge.
+- The stroke of a path is centred on the path edge, so half of the stroke
+  width is outside the path.
 - Built-in authentication is one shared token. Accounts, roles, OIDC, SSO,
   TLS, and per-user audit identity belong in a reverse proxy.
 - The editor is a reference client. It is not a complete professional design

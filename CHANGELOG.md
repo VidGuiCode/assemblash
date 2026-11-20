@@ -29,6 +29,7 @@ schema change is always noted explicitly.
 - MCP: the input schema of `insert_layer_tree` no longer refers to itself. Before, MCP clients that validate tool schemas strictly (Moonshot/Kimi) refused the full tool list. Now the `children` of a group in that schema is an untyped object.
 - MCP: the output schema of `get_document_state` no longer refers to itself. In that schema, the `children` of a group is also an untyped object. The returned document does not change.
 - MCP: `insert_layer_tree` accepts the same input as before. Groups in groups still work. `schemaVersion` stays 1.
+- A `path` shape now paints its stroke. Before, the SVG export omitted the `stroke` and `stroke-width` attributes on the path element, so a stroked path showed no outline. The stroke is centred on the path edge, which is the SVG default. Exports of stroked paths change. No document field or operation changes.
 
 ## [1.13.1] — 2026-11-11
 
