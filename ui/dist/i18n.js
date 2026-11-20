@@ -521,7 +521,7 @@ const i = {
   "canvas.dashMaxError": "Use no more than {count} dash values.",
   "effects.moveEarlier": "Move {type} earlier",
   "effects.moveLater": "Move {type} later",
-  "projects.recoverLockConfirm": "Reclaim the lock held by process {pid}?",
+  "projects.recoverLockConfirm": "Tab {tab}: another process ({pid}) holds the lock of this project. Reclaim the lock?",
   "projects.reclaimedLock": "Recovered this project automatically after a stale lock from pid {pid} on {host}.",
   "fonts.installClickConfirm": "Install the font pack now? The download starts after you confirm.",
   "editor.addedText": "Added {preset} text.",
@@ -587,7 +587,12 @@ const i = {
   "runs.reload": "Discard draft and load current runs",
   "runs.notSent": "The project or selection changed. The draft was not sent.",
   "runs.committed": "The change is saved, but the document could not reload. Load current runs before another edit.",
-  "runs.failed": "The change could not be confirmed. Keep this draft or load current runs."
+  "runs.failed": "The change could not be confirmed. Keep this draft or load current runs.",
+  "tabs.label": "Open projects",
+  "tabs.close": "Close {name}",
+  "tabs.changed": "Changed by another client",
+  "tabs.reorderHint": "Drag a tab to move it. Or press Alt+Shift+Left Arrow or Alt+Shift+Right Arrow.",
+  "tabs.closed": "Closed {name}."
 }, v = {
   "app.description": "Assemblash — composition visuelle structurée avec des modifications précises et réversibles.",
   "app.homeLabel": "Accueil Assemblash",
@@ -1111,7 +1116,7 @@ const i = {
   "canvas.dashMaxError": "Utilisez au maximum {count} valeurs de tirets.",
   "effects.moveEarlier": "Déplacer {type} plus haut",
   "effects.moveLater": "Déplacer {type} plus bas",
-  "projects.recoverLockConfirm": "Récupérer le verrou détenu par le processus {pid} ?",
+  "projects.recoverLockConfirm": "Onglet {tab} : un autre processus ({pid}) détient le verrou de ce projet. Récupérer le verrou ?",
   "projects.reclaimedLock": "Ce projet a été récupéré automatiquement après un verrou obsolète du processus {pid} sur {host}.",
   "fonts.installClickConfirm": "Installer le pack de polices maintenant ? Le téléchargement commence après votre confirmation.",
   "editor.addedText": "Texte {preset} ajouté.",
@@ -1177,7 +1182,12 @@ const i = {
   "runs.reload": "Abandonner le brouillon et charger les segments actuels",
   "runs.notSent": "Le projet ou la sélection a changé. Le brouillon n’a pas été envoyé.",
   "runs.committed": "La modification est enregistrée, mais le document ne se recharge pas. Chargez les segments actuels avant une autre modification.",
-  "runs.failed": "La modification ne peut pas être confirmée. Conservez ce brouillon ou chargez les segments actuels."
+  "runs.failed": "La modification ne peut pas être confirmée. Conservez ce brouillon ou chargez les segments actuels.",
+  "tabs.label": "Projets ouverts",
+  "tabs.close": "Fermer {name}",
+  "tabs.changed": "Modifié par un autre client",
+  "tabs.reorderHint": "Faites glisser un onglet pour le déplacer. Ou appuyez sur Alt+Maj+Flèche gauche ou Alt+Maj+Flèche droite.",
+  "tabs.closed": "{name} est fermé."
 }, b = {
   "app.description": "Assemblash — strukturierte visuelle Gestaltung mit präzisen, umkehrbaren Änderungen.",
   "app.homeLabel": "Assemblash-Startseite",
@@ -1701,7 +1711,7 @@ const i = {
   "canvas.dashMaxError": "Verwenden Sie höchstens {count} Strichwerte.",
   "effects.moveEarlier": "{type} in der Effektreihenfolge nach oben verschieben",
   "effects.moveLater": "{type} in der Effektreihenfolge nach unten verschieben",
-  "projects.recoverLockConfirm": "Sperre des Prozesses {pid} übernehmen?",
+  "projects.recoverLockConfirm": "Tab {tab}: Ein anderer Prozess ({pid}) hält die Sperre dieses Projekts. Sperre übernehmen?",
   "projects.reclaimedLock": "Dieses Projekt wurde nach einer veralteten Sperre von Prozess {pid} auf {host} automatisch wiederhergestellt.",
   "fonts.installClickConfirm": "Schriftartenpaket jetzt installieren? Der Download beginnt nach Ihrer Bestätigung.",
   "editor.addedText": "Text mit der Voreinstellung {preset} hinzugefügt.",
@@ -1767,7 +1777,12 @@ const i = {
   "runs.reload": "Entwurf verwerfen und aktuelle Abschnitte laden",
   "runs.notSent": "Projekt oder Auswahl hat sich geändert. Der Entwurf wurde nicht gesendet.",
   "runs.committed": "Die Änderung ist gespeichert, aber das Dokument konnte nicht neu laden. Laden Sie vor einer weiteren Änderung die aktuellen Abschnitte.",
-  "runs.failed": "Die Änderung konnte nicht bestätigt werden. Behalten Sie den Entwurf oder laden Sie die aktuellen Abschnitte."
+  "runs.failed": "Die Änderung konnte nicht bestätigt werden. Behalten Sie den Entwurf oder laden Sie die aktuellen Abschnitte.",
+  "tabs.label": "Geöffnete Projekte",
+  "tabs.close": "{name} schließen",
+  "tabs.changed": "Von einem anderen Client geändert",
+  "tabs.reorderHint": "Ziehen Sie einen Tab, um ihn zu verschieben. Oder drücken Sie Alt+Umschalt+Pfeil links oder Alt+Umschalt+Pfeil rechts.",
+  "tabs.closed": "{name} ist geschlossen."
 }, g = "assemblash.language", k = {
   en: i,
   fr: v,
@@ -1808,12 +1823,12 @@ function p(e, t = {}) {
     (a, s) => Object.hasOwn(t, s) ? String(t[s]) : a
   );
 }
-function x(e) {
+function w(e) {
   return new Intl.NumberFormat(n === "pseudo" ? "en" : n).format(e);
 }
-function w(e, t, r = {}) {
+function x(e, t, r = {}) {
   const o = new Intl.PluralRules(n === "pseudo" ? "en" : n).select(t), a = `${e}.${o}`, s = `${e}.other`, l = Object.hasOwn(i, a) ? a : s;
-  return p(l, { ...r, count: x(t) });
+  return p(l, { ...r, count: w(t) });
 }
 const j = /* @__PURE__ */ new Set(["title", "placeholder", "aria-label", "aria-description", "alt"]);
 function u(e = document) {
@@ -1824,7 +1839,7 @@ function u(e = document) {
     const o = r.getAttribute("data-i18n");
     o && Object.hasOwn(i, o) && (r.textContent = p(o));
     const a = r.getAttribute("data-i18n-count"), s = Number(r.getAttribute("data-count"));
-    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = w(a, s));
+    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = x(a, s));
     const l = r.getAttribute("data-i18n-attr");
     if (l)
       for (const c of l.split(";")) {
@@ -1848,8 +1863,8 @@ if (typeof document < "u") {
 }
 export {
   u as bindTranslations,
-  w as formatCount,
-  x as formatNumber,
+  x as formatCount,
+  w as formatNumber,
   A as getLocale,
   C as setLocale,
   p as t

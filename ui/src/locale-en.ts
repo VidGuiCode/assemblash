@@ -519,7 +519,7 @@ export const en = {
   "canvas.dashMaxError": "Use no more than {count} dash values.",
   "effects.moveEarlier": "Move {type} earlier",
   "effects.moveLater": "Move {type} later",
-  "projects.recoverLockConfirm": "Reclaim the lock held by process {pid}?",
+  "projects.recoverLockConfirm": "Tab {tab}: another process ({pid}) holds the lock of this project. Reclaim the lock?",
   "projects.reclaimedLock": "Recovered this project automatically after a stale lock from pid {pid} on {host}.",
   "fonts.installClickConfirm": "Install the font pack now? The download starts after you confirm.",
   "editor.addedText": "Added {preset} text.",
@@ -584,4 +584,9 @@ export const en = {
   "runs.notSent": "The project or selection changed. The draft was not sent.",
   "runs.committed": "The change is saved, but the document could not reload. Load current runs before another edit.",
   "runs.failed": "The change could not be confirmed. Keep this draft or load current runs.",
+  "tabs.label": "Open projects",
+  "tabs.close": "Close {name}",
+  "tabs.changed": "Changed by another client",
+  "tabs.reorderHint": "Drag a tab to move it. Or press Alt+Shift+Left Arrow or Alt+Shift+Right Arrow.",
+  "tabs.closed": "Closed {name}.",
 } as const;

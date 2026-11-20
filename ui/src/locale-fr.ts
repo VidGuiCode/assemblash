@@ -521,7 +521,7 @@ export const fr: Record<keyof typeof en, string> = {
   "canvas.dashMaxError": "Utilisez au maximum {count} valeurs de tirets.",
   "effects.moveEarlier": "Déplacer {type} plus haut",
   "effects.moveLater": "Déplacer {type} plus bas",
-  "projects.recoverLockConfirm": "Récupérer le verrou détenu par le processus {pid} ?",
+  "projects.recoverLockConfirm": "Onglet {tab} : un autre processus ({pid}) détient le verrou de ce projet. Récupérer le verrou ?",
   "projects.reclaimedLock": "Ce projet a été récupéré automatiquement après un verrou obsolète du processus {pid} sur {host}.",
   "fonts.installClickConfirm": "Installer le pack de polices maintenant ? Le téléchargement commence après votre confirmation.",
   "editor.addedText": "Texte {preset} ajouté.",
@@ -586,4 +586,9 @@ export const fr: Record<keyof typeof en, string> = {
   "runs.notSent": "Le projet ou la sélection a changé. Le brouillon n’a pas été envoyé.",
   "runs.committed": "La modification est enregistrée, mais le document ne se recharge pas. Chargez les segments actuels avant une autre modification.",
   "runs.failed": "La modification ne peut pas être confirmée. Conservez ce brouillon ou chargez les segments actuels.",
+  "tabs.label": "Projets ouverts",
+  "tabs.close": "Fermer {name}",
+  "tabs.changed": "Modifié par un autre client",
+  "tabs.reorderHint": "Faites glisser un onglet pour le déplacer. Ou appuyez sur Alt+Maj+Flèche gauche ou Alt+Maj+Flèche droite.",
+  "tabs.closed": "{name} est fermé.",
 };

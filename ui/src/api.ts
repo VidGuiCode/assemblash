@@ -223,6 +223,71 @@ export async function recoverProjectLock(project: string, expectedPid: number): 
   return result.unlocked;
 }
 
+/** The project tabs the workspace remembers, in strip order. */
+export interface OpenTabsList {
+  projects: string[];
+  active: string | null;
+}
+
+/**
+ * Runs a request to a route an older server does not have. Such a server
+ * answers 404 or 405, and `missing` stands in for the answer.
+ */
+async function optionalRoute<T>(path: string, init: RequestInit | undefined, missing: T): Promise<T> {
+  const response = await fetch(path, { ...init, method: init?.method ?? "GET" });
+  if (response.status === 404 || response.status === 405) return missing;
+  if (response.status === 401) {
+    goToLogin();
+    throw new ApiError("unauthorized", "this server needs an access token", null);
+  }
+  if (!response.ok) {
+    let code = `http${response.status}`;
+    let message = response.statusText;
+    let details: unknown = null;
+    try {
+      const body = await response.json();
+      code = body?.error?.code ?? code;
+      message = body?.error?.message ?? message;
+      details = body?.error?.details ?? null;
+    } catch {
+      // Not the error envelope; the status is the code.
+    }
+    throw new ApiError(code, message, details);
+  }
+  return (await response.json()) as T;
+}
+
+/**
+ * Reads the open-tab list from the workspace. An older server, which keeps
+ * no list, reads as no tabs.
+ */
+export async function openTabs(): Promise<unknown> {
+  return optionalRoute<unknown>("/api/open-tabs", undefined, { projects: [], active: null });
+}
+
+/** Writes the open-tab list to the workspace. An older server ignores it. */
+export async function saveOpenTabs(list: OpenTabsList): Promise<void> {
+  await optionalRoute<unknown>("/api/open-tabs", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(list),
+  }, null);
+}
+
+/**
+ * Asks the server to close one project, which gives back its lock. A project
+ * the server does not hold answers `false`. An older server without the
+ * route also answers `false`, and the lock then stays until it stops.
+ */
+export async function closeProject(project: string): Promise<boolean> {
+  const result = await optionalRoute<{ closed: boolean }>(
+    `/api/projects/${encodeURIComponent(project)}/close`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+    { closed: false },
+  );
+  return result.closed;
+}
+
 /**
  * The journal, newest tail included.
  *

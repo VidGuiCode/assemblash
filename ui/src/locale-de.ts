@@ -523,7 +523,7 @@ export const de: Record<keyof typeof en, string> = {
   "canvas.dashMaxError": "Verwenden Sie höchstens {count} Strichwerte.",
   "effects.moveEarlier": "{type} in der Effektreihenfolge nach oben verschieben",
   "effects.moveLater": "{type} in der Effektreihenfolge nach unten verschieben",
-  "projects.recoverLockConfirm": "Sperre des Prozesses {pid} übernehmen?",
+  "projects.recoverLockConfirm": "Tab {tab}: Ein anderer Prozess ({pid}) hält die Sperre dieses Projekts. Sperre übernehmen?",
   "projects.reclaimedLock": "Dieses Projekt wurde nach einer veralteten Sperre von Prozess {pid} auf {host} automatisch wiederhergestellt.",
   "fonts.installClickConfirm": "Schriftartenpaket jetzt installieren? Der Download beginnt nach Ihrer Bestätigung.",
   "editor.addedText": "Text mit der Voreinstellung {preset} hinzugefügt.",
@@ -590,4 +590,9 @@ export const de: Record<keyof typeof en, string> = {
   "runs.notSent": "Projekt oder Auswahl hat sich geändert. Der Entwurf wurde nicht gesendet.",
   "runs.committed": "Die Änderung ist gespeichert, aber das Dokument konnte nicht neu laden. Laden Sie vor einer weiteren Änderung die aktuellen Abschnitte.",
   "runs.failed": "Die Änderung konnte nicht bestätigt werden. Behalten Sie den Entwurf oder laden Sie die aktuellen Abschnitte.",
+  "tabs.label": "Geöffnete Projekte",
+  "tabs.close": "{name} schließen",
+  "tabs.changed": "Von einem anderen Client geändert",
+  "tabs.reorderHint": "Ziehen Sie einen Tab, um ihn zu verschieben. Oder drücken Sie Alt+Umschalt+Pfeil links oder Alt+Umschalt+Pfeil rechts.",
+  "tabs.closed": "{name} ist geschlossen.",
 } as const;

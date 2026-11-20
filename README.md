@@ -128,6 +128,20 @@ editor that already runs.
 
 Assemblash saves every change immediately. There is no **Save** button.
 
+To work on more than one project, open each one from the project search. Each
+project opens in its own tab under the top bar. Click a tab to show its
+project. Each tab keeps its own selection, zoom, scroll position, panels, and
+undo history. Drag a tab to move it, or press Alt+Shift+Left Arrow or
+Alt+Shift+Right Arrow. Click × on a tab to close it.
+
+- A project has one tab only. If you open it again, its tab comes to the front.
+- When an AI agent changes a project in a hidden tab, the tab shows a dot. The
+  dot goes when you show the tab, and the tab shows the change.
+- When you close a tab, Assemblash releases the lock on that project. Other
+  programs, for example the `assemblash` command line, can then change it.
+- The open tabs and their order are stored in the workspace. The next start
+  opens the same tabs.
+
 ### 4. Let an AI agent work with you
 
 An AI agent, for example Codex or Claude, can work on your projects while the

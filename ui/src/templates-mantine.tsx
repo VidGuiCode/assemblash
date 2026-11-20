@@ -89,7 +89,7 @@ function TemplatesPanel({ host, projectController }: {
     });
   }
 
-  async function projectChanged(): Promise<void> {
+  async function projectChanged(draft: TemplateDraft | null = null): Promise<void> {
     const project = host.project();
     setValues(new Map());
     setBatch([]);
@@ -111,12 +111,23 @@ function TemplatesPanel({ host, projectController }: {
     for (const slot of nextSlots) {
       if (kindOf(slot) === "color") defaults.set(slot.name, "#000000");
     }
+    // A tab that comes back shows the draft it had: the values typed into
+    // the slots, the batch, and the variant name. Values for slots the
+    // template no longer has are dropped.
+    if (draft) {
+      for (const [name, value] of draft.values) {
+        if (nextSlots.some((slot) => slot.name === name)) defaults.set(name, value);
+      }
+      setBatch([...draft.batch]);
+      setVariantName(draft.variantName);
+    }
     setValues(defaults);
   }
 
   useLayoutEffect(() => {
     projectController.current = {
       projectChanged,
+      draft: () => ({ values: new Map(values), batch: [...batch], variantName }),
       setOpen: setOpened,
       isVisible: () => visibleRef.current,
     };
@@ -240,8 +251,18 @@ function TemplatesPanel({ host, projectController }: {
     </Stack>;
 }
 
+/** What one project tab keeps of the template panel while it is hidden. */
+export interface TemplateDraft {
+  values: ReadonlyMap<string, string>;
+  batch: readonly api.Variant[];
+  variantName: string;
+}
+
 export interface TemplatesController {
-  projectChanged(): Promise<void>;
+  /** Reads the slots of the open project. A tab that comes back passes its draft. */
+  projectChanged(draft?: TemplateDraft | null): Promise<void>;
+  /** The values, batch, and variant name the panel holds now. */
+  draft(): TemplateDraft;
   setOpen(open: boolean): void;
   isVisible(): boolean;
 }
@@ -252,7 +273,8 @@ export function mountTemplates(host: Host): TemplatesController {
   const projectController: { current: TemplatesController | null } = { current: null };
   mountMantinePortal("templates", container, <TemplatesPanel host={host} projectController={projectController} />);
   return {
-    projectChanged: async () => { await projectController.current?.projectChanged(); },
+    projectChanged: async (draft) => { await projectController.current?.projectChanged(draft); },
+    draft: () => projectController.current?.draft() ?? { values: new Map(), batch: [], variantName: "" },
     setOpen: (open) => projectController.current?.setOpen(open),
     isVisible: () => projectController.current?.isVisible() ?? false,
   };

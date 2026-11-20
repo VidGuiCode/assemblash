@@ -12,9 +12,17 @@ schema change is always noted explicitly.
 
 ### Added
 
+- Project tabs in the reference interface. Open, show, close, and reorder projects in a tab strip under the top bar. Reorder with a drag or with Alt+Shift+Left Arrow and Alt+Shift+Right Arrow.
+- Each tab keeps its own selection, zoom, scroll position, panels, template draft, and undo history. Undo in a tab changes only the project of that tab.
+- Every open tab follows changes from other clients. Only the visible tab renders previews. A hidden tab that another client changes shows a marker until you show it, and then it shows the change without a page reload.
+- A project has one tab only. A second open of the same project shows its tab.
+- Closing a tab releases the project lock, so the CLI or another program can write the project.
+- The open tabs and their order persist in `open-tabs.json` in the workspace, and the next start restores them.
 - HTTP: new additive route `GET` and `PUT /api/open-tabs`. It reads and writes the open-tab list in `open-tabs.json` in the workspace.
 - HTTP: new additive route `POST /api/projects/{id}/close`. It closes one project and releases its lock. The next request opens the project again.
 - The two routes are interface routes only. No document field, operation, or MCP tool changes. `schemaVersion` stays 1.
+- The lock-recovery prompt names the tab it belongs to.
+- EN, FR, and DE strings for the tab strip.
 
 ## [1.13.1] — 2026-11-11
 

@@ -40,7 +40,9 @@ import { mountProjectCreate } from "./project-create-mantine.js";
 import { mountNamePrompt } from "./name-prompt-mantine.js";
 import { mountSettings, type SettingsGroup } from "./settings-mantine.js";
 import { mountProjectPicker } from "./project-picker-mantine.js";
-import { mountTemplates } from "./templates-mantine.js";
+import { mountTemplates, type TemplateDraft } from "./templates-mantine.js";
+import { TabList, parseOpenTabs, type TabEntry } from "./tabs.js";
+import { mountProjectTabs } from "./project-tabs-mantine.js";
 import { mountStructurePanel, type DockView, type ReorderPosition, type StructureSnapshot } from "./structure-mantine.js";
 import { mountPaintInput } from "./paint-input.js";
 import { mountRunsEditor, type RunsSubmit } from "./text-runs-mantine.js";
@@ -119,24 +121,64 @@ interface State {
      */
     adoptedDelta?: { x: number; y: number };
   } | null;
-  busy: boolean;
   zoom: number | null;
   pan: { x: number; y: number };
   editingText: { id: string; original: string } | null;
 }
 
-const state: State = {
-  project: null,
-  document: null,
-  presets: [],
-  slots: [],
-  selection: [],
-  drag: null,
-  busy: false,
-  zoom: null,
-  pan: { x: 0, y: 0 },
-  editingText: null,
-};
+function blankState(project: string | null): State {
+  return {
+    project,
+    document: null,
+    presets: [],
+    slots: [],
+    selection: [],
+    drag: null,
+    zoom: null,
+    pan: { x: 0, y: 0 },
+    editingText: null,
+  };
+}
+
+/**
+ * The editor state of the visible tab.
+ *
+ * Each open project tab owns one `State` in its `TabRecord`. This variable
+ * points at the record of the visible tab, so every function that reads
+ * `state` reads the visible tab. A tab switch points it at another record; it
+ * never copies one tab's state into another. With no tab open it points at a
+ * blank state that belongs to no project.
+ */
+let state: State = blankState(null);
+
+/** Everything one project tab keeps while another tab is visible. */
+interface TabRecord {
+  state: State;
+  /** The stage scroll position, in CSS pixels. */
+  scroll: { left: number; top: number };
+  layerQuery: string;
+  historySnapshot: StructureSnapshot["history"];
+  activeDock: DockView;
+  /**
+   * The open Add panel section, or `null` when the Add panel is closed.
+   * Absent until the tab is first hidden: a new tab keeps the panel as it is.
+   */
+  addSection?: string | null;
+  templateDraft: TemplateDraft | null;
+}
+
+function newTabRecord(project: string): TabRecord {
+  return {
+    state: blankState(project),
+    scroll: { left: 0, top: 0 },
+    layerQuery: "",
+    historySnapshot: null,
+    activeDock: "layers",
+    templateDraft: null,
+  };
+}
+
+const tabs = new TabList<TabRecord>();
 
 // --- the action queue and the interaction measurements ------------------------
 //
@@ -183,8 +225,14 @@ function setSaveState(iconName: string, key: "save.working" | "save.allChangesSa
   setSaveIndicator(iconName, key);
 }
 
+/**
+ * Whether the queue is running an action. Kept outside the tab records: the
+ * queue belongs to the page, and a tab switch is itself a queued action.
+ */
+let queueBusy = false;
+
 queue.onActiveChange = (active: boolean): void => {
-  state.busy = active;
+  queueBusy = active;
   if (active) {
     setStatusKind("info");
     setSaveState("ph-circle-notch", "save.working");
@@ -498,7 +546,7 @@ mountStatusChrome(
 
 const projectPicker = mountProjectPicker({
   openProject: (projectId) => openFromQueue(projectId),
-  search: () => { void guard("search", () => loadProjects()); },
+  search: () => { void guard("search", async () => { await loadProjects(); }); },
 }, document.querySelector<HTMLElement>(".project-combobox")!);
 
 const namePrompt = mountNamePrompt();
@@ -3919,20 +3967,275 @@ function alignFromContextMenu(
  */
 function openFromQueue(project: string | null): void {
   cancelResizeGesture();
-  void guard("open", async () => {
-    state.project = project;
-    projectPicker.setCurrentProject(project);
-    state.selection = [];
-    // Painted pixels belong to the project they were painted in. A version
-    // number alone cannot vouch for them across an open.
-    unmountDragPreview();
-    retireDragPreviewCache();
-    await openProject();
+  void guard("open", () => openTab(project));
+}
+
+// --- project tabs ----------------------------------------------------------------
+//
+// One tab for each open project (decision D33). Every tab action goes through
+// the queue like an edit does: actions already waiting belong to the tab that
+// was visible when the person asked for them, so they run first, on their own
+// project, and the switch follows them.
+//
+// Every open tab follows other clients' changes (see `followOtherClients`).
+// Only the visible tab keeps rendered pixels: a hidden tab keeps its document,
+// selection, zoom, scroll, panels, and template draft, but no preview image
+// and no drag-preview cache.
+
+/** Project names from the last project list, for tabs whose document is not read yet. */
+const listedNames = new Map<string, string>();
+
+function tabName(entry: TabEntry<TabRecord>): string {
+  return entry.record.state.document?.name ?? listedNames.get(entry.id) ?? entry.id;
+}
+
+const projectTabs = mountProjectTabs({
+  activate: (id) => {
+    if (tabs.active?.id === id) return;
+    cancelResizeGesture();
+    void guard("switch tab", () => openTab(id));
+  },
+  close: (id) => {
+    cancelResizeGesture();
+    void guard("close tab", () => closeTab(id));
+  },
+  move: (id, to) => {
+    if (!tabs.move(id, to)) return;
+    drawTabs();
+    saveOpenTabs();
+  },
+}, el<HTMLElement>("project-tabs-root"));
+
+function drawTabs(): void {
+  projectTabs.setTabs(tabs.all.map((entry) => ({
+    id: entry.id,
+    name: tabName(entry),
+    active: entry === tabs.active,
+    changed: entry.changed,
+  })));
+}
+
+/** Writes the open tabs and their order to the workspace. A failure costs only the restore. */
+function saveOpenTabs(): void {
+  void api.saveOpenTabs(tabs.serialize()).catch((error: unknown) => {
+    console.error("could not save the open tabs", error);
   });
 }
 
+/**
+ * Takes the visible tab off the page and keeps what it needs to come back.
+ *
+ * Its rendered pixels go: the canvas image, a painted drag preview, and the
+ * drag-preview cache. Reads that are still on their way for it step aside,
+ * because from here they would land in another tab's state.
+ */
+function stashVisibleTab(): void {
+  const entry = tabs.active;
+  if (!entry) return;
+  const record = entry.record;
+  cancelResizeGesture();
+  record.scroll = { left: dom.stageViewport.scrollLeft, top: dom.stageViewport.scrollTop };
+  record.layerQuery = layerQuery;
+  record.historySnapshot = historySnapshot;
+  record.activeDock = activeDock;
+  record.addSection = dom.addPanel.classList.contains("collapsed") ? null : openAddSection;
+  record.templateDraft = templates.draft();
+  state.drag = null;
+  contextMenuController.close();
+  togglePositionPopover(false);
+  unmountDragPreview();
+  releaseCanvasImage();
+  refreshSequence++;
+  presetsSequence++;
+  historySequence++;
+  shapeControlErrors.clear();
+}
+
+/** Gives back the pixels of the canvas image. */
+function releaseCanvasImage(): void {
+  const previous = dom.canvasImage.src;
+  dom.canvasImage.removeAttribute("src");
+  delete dom.canvasImage.dataset["previewName"];
+  if (previous.startsWith("blob:")) URL.revokeObjectURL(previous);
+  lastRequestedPreviewScale = null;
+}
+
+/** Points the page at one tab's record, or at no project when `entry` is null. */
+function adoptTab(entry: TabEntry<TabRecord> | null): void {
+  tabs.activate(entry?.id ?? null);
+  const record = entry?.record;
+  state = record?.state ?? blankState(null);
+  layerQuery = record?.layerQuery ?? "";
+  historySnapshot = record?.historySnapshot ?? null;
+  activeDock = record?.activeDock ?? "layers";
+  projectPicker.setCurrentProject(entry?.id ?? null);
+  if (record && record.addSection !== undefined) {
+    if (record.addSection === null) closeAddPanel();
+    else if (record.addSection !== openAddSection || dom.addPanel.classList.contains("collapsed")) {
+      const section = addSections.find(([id]) => id === record.addSection);
+      if (section) showAddSection(section[0], section[2]);
+    }
+  }
+  drawTabs();
+}
+
+/**
+ * Shows a project: focuses its tab when one is open (D33 (c)), else opens a
+ * new tab for it. `null` shows no project.
+ */
+async function openTab(project: string | null): Promise<void> {
+  const previous = tabs.active;
+  if (previous && previous.id === project) {
+    // Opening the visible project again reads it again, as it always did.
+    state.selection = [];
+    unmountDragPreview();
+    await openProject();
+    return;
+  }
+  stashVisibleTab();
+  if (project === null) {
+    adoptTab(null);
+    showNoProject();
+    saveOpenTabs();
+    return;
+  }
+  const existing = tabs.find(project);
+  if (existing) {
+    await showTab(existing);
+    saveOpenTabs();
+    return;
+  }
+  const { entry } = tabs.open(project, () => newTabRecord(project));
+  try {
+    adoptTab(entry);
+    await openProject();
+  } catch (error) {
+    // A project that did not open leaves no tab behind, and the tab that
+    // was visible before comes back.
+    tabs.close(entry.id);
+    adoptTab(null);
+    if (previous && tabs.has(previous.id)) await showTab(previous).catch(() => showNoProject());
+    else showNoProject();
+    throw error;
+  }
+  drawTabs();
+  saveOpenTabs();
+}
+
+/** Puts a tab that was open before back on the page. */
+async function showTab(entry: TabEntry<TabRecord>): Promise<void> {
+  adoptTab(entry);
+  const record = entry.record;
+  if (!state.document) {
+    await openProject(record.templateDraft);
+    return;
+  }
+  // The document this tab holds may be older than the project: another
+  // client may have changed it while the tab was hidden. The tab shows the
+  // project as it is now, without a page reload.
+  try {
+    await refresh();
+  } catch (error) {
+    applyDocument(state.document);
+    throw error;
+  }
+  applyZoom();
+  dom.stageViewport.scrollLeft = record.scroll.left;
+  dom.stageViewport.scrollTop = record.scroll.top;
+  await templates.projectChanged(record.templateDraft);
+  syncProjectButtons();
+  drawTabs();
+  say(translate("projects.opened", { name: tabName(entry) }));
+}
+
+/**
+ * Closes one tab. The server gives back the project lock, so another
+ * program can write the project again.
+ */
+async function closeTab(id: string): Promise<void> {
+  const entry = tabs.find(id);
+  if (!entry) return;
+  const name = tabName(entry);
+  const visible = tabs.active === entry;
+  if (visible) stashVisibleTab();
+  const { next } = tabs.close(id);
+  drawTabs();
+  saveOpenTabs();
+  // A preview of this project still on its way would open the project
+  // again on the server, and take the lock back. It finishes first.
+  if (visible) await previewStreaming?.catch(() => undefined);
+  await api.closeProject(id);
+  if (visible) {
+    if (next) await showTab(next);
+    else {
+      adoptTab(null);
+      showNoProject();
+    }
+  }
+  say(translate("tabs.closed", { name }));
+}
+
+/** Removes the tab of a project that no longer exists, without asking the server to close it. */
+async function forgetTab(id: string): Promise<void> {
+  const entry = tabs.find(id);
+  if (!entry) return;
+  const visible = tabs.active === entry;
+  if (visible) stashVisibleTab();
+  const { next } = tabs.close(id);
+  if (visible) {
+    if (next) await showTab(next);
+    else {
+      adoptTab(null);
+      showNoProject();
+    }
+  }
+  drawTabs();
+  saveOpenTabs();
+}
+
+/**
+ * Opens the tabs the workspace remembers, in their order (D33 (b)). Each
+ * tab reads its document, so each one follows other clients from the start;
+ * only the active one renders. A project that is gone, or will not open, is
+ * left out and the next save forgets it.
+ */
+async function restoreOpenTabs(available: ReadonlySet<string>): Promise<void> {
+  let saved;
+  try {
+    saved = parseOpenTabs(await api.openTabs());
+  } catch (error) {
+    console.error("could not read the open tabs", error);
+    return;
+  }
+  for (const project of saved.projects) {
+    if (!available.has(project) || tabs.has(project)) continue;
+    try {
+      const document = await api.getDocument(project);
+      const { entry } = tabs.open(project, () => newTabRecord(project));
+      entry.record.state.document = document;
+    } catch (error) {
+      console.error(`could not restore the tab of ${project}`, error);
+    }
+  }
+  if (tabs.size === 0) return;
+  const active = tabs.find(saved.active) ?? tabs.all[0]!;
+  try {
+    await showTab(active);
+  } catch (error) {
+    report("open", error);
+  }
+  drawTabs();
+  saveOpenTabs();
+}
+
+function syncProjectButtons(): void {
+  dom.renameProject.disabled = !state.project;
+  dom.deleteProject.disabled = !state.project;
+  dom.reload.disabled = !state.project;
+}
+
 /** Reads a newly opened project, and asks the template panel what it offers. */
-async function openProject(): Promise<void> {
+async function openProject(templateDraft: TemplateDraft | null = null): Promise<void> {
   try {
     await refresh();
   } catch (error) {
@@ -3949,7 +4252,10 @@ async function openProject(): Promise<void> {
       throw error;
     }
 
-    const confirmed = window.confirm(translate("projects.recoverLockConfirm", { pid }));
+    // The prompt names the tab it belongs to: with several tabs open, the
+    // person must know which project the lock is on.
+    const tab = listedNames.get(state.project) ?? state.project;
+    const confirmed = window.confirm(translate("projects.recoverLockConfirm", { pid, tab }));
     if (!confirmed) throw error;
     await api.recoverProjectLock(state.project, pid);
     await refresh();
@@ -3957,10 +4263,9 @@ async function openProject(): Promise<void> {
   }
   // After the document, because the panel's image fields are built from the
   // assets the document lists.
-  await templates.projectChanged();
-  dom.renameProject.disabled = !state.project;
-  dom.deleteProject.disabled = !state.project;
-  dom.reload.disabled = !state.project;
+  await templates.projectChanged(templateDraft);
+  syncProjectButtons();
+  drawTabs();
   say(translate("projects.opened", { name: state.document?.name ?? state.project ?? "" }));
 
   // The server drains a reclaimed lock the first time it is read after
@@ -4008,7 +4313,11 @@ function activateEditorTool(active: HTMLButtonElement): void {
   }
 }
 
+/** The Add panel section shown last, kept with a tab when the tab is hidden. */
+let openAddSection: string | null = null;
+
 function showAddSection(id = "add-text-section", active = dom.addText): void {
+  openAddSection = id;
   if (id !== "add-fonts-section") fontsPanel.releaseSamples();
   dom.addPanel.classList.remove("collapsed");
   dom.structure.classList.remove("mobile-open");
@@ -4725,20 +5034,18 @@ window.addEventListener("keydown", (event) => {
  * Closes the open project without opening another: the empty canvas shows,
  * and the picker keeps listing what the workspace still holds.
  */
-function closeProject(): void {
+function showNoProject(): void {
   cancelResizeGesture();
-  state.project = null;
-  state.document = null;
-  state.selection = [];
   setDocumentDimensions(null);
   dom.canvas.hidden = true;
   dom.canvasControlsRoot.hidden = true;
   dom.canvasHints.hidden = true;
-  dom.canvasImage.removeAttribute("src");
+  releaseCanvasImage();
   dom.canvasEmpty.hidden = false;
-  dom.renameProject.disabled = true;
-  dom.deleteProject.disabled = true;
-  dom.reload.disabled = true;
+  syncProjectButtons();
+  dom.undo.disabled = true;
+  dom.redo.disabled = true;
+  dom.version.textContent = "–";
   drawLayers();
   drawOverlay();
   drawInspector();
@@ -4759,8 +5066,19 @@ function renameProjectFlow(id: string, currentName: string | null): void {
     void guard("rename project", async () => {
       const result = await api.renameProject(id, name);
       say(translate("projects.renamed", { oldName: currentName ?? id, newName: name }));
-      if (state.project === id) state.project = null;
-      await loadProjects(result.project);
+      // A project open in a tab keeps its tab, under the new id. The server
+      // closed the project to rename it; the next read opens it again.
+      const entry = tabs.find(id);
+      if (entry && tabs.rename(id, result.project)) {
+        entry.record.state.project = result.project;
+        saveOpenTabs();
+      }
+      await loadProjects();
+      if (entry && tabs.active === entry) {
+        projectPicker.setCurrentProject(result.project);
+        await refresh();
+      }
+      drawTabs();
     });
   });
 }
@@ -4779,7 +5097,7 @@ function deleteProjectFlow(id: string, name: string | null): void {
   if (!window.confirm(question)) return;
   void guard("delete project", async () => {
     await api.deleteProject(id);
-    if (state.project === id) closeProject();
+    await forgetTab(id);
     say(translate("projects.deleted", { name: label }));
     await loadProjects();
   });
@@ -4798,24 +5116,22 @@ dom.deleteProject.addEventListener("click", () => {
   deleteProjectFlow(current, state.document?.name ?? null);
 });
 
-async function loadProjects(select?: string): Promise<void> {
+async function loadProjects(select?: string): Promise<readonly api.ProjectSummary[]> {
   if (select) dom.search.value = "";
   const query = dom.search.value.trim();
   // Filtered by the engine against its cache: a workspace of two hundred
   // projects should not be sent here in full for this page to look through it.
   const projects = await api.listProjects(query);
   fillProjectOptions(projects, query);
-  if (select) {
-    state.project = select;
-    projectPicker.setCurrentProject(select);
-    await openProject();
-  }
+  if (select) await openTab(select);
   await drawRecents();
+  return projects;
 }
 
 /** Updates the visible project list from the latest API response. */
 function fillProjectOptions(projects: readonly api.ProjectSummary[], query: string): void {
   listedProjects = projectListKey(projects);
+  for (const project of projects) if (project.name) listedNames.set(project.id, project.name);
   projectPicker.setProjects(projects, query, state.project);
 }
 // --- following other clients ----------------------------------------------------
@@ -4901,7 +5217,7 @@ function stillTyping(): boolean {
 
 function followIsQuiet(): boolean {
   return document.visibilityState === "visible" &&
-    !state.busy &&
+    !queueBusy &&
     !state.drag &&
     !state.editingText &&
     !stillTyping() &&
@@ -4934,6 +5250,8 @@ async function followOtherClients(): Promise<void> {
       if (!state.project) void drawRecents().catch(() => undefined);
     }
 
+    followHiddenTabs(projects);
+
     const project = state.project;
     const listed = projects.find((one) => one.id === project);
     const current = state.document;
@@ -4953,6 +5271,38 @@ async function followOtherClients(): Promise<void> {
     // stopped server says so through the person's next action.
   } finally {
     following = false;
+  }
+}
+
+/**
+ * Brings hidden tabs up to date with other clients (D33 (a)).
+ *
+ * The project list already carries each project's version, so finding a
+ * changed tab costs no extra request. A changed tab reads its document — not
+ * its pixels: only the visible tab renders — and shows the change marker
+ * until the person views it.
+ */
+function followHiddenTabs(projects: readonly api.ProjectSummary[]): void {
+  for (const entry of tabs.all) {
+    if (entry === tabs.active) continue;
+    const held = entry.record.state.document;
+    const listed = projects.find((one) => one.id === entry.id);
+    if (!held || !listed || listed.documentId !== held.id || listed.version === api.versionOf(held)) continue;
+    void guard("follow tab", async () => {
+      if (tabs.active === entry || !tabs.all.includes(entry)) return;
+      const doc = await api.getDocument(entry.id);
+      if (tabs.active === entry || !tabs.all.includes(entry)) return;
+      const record = entry.record;
+      record.state.document = doc;
+      record.state.selection = record.state.selection.filter((id) =>
+        api.flatten(api.layersOf(doc)).some(({ layer }) => layer.id === id),
+      );
+      // The journal moved on with the document; the tab reads it again when
+      // it is shown.
+      record.historySnapshot = null;
+      tabs.markChanged(entry.id);
+      drawTabs();
+    });
   }
 }
 
@@ -5025,7 +5375,8 @@ void guard("start", async () => {
     // A server with no readable font store still edits documents; only the
     // suggestion list is poorer for it, and the field still takes any name.
   }
-  await loadProjects();
+  const projects = await loadProjects();
+  await restoreOpenTabs(new Set(projects.map((project) => project.id)));
   void drawAgentsConnected();
   // The update notices load beside the rest of the start-up, not in front
   // of it: they never block the first paint of the project list.
