@@ -21,6 +21,7 @@ pub mod instance;
 pub mod render;
 pub mod site;
 pub mod state;
+pub mod tabs;
 pub mod ui;
 pub mod update;
 

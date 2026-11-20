@@ -10,6 +10,11 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- HTTP: new additive route `GET` and `PUT /api/open-tabs`. It reads and writes the open-tab list in `open-tabs.json` in the workspace.
+- The two routes are interface routes only. No document field, operation, or MCP tool changes. `schemaVersion` stays 1.
+
 ## [1.13.1] — 2026-11-11
 
 **Security release: dependency advisories.** This release contains only two

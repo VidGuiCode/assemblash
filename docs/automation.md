@@ -139,6 +139,7 @@ The main routes:
 | `GET /api/projects/{id}/presets`, `.../slots` | List presets and slots. |
 | `POST /api/projects/{id}/variants` | Render variant batches. |
 | `POST /api/projects/{id}/recover-lock` | Recover a project lock. |
+| `GET, PUT /api/open-tabs` | Read and write the open project tabs of the reference interface. |
 | `GET, POST /api/fonts`, `POST /api/fonts/install`, `DELETE /api/fonts/{family}` | List the font store, import a font, install a family, and remove a family. |
 | `GET /api/update-status`, `POST /api/update-consent`, `GET /api/agent-sessions`, `POST /api/shutdown` | Read and set the update choice, count the connected agents, and stop the server. |
 

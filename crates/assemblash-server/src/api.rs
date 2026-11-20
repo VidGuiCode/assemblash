@@ -111,6 +111,10 @@ pub fn router_with_limits(
             "/api/update-consent",
             post(crate::update::post_update_consent),
         )
+        .route(
+            "/api/open-tabs",
+            get(crate::tabs::get_open_tabs).put(crate::tabs::put_open_tabs),
+        )
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/recent", get(recent_projects))
         .route(

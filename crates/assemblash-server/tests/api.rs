@@ -324,6 +324,15 @@ mod http {
     pub fn post_bytes(url: &str, content_type: &str, body: &[u8]) -> Response {
         request("POST", url, Some(content_type), Some(body))
     }
+
+    pub fn put_json(url: &str, body: &serde_json::Value) -> Response {
+        request(
+            "PUT",
+            url,
+            Some("application/json"),
+            Some(body.to_string().as_bytes()),
+        )
+    }
 }
 
 fn error_code(response: &http::Response) -> String {
@@ -2453,4 +2462,38 @@ fn preview_bytes_do_not_change_when_the_href_cache_is_warm() {
         first.body, second.body,
         "a warm cache serves the same bytes a cold one built"
     );
+}
+
+// --- 1.14.0: project tabs ---------------------------------------------------
+
+#[test]
+fn the_open_tab_list_is_kept_in_the_workspace() {
+    let harness = Harness::start();
+    let empty = http::get(&harness.url("/api/open-tabs"));
+    assert_eq!(empty.status, 200);
+    assert_eq!(empty.json(), json!({ "projects": [], "active": null }));
+
+    let stored = http::put_json(
+        &harness.url("/api/open-tabs"),
+        &json!({ "projects": ["beta", "alpha", "beta", "../escape"], "active": "alpha" }),
+    );
+    assert_eq!(stored.status, 200, "{}", stored.json());
+    assert_eq!(
+        stored.json(),
+        json!({ "projects": ["beta", "alpha"], "active": "alpha" })
+    );
+    assert_eq!(
+        http::get(&harness.url("/api/open-tabs")).json(),
+        stored.json()
+    );
+    assert!(harness
+        .root()
+        .join(assemblash_server::tabs::OPEN_TABS_FILE)
+        .is_file());
+
+    let unknown = http::put_json(
+        &harness.url("/api/open-tabs"),
+        &json!({ "projects": [], "extra": true }),
+    );
+    assert_eq!(unknown.status, 400, "{}", unknown.json());
 }
