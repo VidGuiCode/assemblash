@@ -521,6 +521,44 @@ impl AppState {
         wait_until_locks_released(&locks, remaining)
     }
 
+    /// Closes one project this server holds, releasing its lock file.
+    ///
+    /// The interface calls this when a person closes the project's tab, so
+    /// another program (the CLI, a second server) can write the project.
+    /// Answers `false` when the project is not open here. A request that is
+    /// still running keeps its own handle; this waits up to five seconds for
+    /// it, then refuses with `projectOpen` and leaves the project closed in
+    /// the registry, so the lock goes when that request ends. A later request
+    /// opens the project again, exactly as the first one did.
+    pub fn close_project(&self, id: &ProjectId) -> Result<bool, ApiError> {
+        let open = self.lock_registry()?.remove(id.as_str());
+        let Some(session) = open else {
+            return Ok(false);
+        };
+        let lock = self
+            .inner
+            .workspace
+            .project_dir(id)
+            .join(assemblash_core::session::LOCK_FILE);
+        // Downgraded before the strong handle goes, or the local binding
+        // would keep the session alive and the wait would always run out.
+        let handle = Arc::downgrade(&session);
+        drop(session);
+        let timeout = std::time::Duration::from_secs(5);
+        if !wait_until_dropped(&[handle], timeout) || !wait_until_locks_released(&[lock], timeout) {
+            return Err(ApiError::new(
+                axum::http::StatusCode::CONFLICT,
+                "projectOpen",
+                format!(
+                    "project {} is being used by a request in this server; it closes when that request has finished",
+                    id.as_str()
+                ),
+            )
+            .with_details(serde_json::json!({ "id": id.as_str() })));
+        }
+        Ok(true)
+    }
+
     /// Registers a session for a project that has just been created.
     pub fn adopt(&self, id: &ProjectId, session: Session) -> Result<OpenProject, ApiError> {
         let session = Arc::new(Mutex::new(session));

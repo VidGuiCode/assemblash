@@ -2467,6 +2467,41 @@ fn preview_bytes_do_not_change_when_the_href_cache_is_warm() {
 // --- 1.14.0: project tabs ---------------------------------------------------
 
 #[test]
+fn closing_a_project_releases_its_lock_and_a_later_read_opens_it_again() {
+    let harness = Harness::start();
+    create_project(&harness, "tabbed");
+    let lock = harness
+        .root()
+        .join(PROJECTS_DIR)
+        .join("tabbed")
+        .join(assemblash_core::session::LOCK_FILE);
+    assert_eq!(
+        http::get(&harness.url("/api/projects/tabbed/document")).status,
+        200
+    );
+    assert!(lock.exists(), "an open project holds its lock");
+
+    let response = http::post_json(&harness.url("/api/projects/tabbed/close"), &json!({}));
+    assert_eq!(response.status, 200, "{}", response.json());
+    assert_eq!(response.json()["closed"], true);
+    assert!(!lock.exists(), "closing gives the lock back");
+
+    // A project that is not open is not an error.
+    let again = http::post_json(&harness.url("/api/projects/tabbed/close"), &json!({}));
+    assert_eq!(again.status, 200, "{}", again.json());
+    assert_eq!(again.json()["closed"], false);
+
+    // The next read opens the project again, with its journal intact.
+    let document = http::get(&harness.url("/api/projects/tabbed/document"));
+    assert_eq!(document.status, 200, "{}", document.json());
+    assert!(lock.exists());
+
+    // An id that cannot be a project is refused before anything happens.
+    let refused = http::post_json(&harness.url("/api/projects/..%2Fescape/close"), &json!({}));
+    assert_ne!(refused.status, 200);
+}
+
+#[test]
 fn the_open_tab_list_is_kept_in_the_workspace() {
     let harness = Harness::start();
     let empty = http::get(&harness.url("/api/open-tabs"));

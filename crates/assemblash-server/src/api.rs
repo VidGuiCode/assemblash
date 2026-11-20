@@ -127,6 +127,7 @@ pub fn router_with_limits(
             "/api/projects/{id}/recover-lock",
             post(recover_project_lock),
         )
+        .route("/api/projects/{id}/close", post(close_project))
         .route("/api/projects/{id}/history", get(get_history))
         .route("/api/projects/{id}/validate", get(validate_project))
         .route("/api/projects/{id}/operations", post(apply_operation))
@@ -341,6 +342,25 @@ async fn recover_project_lock(
     let id = ProjectId::new(id)?;
     let unlocked = state.recover_project_lock(&id, request.expected_pid)?;
     Ok(Json(RecoverLockResponse { unlocked }))
+}
+
+#[derive(Debug, Serialize)]
+struct CloseProjectResponse {
+    closed: bool,
+}
+
+/// Closes one project this server holds and releases its lock.
+///
+/// The interface calls this when a person closes the project's tab. A
+/// project that is not open answers `closed: false`. Nothing in the project
+/// changes: the journal, the document, and the undo history stay as they are.
+async fn close_project(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<CloseProjectResponse>, ApiError> {
+    let id = ProjectId::new(id)?;
+    let closed = state.close_project(&id)?;
+    Ok(Json(CloseProjectResponse { closed }))
 }
 
 /// The document JSON Schema, served from the same generator that writes the
