@@ -376,15 +376,48 @@ export async function redo(project: string): Promise<OperationResult> {
   });
 }
 
+/** The format fields of an export request. Each one is optional. */
+export interface ExportOptions {
+  /** `png` when absent. */
+  format?: "png" | "svg" | "pdf" | "jpeg" | "webp";
+  /** JPEG quality, 1 to 100. JPEG only. */
+  quality?: number;
+  /** The pages of a page set: `<set>` or `<set>:<selection>`. */
+  pages?: string;
+  /** Trim and bleed boxes and crop marks. PDF only. */
+  print?: boolean;
+}
+
+/** What the engine wrote for an export. */
+export interface ExportResult {
+  path: string;
+  bytes: number;
+  width: number;
+  height: number;
+  /** The number of pages, for an export of a page set. */
+  pages?: number;
+}
+
+/**
+ * Asks the engine to write an export into the project.
+ *
+ * Without options the body is `{ name, scale }`, the same request as before
+ * the export formats: a PNG.
+ */
 export async function exportDocument(
   project: string,
   name: string,
   scale: number,
-): Promise<{ path: string; bytes: number; width: number; height: number }> {
+  options: ExportOptions = {},
+): Promise<ExportResult> {
+  const body: Record<string, unknown> = { name, scale };
+  for (const key of ["format", "quality", "pages", "print"] as const) {
+    if (options[key] !== undefined) body[key] = options[key];
+  }
   return request(`/api/projects/${encodeURIComponent(project)}/export`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, scale }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -819,8 +852,8 @@ export async function renderVariants(
  * A file name, never a path: the server validates the stem with the same rule
  * that produced it, so this cannot address anything the engine did not write.
  */
-export function exportUrl(project: string, name: string): string {
-  return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.png`;
+export function exportUrl(project: string, name: string, extension = "png"): string {
+  return `/api/projects/${encodeURIComponent(project)}/exports/${encodeURIComponent(name)}.${extension}`;
 }
 
 /** One face the font store holds, as the engine records it. */

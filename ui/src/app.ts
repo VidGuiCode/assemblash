@@ -682,6 +682,10 @@ const fontsPanel = mountFontsMantine({
 const exporter = mountExport({
   project: () => state.project,
   document: () => state.document,
+  pageSet: () => {
+    const group = tabs.active?.group;
+    return group ? { set: group.set, count: group.count } : null;
+  },
   say,
   guard,
 });
