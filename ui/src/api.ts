@@ -388,6 +388,38 @@ export async function exportDocument(
   });
 }
 
+/** One page of a resolved page set. */
+export interface PageSetPage {
+  index: number;
+  project: string;
+  via: string[];
+}
+
+/** A page set with its flat page list, in manifest order. */
+export interface ResolvedPageSet {
+  name: string;
+  pages: PageSetPage[];
+}
+
+/**
+ * The names of the workspace's page sets. An older server, which has no page
+ * sets, reads as none.
+ */
+export async function listPageSets(): Promise<string[]> {
+  const body = await optionalRoute<{ pageSets?: unknown }>("/api/page-sets", undefined, { pageSets: [] });
+  return Array.isArray(body.pageSets)
+    ? body.pageSets.filter((name): name is string => typeof name === "string")
+    : [];
+}
+
+/**
+ * One page set, resolved by the engine: nested sets are expanded in place. A
+ * loop or a missing member comes back as a typed refusal.
+ */
+export async function getPageSet(name: string): Promise<ResolvedPageSet> {
+  return request<ResolvedPageSet>(`/api/page-sets/${encodeURIComponent(name)}`);
+}
+
 /**
  * Asks the server to stop.
  *

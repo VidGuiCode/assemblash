@@ -592,7 +592,31 @@ const i = {
   "tabs.close": "Close {name}",
   "tabs.changed": "Changed by another client",
   "tabs.reorderHint": "Drag a tab to move it. Or press Alt+Shift+Left Arrow or Alt+Shift+Right Arrow.",
-  "tabs.closed": "Closed {name}."
+  "tabs.closed": "Closed {name}.",
+  "tabs.page": "Page {page} of {count} in {set}",
+  "tabs.groupLabel": "Page set {set}",
+  "pageSets.heading": "Page sets",
+  "pageSets.option": "Page set",
+  "pageSets.openLabel": "Open page set {set}",
+  "pageSets.opened": "Opened page set {set}: {count} pages.",
+  "pageSets.empty": "Page set {set} has no pages.",
+  "pageSets.tooMany": "Page set {set} has {count} pages. At most {max} tabs can be open. Close tabs first.",
+  "refusals.exportFormatNotSupported": "The engine cannot export this format.",
+  "refusals.exportQualityOutOfRange": "Set a JPEG quality from 1 to 100.",
+  "refusals.lossyWebpNotSupported": "The engine exports lossless WebP only. For a smaller file, use JPEG.",
+  "refusals.exportQualityNotApplicable": "Quality applies to JPEG only.",
+  "refusals.printNeedsPdf": "Crop marks and bleed need the PDF format.",
+  "refusals.pagesNeedPdf": "More than one page needs the PDF format.",
+  "refusals.invalidPageSelection": "The page selection is not valid.",
+  "refusals.colorSpaceNotSupported": "The engine exports sRGB only. CMYK is not supported.",
+  "refusals.exportEncodingFailed": "The engine could not encode the export.",
+  "refusals.invalidPageSetName": "The page set name is not valid.",
+  "refusals.pageSetUnreadable": "The engine could not read the page set file.",
+  "refusals.pageSetNotFound": "Page set {set} does not exist.",
+  "refusals.pageSetMalformed": "The file of page set {set} is not valid.",
+  "refusals.pageSetMemberMissing": "Page set {set} names pages that do not exist: {names}.",
+  "refusals.pageSetLoop": "Page set {set} contains itself: {chain}.",
+  "refusals.pageSetDuplicatePage": "Page set {set} has project {project} as page {first} and page {second}. A project can be one page only."
 }, v = {
   "app.description": "Assemblash — composition visuelle structurée avec des modifications précises et réversibles.",
   "app.homeLabel": "Accueil Assemblash",
@@ -1187,7 +1211,31 @@ const i = {
   "tabs.close": "Fermer {name}",
   "tabs.changed": "Modifié par un autre client",
   "tabs.reorderHint": "Faites glisser un onglet pour le déplacer. Ou appuyez sur Alt+Maj+Flèche gauche ou Alt+Maj+Flèche droite.",
-  "tabs.closed": "{name} est fermé."
+  "tabs.closed": "{name} est fermé.",
+  "tabs.page": "Page {page} sur {count} dans {set}",
+  "tabs.groupLabel": "Jeu de pages {set}",
+  "pageSets.heading": "Jeux de pages",
+  "pageSets.option": "Jeu de pages",
+  "pageSets.openLabel": "Ouvrir le jeu de pages {set}",
+  "pageSets.opened": "Jeu de pages {set} ouvert : {count} pages.",
+  "pageSets.empty": "Le jeu de pages {set} ne contient aucune page.",
+  "pageSets.tooMany": "Le jeu de pages {set} contient {count} pages. Au plus {max} onglets peuvent être ouverts. Fermez d’abord des onglets.",
+  "refusals.exportFormatNotSupported": "Le moteur ne peut pas exporter ce format.",
+  "refusals.exportQualityOutOfRange": "Choisissez une qualité JPEG de 1 à 100.",
+  "refusals.lossyWebpNotSupported": "Le moteur exporte le WebP sans perte uniquement. Pour un fichier plus petit, utilisez JPEG.",
+  "refusals.exportQualityNotApplicable": "La qualité s’applique au JPEG uniquement.",
+  "refusals.printNeedsPdf": "Les traits de coupe et le fond perdu nécessitent le format PDF.",
+  "refusals.pagesNeedPdf": "Plusieurs pages nécessitent le format PDF.",
+  "refusals.invalidPageSelection": "La sélection de pages n’est pas valide.",
+  "refusals.colorSpaceNotSupported": "Le moteur exporte en sRGB uniquement. Le CMJN n’est pas pris en charge.",
+  "refusals.exportEncodingFailed": "Le moteur n’a pas pu encoder l’export.",
+  "refusals.invalidPageSetName": "Le nom du jeu de pages n’est pas valide.",
+  "refusals.pageSetUnreadable": "Le moteur n’a pas pu lire le fichier du jeu de pages.",
+  "refusals.pageSetNotFound": "Le jeu de pages {set} n’existe pas.",
+  "refusals.pageSetMalformed": "Le fichier du jeu de pages {set} n’est pas valide.",
+  "refusals.pageSetMemberMissing": "Le jeu de pages {set} nomme des pages qui n’existent pas : {names}.",
+  "refusals.pageSetLoop": "Le jeu de pages {set} se contient lui-même : {chain}.",
+  "refusals.pageSetDuplicatePage": "Le jeu de pages {set} contient le projet {project} en page {first} et en page {second}. Un projet ne peut être qu’une seule page."
 }, b = {
   "app.description": "Assemblash — strukturierte visuelle Gestaltung mit präzisen, umkehrbaren Änderungen.",
   "app.homeLabel": "Assemblash-Startseite",
@@ -1782,7 +1830,31 @@ const i = {
   "tabs.close": "{name} schließen",
   "tabs.changed": "Von einem anderen Client geändert",
   "tabs.reorderHint": "Ziehen Sie einen Tab, um ihn zu verschieben. Oder drücken Sie Alt+Umschalt+Pfeil links oder Alt+Umschalt+Pfeil rechts.",
-  "tabs.closed": "{name} ist geschlossen."
+  "tabs.closed": "{name} ist geschlossen.",
+  "tabs.page": "Seite {page} von {count} in {set}",
+  "tabs.groupLabel": "Seitensatz {set}",
+  "pageSets.heading": "Seitensätze",
+  "pageSets.option": "Seitensatz",
+  "pageSets.openLabel": "Seitensatz {set} öffnen",
+  "pageSets.opened": "Seitensatz {set} geöffnet: {count} Seiten.",
+  "pageSets.empty": "Seitensatz {set} hat keine Seiten.",
+  "pageSets.tooMany": "Seitensatz {set} hat {count} Seiten. Höchstens {max} Tabs können geöffnet sein. Schließen Sie zuerst Tabs.",
+  "refusals.exportFormatNotSupported": "Die Engine kann dieses Format nicht exportieren.",
+  "refusals.exportQualityOutOfRange": "Wählen Sie eine JPEG-Qualität von 1 bis 100.",
+  "refusals.lossyWebpNotSupported": "Die Engine exportiert WebP nur verlustfrei. Für eine kleinere Datei verwenden Sie JPEG.",
+  "refusals.exportQualityNotApplicable": "Die Qualität gilt nur für JPEG.",
+  "refusals.printNeedsPdf": "Schnittmarken und Beschnitt benötigen das PDF-Format.",
+  "refusals.pagesNeedPdf": "Mehr als eine Seite benötigt das PDF-Format.",
+  "refusals.invalidPageSelection": "Die Seitenauswahl ist ungültig.",
+  "refusals.colorSpaceNotSupported": "Die Engine exportiert nur sRGB. CMYK wird nicht unterstützt.",
+  "refusals.exportEncodingFailed": "Die Engine konnte den Export nicht kodieren.",
+  "refusals.invalidPageSetName": "Der Name des Seitensatzes ist ungültig.",
+  "refusals.pageSetUnreadable": "Die Engine konnte die Datei des Seitensatzes nicht lesen.",
+  "refusals.pageSetNotFound": "Seitensatz {set} existiert nicht.",
+  "refusals.pageSetMalformed": "Die Datei von Seitensatz {set} ist ungültig.",
+  "refusals.pageSetMemberMissing": "Seitensatz {set} nennt Seiten, die nicht existieren: {names}.",
+  "refusals.pageSetLoop": "Seitensatz {set} enthält sich selbst: {chain}.",
+  "refusals.pageSetDuplicatePage": "Seitensatz {set} enthält Projekt {project} als Seite {first} und Seite {second}. Ein Projekt kann nur eine Seite sein."
 }, g = "assemblash.language", k = {
   en: i,
   fr: v,
@@ -1791,14 +1863,14 @@ const i = {
 function f(e) {
   return e === "fr" || e === "de" || e === "pseudo" ? e : "en";
 }
-function y() {
+function S() {
   try {
     return f(window.localStorage.getItem(g));
   } catch {
     return "en";
   }
 }
-let n = typeof window > "u" ? "en" : y();
+let n = typeof window > "u" ? "en" : S();
 function A() {
   return n;
 }
@@ -1810,7 +1882,7 @@ function C(e) {
   }
   document.documentElement.lang = n === "pseudo" ? "en" : n, u(), window.dispatchEvent(new Event("assemblash:localechange"));
 }
-function S(e) {
+function y(e) {
   return `⟦${e.replace(
     /\{[a-zA-Z][a-zA-Z0-9]*\}|[A-Za-z]/g,
     (t) => t.startsWith("{") ? t : `${t}${"aeiouAEIOU".includes(t) ? t : ""}`
@@ -1818,17 +1890,17 @@ function S(e) {
 }
 function p(e, t = {}) {
   const o = (n === "pseudo" ? i[e] : k[n][e]) ?? i[e] ?? `[${e}]`;
-  return (n === "pseudo" ? S(o) : o).replace(
+  return (n === "pseudo" ? y(o) : o).replace(
     /\{([a-zA-Z][a-zA-Z0-9]*)\}/g,
     (a, s) => Object.hasOwn(t, s) ? String(t[s]) : a
   );
 }
-function w(e) {
+function x(e) {
   return new Intl.NumberFormat(n === "pseudo" ? "en" : n).format(e);
 }
-function x(e, t, r = {}) {
+function w(e, t, r = {}) {
   const o = new Intl.PluralRules(n === "pseudo" ? "en" : n).select(t), a = `${e}.${o}`, s = `${e}.other`, l = Object.hasOwn(i, a) ? a : s;
-  return p(l, { ...r, count: w(t) });
+  return p(l, { ...r, count: x(t) });
 }
 const j = /* @__PURE__ */ new Set(["title", "placeholder", "aria-label", "aria-description", "alt"]);
 function u(e = document) {
@@ -1839,7 +1911,7 @@ function u(e = document) {
     const o = r.getAttribute("data-i18n");
     o && Object.hasOwn(i, o) && (r.textContent = p(o));
     const a = r.getAttribute("data-i18n-count"), s = Number(r.getAttribute("data-count"));
-    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = x(a, s));
+    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = w(a, s));
     const l = r.getAttribute("data-i18n-attr");
     if (l)
       for (const c of l.split(";")) {
@@ -1863,8 +1935,8 @@ if (typeof document < "u") {
 }
 export {
   u as bindTranslations,
-  x as formatCount,
-  w as formatNumber,
+  w as formatCount,
+  x as formatNumber,
   A as getLocale,
   C as setLocale,
   p as t

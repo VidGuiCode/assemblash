@@ -166,6 +166,44 @@ button { color: inherit; }
   background: var(--color-accent);
 }
 .project-tab-close { flex: 0 0 auto; margin-right: var(--space-1); color: inherit; }
+/* The pages of one page set: one run of tabs with an accent line on top. */
+.project-tab[data-page-set] { border-top: 2px solid var(--color-accent); }
+.project-tab[data-page-set]:not([data-group-end]) { margin-right: calc(-1 * var(--space-1)); border-top-right-radius: 0; }
+.project-tab[data-page-set]:not([data-group-start]) { border-top-left-radius: 0; }
+.project-tab-group-label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 8rem;
+  padding-left: var(--space-2);
+  overflow: hidden;
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-tab-page {
+  flex: 0 0 auto;
+  min-width: 1.25rem;
+  color: var(--color-ink-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.project-tab-thumb {
+  display: grid;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 1.5rem;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+.project-tab-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .topbar {
   z-index: 20;
   display: grid;
@@ -213,6 +251,12 @@ button { color: inherit; }
 .project-option-count, .project-options-empty { color: var(--color-ink-faint); font-size: var(--text-xs); }
 .project-option[aria-selected="true"] { color: var(--color-accent); }
 .project-options-empty { margin: 0; padding: var(--space-3); }
+.project-options-heading {
+  margin: var(--space-2) 0 0; padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--color-line); color: var(--color-ink-faint);
+  font-size: var(--text-xs); font-weight: 700; text-transform: uppercase;
+}
+.page-set-option strong i { color: var(--color-accent); }
 .topbar-history, .topbar-actions { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
 .topbar-history { justify-content: center; }
 .topbar-actions { justify-content: flex-end; }

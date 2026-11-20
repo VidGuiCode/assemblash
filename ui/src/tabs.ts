@@ -7,6 +7,16 @@
  * project (decision D33 (c)), so the project id is the tab id.
  */
 
+/** The page set a tab was opened with, and its page number in that set. */
+export interface TabGroup {
+  /** The name of the page set. */
+  set: string;
+  /** The page number in the set, from 1. */
+  page: number;
+  /** The number of pages in the set. */
+  count: number;
+}
+
 /** One tab: the project it shows, and whether it changed while hidden. */
 export interface TabEntry<T> {
   id: string;
@@ -17,6 +27,8 @@ export interface TabEntry<T> {
    * visible one, and cleared when the person views the tab (D33 (a)).
    */
   changed: boolean;
+  /** The page set of this tab, or `null` for a tab that is not in a set. */
+  group: TabGroup | null;
 }
 
 /** What the strip draws for one tab. */
@@ -24,6 +36,26 @@ export interface TabView {
   id: string;
   changed: boolean;
   active: boolean;
+  group: TabGroup | null;
+}
+
+/**
+ * The strip order after a page set opens: the pages of the set in manifest
+ * order, as one run.
+ *
+ * Tabs that are not pages of the set keep their order. The run goes where the
+ * first page that was already open stood, or at the end when no page was
+ * open. A page that was already open moves into the run: it is never a second
+ * tab.
+ */
+export function pageSetOrder(current: readonly string[], pages: readonly string[]): string[] {
+  const inSet = new Set(pages);
+  const others = current.filter((id) => !inSet.has(id));
+  const first = current.findIndex((id) => inSet.has(id));
+  const at = first < 0
+    ? others.length
+    : current.slice(0, first).filter((id) => !inSet.has(id)).length;
+  return [...others.slice(0, at), ...pages, ...others.slice(at)];
 }
 
 /** The persisted form of the open tabs: project ids in order, plus the active one. */
@@ -69,7 +101,7 @@ export class TabList<T> {
     const existing = this.find(id);
     if (existing) return { entry: existing, added: false };
     if (this.entries.length >= MAX_TABS) throw new RangeError(`at most ${MAX_TABS} tabs`);
-    const entry: TabEntry<T> = { id, record: create(), changed: false };
+    const entry: TabEntry<T> = { id, record: create(), changed: false, group: null };
     this.entries.push(entry);
     return { entry, added: true };
   }
@@ -107,6 +139,33 @@ export class TabList<T> {
     return true;
   }
 
+  /**
+   * Puts the tabs in this order. Ids that are not open are ignored. Open tabs
+   * that the order leaves out stay after the others, in their old order.
+   */
+  arrange(order: readonly string[]): void {
+    const placed = order
+      .map((id) => this.find(id))
+      .filter((entry, index, all): entry is TabEntry<T> => entry !== null && all.indexOf(entry) === index);
+    const rest = this.entries.filter((entry) => !placed.includes(entry));
+    this.entries = [...placed, ...rest];
+  }
+
+  /**
+   * Marks the tabs of a page set with their page numbers, in manifest order.
+   * Tabs that had this set before and are not in `pages` lose the mark. A tab
+   * is in one set at most: the set opened last marks it.
+   */
+  setGroup(set: string, pages: readonly string[]): void {
+    for (const entry of this.entries) {
+      if (entry.group?.set === set) entry.group = null;
+    }
+    pages.forEach((id, index) => {
+      const entry = this.find(id);
+      if (entry) entry.group = { set, page: index + 1, count: pages.length };
+    });
+  }
+
   /** Gives a tab a new project id, for a project renamed while open. */
   rename(id: string, to: string): TabEntry<T> | null {
     const entry = this.find(id);
@@ -129,6 +188,7 @@ export class TabList<T> {
       id: entry.id,
       changed: entry.changed,
       active: entry.id === this.activeId,
+      group: entry.group,
     }));
   }
 

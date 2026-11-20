@@ -42,6 +42,8 @@ import { mountSettings, type SettingsGroup } from "./settings-mantine.js";
 import { mountProjectPicker } from "./project-picker-mantine.js";
 import { mountTemplates, type TemplateDraft } from "./templates-mantine.js";
 import { TabList, parseOpenTabs, type TabEntry } from "./tabs.js";
+import { planPageSetOpen } from "./page-sets.js";
+import { refusalMessage } from "./refusals.js";
 import { mountProjectTabs } from "./project-tabs-mantine.js";
 import { mountStructurePanel, type DockView, type ReorderPosition, type StructureSnapshot } from "./structure-mantine.js";
 import { mountPaintInput } from "./paint-input.js";
@@ -165,6 +167,11 @@ interface TabRecord {
    */
   addSection?: string | null;
   templateDraft: TemplateDraft | null;
+  /**
+   * A blob URL of the engine's small thumbnail of the project, for a tab in
+   * a page set. It is not a rendered preview: the engine caches it.
+   */
+  thumbnail: string | null;
 }
 
 function newTabRecord(project: string): TabRecord {
@@ -175,6 +182,7 @@ function newTabRecord(project: string): TabRecord {
     historySnapshot: null,
     activeDock: "layers",
     templateDraft: null,
+    thumbnail: null,
   };
 }
 
@@ -547,6 +555,10 @@ mountStatusChrome(
 const projectPicker = mountProjectPicker({
   openProject: (projectId) => openFromQueue(projectId),
   search: () => { void guard("search", async () => { await loadProjects(); }); },
+  openPageSet: (name) => {
+    cancelResizeGesture();
+    void guard("open page set", () => openPageSet(name));
+  },
 }, document.querySelector<HTMLElement>(".project-combobox")!);
 
 const namePrompt = mountNamePrompt();
@@ -613,6 +625,9 @@ const knownApiErrors = {
 } as const;
 
 function apiErrorMessage(error: api.ApiError): string {
+  // Page-set and export refusals name what is wrong from their details.
+  const refusal = refusalMessage(error);
+  if (refusal) return refusal;
   const key = knownApiErrors[error.code as keyof typeof knownApiErrors];
   return key ? translate(key) : `${error.message} (${error.code})`;
 }
@@ -4012,7 +4027,87 @@ function drawTabs(): void {
     name: tabName(entry),
     active: entry === tabs.active,
     changed: entry.changed,
+    group: entry.group,
+    thumbnail: entry.group ? entry.record.thumbnail : null,
   })));
+}
+
+/** Gives back the thumbnail pixels of a tab. */
+function releaseTabThumbnail(entry: TabEntry<TabRecord>): void {
+  if (entry.record.thumbnail) URL.revokeObjectURL(entry.record.thumbnail);
+  entry.record.thumbnail = null;
+}
+
+/**
+ * Reads the engine's thumbnail of a page-set tab again.
+ *
+ * Queued like every other read: the thumbnail route opens the project on the
+ * server, so it must never run after the tab closed and gave the lock back.
+ * A failed read keeps the old thumbnail; it is not worth a message.
+ */
+function refreshTabThumbnail(entry: TabEntry<TabRecord>): void {
+  if (!entry.group) return;
+  void guard("tab thumbnail", async () => {
+    if (!entry.group || !tabs.all.includes(entry)) return;
+    try {
+      const url = await api.imageObjectUrl(api.thumbnailUrl(entry.id));
+      if (!entry.group || !tabs.all.includes(entry)) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      releaseTabThumbnail(entry);
+      entry.record.thumbnail = url;
+      drawTabs();
+    } catch (error) {
+      console.error(`could not read the thumbnail of ${entry.id}`, error);
+    }
+  });
+}
+
+/**
+ * Opens every page of a page set as tabs, in manifest order, as one run in
+ * the strip.
+ *
+ * The engine resolves the set first, so a loop or a missing page is its
+ * typed refusal and no tab opens. Each new page is read before any tab is
+ * added: a page that does not read opens no tab, and the pages read before
+ * it give their locks back. A page that already has a tab keeps it and moves
+ * into the run (D33 (c)). The first page becomes the visible tab.
+ */
+async function openPageSet(name: string): Promise<void> {
+  const resolved = await api.getPageSet(name);
+  const pages = resolved.pages.map((page) => page.project);
+  const plan = planPageSetOpen(pages, tabs.all.map((entry) => entry.id));
+  if (plan.kind === "empty") {
+    say(translate("pageSets.empty", { set: name }), "error");
+    return;
+  }
+  if (plan.kind === "tooMany") {
+    say(translate("pageSets.tooMany", { set: name, count: plan.count, max: plan.max }), "error");
+    return;
+  }
+  const read: Array<[string, api.Document]> = [];
+  try {
+    for (const id of plan.toOpen) read.push([id, await api.getDocument(id)]);
+  } catch (error) {
+    for (const [id] of read) await api.closeProject(id).catch(() => false);
+    throw error;
+  }
+  stashVisibleTab();
+  for (const [id, document] of read) {
+    const { entry } = tabs.open(id, () => newTabRecord(id));
+    entry.record.state.document = document;
+  }
+  tabs.arrange(plan.order);
+  tabs.setGroup(name, plan.pages);
+  drawTabs();
+  saveOpenTabs();
+  await showTab(tabs.find(plan.pages[0]!)!);
+  for (const id of plan.pages) {
+    const entry = tabs.find(id);
+    if (entry) refreshTabThumbnail(entry);
+  }
+  say(translate("pageSets.opened", { set: name, count: plan.pages.length }));
 }
 
 /** Writes the open tabs and their order to the workspace. A failure costs only the restore. */
@@ -4049,6 +4144,8 @@ function stashVisibleTab(): void {
   presetsSequence++;
   historySequence++;
   shapeControlErrors.clear();
+  // The person may have changed the page while it was visible.
+  if (entry.group) refreshTabThumbnail(entry);
 }
 
 /** Gives back the pixels of the canvas image. */
@@ -4159,6 +4256,7 @@ async function closeTab(id: string): Promise<void> {
   const visible = tabs.active === entry;
   if (visible) stashVisibleTab();
   const { next } = tabs.close(id);
+  releaseTabThumbnail(entry);
   drawTabs();
   saveOpenTabs();
   // A preview of this project still on its way would open the project
@@ -4182,6 +4280,7 @@ async function forgetTab(id: string): Promise<void> {
   const visible = tabs.active === entry;
   if (visible) stashVisibleTab();
   const { next } = tabs.close(id);
+  releaseTabThumbnail(entry);
   if (visible) {
     if (next) await showTab(next);
     else {
@@ -5123,6 +5222,13 @@ async function loadProjects(select?: string): Promise<readonly api.ProjectSummar
   // projects should not be sent here in full for this page to look through it.
   const projects = await api.listProjects(query);
   fillProjectOptions(projects, query);
+  // The page sets are few, so the picker filters them itself. A list that
+  // does not read costs only the page-set rows.
+  try {
+    projectPicker.setPageSets(await api.listPageSets());
+  } catch (error) {
+    console.error("could not read the page sets", error);
+  }
   if (select) await openTab(select);
   await drawRecents();
   return projects;
@@ -5302,6 +5408,7 @@ function followHiddenTabs(projects: readonly api.ProjectSummary[]): void {
       record.historySnapshot = null;
       tabs.markChanged(entry.id);
       drawTabs();
+      refreshTabThumbnail(entry);
     });
   }
 }

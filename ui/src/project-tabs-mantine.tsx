@@ -5,12 +5,22 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type M
 import { CloseButton, UnstyledButton } from "@mantine/core";
 import { mountMantinePortal, useLocaleRevision } from "./mantine-root.js";
 import { t } from "./i18n.js";
+import type { TabGroup } from "./tabs.js";
 
 export interface ProjectTabView {
   id: string;
   name: string;
   active: boolean;
   changed: boolean;
+  /** The page set of the tab and its page number, or `null`. */
+  group: TabGroup | null;
+  /** A blob URL of the engine's small thumbnail, for a tab in a page set. */
+  thumbnail: string | null;
+}
+
+/** Whether two neighbouring tabs are in the same run of one page set. */
+function sameRun(one: ProjectTabView | undefined, two: ProjectTabView | undefined): boolean {
+  return Boolean(one?.group && two?.group && one.group.set === two.group.set);
 }
 
 export interface ProjectTabsHost {
@@ -93,12 +103,22 @@ function ProjectTabs({ host, bind }: { host: ProjectTabsHost; bind: (set: (tabs:
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropIndex(null);
       }}
     >
-      {tabs.map((tab, index) => (
+      {tabs.map((tab, index) => {
+        const group = tab.group;
+        const startsRun = Boolean(group) && !sameRun(tabs[index - 1], tab);
+        const endsRun = Boolean(group) && !sameRun(tab, tabs[index + 1]);
+        const pageLabel = group ? t("tabs.page", { page: group.page, count: group.count, set: group.set }) : "";
+        const title = [tab.name, pageLabel, tab.changed ? t("tabs.changed") : ""].filter(Boolean).join(" — ");
+        return (
         <div
           key={tab.id}
           className="project-tab"
           data-active={tab.active || undefined}
           data-changed={tab.changed || undefined}
+          data-page-set={group?.set}
+          data-page-number={group?.page}
+          data-group-start={startsRun || undefined}
+          data-group-end={endsRun || undefined}
           data-drop={dropIndex === index ? "before" : dropIndex === index + 1 && index === tabs.length - 1 ? "after" : undefined}
           draggable
           onDragStart={(event) => {
@@ -124,6 +144,11 @@ function ProjectTabs({ host, bind }: { host: ProjectTabsHost; bind: (set: (tabs:
           }}
           onDragEnd={() => setDropIndex(null)}
         >
+          {startsRun && group
+            ? <span className="project-tab-group-label" data-group-label={group.set} title={t("tabs.groupLabel", { set: group.set })}>
+                <i className="ph ph-files" aria-hidden="true" />{group.set}
+              </span>
+            : null}
           <UnstyledButton
             className="project-tab-button"
             role="tab"
@@ -131,13 +156,22 @@ function ProjectTabs({ host, bind }: { host: ProjectTabsHost; bind: (set: (tabs:
             data-tab-id={tab.id}
             aria-selected={tab.active}
             tabIndex={tab.active ? 0 : -1}
-            title={tab.changed ? `${tab.name} — ${t("tabs.changed")}` : tab.name}
+            title={title}
             onClick={() => host.activate(tab.id)}
             onAuxClick={(event) => onAuxClick(event, tab.id)}
             onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }}
             onKeyDown={(event) => onKeyDown(event, index, tab)}
           >
+            {group
+              ? <>
+                  <span className="project-tab-page" data-tab-page={group.page} aria-hidden="true">{group.page}</span>
+                  <span className="project-tab-thumb" aria-hidden="true">
+                    {tab.thumbnail ? <img src={tab.thumbnail} alt="" data-tab-thumbnail={tab.id} draggable={false} /> : null}
+                  </span>
+                </>
+              : null}
             <span className="project-tab-name">{tab.name}</span>
+            {pageLabel ? <span className="sr-only">{`, ${pageLabel}`}</span> : null}
             {tab.changed
               ? <span className="project-tab-marker" data-tab-marker={tab.id} role="img" aria-label={t("tabs.changed")} />
               : null}
@@ -152,7 +186,8 @@ function ProjectTabs({ host, bind }: { host: ProjectTabsHost; bind: (set: (tabs:
             onClick={() => host.close(tab.id)}
           />
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

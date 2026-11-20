@@ -27,8 +27,8 @@ test("viewing a tab clears its change marker, and the visible tab never gets one
   assert.deepEqual(list.views().map((view) => view.changed), [false, true]);
   list.activate("beta");
   assert.deepEqual(list.views(), [
-    { id: "alpha", changed: false, active: false },
-    { id: "beta", changed: false, active: true },
+    { id: "alpha", changed: false, active: false, group: null },
+    { id: "beta", changed: false, active: true, group: null },
   ]);
 });
 
