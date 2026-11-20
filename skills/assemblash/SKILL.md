@@ -389,14 +389,17 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
 - Read a set with `get_page_set` (MCP), `GET /api/page-sets/{name}`, or
   `assemblash page-set show <name>`. The answer is the flat page list in
   order. A loop (`pageSetLoop`), a missing member (`pageSetMemberMissing`,
-  all of them listed), or a project on two pages (`pageSetDuplicatePage`) is
-  refused. No page is dropped. No tool writes a set: write the file.
+  all of them listed), a project on two pages (`pageSetDuplicatePage`), or
+  sets nested more than 32 deep (`pageSetTooDeep`) is refused. No page is dropped. No tool writes a set: write the file.
 - `canvas.bleed` and `canvas.margins` are optional `{top, right, bottom,
   left}` distances in pixels. The canvas is the trim box. Bleed goes outward,
   margins go inward. A PNG, SVG, JPEG, or WebP export does not change with
   them. Only a print PDF reads `bleed`. Set them
   with `updateCanvas` / MCP `update_canvas` (`bleed`, `margins`: omit to keep,
   `null` to clear) or `assemblash canvas set --bleed 9 --margins 36`.
+  `updateCanvas` refuses a negative side, and margins that leave no safe area
+  after the change. A document always loads, whatever these fields hold. A
+  `marginsLeaveNoSafeArea` export warning says that the margins need fixing.
 - Exports are sRGB only. `colorSpace: "cmyk"` on an export is refused with
   `colorSpaceNotSupported`. Do not promise a CMYK file.
 
@@ -423,6 +426,10 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   Pages are numbered from 1 in manifest order, nested sets expanded. A `pdf`
   holds every selected page. Any other format needs exactly one page, or the
   export is refused with `pagesNeedPdf`.
+- A page-set or variants PDF holds at most 200 pages (`pdfPageLimitExceeded`)
+  and 400 000 000 output pixels, all pages together
+  (`pdfPixelLimitExceeded`). An empty `pdf` variants batch is refused with
+  `invalidPageSelection`. A refused export writes no file.
 - The CLI writes a page-set export to the path you give:
   `assemblash export --workspace ./ws --pages deck --format pdf deck.pdf`.
   HTTP and MCP write it to the `exports/` of the project in the request. That
