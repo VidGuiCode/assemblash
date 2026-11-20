@@ -25,6 +25,7 @@
 //! An older build does not read these files. It sees the member projects, and
 //! each of them opens unchanged.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
@@ -351,6 +352,12 @@ pub trait PageSetSource {
 /// order: a loop is refused at once, because the walk cannot continue past
 /// it; then every missing member is reported together; then a project that is
 /// two pages is refused.
+///
+/// The work is linear in the number of distinct sets and entries. Each file is
+/// read one time, and each set is expanded one time. A second visit of a set
+/// that has pages can only repeat those pages, so it is recorded as a
+/// duplicate and not expanded again. This keeps a "diamond" of nested sets
+/// from growing the walk exponentially.
 pub fn resolve(
     name: &PageSetName,
     source: &impl PageSetSource,
@@ -364,6 +371,9 @@ pub fn resolve(
         stack: vec![name.clone()],
         pages: Vec::new(),
         missing: Vec::new(),
+        seen: HashMap::new(),
+        expanded: HashMap::new(),
+        duplicate: None,
     };
     walk.expand(name, &manifest)?;
 
@@ -373,18 +383,13 @@ pub fn resolve(
             missing: walk.missing,
         });
     }
-    for (second, page) in walk.pages.iter().enumerate() {
-        if let Some(first) = walk.pages[..second]
-            .iter()
-            .position(|earlier| earlier.project == page.project)
-        {
-            return Err(PageSetError::DuplicatePage {
-                set: name.clone(),
-                project: page.project.clone(),
-                first,
-                second,
-            });
-        }
+    if let Some((project, first, second)) = walk.duplicate {
+        return Err(PageSetError::DuplicatePage {
+            set: name.clone(),
+            project,
+            first,
+            second,
+        });
     }
 
     Ok(ResolvedPageSet {
@@ -399,19 +404,36 @@ struct Walk<'a, S> {
     stack: Vec<PageSetName>,
     pages: Vec<ResolvedPage>,
     missing: Vec<MissingMember>,
+    /// The page index of each project already in `pages`.
+    seen: HashMap<ProjectId, usize>,
+    /// Each set already expanded, with the index of its first page, if any.
+    expanded: HashMap<PageSetName, Option<usize>>,
+    /// The first duplicate page found: project, first index, second index.
+    duplicate: Option<(ProjectId, usize, usize)>,
 }
 
 impl<S: PageSetSource> Walk<'_, S> {
+    fn add_page(&mut self, project: &ProjectId) {
+        let index = self.pages.len();
+        if let Some(&first) = self.seen.get(project) {
+            self.duplicate
+                .get_or_insert_with(|| (project.clone(), first, index));
+            return;
+        }
+        self.seen.insert(project.clone(), index);
+        self.pages.push(ResolvedPage {
+            index,
+            project: project.clone(),
+            via: self.stack.clone(),
+        });
+    }
+
     fn expand(&mut self, name: &PageSetName, set: &PageSet) -> Result<(), PageSetError> {
         for (entry, item) in set.pages.iter().enumerate() {
             match item.member() {
                 Some(Member::Project(project)) => {
                     if self.source.has_project(project) {
-                        self.pages.push(ResolvedPage {
-                            index: self.pages.len(),
-                            project: project.clone(),
-                            via: self.stack.clone(),
-                        });
+                        self.add_page(project);
                     } else {
                         self.missing.push(MissingMember {
                             set: name.clone(),
@@ -427,6 +449,16 @@ impl<S: PageSetSource> Walk<'_, S> {
                         chain.push(child.clone());
                         return Err(PageSetError::Loop { chain });
                     }
+                    if let Some(first_page) = self.expanded.get(child) {
+                        // Expanded before without a loop, so its subtree has
+                        // none. Its pages are already in the list.
+                        if let Some(first) = *first_page {
+                            let page = &self.pages[first];
+                            let duplicate = (page.project.clone(), first, self.pages.len());
+                            self.duplicate.get_or_insert(duplicate);
+                        }
+                        continue;
+                    }
                     match self.source.page_set(child)? {
                         None => self.missing.push(MissingMember {
                             set: name.clone(),
@@ -435,9 +467,12 @@ impl<S: PageSetSource> Walk<'_, S> {
                             name: child.to_string(),
                         }),
                         Some(nested) => {
+                            let before = self.pages.len();
                             self.stack.push(child.clone());
                             self.expand(child, &nested)?;
                             self.stack.pop();
+                            let first = (self.pages.len() > before).then_some(before);
+                            self.expanded.insert(child.clone(), first);
                         }
                     }
                 }
@@ -628,6 +663,32 @@ mod tests {
             map.resolve("deck").unwrap_err().code(),
             "pageSetDuplicatePage"
         );
+    }
+
+    #[test]
+    fn a_wide_diamond_of_sets_is_refused_without_expanding_every_path() {
+        // Each level names the next level twelve times: 12^12 paths if every
+        // path were walked. Each set is read one time, and the repeat is a
+        // duplicate page.
+        let mut map = Map::default().project("leaf");
+        map = map.set("level0", r#"{"pages":[{"project":"leaf"}]}"#);
+        for level in 1..=12 {
+            let entry = format!(r#"{{"set":"level{}"}}"#, level - 1);
+            let entries = vec![entry; 12].join(",");
+            map = map.set(
+                &format!("level{level}"),
+                &format!(r#"{{"pages":[{entries}]}}"#),
+            );
+        }
+        let error = map.resolve("level12").unwrap_err();
+        assert!(matches!(
+            error,
+            PageSetError::DuplicatePage {
+                first: 0,
+                second: 1,
+                ..
+            }
+        ));
     }
 
     #[test]
