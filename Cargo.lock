@@ -87,7 +87,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "assemblash-cli"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "assemblash-core",
  "assemblash-export",
@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-core"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "assemblash-liveness",
  "proptest",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-export"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "image",
  "miniz_oxide",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-liveness"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "libc",
  "serde",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-mcp"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "assemblash-core",
  "assemblash-export",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-renderer"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "assemblash-core",
  "assemblash-export",
@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "assemblash-server"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "assemblash-core",
  "assemblash-export",

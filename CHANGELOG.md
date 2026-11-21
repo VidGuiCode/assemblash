@@ -10,6 +10,8 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+## [1.15.0] — 2026-11-21
+
 **Charts, tables and QR codes as generated layers.**
 
 The engine makes a chart, a table or a QR code from a spec, as sanitised SVG.
