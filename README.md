@@ -64,6 +64,8 @@ or the [changelog](CHANGELOG.md).
   and a non-destructive effect stack.
 - **Geometry.** Rounded corners, dashes, arrow and circle markers, clip, crop,
   flip, rotation, and opacity.
+- **Charts, tables, and QR codes.** Generated from a spec or a CSV file as
+  vector layers, and made again from the recorded spec.
 - **Templates.** Named slots, presets, and deterministic variant batches.
 - **Record.** Undo, redo, history, version checks, dry runs, and protected
   layers.
@@ -365,6 +367,7 @@ The important limits:
 | [docs/text-and-fonts.md](docs/text-and-fonts.md) | Font store, styled runs, justification, and warnings |
 | [docs/paint-and-rendering.md](docs/paint-and-rendering.md) | Gradients, blend modes, effects, and the renderer |
 | [docs/automation.md](docs/automation.md) | CLI, HTTP, MCP, history, locks, and self-hosting |
+| [docs/charts-tables-and-qr.md](docs/charts-tables-and-qr.md) | Generated charts, tables, and QR codes, their specs, and regenerate |
 | [PRD.md](PRD.md) | Scope, requirements, invariants, and product decisions |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Tokens, Docker, TLS, and reverse proxies |
 | [CHANGELOG.md](CHANGELOG.md) | Release-by-release history |

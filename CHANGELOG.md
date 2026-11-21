@@ -10,6 +10,22 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+**Charts, tables and QR codes as generated layers.**
+
+The engine makes a chart, a table or a QR code from a spec, as sanitised SVG.
+The SVG becomes an ordinary `svg` asset and layer, so the renderer and every
+export format draw it with no new code. The spec is recorded on the layer, so
+the layer can be made again, for example with another chart type. The MCP
+tool count goes from 55 to 60.
+
+`schemaVersion` stays 1. The operation API stays compatible with 1.0. Every
+change is additive.
+
+**Oldest build that opens a 1.15.0 document: 1.0.** A generated layer is an
+`svg` layer, and its recorded spec is one key in the layer `extra` map. An
+older 1.x build draws the layer and keeps the key. Only 1.15.0 or newer makes
+the layer again from its spec.
+
 ### Added
 
 - A new operation, `setLayerMeta`, records structured metadata on a layer.
@@ -19,6 +35,50 @@ schema change is always noted explicitly.
   and a protected or read-only layer. A locked layer needs `allowLocked`.
   Undo and redo restore the document byte for byte. The operation schema and
   its TypeScript declarations are regenerated.
+- Generators in `assemblash-export`: charts (`bar`, `column`, `line`,
+  `area`, `pie`, `donut`, `scatter`), tables (header row, column widths,
+  merged cells, borders, fills, stripes, alignment) and QR codes (error
+  correction `L`, `M`, `Q` or `H`, margin, module size, colours). A chart or
+  table spec can come from CSV text (RFC 4180, at most 1 MiB).
+- Labels are glyph outlines from an installed font face, so a generated
+  asset holds no `<text>` and needs no font when it is drawn. A label
+  character that the face does not cover is refused with
+  `generatorMissingGlyph`. The face is part of the input: the layer records
+  its family and sha256.
+- Equal input gives equal SVG bytes on every release target. Numbers have at
+  most two decimals and come from integer arithmetic. Sine and cosine use
+  only `+`, `-`, `*` and `/`, not the platform maths library.
+- A generated layer is an `svg` layer with its spec under one reserved key:
+  `assemblash.chart`, `assemblash.table` or `assemblash.qr`. The record is
+  `{ spec, generator, font }`. Adding a generated layer is one transaction,
+  and one undo removes it. The asset entry stays in the project, as for an
+  upload, because an asset import is not undoable.
+- Making a layer again (regenerate) replaces its asset and its record in one
+  transaction. It takes a whole new spec of the same kind, or, for a chart,
+  only a new chart type. One undo restores the layer as it was. A spec of
+  another kind is refused with `generatorKindMismatch`, and a layer with no
+  record with `notGeneratedLayer`.
+- HTTP: new additive routes `POST /api/projects/{id}/generated-layers` and
+  `PUT /api/projects/{id}/generated-layers/{layer}`. The add route takes a
+  `spec`, or `csv` (`kind`, `text`, and optional `chartType`, `title` and
+  `fontFamily`). With `csv` and no `fontFamily`, the labels use Noto Sans if
+  the workspace has it, otherwise the first installed family by name. The
+  add route takes `centered` to put the layer in the middle of the canvas.
+- MCP: new tools `add_chart_layer`, `add_table_layer`, `add_qr_layer`,
+  `regenerate_layer` and `set_layer_meta`. The tool count goes from 55 to 60.
+- CLI: new commands `add-chart`, `add-table`, `add-qr` and `regenerate`. Each
+  prints the layer id and the asset sha256.
+- The reference interface: a "Chart, table or QR code" button in Uploads
+  opens a dialog that takes a CSV file, a JSON spec or the QR text. The
+  inspector of a generated layer has a chart type control and "Replace
+  spec". EN, FR and DE strings.
+- New typed refusals: `invalidGeneratorSpec`, `generatorMissingGlyph`,
+  `generatorInvalidFont`, `generatorNeedsFont`, `generatorFontMissing`,
+  `qrDataTooLong`, `invalidCsv`, `notGeneratedLayer` and
+  `generatorKindMismatch`. HTTP answers `422` for a refused spec.
+- New dependencies: `qrcodegen` (MIT) and `skrifa` (MIT or Apache-2.0) in
+  `assemblash-export`; `rqrr` (MIT or Apache-2.0) as a test-only dependency
+  of the CLI.
 
 ## [1.14.0] — 2026-11-20
 

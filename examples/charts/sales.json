@@ -1,0 +1,11 @@
+{
+  "type": "column",
+  "title": "Sales by quarter",
+  "categories": ["Q1", "Q2", "Q3", "Q4"],
+  "series": [
+    { "name": "North", "values": [12, 18, 9, 21] },
+    { "name": "South", "values": [7, 11, 14, 16] }
+  ],
+  "fontFamily": "Inter",
+  "valueLabels": true
+}
