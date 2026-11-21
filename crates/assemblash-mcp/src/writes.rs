@@ -594,6 +594,114 @@ impl Backend {
     }
 }
 
+/// What a generated-layer tool reports.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedWrite {
+    /// The document version after the change.
+    pub version: u64,
+    /// The transaction this change was recorded as.
+    pub transaction: String,
+    /// The generated layer.
+    pub layer_id: String,
+    /// The asset it draws.
+    pub asset: String,
+    /// The sha256 of the asset bytes, `sha256:<hex>`.
+    pub asset_hash: String,
+    /// The size of the generated graphic, in pixels.
+    pub width: f64,
+    /// The size of the generated graphic, in pixels.
+    pub height: f64,
+}
+
+impl From<assemblash_server::generated::GeneratedOutcome> for GeneratedWrite {
+    fn from(outcome: assemblash_server::generated::GeneratedOutcome) -> Self {
+        Self {
+            version: outcome.version,
+            transaction: outcome.transaction,
+            layer_id: outcome.layer.to_string(),
+            asset: outcome.asset.to_string(),
+            asset_hash: outcome.asset_hash,
+            width: outcome.width,
+            height: outcome.height,
+        }
+    }
+}
+
+impl Backend {
+    /// Adds a chart, table or QR code layer: the same code path as
+    /// `POST /api/projects/{id}/generated-layers` and the CLI.
+    pub fn add_generated(
+        &self,
+        envelope: &WriteEnvelope,
+        spec: &assemblash_export::generate::GeneratedSpec,
+        placement: assemblash_server::generated::Placement,
+    ) -> Result<GeneratedWrite, ApiError> {
+        refuse_dry_run(envelope)?;
+        let fonts = self.generator_fonts(spec)?;
+        let opened = self.open(envelope.project.as_deref())?;
+        let mut session = lock_project(&opened)?;
+        assemblash_server::generated::add(
+            &mut session,
+            spec,
+            fonts.font_set(),
+            placement,
+            &actor_of(envelope),
+            envelope.expected_version,
+        )
+        .map(Into::into)
+    }
+
+    /// Makes a generated layer again from its recorded spec, changed as
+    /// asked.
+    pub fn regenerate(
+        &self,
+        envelope: &WriteEnvelope,
+        layer: &LayerId,
+        change: assemblash_server::generated::Regenerate,
+    ) -> Result<GeneratedWrite, ApiError> {
+        refuse_dry_run(envelope)?;
+        let opened = self.open(envelope.project.as_deref())?;
+        let mut session = lock_project(&opened)?;
+        let spec = match &change.spec {
+            Some(spec) => spec.clone(),
+            None => assemblash_server::generated::recorded_spec(session.document(), layer)?,
+        };
+        let fonts = self.generator_fonts(&spec)?;
+        assemblash_server::generated::regenerate(
+            &mut session,
+            layer,
+            change,
+            fonts.font_set(),
+            &actor_of(envelope),
+            envelope.expected_version,
+        )
+        .map(Into::into)
+    }
+
+    fn generator_fonts(
+        &self,
+        spec: &assemblash_export::generate::GeneratedSpec,
+    ) -> Result<assemblash_renderer::LoadedFonts, ApiError> {
+        let families = assemblash_server::generated::families_for(spec);
+        if families.is_empty() {
+            return Ok(assemblash_renderer::LoadedFonts::from_bytes([]));
+        }
+        Ok(self.font_store()?.load_available_families(&families)?)
+    }
+}
+
+/// A generated layer imports an asset before its operations run, and an
+/// import cannot be rehearsed, so a dry run is refused rather than faked.
+fn refuse_dry_run(envelope: &WriteEnvelope) -> Result<(), ApiError> {
+    if envelope.dry_run {
+        return Err(ApiError::bad_request(
+            "a generated layer cannot be added or regenerated as a dry run",
+        ));
+    }
+    Ok(())
+}
+
 fn actor_of(envelope: &WriteEnvelope) -> Actor {
     // Always an agent: this is the MCP surface, and a transport claiming to be
     // a human would make the audit trail a fiction.

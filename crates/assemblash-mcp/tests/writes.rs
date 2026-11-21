@@ -613,6 +613,10 @@ async fn protected_and_locked_layers_refuse_every_mutating_tool() {
             "snap_layer",
             json!({ "layerId": PROTECTED, "edge": "left" }),
         ),
+        (
+            "set_layer_meta",
+            json!({ "layerId": PROTECTED, "key": "assemblash.chart", "value": {} }),
+        ),
     ];
 
     for (tool, arguments) in &attempts {

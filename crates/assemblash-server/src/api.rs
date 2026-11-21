@@ -36,7 +36,7 @@ use crate::state::{lock_project, AppState};
 ///
 /// Read here, in the transport, and passed down. Nothing in the core reads a
 /// clock — that is what lets a test produce the same journal twice.
-fn now_millis() -> Option<u64> {
+pub(crate) fn now_millis() -> Option<u64> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
@@ -136,6 +136,14 @@ pub fn router_with_limits(
         .route(
             "/api/projects/{id}/operation-batches",
             post(apply_operation_batch),
+        )
+        .route(
+            "/api/projects/{id}/generated-layers",
+            post(add_generated_layer),
+        )
+        .route(
+            "/api/projects/{id}/generated-layers/{layer}",
+            axum::routing::put(regenerate_layer),
         )
         .route("/api/projects/{id}/undo", post(undo))
         .route("/api/projects/{id}/redo", post(redo))
@@ -1751,6 +1759,119 @@ async fn apply_operation_batch(
         })
         .await
         .map_err(join_error)??;
+    Ok(Json(response))
+}
+
+/// `POST /api/projects/{id}/generated-layers`: a chart, table or QR code.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AddGeneratedRequest {
+    /// The spec, tagged by `kind`: `chart`, `table` or `qr`.
+    spec: assemblash_export::generate::GeneratedSpec,
+    /// The layer box. At the origin, at the generated size, when absent.
+    #[serde(default)]
+    transform: Option<assemblash_core::Transform>,
+    /// Where in the tree. The top of the root list when absent.
+    #[serde(default)]
+    position: Option<assemblash_core::ops::LayerPosition>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    actor: ActorRequest,
+    #[serde(default)]
+    expected_version: Option<u64>,
+}
+
+/// `PUT /api/projects/{id}/generated-layers/{layer}`: make it again.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegenerateRequest {
+    /// A whole new spec of the same kind.
+    #[serde(default)]
+    spec: Option<assemblash_export::generate::GeneratedSpec>,
+    /// A new chart type, for a chart layer.
+    #[serde(default)]
+    chart_type: Option<assemblash_export::generate::ChartType>,
+    #[serde(default)]
+    actor: ActorRequest,
+    #[serde(default)]
+    expected_version: Option<u64>,
+}
+
+/// Loads the fonts a spec needs from the workspace store.
+pub(crate) fn generator_fonts(
+    state: &AppState,
+    spec: &assemblash_export::generate::GeneratedSpec,
+) -> Result<assemblash_renderer::LoadedFonts, ApiError> {
+    let families = crate::generated::families_for(spec);
+    if families.is_empty() {
+        return Ok(assemblash_renderer::LoadedFonts::from_bytes([]));
+    }
+    Ok(state.font_store()?.load_available_families(&families)?)
+}
+
+async fn add_generated_layer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(request): ApiJson<AddGeneratedRequest>,
+) -> Result<(StatusCode, Json<crate::generated::GeneratedOutcome>), ApiError> {
+    let id = ProjectId::new(id)?;
+    let actor = request.actor.actor()?;
+    let response = tokio::task::spawn_blocking(move || {
+        let fonts = generator_fonts(&state, &request.spec)?;
+        let project = state.project(&id, now_millis())?;
+        let mut session = lock_project(&project)?;
+        crate::generated::add(
+            &mut session,
+            &request.spec,
+            fonts.font_set(),
+            crate::generated::Placement {
+                position: request.position,
+                transform: request.transform,
+                origin: (0.0, 0.0),
+                name: request.name,
+            },
+            &actor,
+            request.expected_version,
+        )
+    })
+    .await
+    .map_err(join_error)??;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn regenerate_layer(
+    State(state): State<AppState>,
+    Path((id, layer)): Path<(String, String)>,
+    ApiJson(request): ApiJson<RegenerateRequest>,
+) -> Result<Json<crate::generated::GeneratedOutcome>, ApiError> {
+    let id = ProjectId::new(id)?;
+    let layer = assemblash_core::LayerId::new(layer);
+    let actor = request.actor.actor()?;
+    let response = tokio::task::spawn_blocking(move || {
+        let project = state.project(&id, now_millis())?;
+        let mut session = lock_project(&project)?;
+        // The fonts follow the spec that will be drawn, which may be the
+        // recorded one.
+        let spec = match &request.spec {
+            Some(spec) => spec.clone(),
+            None => crate::generated::recorded_spec(session.document(), &layer)?,
+        };
+        let fonts = generator_fonts(&state, &spec)?;
+        crate::generated::regenerate(
+            &mut session,
+            &layer,
+            crate::generated::Regenerate {
+                spec: request.spec,
+                chart_type: request.chart_type,
+            },
+            fonts.font_set(),
+            &actor,
+            request.expected_version,
+        )
+    })
+    .await
+    .map_err(join_error)??;
     Ok(Json(response))
 }
 

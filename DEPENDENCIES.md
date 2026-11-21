@@ -14,11 +14,12 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 
 ## Summary
 
-7 workspace crates, 270 third-party crates in the full dependency graph
+7 workspace crates, 276 third-party crates in the full dependency graph
 (all features, all targets).
 
 | Licence | Crates |
 | ------- | -----: |
+| (MIT OR Apache-2.0) AND ISC | 1 |
 | (MIT OR Apache-2.0) AND Unicode-3.0 | 1 |
 | 0BSD OR MIT OR Apache-2.0 | 1 |
 | Apache-2.0 | 3 |
@@ -35,13 +36,13 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | BSD-3-Clause/MIT | 1 |
 | CDLA-Permissive-2.0 | 1 |
 | ISC | 2 |
-| MIT | 47 |
+| MIT | 49 |
 | MIT AND BSD-3-Clause | 1 |
 | MIT OR Apache-2.0 | 151 |
 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | 2 |
 | MIT OR Apache-2.0 OR Zlib | 3 |
 | MIT OR Zlib OR Apache-2.0 | 1 |
-| MIT/Apache-2.0 | 13 |
+| MIT/Apache-2.0 | 16 |
 | Unlicense OR MIT | 2 |
 | Zlib | 2 |
 | Zlib OR Apache-2.0 OR MIT | 3 |
@@ -136,6 +137,9 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | futures-sink | 0.3.33 | MIT OR Apache-2.0 |
 | futures-task | 0.3.33 | MIT OR Apache-2.0 |
 | futures-util | 0.3.33 | MIT OR Apache-2.0 |
+| g2gen | 1.2.2 | MIT/Apache-2.0 |
+| g2p | 1.2.2 | MIT/Apache-2.0 |
+| g2poly | 1.2.2 | MIT/Apache-2.0 |
 | getrandom | 0.2.17 | MIT OR Apache-2.0 |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 |
@@ -168,6 +172,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | libsqlite3-sys | 0.39.1 | MIT |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | log | 0.4.33 | MIT OR Apache-2.0 |
+| lru | 0.18.5 | MIT |
 | matchit | 0.8.4 | MIT AND BSD-3-Clause |
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memmap2 | 0.9.11 | MIT OR Apache-2.0 |
@@ -191,6 +196,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | process-wrap | 10.0.1 | Apache-2.0 OR MIT |
 | proptest | 1.11.0 | MIT OR Apache-2.0 |
 | pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 |
+| qrcodegen | 1.8.0 | MIT |
 | quick-error | 1.2.3 | MIT/Apache-2.0 |
 | quick-error | 2.0.1 | MIT/Apache-2.0 |
 | quote | 1.0.47 | MIT OR Apache-2.0 |
@@ -213,6 +219,7 @@ allowlist on every push (PRD R8). Assemblash itself is Apache-2.0.
 | rmcp-macros | 3.9.0 | Apache-2.0 |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.1 | MIT OR Apache-2.0 |
+| rqrr | 0.11.0 | (MIT OR Apache-2.0) AND ISC |
 | rsqlite-vfs | 0.1.1 | MIT |
 | rusqlite | 0.41.1 | MIT |
 | rustix | 1.1.4 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |

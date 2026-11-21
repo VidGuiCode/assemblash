@@ -2,7 +2,7 @@
 """Two-agent smoke test for Assemblash: MCP over stdio, then two writers.
 
 Speaks MCP over stdio to `assemblash mcp --workspace <ws>` (initialize,
-tools/list with the expected tool count (55 since v1.14.0's page-set tools),
+tools/list with the expected tool count (60 since v1.15.0's generated-layer tools),
 then runs a two-writer stress against one project: ~40 interleaved writes,
 half over HTTP and half over MCP. Asserts zero errors and a consistent
 journal (version count equals write count).
@@ -31,8 +31,9 @@ TIMEOUT = 60
 # 55 since v1.14.0: the 47-tool surface, the six parity tools of v1.10.0
 # (insert_layer_tree, install_font_pack, remove_font_family, list_fonts,
 # delete_project, rename_project), and the two read-only page-set tools of
-# v1.14.0 (list_page_sets, get_page_set).
-EXPECTED_TOOLS = 55
+# v1.14.0 (list_page_sets, get_page_set). 60 since v1.15.0: add_chart_layer,
+# add_table_layer, add_qr_layer, regenerate_layer and set_layer_meta.
+EXPECTED_TOOLS = 60
 WRITES_PER_WRITER = 20
 
 

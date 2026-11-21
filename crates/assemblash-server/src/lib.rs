@@ -17,6 +17,7 @@ pub mod api;
 pub mod auth;
 pub mod batch;
 pub mod error;
+pub mod generated;
 pub mod instance;
 pub mod render;
 pub mod site;

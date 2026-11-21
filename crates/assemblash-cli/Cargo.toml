@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 assemblash-core.workspace = true
+assemblash-export.workspace = true
 assemblash-mcp.workspace = true
 assemblash-renderer.workspace = true
 assemblash-server.workspace = true
@@ -40,6 +41,8 @@ workspace = true
 assemblash-core = { workspace = true, features = ["fault-injection"] }
 assemblash-export.workspace = true
 png = "0.18.1"
+# Decodes the QR codes the generator makes, in the exit test only.
+rqrr = { version = "0.11.0", default-features = false }
 serde_json = "1.0.151"
 tempfile = "3.27.0"
 
