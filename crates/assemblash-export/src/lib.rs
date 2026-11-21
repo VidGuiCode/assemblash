@@ -1,4 +1,5 @@
-//! Deterministic export encoders: raster PDF, JPEG and lossless WebP.
+//! Deterministic export encoders (raster PDF, JPEG and lossless WebP) and
+//! the generators for charts, tables and QR codes ([`generate`]).
 //!
 //! Every encoder in this crate takes plain pixel buffers: straight-alpha RGBA,
 //! eight bits for each channel, row by row from the top. The renderer makes
@@ -15,6 +16,7 @@
 mod format;
 mod raster;
 
+pub mod generate;
 pub mod pdf;
 
 pub use format::{
