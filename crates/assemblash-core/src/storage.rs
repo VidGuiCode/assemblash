@@ -241,14 +241,49 @@ pub fn import_asset_reporting(
     source_file: &Path,
     ids: &mut dyn IdSource,
 ) -> Result<(Asset, Option<crate::svg_import::SvgImportReport>), StorageError> {
-    let mut bytes =
+    let bytes =
         std::fs::read(source_file).map_err(|e| StorageError::io("reading", source_file, e))?;
-    let mut import_report = None;
-
-    let is_svg = source_file
+    let extension = source_file
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| !e.is_empty())
+        .ok_or_else(|| StorageError::UnknownAssetType {
+            path: source_file.to_path_buf(),
+        })?;
+    import_bytes_reporting(project_dir, bytes, &extension, source_file, ids)
+}
+
+/// Imports an asset from bytes in memory, for example an SVG that a
+/// generator made.
+///
+/// The same path as a file import: an SVG goes through the sanitiser, the
+/// file is named by its hash, and the entry is returned for the caller to
+/// register. `extension` is the file type without the dot, such as `svg`.
+pub fn import_asset_bytes(
+    project_dir: &Path,
+    bytes: Vec<u8>,
+    extension: &str,
+    ids: &mut dyn IdSource,
+) -> Result<(Asset, Option<crate::svg_import::SvgImportReport>), StorageError> {
+    let extension = extension.to_ascii_lowercase();
+    let label = PathBuf::from(format!("generated.{extension}"));
+    if extension.is_empty() {
+        return Err(StorageError::UnknownAssetType { path: label });
+    }
+    import_bytes_reporting(project_dir, bytes, &extension, &label, ids)
+}
+
+fn import_bytes_reporting(
+    project_dir: &Path,
+    mut bytes: Vec<u8>,
+    extension: &str,
+    source_file: &Path,
+    ids: &mut dyn IdSource,
+) -> Result<(Asset, Option<crate::svg_import::SvgImportReport>), StorageError> {
+    let mut import_report = None;
+
+    let is_svg = extension == "svg";
     if is_svg {
         // Sanitised before it is stored, not when it is rendered: that way
         // everything under assets/ is safe by construction, and no future
@@ -282,15 +317,6 @@ pub fn import_asset_reporting(
         }
     };
 
-    let extension = source_file
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .filter(|e| !e.is_empty())
-        .ok_or_else(|| StorageError::UnknownAssetType {
-            path: source_file.to_path_buf(),
-        })?;
-
     let hex = hash.trim_start_matches("sha256:");
     let relative = format!("{hex}.{extension}");
     let assets_dir = project_dir.join(ASSETS_DIR);
@@ -305,7 +331,7 @@ pub fn import_asset_reporting(
             id: AssetId::generate(ids),
             path: relative,
             hash,
-            media_type: media_type_for(&extension).to_owned(),
+            media_type: media_type_for(extension).to_owned(),
             width,
             height,
             extra: Extras::new(),

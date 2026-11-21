@@ -10,6 +10,16 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- A new operation, `setLayerMeta`, records structured metadata on a layer.
+  The value goes into the payload `extra` map under a reserved key that
+  starts with `assemblash.`. An absent value or `null` removes the key. The
+  operation refuses a key without the prefix, a value larger than 64 KiB,
+  and a protected or read-only layer. A locked layer needs `allowLocked`.
+  Undo and redo restore the document byte for byte. The operation schema and
+  its TypeScript declarations are regenerated.
+
 ## [1.14.0] — 2026-11-20
 
 **Project tabs, page sets, print geometry, and PDF, JPEG, and WebP export.**

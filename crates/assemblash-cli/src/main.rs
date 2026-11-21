@@ -3480,6 +3480,7 @@ fn operation_name(operation: &Operation) -> &'static str {
         Operation::DefinePreset { .. } => "definePreset",
         Operation::DeletePreset { .. } => "deletePreset",
         Operation::ApplyPreset { .. } => "applyPreset",
+        Operation::SetLayerMeta { .. } => "setLayerMeta",
         // Operation is non-exhaustive, so history written by a newer build
         // still lists rather than refusing to print.
         _ => "operation",

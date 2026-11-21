@@ -527,6 +527,36 @@
         "id",
         "preset"
       ]
+    },
+    {
+      "description": "Records structured metadata on a layer, or removes it.\n\nThe value goes into the layer payload's `extra` map, under a reserved\nkey that starts with `assemblash.`. A typed field never contains a\ndot, so a reserved key cannot collide with a field that a later\nrelease adds. Every build since 1.0.0 keeps the map as it is, so an\nolder build preserves the metadata it cannot read.\n\nA generated layer — a chart, a table, a QR code — records the spec\nit was made from here, so it can be made again from the same data.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Layer to change.",
+          "$ref": "#/$defs/LayerId"
+        },
+        "key": {
+          "description": "The reserved key, for example `assemblash.chart`.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The value to record. An absent value, or JSON `null`, removes the\nkey."
+        },
+        "allowLocked": {
+          "description": "Change a locked layer.\n\ncamelCase like every layer field, unlike the older\n`applyPreset`, whose spelling cannot change in 1.x.",
+          "type": "boolean"
+        },
+        "op": {
+          "type": "string",
+          "const": "setLayerMeta"
+        }
+      },
+      "required": [
+        "op",
+        "id",
+        "key"
+      ]
     }
   ],
   "$defs": {

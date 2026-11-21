@@ -330,6 +330,27 @@ pub enum OpError {
         property: String,
     },
 
+    /// A `setLayerMeta` key is not a reserved metadata key.
+    #[error(
+        "metadata key {key:?} is not reserved: a key starts with \"assemblash.\" and \
+         continues with dot-separated words of ASCII letters and digits, at most 64 bytes"
+    )]
+    InvalidMetaKey {
+        /// The key that was sent.
+        key: String,
+    },
+
+    /// A `setLayerMeta` value is larger than the limit.
+    #[error("metadata value for {key:?} is {bytes} bytes; the limit is {limit} bytes")]
+    MetaValueTooLarge {
+        /// The key it was sent for.
+        key: String,
+        /// Its serialised size.
+        bytes: usize,
+        /// The largest size accepted.
+        limit: usize,
+    },
+
     /// A layout question could not be answered.
     #[error(transparent)]
     Layout(#[from] crate::layout::LayoutError),
