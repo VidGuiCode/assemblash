@@ -113,3 +113,19 @@ test("the history read names a tail instead of reading the whole journal", async
     globalThis.fetch = original;
   }
 });
+
+test("a generated layer is read from its reserved key, and other layers are not", async () => {
+  const { generatedRecordOf, GENERATED_META_KEYS, CHART_TYPES } = await import("./.test-dist/api.js");
+  const spec = { kind: "chart", type: "bar", categories: ["a"], series: [] };
+  const chart = { id: "l1", type: "svg", asset: "a1", "assemblash.chart": { spec, generator: "assemblash 1.15.0" } };
+  assert.deepEqual(generatedRecordOf(chart), { kind: "chart", spec });
+  const qr = { id: "l2", type: "svg", asset: "a2", "assemblash.qr": { spec: { kind: "qr", data: "x" } } };
+  assert.equal(generatedRecordOf(qr)?.kind, "qr");
+  // An image with the key, a record with no spec, and a plain SVG are not generated.
+  assert.equal(generatedRecordOf({ ...chart, type: "image" }), null);
+  assert.equal(generatedRecordOf({ id: "l3", type: "svg", "assemblash.table": { generator: "x" } }), null);
+  assert.equal(generatedRecordOf({ id: "l4", type: "svg", asset: "a4" }), null);
+  assert.deepEqual(Object.values(GENERATED_META_KEYS), ["assemblash.chart", "assemblash.table", "assemblash.qr"]);
+  // The interface offers the chart types the engine accepts, in its order.
+  assert.deepEqual(CHART_TYPES, ["bar", "column", "line", "area", "pie", "donut", "scatter"]);
+});

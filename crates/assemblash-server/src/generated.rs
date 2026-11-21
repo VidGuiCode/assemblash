@@ -36,6 +36,9 @@ pub struct Placement {
     pub transform: Option<Transform>,
     /// Where the box starts when `transform` is absent.
     pub origin: (f64, f64),
+    /// When `transform` is absent: put the box in the middle of the canvas
+    /// instead of at `origin`.
+    pub centered: bool,
     /// The layer name. When absent: the chart title, or the kind.
     pub name: Option<String>,
 }
@@ -108,7 +111,15 @@ pub fn add(
     let asset = import(session, made.svg.into_bytes())?;
 
     let transform = placement.transform.unwrap_or_else(|| {
-        let (x, y) = placement.origin;
+        let (x, y) = if placement.centered {
+            let canvas = &session.document().canvas;
+            (
+                ((canvas.width - made.width) / 2.0).round(),
+                ((canvas.height - made.height) / 2.0).round(),
+            )
+        } else {
+            placement.origin
+        };
         Transform::new(x, y, made.width, made.height)
     });
     let name = placement.name.or_else(|| default_name(spec));

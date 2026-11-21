@@ -38,6 +38,7 @@ import { ActionQueue } from "./queue.js";
 import type { QueueSettlement } from "./queue.js";
 import { mountProjectCreate } from "./project-create-mantine.js";
 import { mountNamePrompt } from "./name-prompt-mantine.js";
+import { CHART_TYPE_LABELS, mountGeneratedDialog } from "./generated-mantine.js";
 import { mountSettings, type SettingsGroup } from "./settings-mantine.js";
 import { mountProjectPicker } from "./project-picker-mantine.js";
 import { mountTemplates, type TemplateDraft } from "./templates-mantine.js";
@@ -562,6 +563,7 @@ const projectPicker = mountProjectPicker({
 }, document.querySelector<HTMLElement>(".project-combobox")!);
 
 const namePrompt = mountNamePrompt();
+const generatedDialog = mountGeneratedDialog();
 
 function requestName(
   titleKey: MessageKey,
@@ -2017,6 +2019,54 @@ function drawInspectorContent(): void {
       clearRow.append(clear);
       pane.append(clearRow);
     }
+  }
+
+  const generated = api.generatedRecordOf(layer);
+  if (generated) {
+    // A generated layer draws an SVG the engine made from a recorded spec.
+    // Changing it means making the SVG again, never editing the asset.
+    pane = beginSection("Generated");
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.dataset["i18n"] = "generated.inspectorHint";
+    hint.textContent = translate("generated.inspectorHint");
+    pane.append(hint);
+    if (generated.kind === "chart") {
+      const current = typeof generated.spec["type"] === "string" ? generated.spec["type"] : "bar";
+      choiceField("generated.chartType", "generated-layer-chart-type", current,
+        api.CHART_TYPES.map((value) => ({ value, label: translate(CHART_TYPE_LABELS[value]) })),
+        (next) => {
+          if (next === current) return;
+          void guard("change chart type", async () => {
+            if (!state.project || !state.document) return;
+            const result = await api.regenerateLayer(state.project, layer.id,
+              { chartType: next as api.ChartType }, api.versionOf(state.document));
+            say(translate("generated.regeneratedVersion", { version: result.version }));
+            await refresh();
+          });
+        });
+    }
+    const replaceRow = document.createElement("div");
+    replaceRow.className = "field";
+    const replaceMount = document.createElement("span");
+    replaceMount.style.display = "contents";
+    mountedInspectorWidgets.push(mountInspectorButton(replaceMount, {
+      id: "generated-layer-replace-spec",
+      label: () => translate("generated.replaceSpec"),
+      title: () => translate("generated.replaceSpecTitle"),
+      className: "small",
+      disabled: why !== null,
+      onClick: () => generatedDialog.replace(generated.kind, generated.spec, (source) =>
+        runForDialog("replace generated spec", async () => {
+          if (!state.project || !state.document || !("spec" in source)) return;
+          const result = await api.regenerateLayer(state.project, layer.id,
+            { spec: source.spec }, api.versionOf(state.document));
+          say(translate("generated.regeneratedVersion", { version: result.version }));
+          await refresh();
+        })),
+    }));
+    replaceRow.append(replaceMount);
+    pane.append(replaceRow);
   }
 
   if (layer.type === "shape") {
@@ -4640,6 +4690,51 @@ dom.exportButton.addEventListener("click", () => exporter.open());
 
 setAssetUploadHandler((file) => addAssetFile(file,
   file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg") ? "svg" : "image"));
+
+/**
+ * Runs a dialog's action in the queue and gives its refusal back to the dialog.
+ *
+ * `guard` reports a refusal on the status line and settles. A dialog needs the
+ * refusal itself, so that the person can correct the spec without starting
+ * again.
+ */
+function runForDialog(what: string, run: () => Promise<void>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    void queue.enqueue({
+      label: what,
+      coalesceKey: null,
+      run: async () => {
+        try {
+          await run();
+          resolve();
+        } catch (error) {
+          // A malformed spec gets the parser's own words: the generic
+          // message would not say which field to correct.
+          const message = error instanceof api.ApiError
+            ? (error.code === "malformedRequest" ? error.message : apiErrorMessage(error))
+            : String(error);
+          reject(new Error(message));
+        }
+      },
+      onError: (error) => reject(error instanceof Error ? error : new Error(String(error))),
+    });
+  });
+}
+
+el<HTMLButtonElement>("open-generated").addEventListener("click", () => {
+  if (!state.project) {
+    say(translate("generated.needsProject"), "error");
+    return;
+  }
+  generatedDialog.insert((source) => runForDialog("insert generated layer", async () => {
+    if (!state.project || !state.document) return;
+    // At the generated size, in the middle of the canvas, in one transaction.
+    const result = await api.addGeneratedLayer(state.project, source, api.versionOf(state.document));
+    state.selection = [result.layer];
+    say(translate("generated.addedVersion", { version: result.version }));
+    await refresh();
+  }));
+});
 
 function addAssetFile(
   file: File,

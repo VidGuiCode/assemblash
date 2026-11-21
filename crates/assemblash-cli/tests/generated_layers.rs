@@ -691,3 +691,53 @@ fn a_qr_code_at_three_sizes_decodes() {
         assert_eq!(content, data, "module size {module}");
     }
 }
+
+#[test]
+fn http_csv_gives_a_centred_chart_with_an_installed_family() {
+    let fixture = Fixture::new(&["csv"]);
+    let server = Serving::start(&fixture.workspace);
+    let post = |body: Value| {
+        let response = http::request(
+            "POST",
+            &server.url("/api/projects/csv/generated-layers"),
+            Some(body.to_string().as_bytes()),
+        );
+        let parsed: Value = serde_json::from_slice(&response.body).unwrap();
+        (response.status, parsed)
+    };
+
+    let (status, body) = post(json!({
+        "csv": {
+            "kind": "chart",
+            "chartType": "column",
+            "title": "Sales",
+            "text": "Quarter,Sales\nQ1,10\nQ2,14\n"
+        },
+        "centered": true
+    }));
+    assert_eq!(status, 201, "{body}");
+
+    // Neither `spec` nor `csv`, and both, are refused before anything is written.
+    let (status, refused) = post(json!({ "centered": true }));
+    assert_eq!(status, 422, "{refused}");
+    assert_eq!(refused["error"]["code"], "invalidGeneratorSpec");
+    let (status, refused) = post(json!({ "csv": { "kind": "pie", "text": "a,b\n" } }));
+    assert_eq!(status, 422, "{refused}");
+
+    let closed = http::request("POST", &server.url("/api/projects/csv/close"), Some(b"{}"));
+    assert!(closed.status < 300, "close: {}", closed.status);
+
+    let document = fixture.document("csv");
+    let layers = document["layers"].as_array().unwrap();
+    assert_eq!(layers.len(), 1, "a refused request wrote a layer");
+    let layer = &layers[0];
+    // The canvas is 900 by 600 and the default chart is 800 by 500.
+    assert_eq!(layer["transform"]["x"], json!(50.0));
+    assert_eq!(layer["transform"]["y"], json!(50.0));
+    let spec = &layer["assemblash.chart"]["spec"];
+    assert_eq!(spec["type"], "column");
+    assert_eq!(spec["title"], "Sales");
+    // Noto Sans is not installed, so the spec records the family that was.
+    assert_eq!(spec["fontFamily"], "Inter");
+    assert_eq!(layer["assemblash.chart"]["font"]["family"], "Inter");
+}

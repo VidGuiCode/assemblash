@@ -13,8 +13,8 @@ pub enum GenerateError {
         reason: String,
     },
 
-    /// A colour is not `#rgb`, `#rrggbb` or `#rrggbbaa`.
-    #[error("{field}: colour {value:?} is not #rgb, #rrggbb or #rrggbbaa")]
+    /// A colour is not `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`.
+    #[error("{field}: colour {value:?} is not #rgb, #rgba, #rrggbb or #rrggbbaa")]
     InvalidColor {
         /// The spec field.
         field: String,

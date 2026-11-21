@@ -215,6 +215,7 @@ impl AssemblashMcp {
                     position: Some(placement.into()),
                     transform,
                     origin: (box_.x.unwrap_or(0.0), box_.y.unwrap_or(0.0)),
+                    centered: false,
                     name,
                 },
             )

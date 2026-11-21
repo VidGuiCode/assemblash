@@ -1766,14 +1766,23 @@ async fn apply_operation_batch(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AddGeneratedRequest {
-    /// The spec, tagged by `kind`: `chart`, `table` or `qr`.
-    spec: assemblash_export::generate::GeneratedSpec,
+    /// The spec, tagged by `kind`: `chart`, `table` or `qr`. Give this or
+    /// `csv`, not both.
+    #[serde(default)]
+    spec: Option<assemblash_export::generate::GeneratedSpec>,
+    /// CSV text to make a chart or table spec from, with default settings.
+    #[serde(default)]
+    csv: Option<CsvSource>,
     /// The layer box. At the origin, at the generated size, when absent.
     #[serde(default)]
     transform: Option<assemblash_core::Transform>,
     /// Where in the tree. The top of the root list when absent.
     #[serde(default)]
     position: Option<assemblash_core::ops::LayerPosition>,
+    /// With no `transform`: in the middle of the canvas instead of at the
+    /// origin.
+    #[serde(default)]
+    centered: bool,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -1798,6 +1807,88 @@ struct RegenerateRequest {
     expected_version: Option<u64>,
 }
 
+/// CSV text for a chart or a table.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CsvSource {
+    /// `chart` or `table`.
+    kind: String,
+    /// The chart type, for a chart. A bar chart when absent.
+    #[serde(default)]
+    chart_type: Option<assemblash_export::generate::ChartType>,
+    /// The CSV text.
+    text: String,
+    /// A chart title.
+    #[serde(default)]
+    title: Option<String>,
+    /// The label family. When absent: the default family if the workspace
+    /// has it, otherwise the first installed family by name. The spec
+    /// records the family that was used.
+    #[serde(default)]
+    font_family: Option<String>,
+}
+
+/// The family a CSV spec draws with when the request names none.
+fn csv_font_family(state: &AppState, requested: Option<&str>) -> Result<String, ApiError> {
+    use assemblash_export::generate::DEFAULT_FONT_FAMILY;
+    if let Some(family) = requested {
+        return Ok(family.to_owned());
+    }
+    let store = state.font_store()?;
+    let mut families: Vec<&str> = store
+        .records()
+        .iter()
+        .map(|face| face.family.as_str())
+        .collect();
+    if families.contains(&DEFAULT_FONT_FAMILY) {
+        return Ok(DEFAULT_FONT_FAMILY.to_owned());
+    }
+    families.sort_unstable();
+    Ok(families
+        .first()
+        .map_or(DEFAULT_FONT_FAMILY, |family| family)
+        .to_owned())
+}
+
+impl AddGeneratedRequest {
+    /// The spec to draw, from `spec` or from `csv`.
+    fn resolved_spec(
+        &self,
+        state: &AppState,
+    ) -> Result<assemblash_export::generate::GeneratedSpec, ApiError> {
+        use assemblash_export::generate::{ChartSpec, ChartType, GeneratedSpec, TableSpec};
+        match (&self.spec, &self.csv) {
+            (Some(spec), None) => Ok(spec.clone()),
+            (None, Some(csv)) => match csv.kind.as_str() {
+                "chart" => {
+                    let mut spec =
+                        ChartSpec::from_csv(csv.chart_type.unwrap_or(ChartType::Bar), &csv.text)
+                            .map_err(crate::generated::generate_error)?;
+                    spec.title.clone_from(&csv.title);
+                    spec.font_family = Some(csv_font_family(state, csv.font_family.as_deref())?);
+                    Ok(GeneratedSpec::Chart(spec))
+                }
+                "table" => {
+                    let mut spec =
+                        TableSpec::from_csv(&csv.text).map_err(crate::generated::generate_error)?;
+                    spec.font_family = Some(csv_font_family(state, csv.font_family.as_deref())?);
+                    Ok(GeneratedSpec::Table(spec))
+                }
+                _ => Err(ApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalidGeneratorSpec",
+                    "csv.kind: use chart or table",
+                )),
+            },
+            _ => Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalidGeneratorSpec",
+                "give spec or csv, not both and not neither",
+            )),
+        }
+    }
+}
+
 /// Loads the fonts a spec needs from the workspace store.
 pub(crate) fn generator_fonts(
     state: &AppState,
@@ -1818,17 +1909,19 @@ async fn add_generated_layer(
     let id = ProjectId::new(id)?;
     let actor = request.actor.actor()?;
     let response = tokio::task::spawn_blocking(move || {
-        let fonts = generator_fonts(&state, &request.spec)?;
+        let spec = request.resolved_spec(&state)?;
+        let fonts = generator_fonts(&state, &spec)?;
         let project = state.project(&id, now_millis())?;
         let mut session = lock_project(&project)?;
         crate::generated::add(
             &mut session,
-            &request.spec,
+            &spec,
             fonts.font_set(),
             crate::generated::Placement {
                 position: request.position,
                 transform: request.transform,
                 origin: (0.0, 0.0),
+                centered: request.centered,
                 name: request.name,
             },
             &actor,

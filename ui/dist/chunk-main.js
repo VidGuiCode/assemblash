@@ -1,4 +1,4 @@
-import { r as c, p as Ye, l as Te, u as G, a as ce, j as n, B as te, c as Be, n as vt, o as Ht, q as Ln, f as De, t as _n, v as Mn, w as $n, T as O, d as Hn, P as Gt, x as X, y as Ut, z as Gn, L as Un, C as Vt, I as Wt, D as Ke, E as Vn, b as Wn, m as ee, A as Y, k as w, i as Ne, U as qn, S as Kn, G as qt, s as Yn } from "./chunk-mantine-root.js";
+import { r as c, p as Ye, l as Te, u as G, a as ce, j as n, B as te, c as Be, n as vt, o as Ht, q as Ln, f as De, t as _n, v as Mn, w as $n, T as O, d as Hn, P as Gt, x as X, y as Ut, z as Gn, L as Un, C as Vt, I as Wt, D as Ke, E as Vn, b as Wn, m as ee, A as Y, k as j, i as Ce, U as qn, S as Kn, G as qt, s as Yn } from "./chunk-mantine-root.js";
 import { t as f, formatCount as Kt } from "./i18n.js";
 function Zn(e) {
   return Array.isArray(e) || e === null ? !1 : typeof e == "object" ? e.type !== c.Fragment : !1;
@@ -11,7 +11,7 @@ function Yt(e) {
     return r;
   }];
 }
-const Jn = {
+const Qn = {
   app: 100,
   modal: 200,
   popover: 300,
@@ -19,19 +19,19 @@ const Jn = {
   max: 9999
 };
 function jt(e) {
-  return Jn[e];
+  return Qn[e];
 }
-function Qn(e, t) {
+function Jn(e, t) {
   return e in t ? Ye(t[e]) : Ye(e);
 }
 function Xn(e, t) {
   const s = e.map((r) => ({
     value: r,
-    px: Qn(r, t)
+    px: Jn(r, t)
   }));
   return s.sort((r, a) => r.px - a.px), s;
 }
-function we(e) {
+function Ne(e) {
   return typeof e == "object" && e !== null ? "base" in e ? e.base : void 0 : e;
 }
 function At(e) {
@@ -78,13 +78,13 @@ function ts(e = !1, t = {}) {
   }];
 }
 var Zt = { root: "m_9814e45f" };
-const ns = { zIndex: jt("modal") }, Jt = Be((e, { gradient: t, color: s, backgroundOpacity: r, blur: a, radius: i, zIndex: l }) => ({ root: {
+const ns = { zIndex: jt("modal") }, Qt = Be((e, { gradient: t, color: s, backgroundOpacity: r, blur: a, radius: i, zIndex: l }) => ({ root: {
   "--overlay-bg": t || (s !== void 0 || r !== void 0) && Ln(s || "#000", r ?? 0.6) || void 0,
   "--overlay-filter": a ? `blur(${Ht(a)})` : void 0,
   "--overlay-radius": i === void 0 ? void 0 : vt(i),
   "--overlay-z-index": l?.toString()
-} })), Re = Te((e) => {
-  const t = G("Overlay", ns, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, fixed: h, center: y, children: b, radius: j, zIndex: u, gradient: p, blur: N, color: C, backgroundOpacity: x, mod: v, attributes: D, ...I } = t, k = ce({
+} })), Ie = Te((e) => {
+  const t = G("Overlay", ns, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, fixed: h, center: y, children: b, radius: w, zIndex: u, gradient: p, blur: D, color: C, backgroundOpacity: x, mod: v, attributes: E, ...R } = t, k = ce({
     name: "Overlay",
     props: t,
     classes: Zt,
@@ -93,9 +93,9 @@ const ns = { zIndex: jt("modal") }, Jt = Be((e, { gradient: t, color: s, backgro
     classNames: s,
     styles: i,
     unstyled: l,
-    attributes: D,
+    attributes: E,
     vars: d,
-    varsResolver: Jt
+    varsResolver: Qt
   });
   return /* @__PURE__ */ n.jsx(te, {
     ...k("root"),
@@ -103,13 +103,13 @@ const ns = { zIndex: jt("modal") }, Jt = Be((e, { gradient: t, color: s, backgro
       center: y,
       fixed: h
     }, v],
-    ...I,
+    ...R,
     children: b
   });
 });
-Re.classes = Zt;
-Re.varsResolver = Jt;
-Re.displayName = "@mantine/core/Overlay";
+Ie.classes = Zt;
+Ie.varsResolver = Qt;
+Ie.displayName = "@mantine/core/Overlay";
 function dt(e) {
   const t = document.createElement("div");
   return t.setAttribute("data-portal", "true"), typeof e.className == "string" && t.classList.add(...e.className.split(" ").filter(Boolean)), typeof e.style == "object" && Object.assign(t.style, e.style), typeof e.id == "string" && t.setAttribute("id", e.id), t;
@@ -131,7 +131,7 @@ function ss({ target: e, reuseTargetNode: t, ...s }) {
   }
   return dt(s);
 }
-const rs = { reuseTargetNode: !0 }, Qt = De((e) => {
+const rs = { reuseTargetNode: !0 }, Jt = De((e) => {
   const { children: t, target: s, reuseTargetNode: r, ref: a, ...i } = G("Portal", rs, e), [l, d] = c.useState(!1), h = c.useRef(null);
   return _n(() => (d(!0), h.current = ss({
     target: s,
@@ -141,14 +141,14 @@ const rs = { reuseTargetNode: !0 }, Qt = De((e) => {
     !s && !r && h.current && document.body.removeChild(h.current);
   }), [s]), !l || !h.current ? null : Mn.createPortal(/* @__PURE__ */ n.jsx(n.Fragment, { children: t }), h.current);
 });
-Qt.displayName = "@mantine/core/Portal";
-const Xt = De(({ withinPortal: e = !0, children: t, ...s }) => $n() === "test" || !e ? /* @__PURE__ */ n.jsx(n.Fragment, { children: t }) : /* @__PURE__ */ n.jsx(Qt, {
+Jt.displayName = "@mantine/core/Portal";
+const Xt = De(({ withinPortal: e = !0, children: t, ...s }) => $n() === "test" || !e ? /* @__PURE__ */ n.jsx(n.Fragment, { children: t }) : /* @__PURE__ */ n.jsx(Jt, {
   ...s,
   children: t
 }));
 Xt.displayName = "@mantine/core/OptionalPortal";
 var en = { root: "m_849cf0da" };
-const as = { underline: "hover" }, Je = Te((e) => {
+const as = { underline: "hover" }, Qe = Te((e) => {
   const { underline: t, className: s, unstyled: r, mod: a, ...i } = G("Anchor", as, e);
   return /* @__PURE__ */ n.jsx(O, {
     component: "a",
@@ -159,8 +159,8 @@ const as = { underline: "hover" }, Je = Te((e) => {
     unstyled: r
   });
 });
-Je.classes = en;
-Je.displayName = "@mantine/core/Anchor";
+Qe.classes = en;
+Qe.displayName = "@mantine/core/Anchor";
 const [os, is] = Yt("Card component was not found in tree");
 var wt = {
   root: "m_e615b15f",
@@ -185,7 +185,7 @@ const tt = Te((e) => {
 tt.classes = wt;
 tt.displayName = "@mantine/core/CardSection";
 const tn = Be((e, { padding: t }) => ({ root: { "--card-padding": X(t) } })), ls = { orientation: "vertical" }, Le = Te((e) => {
-  const t = G("Card", ls, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, children: h, padding: y, attributes: b, orientation: j, ...u } = t, p = ce({
+  const t = G("Card", ls, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, children: h, padding: y, attributes: b, orientation: w, ...u } = t, p = ce({
     name: "Card",
     props: t,
     classes: wt,
@@ -197,16 +197,16 @@ const tn = Be((e, { padding: t }) => ({ root: { "--card-padding": X(t) } })), ls
     attributes: b,
     vars: d,
     varsResolver: tn
-  }), N = c.Children.toArray(h), C = N.map((x, v) => typeof x == "object" && x && "type" in x && (x.type === tt || x.type?.displayName === "@mantine/core/CardSection") ? c.cloneElement(x, {
-    "data-orientation": j,
+  }), D = c.Children.toArray(h), C = D.map((x, v) => typeof x == "object" && x && "type" in x && (x.type === tt || x.type?.displayName === "@mantine/core/CardSection") ? c.cloneElement(x, {
+    "data-orientation": w,
     "data-first-section": v === 0 || void 0,
-    "data-last-section": v === N.length - 1 || void 0
+    "data-last-section": v === D.length - 1 || void 0
   }) : x);
   return /* @__PURE__ */ n.jsx(os, {
     value: { getStyles: p },
     children: /* @__PURE__ */ n.jsx(Gt, {
       unstyled: l,
-      "data-orientation": j,
+      "data-orientation": w,
       ...p("root"),
       ...u,
       children: C
@@ -222,9 +222,9 @@ const sn = Be((e, { radius: t, fit: s }) => ({ root: {
   "--image-radius": t === void 0 ? void 0 : vt(t),
   "--image-object-fit": s
 } })), nt = Te((e) => {
-  const t = G("Image", null, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, onError: h, src: y, radius: b, fit: j, fallbackSrc: u, mod: p, attributes: N, ...C } = t, [x, v] = c.useState(!y);
+  const t = G("Image", null, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, onError: h, src: y, radius: b, fit: w, fallbackSrc: u, mod: p, attributes: D, ...C } = t, [x, v] = c.useState(!y);
   c.useEffect(() => v(!y), [y]);
-  const D = ce({
+  const E = ce({
     name: "Image",
     classes: nn,
     props: t,
@@ -233,23 +233,23 @@ const sn = Be((e, { radius: t, fit: s }) => ({ root: {
     classNames: s,
     styles: i,
     unstyled: l,
-    attributes: N,
+    attributes: D,
     vars: d,
     varsResolver: sn
   });
   return x && u ? /* @__PURE__ */ n.jsx(te, {
     component: "img",
     src: u,
-    ...D("root"),
+    ...E("root"),
     onError: h,
     mod: ["fallback", p],
     ...C
   }) : /* @__PURE__ */ n.jsx(te, {
     component: "img",
-    ...D("root"),
+    ...E("root"),
     src: y,
-    onError: (I) => {
-      h?.(I), v(!0);
+    onError: (R) => {
+      h?.(R), v(!0);
     },
     mod: p,
     ...C
@@ -263,7 +263,7 @@ var rn = {
   loader: "m_e8eb006c",
   overlay: "m_df587f17"
 };
-const It = {
+const Rt = {
   transitionProps: {
     transition: "fade",
     duration: 0
@@ -271,7 +271,7 @@ const It = {
   overlayProps: { backgroundOpacity: 0.75 },
   zIndex: jt("overlay")
 }, an = Be((e, { zIndex: t }) => ({ root: { "--lo-z-index": t?.toString() } })), st = De((e) => {
-  const t = G("LoadingOverlay", It, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, transitionProps: h, loaderProps: y, overlayProps: b, visible: j, zIndex: u, attributes: p, onEnter: N, onEntered: C, onExit: x, onExited: v, ...D } = t, I = Ut(), k = ce({
+  const t = G("LoadingOverlay", Rt, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, transitionProps: h, loaderProps: y, overlayProps: b, visible: w, zIndex: u, attributes: p, onEnter: D, onEntered: C, onExit: x, onExited: v, ...E } = t, R = Ut(), k = ce({
     name: "LoadingOverlay",
     classes: rn,
     props: t,
@@ -283,21 +283,21 @@ const It = {
     attributes: p,
     vars: d,
     varsResolver: an
-  }), R = {
-    ...It.overlayProps,
+  }), I = {
+    ...Rt.overlayProps,
     ...b
   };
   return /* @__PURE__ */ n.jsx(Gn, {
     transition: "fade",
     ...h,
-    mounted: !!j,
-    onEnter: N,
+    mounted: !!w,
+    onEnter: D,
     onEntered: C,
     onExit: x,
     onExited: v,
-    children: (P) => /* @__PURE__ */ n.jsxs(te, {
-      ...k("root", { style: P }),
-      ...D,
+    children: (S) => /* @__PURE__ */ n.jsxs(te, {
+      ...k("root", { style: S }),
+      ...E,
       children: [
         /* @__PURE__ */ n.jsx(Un, {
           unstyled: l,
@@ -307,25 +307,25 @@ const It = {
             style: y?.style
           })
         }),
-        /* @__PURE__ */ n.jsx(Re, {
-          ...R,
+        /* @__PURE__ */ n.jsx(Ie, {
+          ...I,
           ...k("overlay", {
-            className: R?.className,
-            style: R?.style
+            className: I?.className,
+            style: I?.style
           }),
           darkHidden: !0,
           unstyled: l,
-          color: b?.color || I.white
+          color: b?.color || R.white
         }),
-        /* @__PURE__ */ n.jsx(Re, {
-          ...R,
+        /* @__PURE__ */ n.jsx(Ie, {
+          ...I,
           ...k("overlay", {
-            className: R?.className,
-            style: R?.style
+            className: I?.className,
+            style: I?.style
           }),
           lightHidden: !0,
           unstyled: l,
-          color: b?.color || I.colors.dark[5]
+          color: b?.color || R.colors.dark[5]
         })
       ]
     })
@@ -340,17 +340,17 @@ function on(e) {
 }
 function cs({ spacing: e, verticalSpacing: t, cols: s, minColWidth: r, autoRows: a, selector: i }) {
   const l = Ut(), d = t === void 0 ? e : t, h = r !== void 0, y = Vt({
-    "--sg-spacing-x": X(we(e)),
-    "--sg-spacing-y": X(we(d)),
+    "--sg-spacing-x": X(Ne(e)),
+    "--sg-spacing-y": X(Ne(d)),
     "--sg-auto-rows": a,
-    ...h ? { "--sg-min-col-width": on(r) } : { "--sg-cols": we(s)?.toString() }
-  }), b = Ke(l.breakpoints).reduce((u, p) => (u[p] || (u[p] = {}), typeof e == "object" && e[p] !== void 0 && (u[p]["--sg-spacing-x"] = X(e[p])), typeof d == "object" && d[p] !== void 0 && (u[p]["--sg-spacing-y"] = X(d[p])), !h && typeof s == "object" && s[p] !== void 0 && (u[p]["--sg-cols"] = s[p]), u), {}), j = Xn(Ke(b), l.breakpoints).filter((u) => Ke(b[u.value]).length > 0).map((u) => ({
+    ...h ? { "--sg-min-col-width": on(r) } : { "--sg-cols": Ne(s)?.toString() }
+  }), b = Ke(l.breakpoints).reduce((u, p) => (u[p] || (u[p] = {}), typeof e == "object" && e[p] !== void 0 && (u[p]["--sg-spacing-x"] = X(e[p])), typeof d == "object" && d[p] !== void 0 && (u[p]["--sg-spacing-y"] = X(d[p])), !h && typeof s == "object" && s[p] !== void 0 && (u[p]["--sg-cols"] = s[p]), u), {}), w = Xn(Ke(b), l.breakpoints).filter((u) => Ke(b[u.value]).length > 0).map((u) => ({
     query: `(min-width: ${l.breakpoints[u.value]})`,
     styles: b[u.value]
   }));
   return /* @__PURE__ */ n.jsx(Wt, {
     styles: y,
-    media: j,
+    media: w,
     selector: i
   });
 }
@@ -369,22 +369,22 @@ function us({ spacing: e, verticalSpacing: t, cols: s, minColWidth: r }) {
 }
 function ps({ spacing: e, verticalSpacing: t, cols: s, minColWidth: r, autoRows: a, selector: i }) {
   const l = t === void 0 ? e : t, d = r !== void 0, h = Vt({
-    "--sg-spacing-x": X(we(e)),
-    "--sg-spacing-y": X(we(l)),
+    "--sg-spacing-x": X(Ne(e)),
+    "--sg-spacing-y": X(Ne(l)),
     "--sg-auto-rows": a,
-    ...d ? { "--sg-min-col-width": on(r) } : { "--sg-cols": we(s)?.toString() }
+    ...d ? { "--sg-min-col-width": on(r) } : { "--sg-cols": Ne(s)?.toString() }
   }), y = us({
     spacing: e,
     verticalSpacing: t,
     cols: s,
     minColWidth: r
-  }), b = y.reduce((u, p) => (u[p] || (u[p] = {}), typeof e == "object" && e[p] !== void 0 && (u[p]["--sg-spacing-x"] = X(e[p])), typeof l == "object" && l[p] !== void 0 && (u[p]["--sg-spacing-y"] = X(l[p])), !d && typeof s == "object" && s[p] !== void 0 && (u[p]["--sg-cols"] = s[p]), u), {}), j = y.map((u) => ({
+  }), b = y.reduce((u, p) => (u[p] || (u[p] = {}), typeof e == "object" && e[p] !== void 0 && (u[p]["--sg-spacing-x"] = X(e[p])), typeof l == "object" && l[p] !== void 0 && (u[p]["--sg-spacing-y"] = X(l[p])), !d && typeof s == "object" && s[p] !== void 0 && (u[p]["--sg-cols"] = s[p]), u), {}), w = y.map((u) => ({
     query: `simple-grid (min-width: ${u})`,
     styles: b[u]
   }));
   return /* @__PURE__ */ n.jsx(Wt, {
     styles: h,
-    container: j,
+    container: w,
     selector: i
   });
 }
@@ -396,8 +396,8 @@ const fs = {
   cols: 1,
   spacing: "md",
   type: "media"
-}, Et = De((e) => {
-  const t = G("SimpleGrid", fs, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, cols: h, verticalSpacing: y, spacing: b, type: j, minColWidth: u, autoFlow: p, autoRows: N, attributes: C, ...x } = t, v = ce({
+}, Nt = De((e) => {
+  const t = G("SimpleGrid", fs, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, cols: h, verticalSpacing: y, spacing: b, type: w, minColWidth: u, autoFlow: p, autoRows: D, attributes: C, ...x } = t, v = ce({
     name: "SimpleGrid",
     classes: ln,
     props: t,
@@ -408,37 +408,37 @@ const fs = {
     unstyled: l,
     attributes: C,
     vars: d
-  }), D = Vn(), I = u !== void 0 ? p || "auto-fill" : void 0;
-  return j === "container" ? /* @__PURE__ */ n.jsxs(n.Fragment, { children: [/* @__PURE__ */ n.jsx(ps, {
+  }), E = Vn(), R = u !== void 0 ? p || "auto-fill" : void 0;
+  return w === "container" ? /* @__PURE__ */ n.jsxs(n.Fragment, { children: [/* @__PURE__ */ n.jsx(ps, {
     ...t,
-    selector: `.${D}`
+    selector: `.${E}`
   }), /* @__PURE__ */ n.jsx("div", {
     ...v("container"),
     children: /* @__PURE__ */ n.jsx(te, {
-      ...v("root", { className: D }),
+      ...v("root", { className: E }),
       ...x,
-      "data-auto-cols": I
+      "data-auto-cols": R
     })
   })] }) : /* @__PURE__ */ n.jsxs(n.Fragment, { children: [/* @__PURE__ */ n.jsx(cs, {
     ...t,
-    selector: `.${D}`
+    selector: `.${E}`
   }), /* @__PURE__ */ n.jsx(te, {
-    ...v("root", { className: D }),
+    ...v("root", { className: E }),
     ...x,
-    "data-auto-cols": I
+    "data-auto-cols": R
   })] });
 });
-Et.classes = ln;
-Et.displayName = "@mantine/core/SimpleGrid";
+Nt.classes = ln;
+Nt.displayName = "@mantine/core/SimpleGrid";
 const [ms, hs] = Yt("Dropzone component was not found in tree");
-function Dt(e) {
+function Et(e) {
   const t = (s) => {
     const { children: r, ...a } = G(`Dropzone${At(e)}`, {}, s), i = hs(), l = Zn(r) ? r : /* @__PURE__ */ n.jsx("span", { children: r });
     return i[e] ? c.cloneElement(l, a) : null;
   };
   return t.displayName = `@mantine/dropzone/${At(e)}`, t;
 }
-const gs = Dt("accept"), ys = Dt("reject"), bs = Dt("idle");
+const gs = Et("accept"), ys = Et("reject"), bs = Et("idle");
 var ke = {
   root: "m_d46a4834",
   inner: "m_b85f7144",
@@ -491,12 +491,12 @@ var xs = class extends Error {
 };
 function le(e, t, s) {
   const r = e, { webkitRelativePath: a } = e, i = typeof t == "string" ? t : typeof a == "string" && a.length > 0 ? a : `./${e.name}`;
-  return typeof r.path != "string" && Rt(r, "path", i), s !== void 0 && Object.defineProperty(r, "handle", {
+  return typeof r.path != "string" && It(r, "path", i), s !== void 0 && Object.defineProperty(r, "handle", {
     value: s,
     writable: !1,
     configurable: !1,
     enumerable: !0
-  }), Rt(r, "relativePath", i), r;
+  }), It(r, "relativePath", i), r;
 }
 function vs(e, t = cn) {
   const { name: s } = e;
@@ -511,7 +511,7 @@ function vs(e, t = cn) {
   }
   return e;
 }
-function Rt(e, t, s) {
+function It(e, t, s) {
   Object.defineProperty(e, t, {
     value: s,
     writable: !1,
@@ -521,41 +521,41 @@ function Rt(e, t, s) {
 }
 const js = [".DS_Store", "Thumbs.db"];
 async function ws(e, { mimeTypes: t = cn } = {}) {
-  return (await Es(e)).map((s) => s instanceof File ? vs(s, t) : s);
+  return (await Ns(e)).map((s) => s instanceof File ? vs(s, t) : s);
 }
-async function Es(e) {
-  return ze(e) && dn(e.dataTransfer) ? Ps(e.dataTransfer, e.type) : Ds(e) ? Ss(e.clipboardData) : Ns(e) ? Cs(e) : Array.isArray(e) && e.every((t) => "getFile" in t && typeof t.getFile == "function") ? Fs(e) : [];
+async function Ns(e) {
+  return ze(e) && dn(e.dataTransfer) ? Ps(e.dataTransfer, e.type) : Es(e) ? Ss(e.clipboardData) : Ds(e) ? Cs(e) : Array.isArray(e) && e.every((t) => "getFile" in t && typeof t.getFile == "function") ? Fs(e) : [];
 }
 function dn(e) {
   return ze(e);
 }
-function Ds(e) {
+function Es(e) {
   return ze(e) && dn(e.clipboardData);
 }
-function Ns(e) {
+function Ds(e) {
   return ze(e) && ze(e.target);
 }
 function ze(e) {
   return typeof e == "object" && e !== null;
 }
 function Cs(e) {
-  return Qe(e.target.files).map((t) => le(t));
+  return Je(e.target.files).map((t) => le(t));
 }
 async function Fs(e) {
   return (await Promise.all(e.map((t) => t.getFile()))).map((t) => le(t));
 }
 async function Ps(e, t) {
-  const s = Qe(e.items).filter((r) => r.kind === "file");
+  const s = Je(e.items).filter((r) => r.kind === "file");
   return t !== "drop" ? s : un(pn(await Promise.all(s.map(As))));
 }
 function Ss(e) {
-  const t = Qe(e.items).filter((s) => s.kind === "file").map((s) => s.getAsFile()).filter((s) => s !== null);
-  return un((t.length > 0 ? t : Qe(e.files)).map((s) => le(s)));
+  const t = Je(e.items).filter((s) => s.kind === "file").map((s) => s.getAsFile()).filter((s) => s !== null);
+  return un((t.length > 0 ? t : Je(e.files)).map((s) => le(s)));
 }
 function un(e) {
   return e.filter((t) => js.indexOf(t.name) === -1);
 }
-function Qe(e) {
+function Je(e) {
   return e === null ? [] : Array.from(e);
 }
 async function As(e) {
@@ -596,8 +596,8 @@ async function mn(e, t) {
   }
   return s;
 }
-async function Is(e) {
-  return e.isDirectory ? hn(e) : Rs(e);
+async function Rs(e) {
+  return e.isDirectory ? hn(e) : Is(e);
 }
 function hn(e) {
   const t = e.createReader();
@@ -606,7 +606,7 @@ function hn(e) {
     function i() {
       t.readEntries(async (l) => {
         if (l.length) {
-          const d = Promise.all(l.map(Is));
+          const d = Promise.all(l.map(Rs));
           a.push(d), i();
         } else
           try {
@@ -621,7 +621,7 @@ function hn(e) {
     i();
   });
 }
-async function Rs(e) {
+async function Is(e) {
   return new Promise((t, s) => {
     e.file((r) => {
       t(le(r, e.fullPath));
@@ -710,14 +710,14 @@ function $s({ files: e, accept: t, minSize: s, maxSize: r, multiple: a, maxFiles
     message: d(u, p)
   } : u;
   e.forEach((u) => {
-    const [p, N] = bn(u, t), [C, x] = xn(u, s, r);
+    const [p, D] = bn(u, t), [C, x] = xn(u, s, r);
     p && C ? h.push(u) : y.push({
       file: u,
-      errors: [N, x].filter((v) => v != null).map((v) => b(v, u))
+      errors: [D, x].filter((v) => v != null).map((v) => b(v, u))
     });
   });
-  const j = a ? i >= 1 ? i : Number.POSITIVE_INFINITY : 1;
-  return h.length > j && h.slice(j).forEach((u) => {
+  const w = a ? i >= 1 ? i : Number.POSITIVE_INFINITY : 1;
+  return h.length > w && h.slice(w).forEach((u) => {
     y.push({
       file: u,
       errors: [b(yn, u)]
@@ -730,7 +730,7 @@ function $s({ files: e, accept: t, minSize: s, maxSize: r, multiple: a, maxFiles
     rejections: y
   };
 }
-function Ie(e) {
+function Re(e) {
   return typeof e.isPropagationStopped == "function" ? e.isPropagationStopped() : typeof e.cancelBubble < "u" ? e.cancelBubble : !1;
 }
 function je(e) {
@@ -753,7 +753,7 @@ function Vs(e = window.navigator.userAgent) {
   return Gs(e) || Us(e);
 }
 function H(...e) {
-  return (t, ...s) => e.some((r) => (!Ie(t) && r && r(t, ...s), Ie(t)));
+  return (t, ...s) => e.some((r) => (!Re(t) && r && r(t, ...s), Re(t)));
 }
 function Ws() {
   return "showOpenFilePicker" in window;
@@ -804,10 +804,10 @@ function Lt(e, { omitWildcardMimeTypesWithExtensions: t = !1 } = {}) {
 function Zs(e) {
   return e instanceof DOMException && (e.name === "AbortError" || e.code === e.ABORT_ERR);
 }
-function Js(e) {
+function Qs(e) {
   return e instanceof DOMException && (e.name === "SecurityError" || e.code === e.SECURITY_ERR);
 }
-function Qs(e) {
+function Js(e) {
   return e instanceof DOMException && e.name === "NotAllowedError";
 }
 function jn(e) {
@@ -841,17 +841,17 @@ const mt = {
   dragFileRejections: []
 };
 function wn(e = {}) {
-  const { accept: t, disabled: s = !1, getFilesFromEvent: r = ws, maxSize: a = Number.POSITIVE_INFINITY, minSize: i = 0, multiple: l = !0, maxFiles: d = 0, onDragEnter: h, onDragLeave: y, onDragOver: b, onDrop: j, onDropAccepted: u, onDropRejected: p, onFileDialogCancel: N, onFileDialogOpen: C, useFsAccessApi: x = !1, autoFocus: v = !1, preventDropOnDocument: D = !0, noClick: I = !1, noKeyboard: k = !1, noDrag: R = !1, noDragEventsBubbling: P = !1, noPaste: de = !1, onError: Z, validator: U, getErrorMessage: V } = e, T = c.useMemo(() => Ks(t), [t]), ue = c.useMemo(() => Lt(T), [T]), Fe = c.useMemo(() => Lt(T, { omitWildcardMimeTypesWithExtensions: !0 }), [T]), _e = c.useMemo(() => Ys(t), [t]), Pe = c.useMemo(() => typeof C == "function" ? C : _t, [C]), pe = c.useMemo(() => typeof N == "function" ? N : _t, [N]), S = c.useRef(null), B = c.useRef(null), [rt, E] = c.useReducer(tr, mt), { isFocused: at, isFileDialogActive: fe } = rt, me = c.useRef(fe);
+  const { accept: t, disabled: s = !1, getFilesFromEvent: r = ws, maxSize: a = Number.POSITIVE_INFINITY, minSize: i = 0, multiple: l = !0, maxFiles: d = 0, onDragEnter: h, onDragLeave: y, onDragOver: b, onDrop: w, onDropAccepted: u, onDropRejected: p, onFileDialogCancel: D, onFileDialogOpen: C, useFsAccessApi: x = !1, autoFocus: v = !1, preventDropOnDocument: E = !0, noClick: R = !1, noKeyboard: k = !1, noDrag: I = !1, noDragEventsBubbling: S = !1, noPaste: de = !1, onError: Z, validator: U, getErrorMessage: V } = e, T = c.useMemo(() => Ks(t), [t]), ue = c.useMemo(() => Lt(T), [T]), Pe = c.useMemo(() => Lt(T, { omitWildcardMimeTypesWithExtensions: !0 }), [T]), _e = c.useMemo(() => Ys(t), [t]), Se = c.useMemo(() => typeof C == "function" ? C : _t, [C]), pe = c.useMemo(() => typeof D == "function" ? D : _t, [D]), A = c.useRef(null), B = c.useRef(null), [rt, N] = c.useReducer(tr, mt), { isFocused: at, isFileDialogActive: fe } = rt, me = c.useRef(fe);
   me.current = fe;
   const Me = c.useRef(null), se = c.useCallback(() => {
     Me.current?.abort();
     const o = new AbortController();
-    return Me.current = o, E({
+    return Me.current = o, N({
       type: "setProcessing",
       isProcessing: !0
     }), o.signal;
   }, []), _ = c.useCallback((o) => {
-    o.aborted || E({
+    o.aborted || N({
       type: "setProcessing",
       isProcessing: !1
     });
@@ -859,7 +859,7 @@ function wn(e = {}) {
     !oe.current && fe && setTimeout(() => {
       if (B.current) {
         const { files: o } = B.current;
-        o?.length || (E({ type: "closeDialog" }), pe());
+        o?.length || (N({ type: "closeDialog" }), pe());
       }
     }, 300);
   };
@@ -871,29 +871,29 @@ function wn(e = {}) {
     pe,
     oe
   ]);
-  const re = c.useRef([]), J = c.useRef([]), He = (o) => {
-    S.current && o.target && S.current.contains(o.target) && o.defaultPrevented || (o.preventDefault(), re.current = []);
+  const re = c.useRef([]), Q = c.useRef([]), He = (o) => {
+    A.current && o.target && A.current.contains(o.target) && o.defaultPrevented || (o.preventDefault(), re.current = []);
   };
-  c.useEffect(() => (D && (document.addEventListener("dragover", Bt, !1), document.addEventListener("drop", He, !1)), () => {
-    D && (document.removeEventListener("dragover", Bt), document.removeEventListener("drop", He));
-  }), [S, D]), c.useEffect(() => {
+  c.useEffect(() => (E && (document.addEventListener("dragover", Bt, !1), document.addEventListener("drop", He, !1)), () => {
+    E && (document.removeEventListener("dragover", Bt), document.removeEventListener("drop", He));
+  }), [A, E]), c.useEffect(() => {
     const o = (W) => {
-      W.target && (J.current = [...J.current, W.target]), je(W) && E({
+      W.target && (Q.current = [...Q.current, W.target]), je(W) && N({
         isDragGlobal: !0,
         type: "setDragGlobal"
       });
     }, m = (W) => {
-      J.current = J.current.filter((ae) => ae !== W.target && ae !== null), !(J.current.length > 0) && E({
+      Q.current = Q.current.filter((ae) => ae !== W.target && ae !== null), !(Q.current.length > 0) && N({
         isDragGlobal: !1,
         type: "setDragGlobal"
       });
     }, g = () => {
-      J.current = [], E({
+      Q.current = [], N({
         isDragGlobal: !1,
         type: "setDragGlobal"
       });
     }, $ = () => {
-      J.current = [], E({
+      Q.current = [], N({
         isDragGlobal: !1,
         type: "setDragGlobal"
       });
@@ -901,17 +901,17 @@ function wn(e = {}) {
     return document.addEventListener("dragenter", o, !1), document.addEventListener("dragleave", m, !1), document.addEventListener("dragend", g, !1), document.addEventListener("drop", $, !1), () => {
       document.removeEventListener("dragenter", o), document.removeEventListener("dragleave", m), document.removeEventListener("dragend", g), document.removeEventListener("drop", $);
     };
-  }, [S]), c.useEffect(() => (!s && v && S.current && S.current.focus(), () => {
+  }, [A]), c.useEffect(() => (!s && v && A.current && A.current.focus(), () => {
   }), [
-    S,
+    A,
     v,
     s
   ]);
   const L = c.useCallback((o) => {
     Z ? Z(o) : console.error(o);
   }, [Z]), Ge = c.useCallback((o) => {
-    o.preventDefault(), o.persist?.(), Se(o), !me.current && (re.current = [...re.current, o.target], je(o) && Promise.resolve(r(o)).then((m) => {
-      if (Ie(o) && !P) return;
+    o.preventDefault(), o.persist?.(), Ae(o), !me.current && (re.current = [...re.current, o.target], je(o) && Promise.resolve(r(o)).then((m) => {
+      if (Re(o) && !S) return;
       const g = m.length > 0 ? $s({
         files: m,
         accept: ue,
@@ -922,7 +922,7 @@ function wn(e = {}) {
         validator: U,
         getErrorMessage: V
       }) : null;
-      E({
+      N({
         isDragAccept: g?.verdict === "accept",
         isDragReject: g?.verdict === "reject",
         isDragUnknown: g?.verdict === "unknown",
@@ -935,7 +935,7 @@ function wn(e = {}) {
     r,
     h,
     L,
-    P,
+    S,
     ue,
     i,
     a,
@@ -944,17 +944,17 @@ function wn(e = {}) {
     U,
     V
   ]), he = c.useCallback((o) => {
-    if (o.preventDefault(), o.persist?.(), Se(o), me.current) return !1;
+    if (o.preventDefault(), o.persist?.(), Ae(o), me.current) return !1;
     const m = je(o);
     if (m && o.dataTransfer) try {
       o.dataTransfer.dropEffect = "copy";
     } catch {
     }
     return m && b && b(o), !1;
-  }, [b, P]), ge = c.useCallback((o) => {
-    o.preventDefault(), o.persist?.(), Se(o);
-    const m = re.current.filter(($) => S.current?.contains($)), g = m.indexOf(o.target);
-    g !== -1 && m.splice(g, 1), re.current = m, !(m.length > 0) && (E({
+  }, [b, S]), ge = c.useCallback((o) => {
+    o.preventDefault(), o.persist?.(), Ae(o);
+    const m = re.current.filter(($) => A.current?.contains($)), g = m.indexOf(o.target);
+    g !== -1 && m.splice(g, 1), re.current = m, !(m.length > 0) && (N({
       type: "setDraggedFiles",
       isDragActive: !1,
       isDragAccept: !1,
@@ -963,10 +963,10 @@ function wn(e = {}) {
       dragFileRejections: []
     }), je(o) && y && y(o));
   }, [
-    S,
+    A,
     y,
-    P
-  ]), Q = c.useCallback(async (o, m, g) => {
+    S
+  ]), J = c.useCallback(async (o, m, g) => {
     const $ = (F, z) => V ? {
       ...F,
       message: V(F, z)
@@ -988,13 +988,13 @@ function wn(e = {}) {
           file: K,
           errors: [$(yn, K)]
         });
-      }), E({
+      }), N({
         acceptedFiles: z,
         fileRejections: q,
         type: "setFiles"
-      }), j && j(z, q, m), q.length > 0 && p && p(q, m), z.length > 0 && u && u(z, m);
+      }), w && w(z, q, m), q.length > 0 && p && p(q, m), z.length > 0 && u && u(z, m);
     }, ae = o.map((F) => {
-      const [z, q] = bn(F, Fe), [xe, K] = xn(F, i, a);
+      const [z, q] = bn(F, Pe), [xe, K] = xn(F, i, a);
       return {
         file: F,
         accepted: z,
@@ -1020,13 +1020,13 @@ function wn(e = {}) {
     }
     g.aborted || W(We);
   }, [
-    E,
+    N,
     l,
-    Fe,
+    Pe,
     i,
     a,
     d,
-    j,
+    w,
     u,
     p,
     U,
@@ -1034,15 +1034,15 @@ function wn(e = {}) {
     L,
     _
   ]), ye = c.useCallback((o) => {
-    if (o.preventDefault(), o.persist?.(), Se(o), re.current = [], !(me.current && o.dataTransfer) && (E({ type: "reset" }), je(o))) {
+    if (o.preventDefault(), o.persist?.(), Ae(o), re.current = [], !(me.current && o.dataTransfer) && (N({ type: "reset" }), je(o))) {
       const m = se();
       Promise.resolve(r(o)).then((g) => {
         if (!m.aborted) {
-          if (Ie(o) && !P) {
+          if (Re(o) && !S) {
             _(m);
             return;
           }
-          return Q(g, o, m);
+          return J(g, o, m);
         }
       }).catch((g) => {
         m.aborted || (_(m), L(g));
@@ -1050,72 +1050,72 @@ function wn(e = {}) {
     }
   }, [
     r,
-    Q,
+    J,
     L,
-    P,
+    S,
     se,
     _
   ]), Ue = c.useCallback((o) => {
     if (!je(o)) return;
-    o.preventDefault(), o.persist?.(), Se(o);
+    o.preventDefault(), o.persist?.(), Ae(o);
     const m = se();
     Promise.resolve(r(o)).then((g) => {
       if (!m.aborted) {
-        if (Ie(o) && !P) {
+        if (Re(o) && !S) {
           _(m);
           return;
         }
-        return Q(g, o, m);
+        return J(g, o, m);
       }
     }).catch((g) => {
       m.aborted || (_(m), L(g));
     });
   }, [
     r,
-    Q,
+    J,
     L,
-    P,
+    S,
     se,
     _
   ]), be = c.useCallback(() => {
     if (oe.current) {
-      E({ type: "openDialog" }), Pe();
+      N({ type: "openDialog" }), Se();
       const o = {
         multiple: l,
         types: _e
       };
       let m;
       window.showOpenFilePicker(o).then((g) => (m = se(), r(g))).then((g) => {
-        if (E({ type: "closeDialog" }), !m.aborted)
-          return Q(g, null, m);
+        if (N({ type: "closeDialog" }), !m.aborted)
+          return J(g, null, m);
       }).catch((g) => {
-        m && _(m), Zs(g) ? (pe(g), E({ type: "closeDialog" })) : Js(g) || Qs(g) ? (oe.current = !1, B.current ? (B.current.value = "", B.current.click()) : L(/* @__PURE__ */ new Error("Cannot open the file picker because the https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API is not supported and no <input> was provided."))) : L(g);
+        m && _(m), Zs(g) ? (pe(g), N({ type: "closeDialog" })) : Qs(g) || Js(g) ? (oe.current = !1, B.current ? (B.current.value = "", B.current.click()) : L(/* @__PURE__ */ new Error("Cannot open the file picker because the https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API is not supported and no <input> was provided."))) : L(g);
       });
       return;
     }
-    B.current && (E({ type: "openDialog" }), Pe(), B.current.value = "", B.current.click());
+    B.current && (N({ type: "openDialog" }), Se(), B.current.value = "", B.current.click());
   }, [
-    E,
-    Pe,
+    N,
+    Se,
     pe,
     x,
-    Q,
+    J,
     L,
     _e,
     l,
     se,
     _
   ]), Ct = c.useCallback((o) => {
-    S.current?.isEqualNode(o.target) && (o.key === " " || o.key === "Enter" || o.keyCode === 32 || o.keyCode === 13) && (o.preventDefault(), be());
-  }, [S, be]), Ft = c.useCallback(() => {
-    E({ type: "focus" });
+    A.current?.isEqualNode(o.target) && (o.key === " " || o.key === "Enter" || o.keyCode === 32 || o.keyCode === 13) && (o.preventDefault(), be());
+  }, [A, be]), Ft = c.useCallback(() => {
+    N({ type: "focus" });
   }, []), Pt = c.useCallback(() => {
-    E({ type: "blur" });
+    N({ type: "blur" });
   }, []), St = c.useCallback(() => {
-    I || (Vs() ? setTimeout(be, 0) : be());
-  }, [I, be]), ie = (o) => s ? null : o, ot = (o) => k ? null : ie(o), Ve = (o) => R ? null : ie(o), An = (o) => de ? null : ie(o), Se = (o) => {
-    P && o.stopPropagation();
-  }, In = c.useMemo(() => ({ refKey: o = "ref", role: m, onKeyDown: g, onFocus: $, onBlur: W, onClick: ae, onDragEnter: We, onDragOver: F, onDragLeave: z, onDrop: q, onPaste: xe, ...K } = {}) => ({
+    R || (Vs() ? setTimeout(be, 0) : be());
+  }, [R, be]), ie = (o) => s ? null : o, ot = (o) => k ? null : ie(o), Ve = (o) => I ? null : ie(o), An = (o) => de ? null : ie(o), Ae = (o) => {
+    S && o.stopPropagation();
+  }, Rn = c.useMemo(() => ({ refKey: o = "ref", role: m, onKeyDown: g, onFocus: $, onBlur: W, onClick: ae, onDragEnter: We, onDragOver: F, onDragLeave: z, onDrop: q, onPaste: xe, ...K } = {}) => ({
     onKeyDown: ot(H(g, Ct)),
     onFocus: ot(H($, Ft)),
     onBlur: ot(H(W, Pt)),
@@ -1126,12 +1126,12 @@ function wn(e = {}) {
     onDrop: Ve(H(q, ye)),
     onPaste: An(H(xe, Ue)),
     role: typeof m == "string" && m !== "" ? m : "presentation",
-    [o]: S,
+    [o]: A,
     ...!s && !k ? { tabIndex: 0 } : {},
     ...s ? { "aria-disabled": !0 } : {},
     ...K
   }), [
-    S,
+    A,
     Ct,
     Ft,
     Pt,
@@ -1142,13 +1142,13 @@ function wn(e = {}) {
     ye,
     Ue,
     k,
-    R,
+    I,
     de,
     s
-  ]), Rn = c.useCallback((o) => {
+  ]), In = c.useCallback((o) => {
     o.stopPropagation();
   }, []), kn = c.useMemo(() => ({ refKey: o = "ref", onChange: m, onClick: g, ...$ } = {}) => ({
-    accept: Fe,
+    accept: Pe,
     multiple: l,
     type: "file",
     "aria-label": "file upload",
@@ -1163,7 +1163,7 @@ function wn(e = {}) {
       width: 0
     },
     onChange: ie(H(m, ye)),
-    onClick: ie(H(g, Rn)),
+    onClick: ie(H(g, In)),
     tabIndex: -1,
     [o]: B,
     ...$
@@ -1177,9 +1177,9 @@ function wn(e = {}) {
   return {
     ...rt,
     isFocused: at && !s,
-    getRootProps: In,
+    getRootProps: Rn,
     getInputProps: kn,
-    rootRef: S,
+    rootRef: A,
     inputRef: B,
     open: ie(be)
   };
@@ -1268,7 +1268,7 @@ const rr = {
   useFsAccessApi: !1,
   variant: "light",
   rejectColor: "red"
-}, En = Be((e, { radius: t, variant: s, acceptColor: r, rejectColor: a }) => {
+}, Nn = Be((e, { radius: t, variant: s, acceptColor: r, rejectColor: a }) => {
   const i = e.variantColorResolver({
     color: r || e.primaryColor,
     theme: e,
@@ -1286,7 +1286,7 @@ const rr = {
     "--dropzone-reject-bg": l.background
   } };
 }), ne = De((e) => {
-  const t = G("Dropzone", rr, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, radius: h, disabled: y, loading: b, multiple: j, maxSize: u, accept: p, children: N, onDropAny: C, onDrop: x, onReject: v, openRef: D, name: I, maxFiles: k, autoFocus: R, activateOnClick: P, activateOnDrag: de, dragEventsBubbling: Z, activateOnKeyboard: U, onDragEnter: V, onDragLeave: T, onDragOver: ue, onFileDialogCancel: Fe, onFileDialogOpen: _e, preventDropOnDocument: Pe, useFsAccessApi: pe, getFilesFromEvent: S, validator: B, rejectColor: rt, acceptColor: E, enablePointerEvents: at, loaderProps: fe, inputProps: me, mod: Me, attributes: se, ..._ } = t, oe = ce({
+  const t = G("Dropzone", rr, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, radius: h, disabled: y, loading: b, multiple: w, maxSize: u, accept: p, children: D, onDropAny: C, onDrop: x, onReject: v, openRef: E, name: R, maxFiles: k, autoFocus: I, activateOnClick: S, activateOnDrag: de, dragEventsBubbling: Z, activateOnKeyboard: U, onDragEnter: V, onDragLeave: T, onDragOver: ue, onFileDialogCancel: Pe, onFileDialogOpen: _e, preventDropOnDocument: Se, useFsAccessApi: pe, getFilesFromEvent: A, validator: B, rejectColor: rt, acceptColor: N, enablePointerEvents: at, loaderProps: fe, inputProps: me, mod: Me, attributes: se, ..._ } = t, oe = ce({
     name: "Dropzone",
     classes: ke,
     props: t,
@@ -1297,8 +1297,8 @@ const rr = {
     unstyled: l,
     attributes: se,
     vars: d,
-    varsResolver: En
-  }), { getRootProps: $e, getInputProps: re, isDragAccept: J, isDragReject: He, isDragActive: L, open: Ge } = wn({
+    varsResolver: Nn
+  }), { getRootProps: $e, getInputProps: re, isDragAccept: Q, isDragReject: He, isDragActive: L, open: Ge } = wn({
     onDrop: C,
     onDropAccepted: x,
     onDropRejected: v,
@@ -1307,31 +1307,31 @@ const rr = {
       ...ye,
       [Ue]: []
     }), {}) : p,
-    multiple: j,
+    multiple: w,
     maxSize: u,
     maxFiles: k,
-    autoFocus: R,
-    noClick: !P,
+    autoFocus: I,
+    noClick: !S,
     noDrag: !de,
     noDragEventsBubbling: !Z,
     noKeyboard: !U,
     onDragEnter: V,
     onDragLeave: T,
     onDragOver: ue,
-    onFileDialogCancel: Fe,
+    onFileDialogCancel: Pe,
     onFileDialogOpen: _e,
-    preventDropOnDocument: Pe,
+    preventDropOnDocument: Se,
     useFsAccessApi: pe,
     validator: B,
-    ...S ? { getFilesFromEvent: sr(S) } : null
+    ...A ? { getFilesFromEvent: sr(A) } : null
   });
-  Ze(D, Ge);
-  const he = L && J, ge = L && He, Q = !he && !ge;
+  Ze(E, Ge);
+  const he = L && Q, ge = L && He, J = !he && !ge;
   return /* @__PURE__ */ n.jsx(ms, {
     value: {
       accept: he,
       reject: ge,
-      idle: Q
+      idle: J
     },
     children: /* @__PURE__ */ n.jsxs(te, {
       ...$e(),
@@ -1340,10 +1340,10 @@ const rr = {
       mod: [{
         accept: he,
         reject: ge,
-        idle: Q,
+        idle: J,
         disabled: y,
         loading: b,
-        "activate-on-click": P
+        "activate-on-click": S
       }, Me],
       children: [
         /* @__PURE__ */ n.jsx(st, {
@@ -1354,19 +1354,19 @@ const rr = {
         }),
         /* @__PURE__ */ n.jsx("input", {
           ...re(me),
-          name: I
+          name: R
         }),
         /* @__PURE__ */ n.jsx("div", {
           ...oe("inner"),
           "data-enable-pointer-events": at || void 0,
-          children: N
+          children: D
         })
       ]
     })
   });
 });
 ne.classes = ke;
-ne.varsResolver = En;
+ne.varsResolver = Nn;
 ne.displayName = "@mantine/dropzone/Dropzone";
 ne.Accept = gs;
 ne.Idle = bs;
@@ -1379,8 +1379,8 @@ const ar = {
   active: !0,
   zIndex: jt("max"),
   withinPortal: !0
-}, Nt = De((e) => {
-  const t = G("DropzoneFullScreen", ar, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, active: h, onDrop: y, onReject: b, zIndex: j, withinPortal: u, portalProps: p, attributes: N, mod: C, ...x } = t, v = ce({
+}, Dt = De((e) => {
+  const t = G("DropzoneFullScreen", ar, e), { classNames: s, className: r, style: a, styles: i, unstyled: l, vars: d, active: h, onDrop: y, onReject: b, zIndex: w, withinPortal: u, portalProps: p, attributes: D, mod: C, ...x } = t, v = ce({
     name: "DropzoneFullScreen",
     classes: ke,
     props: t,
@@ -1389,16 +1389,16 @@ const ar = {
     classNames: s,
     styles: i,
     unstyled: l,
-    attributes: N,
+    attributes: D,
     rootSelector: "fullScreen"
-  }), { resolvedClassNames: D, resolvedStyles: I } = Wn({
+  }), { resolvedClassNames: E, resolvedStyles: R } = Wn({
     classNames: s,
     styles: i,
     props: t
-  }), [k, R] = c.useState(0), [P, { open: de, close: Z }] = ts(!1), U = (T) => {
-    T.dataTransfer?.types.includes("Files") && (R((ue) => ue + 1), de());
+  }), [k, I] = c.useState(0), [S, { open: de, close: Z }] = ts(!1), U = (T) => {
+    T.dataTransfer?.types.includes("Files") && (I((ue) => ue + 1), de());
   }, V = () => {
-    R((T) => T - 1);
+    I((T) => T - 1);
   };
   return c.useEffect(() => {
     k === 0 && Z();
@@ -1412,36 +1412,36 @@ const ar = {
     withinPortal: u,
     children: /* @__PURE__ */ n.jsx(te, {
       ...v("fullScreen", { style: {
-        opacity: P ? 1 : 0,
-        pointerEvents: P ? "all" : "none",
-        zIndex: j
+        opacity: S ? 1 : 0,
+        pointerEvents: S ? "all" : "none",
+        zIndex: w
       } }),
       children: /* @__PURE__ */ n.jsx(ne, {
         activateOnClick: !1,
         ...x,
-        classNames: D,
-        styles: I,
+        classNames: E,
+        styles: R,
         unstyled: l,
         className: ke.dropzone,
         onDrop: (T) => {
-          y?.(T), Z(), R(0);
+          y?.(T), Z(), I(0);
         },
         onReject: (T) => {
-          b?.(T), Z(), R(0);
+          b?.(T), Z(), I(0);
         }
       })
     })
   });
 });
-Nt.classes = ke;
-Nt.displayName = "@mantine/dropzone/DropzoneFullScreen";
-ne.FullScreen = Nt;
+Dt.classes = ke;
+Dt.displayName = "@mantine/dropzone/DropzoneFullScreen";
+ne.FullScreen = Dt;
 const or = ne;
-let Dn = null;
+let En = null;
 function Pr(e) {
-  Dn = e;
+  En = e;
 }
-const A = (e) => /* @__PURE__ */ n.jsx("i", { className: `ph ${e}`, "aria-hidden": "true" }), Mt = {
+const P = (e) => /* @__PURE__ */ n.jsx("i", { className: `ph ${e}`, "aria-hidden": "true" }), Mt = {
   root: {
     width: "100%",
     height: "auto",
@@ -1470,7 +1470,7 @@ const A = (e) => /* @__PURE__ */ n.jsx("i", { className: `ph ${e}`, "aria-hidden
 }, $t = {
   root: { height: "var(--header-control-height)", minHeight: "var(--header-control-height)" },
   inner: { height: "100%" }
-}, Ae = {
+}, we = {
   inner: { justifyContent: "flex-start" },
   label: { flex: "0 1 auto" }
 }, qe = {
@@ -1509,13 +1509,13 @@ function lr() {
     ] }),
     /* @__PURE__ */ n.jsxs("div", { className: "project-control", children: [
       /* @__PURE__ */ n.jsx("div", { className: "project-combobox" }),
-      /* @__PURE__ */ n.jsx(Y, { id: "new-project", className: "icon-button", type: "button", size: 40, variant: "default", title: "New project", "data-i18n-attr": "title:projects.newButton;aria-label:projects.newButton", "aria-label": "New project", children: A("ph-plus") })
+      /* @__PURE__ */ n.jsx(Y, { id: "new-project", className: "icon-button", type: "button", size: 40, variant: "default", title: "New project", "data-i18n-attr": "title:projects.newButton;aria-label:projects.newButton", "aria-label": "New project", children: P("ph-plus") })
     ] }),
     /* @__PURE__ */ n.jsxs("div", { className: "topbar-history", "aria-label": "Document history", "data-i18n-attr": "aria-label:history.documentLabel", children: [
-      /* @__PURE__ */ n.jsx(Y, { id: "undo", className: "icon-button", type: "button", size: 40, variant: "default", disabled: !0, title: "Undo", "data-i18n-attr": "title:history.undo;aria-label:history.undo", "aria-label": "Undo", children: A("ph-arrow-counter-clockwise") }),
-      /* @__PURE__ */ n.jsx(Y, { id: "redo", className: "icon-button", type: "button", size: 40, variant: "default", disabled: !0, title: "Redo", "data-i18n-attr": "title:history.redo;aria-label:history.redo", "aria-label": "Redo", children: A("ph-arrow-clockwise") }),
-      /* @__PURE__ */ n.jsxs(w, { id: "history-shortcut", className: "version-pill", type: "button", variant: "default", styles: $t, title: "Show history", "data-i18n-attr": "title:history.show", children: [
-        A("ph-clock-counter-clockwise"),
+      /* @__PURE__ */ n.jsx(Y, { id: "undo", className: "icon-button", type: "button", size: 40, variant: "default", disabled: !0, title: "Undo", "data-i18n-attr": "title:history.undo;aria-label:history.undo", "aria-label": "Undo", children: P("ph-arrow-counter-clockwise") }),
+      /* @__PURE__ */ n.jsx(Y, { id: "redo", className: "icon-button", type: "button", size: 40, variant: "default", disabled: !0, title: "Redo", "data-i18n-attr": "title:history.redo;aria-label:history.redo", "aria-label": "Redo", children: P("ph-arrow-clockwise") }),
+      /* @__PURE__ */ n.jsxs(j, { id: "history-shortcut", className: "version-pill", type: "button", variant: "default", styles: $t, title: "Show history", "data-i18n-attr": "title:history.show", children: [
+        P("ph-clock-counter-clockwise"),
         /* @__PURE__ */ n.jsxs("span", { children: [
           /* @__PURE__ */ n.jsx("span", { "data-i18n": "history.version", children: "Version" }),
           " ",
@@ -1525,11 +1525,11 @@ function lr() {
       /* @__PURE__ */ n.jsx("span", { id: "save-state", className: "save-state" })
     ] }),
     /* @__PURE__ */ n.jsxs("div", { className: "topbar-actions", children: [
-      /* @__PURE__ */ n.jsx(Y, { id: "settings", className: "icon-button", type: "button", size: 40, variant: "default", title: "Settings", "data-i18n-attr": "title:settings.openButton;aria-label:settings.openButton", "aria-label": "Settings", children: A("ph-gear-six") }),
-      /* @__PURE__ */ n.jsxs(w, { id: "export", className: "button button-primary export-button", type: "button", styles: $t, "aria-label": "Export", "data-i18n-attr": "aria-label:export.openButton", children: [
-        A("ph-export"),
+      /* @__PURE__ */ n.jsx(Y, { id: "settings", className: "icon-button", type: "button", size: 40, variant: "default", title: "Settings", "data-i18n-attr": "title:settings.openButton;aria-label:settings.openButton", "aria-label": "Settings", children: P("ph-gear-six") }),
+      /* @__PURE__ */ n.jsxs(j, { id: "export", className: "button button-primary export-button", type: "button", styles: $t, "aria-label": "Export", "data-i18n-attr": "aria-label:export.openButton", children: [
+        P("ph-export"),
         /* @__PURE__ */ n.jsx("span", { "data-i18n": "export.openButton", children: "Export" }),
-        A("ph-caret-down")
+        P("ph-caret-down")
       ] })
     ] })
   ] });
@@ -1543,13 +1543,13 @@ const cr = [
 ];
 function dr() {
   return /* @__PURE__ */ n.jsxs(n.Fragment, { children: [
-    cr.map((e) => /* @__PURE__ */ n.jsxs(w, { id: e.id, type: "button", variant: "subtle", className: `tool${"active" in e && e.active ? " active" : ""}`, styles: Mt, "aria-label": e.aria, title: e.label.split(".")[1], "aria-pressed": e.pressed, "aria-controls": "controls" in e ? e.controls : void 0, "data-i18n-attr": `aria-label:${e.aria};title:${e.label}`, children: [
-      A(e.icon),
+    cr.map((e) => /* @__PURE__ */ n.jsxs(j, { id: e.id, type: "button", variant: "subtle", className: `tool${"active" in e && e.active ? " active" : ""}`, styles: Mt, "aria-label": e.aria, title: e.label.split(".")[1], "aria-pressed": e.pressed, "aria-controls": "controls" in e ? e.controls : void 0, "data-i18n-attr": `aria-label:${e.aria};title:${e.label}`, children: [
+      P(e.icon),
       /* @__PURE__ */ n.jsx("span", { className: "tool-label", "data-i18n": e.label, children: e.label.split(".")[1] })
     ] }, e.id)),
     /* @__PURE__ */ n.jsx("span", { className: "toolrail-spacer" }),
-    /* @__PURE__ */ n.jsxs(w, { id: "dock-toggle", className: "tool", type: "button", variant: "subtle", styles: Mt, "aria-label": "Toggle properties and layers", title: "Panels", "aria-expanded": "true", "aria-controls": "structure-panel", "data-i18n-attr": "aria-label:toolbar.togglePanels;title:toolbar.panelsButton", children: [
-      A("ph-sidebar-simple"),
+    /* @__PURE__ */ n.jsxs(j, { id: "dock-toggle", className: "tool", type: "button", variant: "subtle", styles: Mt, "aria-label": "Toggle properties and layers", title: "Panels", "aria-expanded": "true", "aria-controls": "structure-panel", "data-i18n-attr": "aria-label:toolbar.togglePanels;title:toolbar.panelsButton", children: [
+      P("ph-sidebar-simple"),
       /* @__PURE__ */ n.jsx("span", { className: "tool-label", "data-i18n": "toolbar.panelsButton", children: "Panels" })
     ] })
   ] });
@@ -1558,38 +1558,38 @@ function ur() {
   return /* @__PURE__ */ n.jsxs(n.Fragment, { children: [
     /* @__PURE__ */ n.jsxs("div", { className: "panel-heading", children: [
       /* @__PURE__ */ n.jsx(O, { component: "h2", id: "add-panel-title", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "toolbar.textButton", children: "Text" }) }),
-      /* @__PURE__ */ n.jsx(Y, { id: "add-panel-close", className: "icon-button", type: "button", variant: "subtle", title: "Collapse Add panel", "data-i18n-attr": "title:panels.collapseAdd;aria-label:panels.collapseAdd", "aria-label": "Collapse Add panel", children: A("ph-x") })
+      /* @__PURE__ */ n.jsx(Y, { id: "add-panel-close", className: "icon-button", type: "button", variant: "subtle", title: "Collapse Add panel", "data-i18n-attr": "title:panels.collapseAdd;aria-label:panels.collapseAdd", "aria-label": "Collapse Add panel", children: P("ph-x") })
     ] }),
     /* @__PURE__ */ n.jsxs("section", { className: "add-section", id: "add-text-section", children: [
       /* @__PURE__ */ n.jsxs("div", { className: "section-title", children: [
         /* @__PURE__ */ n.jsx("h3", { children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "toolbar.textButton", children: "Text" }) }),
-        A("ph-caret-up")
+        P("ph-caret-up")
       ] }),
-      /* @__PURE__ */ n.jsx(w, { className: "text-preset plain", type: "button", variant: "default", styles: Ae, "data-text-preset": "plain", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.plain", children: "Plain text" }) }),
-      /* @__PURE__ */ n.jsx(w, { className: "text-preset heading", type: "button", variant: "default", styles: Ae, "data-text-preset": "heading", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.heading", children: "Heading" }) }),
-      /* @__PURE__ */ n.jsx(w, { className: "text-preset subheading", type: "button", variant: "default", styles: Ae, "data-text-preset": "subheading", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.subheading", children: "Subheading" }) }),
-      /* @__PURE__ */ n.jsx(w, { className: "text-preset body", type: "button", variant: "default", styles: Ae, "data-text-preset": "body", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.body", children: "Body text" }) })
+      /* @__PURE__ */ n.jsx(j, { className: "text-preset plain", type: "button", variant: "default", styles: we, "data-text-preset": "plain", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.plain", children: "Plain text" }) }),
+      /* @__PURE__ */ n.jsx(j, { className: "text-preset heading", type: "button", variant: "default", styles: we, "data-text-preset": "heading", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.heading", children: "Heading" }) }),
+      /* @__PURE__ */ n.jsx(j, { className: "text-preset subheading", type: "button", variant: "default", styles: we, "data-text-preset": "subheading", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.subheading", children: "Subheading" }) }),
+      /* @__PURE__ */ n.jsx(j, { className: "text-preset body", type: "button", variant: "default", styles: we, "data-text-preset": "body", children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "text.body", children: "Body text" }) })
     ] }),
     /* @__PURE__ */ n.jsxs("section", { className: "add-section", id: "add-shape-section", hidden: !0, children: [
       /* @__PURE__ */ n.jsx("div", { className: "section-title", children: /* @__PURE__ */ n.jsx("h3", { children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "toolbar.elementsButton", children: "Elements" }) }) }),
       /* @__PURE__ */ n.jsxs("div", { className: "shape-row", children: [
         /* @__PURE__ */ n.jsx(O, { className: "element-group-title", "data-i18n": "elements.shapes", children: "Shapes" }),
-        /* @__PURE__ */ n.jsxs(w, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "rect", children: [
-          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: A("ph-square") }),
+        /* @__PURE__ */ n.jsxs(j, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "rect", children: [
+          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: P("ph-square") }),
           /* @__PURE__ */ n.jsx("span", { "data-i18n": "shapes.rectangle", children: "Rectangle" })
         ] }),
-        /* @__PURE__ */ n.jsxs(w, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "ellipse", children: [
-          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: A("ph-circle") }),
+        /* @__PURE__ */ n.jsxs(j, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "ellipse", children: [
+          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: P("ph-circle") }),
           /* @__PURE__ */ n.jsx("span", { "data-i18n": "shapes.ellipse", children: "Ellipse" })
         ] }),
         /* @__PURE__ */ n.jsx(O, { className: "element-group-title", "data-i18n": "elements.lines", children: "Lines" }),
-        /* @__PURE__ */ n.jsxs(w, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "line", children: [
-          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: A("ph-line-segment") }),
+        /* @__PURE__ */ n.jsxs(j, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "line", children: [
+          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: P("ph-line-segment") }),
           /* @__PURE__ */ n.jsx("span", { "data-i18n": "shapes.line", children: "Line" })
         ] }),
         /* @__PURE__ */ n.jsx(O, { className: "element-group-title", "data-i18n": "elements.paths", children: "Paths" }),
-        /* @__PURE__ */ n.jsxs(w, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "path", children: [
-          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: A("ph-bezier-curve") }),
+        /* @__PURE__ */ n.jsxs(j, { className: "shape-preset", type: "button", variant: "default", radius: 12, styles: qe, "data-shape": "path", children: [
+          /* @__PURE__ */ n.jsx("span", { className: "shape-preset-icon", children: P("ph-bezier-curve") }),
           /* @__PURE__ */ n.jsx("span", { "data-i18n": "shapes.path", children: "Path" })
         ] })
       ] })
@@ -1607,26 +1607,31 @@ function ur() {
           accept: { "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"], "image/webp": [".webp"], "image/gif": [".gif"], "image/svg+xml": [".svg"] },
           inputProps: { id: "image-file" },
           onDrop: (e) => {
-            e[0] && Dn?.(e[0]);
+            e[0] && En?.(e[0]);
           },
           onReject: (e) => {
             const t = document.getElementById("upload-feedback");
             t && e[0] && (t.textContent = f("uploads.failed", { name: e[0].file.name }));
           },
           children: [
-            A("ph-cloud-arrow-up"),
+            P("ph-cloud-arrow-up"),
             /* @__PURE__ */ n.jsx("strong", { "data-i18n": "uploads.dropFiles", children: "Drop files here" }),
             /* @__PURE__ */ n.jsx("span", { "data-i18n": "uploads.orBrowse", children: "or browse images and SVG" })
           ]
         }
       ),
-      /* @__PURE__ */ n.jsx("div", { id: "upload-feedback", className: "upload-feedback", "aria-live": "polite" })
+      /* @__PURE__ */ n.jsx("div", { id: "upload-feedback", className: "upload-feedback", "aria-live": "polite" }),
+      /* @__PURE__ */ n.jsx("p", { className: "hint", "data-i18n": "generated.uploadsHint", children: "Make a chart or a table from CSV, or a QR code from text." }),
+      /* @__PURE__ */ n.jsxs(j, { id: "open-generated", className: "wide-action", type: "button", variant: "default", styles: we, children: [
+        P("ph-chart-bar"),
+        /* @__PURE__ */ n.jsx("span", { "data-i18n": "generated.insertButton", children: "Chart, table or QR code" })
+      ] })
     ] }),
     /* @__PURE__ */ n.jsxs("section", { className: "add-section", id: "add-template-section", hidden: !0, children: [
       /* @__PURE__ */ n.jsx("div", { className: "section-title", children: /* @__PURE__ */ n.jsx("h3", { children: /* @__PURE__ */ n.jsx("span", { "data-i18n": "toolbar.templatesButton", children: "Templates" }) }) }),
       /* @__PURE__ */ n.jsx("p", { className: "hint", "data-i18n": "templates.fillWorkspaceHint", children: "Fill project slots and render variants from this workspace." }),
-      /* @__PURE__ */ n.jsxs(w, { id: "open-templates", className: "wide-action", type: "button", variant: "default", styles: Ae, children: [
-        A("ph-layout"),
+      /* @__PURE__ */ n.jsxs(j, { id: "open-templates", className: "wide-action", type: "button", variant: "default", styles: we, children: [
+        P("ph-layout"),
         /* @__PURE__ */ n.jsx("span", { "data-i18n": "templates.openTools", children: "Open template tools" })
       ] })
     ] }),
@@ -1645,7 +1650,7 @@ function pr() {
 }
 const Xe = (e) => /* @__PURE__ */ n.jsx("i", { className: `ph ${e}`, "aria-hidden": "true" });
 function fr() {
-  return Ne(), /* @__PURE__ */ n.jsxs(n.Fragment, { children: [
+  return Ce(), /* @__PURE__ */ n.jsxs(n.Fragment, { children: [
     /* @__PURE__ */ n.jsxs("div", { id: "canvas-empty", className: "canvas-empty", children: [
       /* @__PURE__ */ n.jsx("div", { className: "empty-mark", children: Xe("ph-sparkle") }),
       /* @__PURE__ */ n.jsx("p", { className: "eyebrow", children: f("editor.structuredEyebrow") }),
@@ -1655,7 +1660,7 @@ function fr() {
         f("editor.emptyTitleSecond")
       ] }),
       /* @__PURE__ */ n.jsx("p", { children: f("editor.emptyDescription") }),
-      /* @__PURE__ */ n.jsxs(w, { id: "empty-create", className: "button button-primary", type: "button", variant: "filled", children: [
+      /* @__PURE__ */ n.jsxs(j, { id: "empty-create", className: "button button-primary", type: "button", variant: "filled", children: [
         Xe("ph-plus"),
         " ",
         f("editor.createProject")
@@ -1669,12 +1674,12 @@ function fr() {
   ] });
 }
 function mr() {
-  return Ne(), /* @__PURE__ */ n.jsxs(n.Fragment, { children: [
+  return Ce(), /* @__PURE__ */ n.jsxs(n.Fragment, { children: [
     /* @__PURE__ */ n.jsxs("div", { className: "zoom-controls", role: "group", "aria-label": f("canvas.zoomLabel"), children: [
       /* @__PURE__ */ n.jsx(Y, { id: "zoom-out", type: "button", size: 36, variant: "default", title: f("canvas.zoomOut"), "aria-label": f("canvas.zoomOut"), children: Xe("ph-minus") }),
-      /* @__PURE__ */ n.jsx(w, { id: "zoom-value", type: "button", title: f("canvas.zoomCurrent"), variant: "default", children: f("canvas.zoomFit") }),
+      /* @__PURE__ */ n.jsx(j, { id: "zoom-value", type: "button", title: f("canvas.zoomCurrent"), variant: "default", children: f("canvas.zoomFit") }),
       /* @__PURE__ */ n.jsx(Y, { id: "zoom-in", type: "button", size: 36, variant: "default", title: f("canvas.zoomIn"), "aria-label": f("canvas.zoomIn"), children: Xe("ph-plus") }),
-      /* @__PURE__ */ n.jsx(w, { id: "zoom-100", type: "button", title: f("canvas.zoomSet100"), variant: "default", children: "100%" })
+      /* @__PURE__ */ n.jsx(j, { id: "zoom-100", type: "button", title: f("canvas.zoomSet100"), variant: "default", children: "100%" })
     ] }),
     /* @__PURE__ */ n.jsx("p", { id: "canvas-hints", className: "canvas-hints", hidden: !0, children: f("canvas.panHint") })
   ] });
@@ -1691,8 +1696,8 @@ function yr({
   onRename: s,
   onDelete: r
 }) {
-  return Ne(), /* @__PURE__ */ n.jsx(
-    Et,
+  return Ce(), /* @__PURE__ */ n.jsx(
+    Nt,
     {
       id: "recents",
       className: "recents",
@@ -1729,7 +1734,7 @@ function yr({
           ),
           /* @__PURE__ */ n.jsxs(qt, { className: "recent-controls", gap: "xs", grow: !0, wrap: "nowrap", children: [
             /* @__PURE__ */ n.jsx(
-              w,
+              j,
               {
                 className: "small recent-rename",
                 type: "button",
@@ -1741,7 +1746,7 @@ function yr({
               }
             ),
             /* @__PURE__ */ n.jsx(
-              w,
+              j,
               {
                 className: "small recent-delete",
                 type: "button",
@@ -1773,11 +1778,11 @@ let Ee = {
   consentVisible: !1,
   banner: null
 }, ht = "ph-check-circle", gt = "save.allChangesSaved", yt = null;
-function Ce(e) {
+function Fe(e) {
   Ee = { ...Ee, ...e }, yt?.(Ee);
 }
 function br() {
-  Ne();
+  Ce();
   const [e, t] = c.useState({ icon: ht, key: gt });
   return c.useEffect(() => (bt = t, t({ icon: ht, key: gt }), () => {
     bt = null;
@@ -1788,7 +1793,7 @@ function br() {
 }
 let bt = null;
 function xr({ onConsent: e, onDismiss: t }) {
-  Ne();
+  Ce();
   const [s, r] = c.useState(Ee);
   c.useEffect(() => (yt = r, r(Ee), () => {
     yt = null;
@@ -1806,7 +1811,7 @@ function xr({ onConsent: e, onDismiss: t }) {
           /* @__PURE__ */ n.jsx(O, { className: "notice-text", children: f("updates.consentQuestion") }),
           /* @__PURE__ */ n.jsxs(qt, { className: "notice-actions", gap: "sm", justify: "flex-end", wrap: "wrap", children: [
             /* @__PURE__ */ n.jsx(
-              w,
+              j,
               {
                 id: "consent-notify",
                 className: "button button-primary",
@@ -1817,7 +1822,7 @@ function xr({ onConsent: e, onDismiss: t }) {
               }
             ),
             /* @__PURE__ */ n.jsx(
-              w,
+              j,
               {
                 id: "consent-off",
                 className: "button button-quiet",
@@ -1841,7 +1846,7 @@ function xr({ onConsent: e, onDismiss: t }) {
         children: [
           /* @__PURE__ */ n.jsx("i", { className: "ph ph-arrow-circle-up", "aria-hidden": "true" }),
           /* @__PURE__ */ n.jsx(O, { id: "update-banner-text", className: "notice-text", "data-version": i?.version ?? "", children: i?.text ?? "" }),
-          i?.notesUrl ? /* @__PURE__ */ n.jsx(Je, { id: "update-banner-link", href: i.notesUrl, target: "_blank", rel: "noopener noreferrer", children: f("updates.releaseNotes") }) : /* @__PURE__ */ n.jsx(Je, { id: "update-banner-link", hidden: !0, target: "_blank", rel: "noopener noreferrer", children: f("updates.releaseNotes") }),
+          i?.notesUrl ? /* @__PURE__ */ n.jsx(Qe, { id: "update-banner-link", href: i.notesUrl, target: "_blank", rel: "noopener noreferrer", children: f("updates.releaseNotes") }) : /* @__PURE__ */ n.jsx(Qe, { id: "update-banner-link", hidden: !0, target: "_blank", rel: "noopener noreferrer", children: f("updates.releaseNotes") }),
           /* @__PURE__ */ n.jsx(
             Y,
             {
@@ -1876,26 +1881,26 @@ function Ar(e, t, s) {
     /* @__PURE__ */ n.jsx(xr, { onConsent: t, onDismiss: s })
   );
 }
-function Ir(e, t = "info") {
-  Ce({ message: e, kind: t });
+function Rr(e, t = "info") {
+  Fe({ message: e, kind: t });
 }
-function Rr(e) {
-  Ce({ kind: e });
+function Ir(e) {
+  Fe({ kind: e });
 }
 function kr() {
   return Ee.kind;
 }
 function zr(e) {
-  Ce({ dimensions: e });
+  Fe({ dimensions: e });
 }
 function Or(e) {
-  Ce({ agents: e });
+  Fe({ agents: e });
 }
 function Tr(e) {
-  Ce({ consentVisible: e });
+  Fe({ consentVisible: e });
 }
 function Br(e) {
-  Ce({ banner: e });
+  Fe({ banner: e });
 }
 function Lr(e, t) {
   ht = e, gt = t, bt?.({ icon: e, key: t });
@@ -1928,8 +1933,8 @@ function _r(e) {
 function Mr() {
   return et;
 }
-function Er() {
-  Ne();
+function Nr() {
+  Ce();
   const [e, t] = c.useState(et);
   return c.useEffect(() => (xt = t, t(et), () => {
     xt = null;
@@ -1955,17 +1960,17 @@ function Er() {
     ] }),
     /* @__PURE__ */ n.jsxs("section", { children: [
       /* @__PURE__ */ n.jsx(O, { component: "h3", children: f("position.alignSelection") }),
-      /* @__PURE__ */ n.jsx("div", { className: "popover-actions", children: wr.map(([s, r]) => /* @__PURE__ */ n.jsx(w, { type: "button", variant: "default", "data-layout": s, children: f(r) }, s)) })
+      /* @__PURE__ */ n.jsx("div", { className: "popover-actions", children: wr.map(([s, r]) => /* @__PURE__ */ n.jsx(j, { type: "button", variant: "default", "data-layout": s, children: f(r) }, s)) })
     ] }),
     /* @__PURE__ */ n.jsxs("section", { children: [
       /* @__PURE__ */ n.jsx(O, { component: "h3", children: f("position.distribute") }),
       /* @__PURE__ */ n.jsxs("div", { className: "popover-actions two", children: [
-        /* @__PURE__ */ n.jsxs(w, { type: "button", variant: "default", "data-layout": "distribute-horizontal", children: [
+        /* @__PURE__ */ n.jsxs(j, { type: "button", variant: "default", "data-layout": "distribute-horizontal", children: [
           /* @__PURE__ */ n.jsx("i", { className: "ph ph-columns", "aria-hidden": "true" }),
           " ",
           f("position.horizontal")
         ] }),
-        /* @__PURE__ */ n.jsxs(w, { type: "button", variant: "default", "data-layout": "distribute-vertical", children: [
+        /* @__PURE__ */ n.jsxs(j, { type: "button", variant: "default", "data-layout": "distribute-vertical", children: [
           /* @__PURE__ */ n.jsx("i", { className: "ph ph-rows", "aria-hidden": "true" }),
           " ",
           f("position.vertical")
@@ -1978,16 +1983,16 @@ function Er() {
     ] })
   ] });
 }
-function Dr(e) {
-  ee("position-popover", e, /* @__PURE__ */ n.jsx(Er, {}));
+function Er(e) {
+  ee("position-popover", e, /* @__PURE__ */ n.jsx(Nr, {}));
 }
-const Nn = document.getElementById("mantine-root");
-if (!(Nn instanceof HTMLElement)) throw new Error("Missing Mantine root");
+const Dn = document.getElementById("mantine-root");
+if (!(Dn instanceof HTMLElement)) throw new Error("Missing Mantine root");
 const Cn = document.getElementById("canvas-surface-root");
 if (!(Cn instanceof HTMLElement)) throw new Error("Missing canvas surface mount");
 const Fn = document.getElementById("canvas-controls-root");
 if (!(Fn instanceof HTMLElement)) throw new Error("Missing canvas controls mount");
-Yn(Nn);
+Yn(Dn);
 pr();
 hr(Cn);
 gr(Fn);
@@ -1996,12 +2001,12 @@ if (!(Pn instanceof HTMLElement)) throw new Error("Missing save indicator mount"
 vr(Pn);
 const Sn = document.getElementById("position-popover-root");
 if (!(Sn instanceof HTMLElement)) throw new Error("Missing position popover mount");
-Dr(Sn);
+Er(Sn);
 import("./chunk-app.js");
 export {
   Xt as O,
-  Et as S,
-  Re as a,
+  Nt as S,
+  Ie as a,
   Ze as b,
   Yt as c,
   kr as d,
@@ -2010,8 +2015,8 @@ export {
   jt as g,
   Tr as h,
   Zn as i,
-  _r as j,
-  Ir as k,
+  Rr as j,
+  _r as k,
   Br as l,
   es as m,
   Or as n,
@@ -2019,6 +2024,6 @@ export {
   Mr as p,
   zr as q,
   Pr as r,
-  Rr as s,
+  Ir as s,
   Fr as u
 };

@@ -1480,6 +1480,7 @@ impl GeneratedBoxArgs {
         assemblash_server::generated::Placement {
             position: None,
             origin: (self.x, self.y),
+            centered: false,
             transform,
             name: self.layer_name.clone(),
         }
