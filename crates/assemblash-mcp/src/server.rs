@@ -197,6 +197,32 @@ impl AssemblashMcp {
             .map_err(to_error)
     }
 
+    /// Adds a generated layer, resolving the project first.
+    pub(crate) fn add_generated(
+        &self,
+        envelope: &crate::writes::WriteEnvelope,
+        placement: &crate::write_tools::PlacementArgs,
+        box_: &crate::write_tools::OptionalBoxArgs,
+        name: Option<String>,
+        spec: &assemblash_export::generate::GeneratedSpec,
+    ) -> Result<Json<crate::writes::GeneratedWrite>, ErrorData> {
+        let transform = box_.transform()?;
+        self.backend
+            .add_generated(
+                &self.resolved(envelope),
+                spec,
+                assemblash_server::generated::Placement {
+                    position: Some(placement.into()),
+                    transform,
+                    origin: (box_.x.unwrap_or(0.0), box_.y.unwrap_or(0.0)),
+                    centered: false,
+                    name,
+                },
+            )
+            .map(Json)
+            .map_err(to_error)
+    }
+
     /// The project argument a read tool should use.
     fn read_project(&self, named: Option<String>) -> Option<String> {
         self.resolve_project(named)

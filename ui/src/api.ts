@@ -360,6 +360,102 @@ export async function applyOperationBatch(
   );
 }
 
+/** The chart types the chart generator draws. */
+export const CHART_TYPES = ["bar", "column", "line", "area", "pie", "donut", "scatter"] as const;
+export type ChartType = (typeof CHART_TYPES)[number];
+
+/** The kinds of generated layer: a chart, a table or a QR code. */
+export const GENERATED_KINDS = ["chart", "table", "qr"] as const;
+export type GeneratedKind = (typeof GENERATED_KINDS)[number];
+
+/** The reserved layer metadata key each generated kind records its spec under. */
+export const GENERATED_META_KEYS: Record<GeneratedKind, string> = {
+  chart: "assemblash.chart",
+  table: "assemblash.table",
+  qr: "assemblash.qr",
+};
+
+/** What the server returns after it adds or makes again a generated layer. */
+export interface GeneratedResult {
+  layer: string;
+  asset: string;
+  assetHash: string;
+  width: number;
+  height: number;
+  transaction: string;
+  version: number;
+}
+
+/** The source of a new generated layer: a whole spec, or CSV text with default settings. */
+export type GeneratedSource =
+  | { spec: Record<string, unknown> }
+  | { csv: { kind: "chart" | "table"; chartType?: ChartType; text: string; title?: string } };
+
+/** Adds a chart, table or QR code layer. The server generates the SVG and records the spec. */
+export async function addGeneratedLayer(
+  project: string,
+  source: GeneratedSource,
+  expectedVersion: number | null,
+): Promise<GeneratedResult> {
+  return request<GeneratedResult>(
+    `/api/projects/${encodeURIComponent(project)}/generated-layers`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...source,
+        centered: true,
+        expectedVersion,
+        actor: { kind: "human", name: "reference UI" },
+      }),
+    },
+  );
+}
+
+/** Makes a generated layer again, from a new spec or with another chart type. */
+export async function regenerateLayer(
+  project: string,
+  layer: string,
+  change: { spec?: Record<string, unknown>; chartType?: ChartType },
+  expectedVersion: number | null,
+): Promise<GeneratedResult> {
+  return request<GeneratedResult>(
+    `/api/projects/${encodeURIComponent(project)}/generated-layers/${encodeURIComponent(layer)}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...change,
+        expectedVersion,
+        actor: { kind: "human", name: "reference UI" },
+      }),
+    },
+  );
+}
+
+/**
+ * The generated-layer record on a layer, or `null` when the layer is not generated.
+ *
+ * The record is `{ spec, generator, font }` under one reserved key. It is read
+ * defensively because layer extras are free JSON.
+ */
+export function generatedRecordOf(
+  layer: Layer,
+): { kind: GeneratedKind; spec: Record<string, unknown> } | null {
+  if (layer.type !== "svg") return null;
+  const extras = layer as unknown as Record<string, unknown>;
+  for (const kind of GENERATED_KINDS) {
+    const record = extras[GENERATED_META_KEYS[kind]];
+    if (record && typeof record === "object" && !Array.isArray(record)) {
+      const spec = (record as Record<string, unknown>)["spec"];
+      if (spec && typeof spec === "object" && !Array.isArray(spec)) {
+        return { kind, spec: spec as Record<string, unknown> };
+      }
+    }
+  }
+  return null;
+}
+
 export async function undo(project: string): Promise<OperationResult> {
   return request<OperationResult>(`/api/projects/${encodeURIComponent(project)}/undo`, {
     method: "POST",

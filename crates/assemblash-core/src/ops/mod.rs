@@ -234,7 +234,46 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         allow_locked: bool,
     },
+
+    /// Records structured metadata on a layer, or removes it.
+    ///
+    /// The value goes into the layer payload's `extra` map, under a reserved
+    /// key that starts with `assemblash.`. A typed field never contains a
+    /// dot, so a reserved key cannot collide with a field that a later
+    /// release adds. Every build since 1.0.0 keeps the map as it is, so an
+    /// older build preserves the metadata it cannot read.
+    ///
+    /// A generated layer — a chart, a table, a QR code — records the spec
+    /// it was made from here, so it can be made again from the same data.
+    SetLayerMeta {
+        /// Layer to change.
+        id: LayerId,
+        /// The reserved key, for example `assemblash.chart`.
+        key: String,
+        /// The value to record. An absent value, or JSON `null`, removes the
+        /// key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<serde_json::Value>,
+        /// Change a locked layer.
+        ///
+        /// camelCase like every layer field, unlike the older
+        /// `applyPreset`, whose spelling cannot change in 1.x.
+        #[serde(
+            default,
+            rename = "allowLocked",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        allow_locked: bool,
+    },
 }
+
+/// The prefix every key that [`Operation::SetLayerMeta`] writes starts with.
+pub const LAYER_META_PREFIX: &str = "assemblash.";
+
+/// The largest value [`Operation::SetLayerMeta`] records, serialised, in
+/// bytes. A spec is a few kilobytes; this stops a document from growing
+/// without bound through one field.
+pub const LAYER_META_MAX_BYTES: usize = 64 * 1024;
 
 /// What an operation did, beyond changing the document.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -410,6 +449,12 @@ pub(crate) fn apply_with_semantics(
             },
             semantics,
         ),
+        Operation::SetLayerMeta {
+            id,
+            key,
+            value,
+            allow_locked,
+        } => set_layer_meta(&mut candidate, id, key, value.as_ref(), *allow_locked),
     }?;
 
     // The operation itself checks its own preconditions; this catches
@@ -503,6 +548,7 @@ const OPERATION_NAMES: &[&str] = &[
     "updateSlot",
     "removeSlot",
     "applyPreset",
+    "setLayerMeta",
 ];
 
 fn known_operation_name(name: &str) -> Option<&'static str> {
@@ -1005,6 +1051,71 @@ fn update(
     })?;
     request.apply_to(layer, semantics)?;
     Ok(OpOutcome::changed(request.id.clone()))
+}
+
+fn set_layer_meta(
+    document: &mut Document,
+    id: &LayerId,
+    key: &str,
+    value: Option<&serde_json::Value>,
+    allow_locked: bool,
+) -> Result<OpOutcome, OpError> {
+    if !is_layer_meta_key(key) {
+        return Err(OpError::InvalidMetaKey {
+            key: key.to_owned(),
+        });
+    }
+    // JSON `null` and an absent value mean the same: remove the key. Keeping
+    // a `null` would make two documents that draw and regenerate the same
+    // differ in their bytes.
+    let value = value.filter(|value| !value.is_null());
+    if let Some(value) = value {
+        let bytes = serde_json::to_vec(value)
+            .map(|bytes| bytes.len())
+            .unwrap_or(usize::MAX);
+        if bytes > LAYER_META_MAX_BYTES {
+            return Err(OpError::MetaValueTooLarge {
+                key: key.to_owned(),
+                bytes,
+                limit: LAYER_META_MAX_BYTES,
+            });
+        }
+    }
+    ensure_mutable(document, id, allow_locked)?;
+    let layer =
+        tree::find_mut(document, id).ok_or_else(|| OpError::NoSuchLayer { id: id.clone() })?;
+    let extra = match &mut layer.kind {
+        LayerKind::Text(payload) => &mut payload.extra,
+        LayerKind::Image(payload) => &mut payload.extra,
+        LayerKind::Group(payload) => &mut payload.extra,
+        LayerKind::Svg(payload) => &mut payload.extra,
+        LayerKind::Shape(payload) => &mut payload.extra,
+    };
+    match value {
+        Some(value) => {
+            extra.insert(key.to_owned(), value.clone());
+        }
+        None => {
+            if extra.remove(key).is_none() {
+                return Err(OpError::NothingToDo {
+                    operation: "setLayerMeta",
+                });
+            }
+        }
+    }
+    Ok(OpOutcome::changed(id.clone()))
+}
+
+/// Whether `key` is one [`Operation::SetLayerMeta`] may write: the reserved
+/// prefix, then one or more dot-separated words of ASCII letters and digits.
+pub fn is_layer_meta_key(key: &str) -> bool {
+    let Some(rest) = key.strip_prefix(LAYER_META_PREFIX) else {
+        return false;
+    };
+    key.len() <= 64
+        && rest
+            .split('.')
+            .all(|word| !word.is_empty() && word.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
 fn delete(document: &mut Document, id: &LayerId) -> Result<OpOutcome, OpError> {
@@ -2195,9 +2306,15 @@ mod tests {
                 name: "headline".to_owned(),
             },
             Operation::ApplyPreset {
-                id,
+                id: id.clone(),
                 preset: "heading".to_owned(),
                 allow_locked: false,
+            },
+            Operation::SetLayerMeta {
+                id,
+                key: "assemblash.chart".to_owned(),
+                value: Some(serde_json::json!({ "spec": { "type": "bar" } })),
+                allow_locked: true,
             },
         ]
     }

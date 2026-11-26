@@ -495,6 +495,196 @@ pub struct FlagArgs {
     pub value: bool,
 }
 
+/// An optional layer box. Omit `width` and `height` to use the generated
+/// size; omit `x` and `y` for the canvas origin.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionalBoxArgs {
+    /// Left edge, in the parent's coordinate space. Default 0.
+    #[serde(default)]
+    pub x: Option<f64>,
+    /// Top edge. Default 0.
+    #[serde(default)]
+    pub y: Option<f64>,
+    /// Box width. Default: the generated width.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// Box height. Default: the generated height.
+    #[serde(default)]
+    pub height: Option<f64>,
+}
+
+impl OptionalBoxArgs {
+    pub(crate) fn transform(&self) -> Result<Option<Transform>, ErrorData> {
+        match (self.width, self.height) {
+            (None, None) => Ok(None),
+            (Some(width), Some(height)) => Ok(Some(Transform::new(
+                self.x.unwrap_or(0.0),
+                self.y.unwrap_or(0.0),
+                width,
+                height,
+            ))),
+            _ => Err(ErrorData::invalid_params(
+                "give width and height together, or neither to use the generated size",
+                None,
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddChartArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    #[serde(flatten)]
+    pub placement: PlacementArgs,
+    #[serde(flatten)]
+    pub box_: OptionalBoxArgs,
+    /// The chart spec: `type` (bar, column, line, area, pie, donut,
+    /// scatter), `categories` (labels), `series` ([{name, values, color?}],
+    /// one value per category), and optional `title`, `width`, `height`,
+    /// `fontFamily`, `fontSize`, `palette`, `background`, `textColor`,
+    /// `axis` {min, max, gridLines}, `legend`, `valueLabels`. Give this or
+    /// `csv`.
+    #[serde(default)]
+    pub spec: Option<serde_json::Value>,
+    /// CSV text instead of a spec: a header row (first cell ignored, then
+    /// series names), then one row per category. Needs `chartType`.
+    #[serde(default)]
+    pub csv: Option<String>,
+    /// The chart type for `csv`: bar, column, line, area, pie, donut or
+    /// scatter.
+    #[serde(default)]
+    pub chart_type: Option<String>,
+    /// Human-facing layer name. Default: the title.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTableArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    #[serde(flatten)]
+    pub placement: PlacementArgs,
+    #[serde(flatten)]
+    pub box_: OptionalBoxArgs,
+    /// The table spec: `rows` (arrays of strings, all the same length) and
+    /// optional `width`, `header`, `columnWidths`, `fontFamily`, `fontSize`,
+    /// `padding`, `border` {color, width}, `headerFill`, `fill`,
+    /// `stripeFill`, `textColor`, `align` (per column: left, center,
+    /// right), `merges` [{row, col, rowSpan, colSpan}], `cells` [{row, col,
+    /// fill, color, align}]. Give this or `csv`.
+    #[serde(default)]
+    pub spec: Option<serde_json::Value>,
+    /// CSV text instead of a spec; the first row is the header.
+    #[serde(default)]
+    pub csv: Option<String>,
+    /// Human-facing layer name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddQrArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    #[serde(flatten)]
+    pub placement: PlacementArgs,
+    #[serde(flatten)]
+    pub box_: OptionalBoxArgs,
+    /// The QR spec: `data`, and optional `errorCorrection` (L, M, Q, H),
+    /// `margin` (modules), `moduleSize` (pixels), `foreground`,
+    /// `background`. Give this or `data`.
+    #[serde(default)]
+    pub spec: Option<serde_json::Value>,
+    /// The text to encode, with every other setting at its default.
+    #[serde(default)]
+    pub data: Option<String>,
+    /// Human-facing layer name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RegenerateArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// The chart, table or QR code layer.
+    pub layer_id: String,
+    /// A whole new spec, with `kind` (chart, table or qr) matching the
+    /// layer. Omit to keep the recorded spec.
+    #[serde(default)]
+    pub spec: Option<serde_json::Value>,
+    /// A new chart type, for a chart layer. The data stays.
+    #[serde(default)]
+    pub chart_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetLayerMetaArgs {
+    #[serde(flatten)]
+    pub write: WriteEnvelope,
+    /// Layer to change.
+    pub layer_id: String,
+    /// A reserved key: `assemblash.` then dot-separated words of letters
+    /// and digits.
+    pub key: String,
+    /// The value to record. Omit, or give null, to remove the key.
+    #[serde(default)]
+    pub value: Option<serde_json::Value>,
+    /// Change a locked layer.
+    #[serde(default)]
+    pub allow_locked: bool,
+}
+
+fn parse_spec(
+    kind: &str,
+    spec: serde_json::Value,
+) -> Result<assemblash_export::generate::GeneratedSpec, ErrorData> {
+    let mut spec = spec;
+    if let Some(object) = spec.as_object_mut() {
+        object
+            .entry("kind")
+            .or_insert_with(|| serde_json::Value::String(kind.to_owned()));
+    }
+    serde_json::from_value(spec).map_err(|error| spec_error(error.to_string()))
+}
+
+fn spec_error(message: String) -> ErrorData {
+    ErrorData::invalid_params(
+        message,
+        Some(serde_json::json!({ "code": "invalidGeneratorSpec" })),
+    )
+}
+
+fn generate_error(error: assemblash_export::generate::GenerateError) -> ErrorData {
+    to_error(assemblash_server::generated::generate_error(error))
+}
+
+fn chart_type(name: &str) -> Result<assemblash_export::generate::ChartType, ErrorData> {
+    assemblash_export::generate::ChartType::parse(name).ok_or_else(|| {
+        spec_error(format!(
+            "chart type {name:?} is not one of: bar, column, line, area, pie, donut, scatter"
+        ))
+    })
+}
+
+fn one_of<T>(spec: Option<T>, other: Option<T>, names: &str) -> Result<T, ErrorData> {
+    match (spec, other) {
+        (Some(value), None) | (None, Some(value)) => Ok(value),
+        _ => Err(ErrorData::invalid_params(
+            format!("give exactly one of {names}"),
+            None,
+        )),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameArgs {
@@ -1269,6 +1459,139 @@ impl AssemblashMcp {
             Operation::Rename {
                 id: LayerId::new(args.layer_id.clone()),
                 name: args.name.clone(),
+            },
+        )
+    }
+
+    /// Adds a chart layer.
+    #[tool(
+        description = "Add a chart (bar, column, line, area, pie, donut or scatter) as a vector \
+                       layer, from a spec or from CSV text. Labels are drawn as outlines from \
+                       the installed font (default Noto Sans), so the family must be installed. \
+                       The spec is recorded on the layer: regenerate_layer switches the type \
+                       without re-entering the data. One undo removes the layer."
+    )]
+    async fn add_chart_layer(
+        &self,
+        Parameters(args): Parameters<AddChartArgs>,
+    ) -> Result<Json<crate::writes::GeneratedWrite>, ErrorData> {
+        let spec = match one_of(
+            args.spec,
+            args.csv.map(serde_json::Value::String),
+            "spec, csv",
+        )? {
+            serde_json::Value::String(csv) => {
+                let name = args
+                    .chart_type
+                    .as_deref()
+                    .ok_or_else(|| ErrorData::invalid_params("csv needs chartType", None))?;
+                assemblash_export::generate::GeneratedSpec::Chart(
+                    assemblash_export::generate::ChartSpec::from_csv(chart_type(name)?, &csv)
+                        .map_err(generate_error)?,
+                )
+            }
+            spec => parse_spec("chart", spec)?,
+        };
+        self.add_generated(&args.write, &args.placement, &args.box_, args.name, &spec)
+    }
+
+    /// Adds a table layer.
+    #[tool(
+        description = "Add a table as a vector layer, from a spec or from CSV text (first row is \
+                       the header). Supports column widths, borders, header and stripe fills, \
+                       merged cells and per-cell fill, colour and alignment. Cell text is one \
+                       line and is clipped at the cell edge."
+    )]
+    async fn add_table_layer(
+        &self,
+        Parameters(args): Parameters<AddTableArgs>,
+    ) -> Result<Json<crate::writes::GeneratedWrite>, ErrorData> {
+        let spec = match one_of(
+            args.spec,
+            args.csv.map(serde_json::Value::String),
+            "spec, csv",
+        )? {
+            serde_json::Value::String(csv) => assemblash_export::generate::GeneratedSpec::Table(
+                assemblash_export::generate::TableSpec::from_csv(&csv).map_err(generate_error)?,
+            ),
+            spec => parse_spec("table", spec)?,
+        };
+        self.add_generated(&args.write, &args.placement, &args.box_, args.name, &spec)
+    }
+
+    /// Adds a QR code layer.
+    #[tool(
+        description = "Add a QR code as a vector layer, from a spec or from the data to encode. \
+                       Needs no font."
+    )]
+    async fn add_qr_layer(
+        &self,
+        Parameters(args): Parameters<AddQrArgs>,
+    ) -> Result<Json<crate::writes::GeneratedWrite>, ErrorData> {
+        let spec = match one_of(
+            args.spec,
+            args.data.map(serde_json::Value::String),
+            "spec, data",
+        )? {
+            serde_json::Value::String(data) => assemblash_export::generate::GeneratedSpec::Qr(
+                assemblash_export::generate::QrSpec::new(data),
+            ),
+            spec => parse_spec("qr", spec)?,
+        };
+        self.add_generated(&args.write, &args.placement, &args.box_, args.name, &spec)
+    }
+
+    /// Makes a generated layer again.
+    #[tool(
+        description = "Make a chart, table or QR code layer again from its recorded spec. Pass \
+                       chartType to switch a chart's type with the same data, or a whole new \
+                       spec of the same kind. The layer box stays. One undo restores it."
+    )]
+    async fn regenerate_layer(
+        &self,
+        Parameters(args): Parameters<RegenerateArgs>,
+    ) -> Result<Json<crate::writes::GeneratedWrite>, ErrorData> {
+        let spec = args
+            .spec
+            .map(|spec| {
+                serde_json::from_value::<assemblash_export::generate::GeneratedSpec>(spec)
+                    .map_err(|error| spec_error(error.to_string()))
+            })
+            .transpose()?;
+        let chart_type = args.chart_type.as_deref().map(chart_type).transpose()?;
+        if spec.is_none() && chart_type.is_none() {
+            return Err(ErrorData::invalid_params(
+                "give spec, chartType, or both",
+                None,
+            ));
+        }
+        self.backend()
+            .regenerate(
+                &self.resolved(&args.write),
+                &LayerId::new(args.layer_id),
+                assemblash_server::generated::Regenerate { spec, chart_type },
+            )
+            .map(Json)
+            .map_err(to_error)
+    }
+
+    /// Records metadata on a layer.
+    #[tool(
+        description = "Record structured metadata on a layer under a reserved key that starts \
+                       with `assemblash.`, or remove it by omitting the value. Older builds keep \
+                       it. The value is at most 64 KiB of JSON."
+    )]
+    async fn set_layer_meta(
+        &self,
+        Parameters(args): Parameters<SetLayerMetaArgs>,
+    ) -> Result<Json<WriteOutcome>, ErrorData> {
+        self.write(
+            &args.write,
+            Operation::SetLayerMeta {
+                id: LayerId::new(args.layer_id.clone()),
+                key: args.key.clone(),
+                value: args.value.clone(),
+                allow_locked: args.allow_locked,
             },
         )
     }

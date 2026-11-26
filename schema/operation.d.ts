@@ -783,5 +783,16 @@ export type Operation = UpdateCanvas & {
   allow_locked?: boolean;
   op: "applyPreset";
   [key: string]: unknown;
+} | {
+  /** Layer to change. */
+  id: LayerId;
+  /** The reserved key, for example `assemblash.chart`. */
+  key: string;
+  /** The value to record. An absent value, or JSON `null`, removes the */
+  value?: unknown;
+  /** Change a locked layer. */
+  allowLocked?: boolean;
+  op: "setLayerMeta";
+  [key: string]: unknown;
 };
 

@@ -44,8 +44,8 @@ appearance, open **Settings** → **Application** and select Light, Dark, or
 System. The browser stores this choice locally. It does not change document
 colours.
 
-**Current release: 1.14.0.** The document schema and the operation API are
-stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.14.0)
+**Current release: 1.15.0.** The document schema and the operation API are
+stable since 1.0. See the [release notes](https://github.com/VidGuiCode/assemblash/releases/tag/v1.15.0)
 or the [changelog](CHANGELOG.md).
 
 ## What one document can hold
@@ -64,6 +64,8 @@ or the [changelog](CHANGELOG.md).
   and a non-destructive effect stack.
 - **Geometry.** Rounded corners, dashes, arrow and circle markers, clip, crop,
   flip, rotation, and opacity.
+- **Charts, tables, and QR codes.** Generated from a spec or a CSV file as
+  vector layers, and made again from the recorded spec.
 - **Templates.** Named slots, presets, and deterministic variant batches.
 - **Record.** Undo, redo, history, version checks, dry runs, and protected
   layers.
@@ -85,8 +87,8 @@ do not install anything else.
 | Mac with an Intel processor | `assemblash-<version>-macos-x86_64.tar.gz` |
 | Debian or Ubuntu | `assemblash_<version>_amd64.deb` (on ARM: `arm64`) |
 
-For example, the Windows file of release 1.14.0 is
-`assemblash-v1.14.0-windows-x86_64.exe`.
+For example, the Windows file of release 1.15.0 is
+`assemblash-v1.15.0-windows-x86_64.exe`.
 
 ### 2. Start Assemblash
 
@@ -275,7 +277,7 @@ it once, and one undo reverts it. Run `assemblash --help` or
 Builds need [Rust 1.92 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.14.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.15.0 assemblash-cli
 ```
 
 ## Why Assemblash
@@ -365,6 +367,7 @@ The important limits:
 | [docs/text-and-fonts.md](docs/text-and-fonts.md) | Font store, styled runs, justification, and warnings |
 | [docs/paint-and-rendering.md](docs/paint-and-rendering.md) | Gradients, blend modes, effects, and the renderer |
 | [docs/automation.md](docs/automation.md) | CLI, HTTP, MCP, history, locks, and self-hosting |
+| [docs/charts-tables-and-qr.md](docs/charts-tables-and-qr.md) | Generated charts, tables, and QR codes, their specs, and regenerate |
 | [PRD.md](PRD.md) | Scope, requirements, invariants, and product decisions |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Tokens, Docker, TLS, and reverse proxies |
 | [CHANGELOG.md](CHANGELOG.md) | Release-by-release history |

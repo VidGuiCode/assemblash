@@ -180,7 +180,9 @@ async function openFromPicker(id) {
   await page.waitFor(`document.querySelector('#project-options [data-project-id="${id}"]')`, `${id} in the picker`);
   await page.click(`#project-options [data-project-id="${id}"]`);
   await page.waitFor(`document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tabId === "${id}"`, `${id} tab visible`);
-  await page.waitFor(`document.querySelector("#canvas-image")?.naturalWidth > 0`, `${id} preview`);
+  // The first render of a project on a slow runner can take more than the
+  // default wait (candidate run 45873939709 timed out at 5 s on the third tab).
+  await page.waitFor(`document.querySelector("#canvas-image")?.naturalWidth > 0`, `${id} preview`, 15000);
 }
 async function switchTo(id) {
   await page.click(`[data-tab-id="${id}"]`);

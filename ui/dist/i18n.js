@@ -630,7 +630,44 @@ const i = {
   "refusals.pageSetMalformed": "The file of page set {set} is not valid.",
   "refusals.pageSetMemberMissing": "Page set {set} names pages that do not exist: {names}.",
   "refusals.pageSetLoop": "Page set {set} contains itself: {chain}.",
-  "refusals.pageSetDuplicatePage": "Page set {set} has project {project} as page {first} and page {second}. A project can be one page only."
+  "refusals.pageSetDuplicatePage": "Page set {set} has project {project} as page {first} and page {second}. A project can be one page only.",
+  "generated.insertButton": "Chart, table or QR code",
+  "generated.uploadsHint": "Make a chart or a table from CSV, or a QR code from text.",
+  "generated.insertTitle": "Insert chart, table or QR code",
+  "generated.replaceTitle": "Replace the spec",
+  "generated.insertConfirm": "Insert",
+  "generated.replaceConfirm": "Make again",
+  "generated.kindChart": "Chart",
+  "generated.kindTable": "Table",
+  "generated.kindQr": "QR code",
+  "generated.sourceCsv": "CSV file",
+  "generated.sourceJson": "JSON spec",
+  "generated.sourceData": "Text or link",
+  "generated.csvFile": "CSV file",
+  "generated.csvChartHint": "The first row names the series. Each other row is one category, then one value for each series.",
+  "generated.csvTableHint": "Each row is one table row. The first row is the header.",
+  "generated.chartType": "Chart type",
+  "generated.chartTitle": "Title",
+  "generated.qrData": "Text or link",
+  "generated.qrDataHint": "The QR code holds this text exactly.",
+  "generated.specJson": "Spec",
+  "generated.specJsonHint": "The spec as JSON. The kind comes from this dialog.",
+  "generated.invalidJson": "The spec is not a JSON object.",
+  "generated.fileRequired": "Choose a CSV file.",
+  "generated.dataRequired": "Type the text for the QR code.",
+  "generated.typeBar": "Bar",
+  "generated.typeColumn": "Column",
+  "generated.typeLine": "Line",
+  "generated.typeArea": "Area",
+  "generated.typePie": "Pie",
+  "generated.typeDonut": "Donut",
+  "generated.typeScatter": "Scatter",
+  "generated.inspectorHint": "This layer was generated from a spec. A change makes the SVG again.",
+  "generated.replaceSpec": "Replace spec",
+  "generated.replaceSpecTitle": "Edit the spec and make the layer again",
+  "generated.addedVersion": "Generated layer added in version {version}.",
+  "generated.regeneratedVersion": "Generated layer made again in version {version}.",
+  "generated.needsProject": "Open a project first."
 }, v = {
   "app.description": "Assemblash — composition visuelle structurée avec des modifications précises et réversibles.",
   "app.homeLabel": "Accueil Assemblash",
@@ -1263,7 +1300,44 @@ const i = {
   "refusals.pageSetMalformed": "Le fichier du jeu de pages {set} n’est pas valide.",
   "refusals.pageSetMemberMissing": "Le jeu de pages {set} nomme des pages qui n’existent pas : {names}.",
   "refusals.pageSetLoop": "Le jeu de pages {set} se contient lui-même : {chain}.",
-  "refusals.pageSetDuplicatePage": "Le jeu de pages {set} contient le projet {project} en page {first} et en page {second}. Un projet ne peut être qu’une seule page."
+  "refusals.pageSetDuplicatePage": "Le jeu de pages {set} contient le projet {project} en page {first} et en page {second}. Un projet ne peut être qu’une seule page.",
+  "generated.insertButton": "Graphique, tableau ou QR",
+  "generated.uploadsHint": "Créez un graphique ou un tableau à partir d’un CSV, ou un code QR à partir d’un texte.",
+  "generated.insertTitle": "Insérer un graphique, un tableau ou un code QR",
+  "generated.replaceTitle": "Remplacer la spécification",
+  "generated.insertConfirm": "Insérer",
+  "generated.replaceConfirm": "Générer à nouveau",
+  "generated.kindChart": "Graphique",
+  "generated.kindTable": "Tableau",
+  "generated.kindQr": "Code QR",
+  "generated.sourceCsv": "Fichier CSV",
+  "generated.sourceJson": "Spécification JSON",
+  "generated.sourceData": "Texte ou lien",
+  "generated.csvFile": "Fichier CSV",
+  "generated.csvChartHint": "La première ligne nomme les séries. Chaque autre ligne est une catégorie, puis une valeur par série.",
+  "generated.csvTableHint": "Chaque ligne est une ligne du tableau. La première ligne est l’en-tête.",
+  "generated.chartType": "Type de graphique",
+  "generated.chartTitle": "Titre",
+  "generated.qrData": "Texte ou lien",
+  "generated.qrDataHint": "Le code QR contient exactement ce texte.",
+  "generated.specJson": "Spécification",
+  "generated.specJsonHint": "La spécification en JSON. Le type vient de cette boîte de dialogue.",
+  "generated.invalidJson": "La spécification n’est pas un objet JSON.",
+  "generated.fileRequired": "Choisissez un fichier CSV.",
+  "generated.dataRequired": "Saisissez le texte du code QR.",
+  "generated.typeBar": "Barres",
+  "generated.typeColumn": "Colonnes",
+  "generated.typeLine": "Courbes",
+  "generated.typeArea": "Aires",
+  "generated.typePie": "Secteurs",
+  "generated.typeDonut": "Anneau",
+  "generated.typeScatter": "Nuage de points",
+  "generated.inspectorHint": "Ce calque a été généré à partir d’une spécification. Une modification génère à nouveau le SVG.",
+  "generated.replaceSpec": "Remplacer la spécification",
+  "generated.replaceSpecTitle": "Modifier la spécification et générer à nouveau le calque",
+  "generated.addedVersion": "Calque généré ajouté dans la version {version}.",
+  "generated.regeneratedVersion": "Calque généré à nouveau dans la version {version}.",
+  "generated.needsProject": "Ouvrez d’abord un projet."
 }, b = {
   "app.description": "Assemblash — strukturierte visuelle Gestaltung mit präzisen, umkehrbaren Änderungen.",
   "app.homeLabel": "Assemblash-Startseite",
@@ -1896,8 +1970,45 @@ const i = {
   "refusals.pageSetMalformed": "Die Datei von Seitensatz {set} ist ungültig.",
   "refusals.pageSetMemberMissing": "Seitensatz {set} nennt Seiten, die nicht existieren: {names}.",
   "refusals.pageSetLoop": "Seitensatz {set} enthält sich selbst: {chain}.",
-  "refusals.pageSetDuplicatePage": "Seitensatz {set} enthält Projekt {project} als Seite {first} und Seite {second}. Ein Projekt kann nur eine Seite sein."
-}, g = "assemblash.language", k = {
+  "refusals.pageSetDuplicatePage": "Seitensatz {set} enthält Projekt {project} als Seite {first} und Seite {second}. Ein Projekt kann nur eine Seite sein.",
+  "generated.insertButton": "Diagramm, Tabelle oder QR",
+  "generated.uploadsHint": "Erstellen Sie ein Diagramm oder eine Tabelle aus CSV oder einen QR-Code aus Text.",
+  "generated.insertTitle": "Diagramm, Tabelle oder QR-Code einfügen",
+  "generated.replaceTitle": "Spezifikation ersetzen",
+  "generated.insertConfirm": "Einfügen",
+  "generated.replaceConfirm": "Neu erzeugen",
+  "generated.kindChart": "Diagramm",
+  "generated.kindTable": "Tabelle",
+  "generated.kindQr": "QR-Code",
+  "generated.sourceCsv": "CSV-Datei",
+  "generated.sourceJson": "JSON-Spezifikation",
+  "generated.sourceData": "Text oder Link",
+  "generated.csvFile": "CSV-Datei",
+  "generated.csvChartHint": "Die erste Zeile benennt die Reihen. Jede weitere Zeile ist eine Kategorie, dann ein Wert je Reihe.",
+  "generated.csvTableHint": "Jede Zeile ist eine Tabellenzeile. Die erste Zeile ist die Kopfzeile.",
+  "generated.chartType": "Diagrammtyp",
+  "generated.chartTitle": "Titel",
+  "generated.qrData": "Text oder Link",
+  "generated.qrDataHint": "Der QR-Code enthält genau diesen Text.",
+  "generated.specJson": "Spezifikation",
+  "generated.specJsonHint": "Die Spezifikation als JSON. Die Art kommt aus diesem Dialog.",
+  "generated.invalidJson": "Die Spezifikation ist kein JSON-Objekt.",
+  "generated.fileRequired": "Wählen Sie eine CSV-Datei.",
+  "generated.dataRequired": "Geben Sie den Text für den QR-Code ein.",
+  "generated.typeBar": "Balken",
+  "generated.typeColumn": "Säulen",
+  "generated.typeLine": "Linie",
+  "generated.typeArea": "Fläche",
+  "generated.typePie": "Kreis",
+  "generated.typeDonut": "Ring",
+  "generated.typeScatter": "Streuung",
+  "generated.inspectorHint": "Diese Ebene wurde aus einer Spezifikation erzeugt. Eine Änderung erzeugt das SVG neu.",
+  "generated.replaceSpec": "Spezifikation ersetzen",
+  "generated.replaceSpecTitle": "Spezifikation bearbeiten und Ebene neu erzeugen",
+  "generated.addedVersion": "Erzeugte Ebene in Version {version} hinzugefügt.",
+  "generated.regeneratedVersion": "Ebene in Version {version} neu erzeugt.",
+  "generated.needsProject": "Öffnen Sie zuerst ein Projekt."
+}, h = "assemblash.language", k = {
   en: i,
   fr: v,
   de: b
@@ -1907,19 +2018,19 @@ function f(e) {
 }
 function S() {
   try {
-    return f(window.localStorage.getItem(g));
+    return f(window.localStorage.getItem(h));
   } catch {
     return "en";
   }
 }
 let n = typeof window > "u" ? "en" : S();
-function A() {
+function C() {
   return n;
 }
-function C(e) {
+function A(e) {
   n = f(e);
   try {
-    window.localStorage.setItem(g, n);
+    window.localStorage.setItem(h, n);
   } catch {
   }
   document.documentElement.lang = n === "pseudo" ? "en" : n, u(), window.dispatchEvent(new Event("assemblash:localechange"));
@@ -1931,17 +2042,17 @@ function y(e) {
   )}⟧`;
 }
 function p(e, t = {}) {
-  const o = (n === "pseudo" ? i[e] : k[n][e]) ?? i[e] ?? `[${e}]`;
-  return (n === "pseudo" ? y(o) : o).replace(
+  const a = (n === "pseudo" ? i[e] : k[n][e]) ?? i[e] ?? `[${e}]`;
+  return (n === "pseudo" ? y(a) : a).replace(
     /\{([a-zA-Z][a-zA-Z0-9]*)\}/g,
-    (a, s) => Object.hasOwn(t, s) ? String(t[s]) : a
+    (o, s) => Object.hasOwn(t, s) ? String(t[s]) : o
   );
 }
 function x(e) {
   return new Intl.NumberFormat(n === "pseudo" ? "en" : n).format(e);
 }
 function w(e, t, r = {}) {
-  const o = new Intl.PluralRules(n === "pseudo" ? "en" : n).select(t), a = `${e}.${o}`, s = `${e}.other`, l = Object.hasOwn(i, a) ? a : s;
+  const a = new Intl.PluralRules(n === "pseudo" ? "en" : n).select(t), o = `${e}.${a}`, s = `${e}.other`, l = Object.hasOwn(i, o) ? o : s;
   return p(l, { ...r, count: x(t) });
 }
 const j = /* @__PURE__ */ new Set(["title", "placeholder", "aria-label", "aria-description", "alt"]);
@@ -1950,17 +2061,17 @@ function u(e = document) {
   const t = [];
   e instanceof Element && t.push(e), t.push(...e.querySelectorAll("[data-i18n], [data-i18n-attr], [data-i18n-count]"));
   for (const r of t) {
-    const o = r.getAttribute("data-i18n");
-    o && Object.hasOwn(i, o) && (r.textContent = p(o));
-    const a = r.getAttribute("data-i18n-count"), s = Number(r.getAttribute("data-count"));
-    a && Number.isFinite(s) && Object.hasOwn(i, `${a}.other`) && (r.textContent = w(a, s));
+    const a = r.getAttribute("data-i18n");
+    a && Object.hasOwn(i, a) && (r.textContent = p(a));
+    const o = r.getAttribute("data-i18n-count"), s = Number(r.getAttribute("data-count"));
+    o && Number.isFinite(s) && Object.hasOwn(i, `${o}.other`) && (r.textContent = w(o, s));
     const l = r.getAttribute("data-i18n-attr");
     if (l)
       for (const c of l.split(";")) {
         const d = c.indexOf(":");
         if (d < 0) continue;
-        const m = c.slice(0, d).trim(), h = c.slice(d + 1).trim();
-        j.has(m) && Object.hasOwn(i, h) && r.setAttribute(m, p(h));
+        const m = c.slice(0, d).trim(), g = c.slice(d + 1).trim();
+        j.has(m) && Object.hasOwn(i, g) && r.setAttribute(m, p(g));
       }
   }
 }
@@ -1969,8 +2080,8 @@ if (typeof document < "u") {
   const e = () => {
     u(), new MutationObserver((t) => {
       for (const r of t)
-        for (const o of r.addedNodes)
-          o instanceof Element && u(o);
+        for (const a of r.addedNodes)
+          a instanceof Element && u(a);
     }).observe(document.body, { childList: !0, subtree: !0 });
   };
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", e, { once: !0 }) : e();
@@ -1979,7 +2090,7 @@ export {
   u as bindTranslations,
   w as formatCount,
   x as formatNumber,
-  A as getLocale,
-  C as setLocale,
+  C as getLocale,
+  A as setLocale,
   p as t
 };

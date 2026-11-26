@@ -534,10 +534,12 @@ async fn every_new_tool_is_advertised_and_callable() {
     // `install_font_pack`, `remove_font_family`, `list_fonts`,
     // `delete_project`, and `rename_project`: 53.
     // 1.14.0 added two read-only page-set tools, `list_page_sets` and
-    // `get_page_set`: 55.
+    // `get_page_set`: 55. 1.15.0 added the generated-layer tools —
+    // `add_chart_layer`, `add_table_layer`, `add_qr_layer`,
+    // `regenerate_layer` — and `set_layer_meta`: 60.
     assert_eq!(
         tools.len(),
-        55,
+        60,
         "the tool count is a deliberate number, not an accident: {names:?}"
     );
 
@@ -976,7 +978,7 @@ async fn no_tool_schema_has_a_ref_cycle() {
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
 
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 55, "the tool surface holds 55 tools");
+    assert_eq!(tools.len(), 60, "the tool surface holds 60 tools");
     for tool in &tools {
         assert_eq!(
             ref_cycle(&tool.input_schema),

@@ -23,6 +23,7 @@ use assemblash_core::session::{self, Session, SessionError};
 use assemblash_core::storage::{self, StorageError};
 use assemblash_core::workspace::Workspace;
 use assemblash_core::{Color, Document};
+use assemblash_export::generate::{ChartSpec, ChartType, GeneratedSpec, QrSpec, TableSpec};
 use assemblash_renderer::install::{self, HttpFetcher, InstallError, Manifest};
 use assemblash_renderer::raster::{font_files_in, LoadedFonts, PngMetadata};
 use assemblash_renderer::store::{FontStore, FontStoreError};
@@ -264,6 +265,102 @@ enum Command {
         fit: Fit,
         #[command(flatten)]
         box_: BoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Adds a chart as a vector layer, from a spec file or a CSV file.
+    ///
+    /// Labels are drawn as outlines from the font, so the family the spec
+    /// names (default Noto Sans) must be loadable from the font options or
+    /// the workspace font store. Prints the layer id and the asset hash,
+    /// separated by a tab.
+    AddChart {
+        /// Project directory.
+        project: PathBuf,
+        /// JSON chart spec.
+        #[arg(long, conflicts_with = "csv", required_unless_present = "csv")]
+        spec: Option<PathBuf>,
+        /// CSV data: a header row with series names, then one row per
+        /// category.
+        #[arg(long, requires = "chart_type")]
+        csv: Option<PathBuf>,
+        /// Chart type, for --csv: bar, column, line, area, pie, donut, scatter.
+        #[arg(long = "type", value_name = "TYPE")]
+        chart_type: Option<String>,
+        /// Chart title, for --csv.
+        #[arg(long, requires = "csv")]
+        title: Option<String>,
+        /// Label font family, for --csv. Default: Noto Sans.
+        #[arg(long, requires = "csv")]
+        font_family: Option<String>,
+        #[command(flatten)]
+        box_: GeneratedBoxArgs,
+        #[command(flatten)]
+        fonts: FontArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Adds a table as a vector layer, from a spec file or a CSV file.
+    ///
+    /// Prints the layer id and the asset hash, separated by a tab.
+    AddTable {
+        /// Project directory.
+        project: PathBuf,
+        /// JSON table spec.
+        #[arg(long, conflicts_with = "csv", required_unless_present = "csv")]
+        spec: Option<PathBuf>,
+        /// CSV data; the first row is the header.
+        #[arg(long)]
+        csv: Option<PathBuf>,
+        /// Cell font family, for --csv. Default: Noto Sans.
+        #[arg(long, requires = "csv")]
+        font_family: Option<String>,
+        #[command(flatten)]
+        box_: GeneratedBoxArgs,
+        #[command(flatten)]
+        fonts: FontArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Adds a QR code as a vector layer.
+    ///
+    /// Prints the layer id and the asset hash, separated by a tab.
+    AddQr {
+        /// Project directory.
+        project: PathBuf,
+        /// JSON QR spec.
+        #[arg(long, conflicts_with = "data", required_unless_present = "data")]
+        spec: Option<PathBuf>,
+        /// The text to encode, with every other setting at its default.
+        #[arg(long)]
+        data: Option<String>,
+        #[command(flatten)]
+        box_: GeneratedBoxArgs,
+        #[command(flatten)]
+        who: ActorArgs,
+    },
+
+    /// Makes a chart, table or QR code layer again from its recorded spec.
+    ///
+    /// --type switches a chart's type with the same data; --spec replaces
+    /// the spec with one of the same kind. One undo restores the layer.
+    /// Prints the layer id and the new asset hash, separated by a tab.
+    Regenerate {
+        /// Project directory.
+        project: PathBuf,
+        /// The generated layer.
+        layer: String,
+        /// A new JSON spec, with `kind` matching the layer.
+        #[arg(long, required_unless_present = "chart_type")]
+        spec: Option<PathBuf>,
+        /// A new chart type: bar, column, line, area, pie, donut, scatter.
+        #[arg(long = "type", value_name = "TYPE")]
+        chart_type: Option<String>,
+        #[command(flatten)]
+        fonts: FontArgs,
         #[command(flatten)]
         who: ActorArgs,
     },
@@ -1350,6 +1447,46 @@ struct BoxArgs {
     layer_name: Option<String>,
 }
 
+/// The box of a generated layer. Width and height default to the size the
+/// generator made.
+#[derive(Debug, Args)]
+struct GeneratedBoxArgs {
+    /// Left edge.
+    #[arg(long, default_value_t = 0.0)]
+    x: f64,
+    /// Top edge.
+    #[arg(long, default_value_t = 0.0)]
+    y: f64,
+    /// Box width. Default: the generated width.
+    #[arg(long, requires = "height")]
+    width: Option<f64>,
+    /// Box height. Default: the generated height.
+    #[arg(long, requires = "width")]
+    height: Option<f64>,
+    /// Layer name.
+    #[arg(long)]
+    layer_name: Option<String>,
+}
+
+impl GeneratedBoxArgs {
+    fn placement(&self) -> assemblash_server::generated::Placement {
+        // Without a size, the layer is placed at x and y at the generated
+        // size; the size is known only after generating, so the shared code
+        // fills it in.
+        let transform = match (self.width, self.height) {
+            (Some(width), Some(height)) => Some(Transform::new(self.x, self.y, width, height)),
+            _ => None,
+        };
+        assemblash_server::generated::Placement {
+            position: None,
+            origin: (self.x, self.y),
+            centered: false,
+            transform,
+            name: self.layer_name.clone(),
+        }
+    }
+}
+
 /// How an export says what it noticed (FR-11).
 ///
 /// A warning is never a failure and never changes a byte of the file, so the
@@ -2081,6 +2218,8 @@ enum CliError {
     InstallTarget,
     #[error("say where to write it: a path, or --out")]
     NoOutput,
+    #[error("{0}")]
+    Usage(String),
     #[error(
         "give a project directory or --pages, not both; with --pages, the one path is the \
          output file"
@@ -2471,6 +2610,118 @@ fn run(command: Command) -> Result<(), CliError> {
             }
 
             print_created(&outcome);
+            Ok(())
+        }
+
+        Command::AddChart {
+            project,
+            spec,
+            csv,
+            chart_type,
+            title,
+            font_family,
+            box_,
+            fonts,
+            who,
+        } => {
+            let spec = match (spec, csv) {
+                (Some(path), _) => read_spec(&path, "chart")?,
+                (None, Some(path)) => {
+                    let name = chart_type.unwrap_or_default();
+                    let parsed = ChartType::parse(&name).ok_or_else(|| {
+                        CliError::Usage(format!(
+                            "chart type {name:?} is not one of: bar, column, line, area, pie, \
+                             donut, scatter"
+                        ))
+                    })?;
+                    let mut chart =
+                        ChartSpec::from_csv(parsed, &read_text(&path)?).map_err(generate_error)?;
+                    chart.title = title;
+                    chart.font_family = font_family;
+                    GeneratedSpec::Chart(chart)
+                }
+                (None, None) => return Err(CliError::Usage("give --spec or --csv".to_owned())),
+            };
+            add_generated(&project, &spec, &box_, &fonts, &who)
+        }
+
+        Command::AddTable {
+            project,
+            spec,
+            csv,
+            font_family,
+            box_,
+            fonts,
+            who,
+        } => {
+            let spec = match (spec, csv) {
+                (Some(path), _) => read_spec(&path, "table")?,
+                (None, Some(path)) => {
+                    let mut table =
+                        TableSpec::from_csv(&read_text(&path)?).map_err(generate_error)?;
+                    table.font_family = font_family;
+                    GeneratedSpec::Table(table)
+                }
+                (None, None) => return Err(CliError::Usage("give --spec or --csv".to_owned())),
+            };
+            add_generated(&project, &spec, &box_, &fonts, &who)
+        }
+
+        Command::AddQr {
+            project,
+            spec,
+            data,
+            box_,
+            who,
+        } => {
+            let spec = match (spec, data) {
+                (Some(path), _) => read_spec(&path, "qr")?,
+                (None, Some(data)) => GeneratedSpec::Qr(QrSpec::new(data)),
+                (None, None) => return Err(CliError::Usage("give --spec or --data".to_owned())),
+            };
+            let no_fonts = FontArgs {
+                font_dirs: Vec::new(),
+                font_files: Vec::new(),
+                font_store: None,
+            };
+            add_generated(&project, &spec, &box_, &no_fonts, &who)
+        }
+
+        Command::Regenerate {
+            project,
+            layer,
+            spec,
+            chart_type,
+            fonts,
+            who,
+        } => {
+            let spec = spec.map(|path| read_spec_any(&path)).transpose()?;
+            let chart_type = chart_type
+                .map(|name| {
+                    ChartType::parse(&name).ok_or_else(|| {
+                        CliError::Usage(format!(
+                            "chart type {name:?} is not one of: bar, column, line, area, pie, \
+                             donut, scatter"
+                        ))
+                    })
+                })
+                .transpose()?;
+            let mut session = open_session(&project)?;
+            let layer = assemblash_core::LayerId::new(layer);
+            let drawn = match &spec {
+                Some(spec) => spec.clone(),
+                None => assemblash_server::generated::recorded_spec(session.document(), &layer)?,
+            };
+            let loaded = generator_fonts(&fonts, &drawn)?;
+            let outcome = assemblash_server::generated::regenerate(
+                &mut session,
+                &layer,
+                assemblash_server::generated::Regenerate { spec, chart_type },
+                loaded.font_set(),
+                &who.actor(),
+                who.expect_version,
+            )?;
+            println!("{}\t{}", outcome.layer, outcome.asset_hash);
             Ok(())
         }
 
@@ -3480,6 +3731,7 @@ fn operation_name(operation: &Operation) -> &'static str {
         Operation::DefinePreset { .. } => "definePreset",
         Operation::DeletePreset { .. } => "deletePreset",
         Operation::ApplyPreset { .. } => "applyPreset",
+        Operation::SetLayerMeta { .. } => "setLayerMeta",
         // Operation is non-exhaustive, so history written by a newer build
         // still lists rather than refusing to print.
         _ => "operation",
@@ -3532,6 +3784,96 @@ fn add_layer(
         }
     }
     Ok(outcome)
+}
+
+fn add_generated(
+    project: &Path,
+    spec: &GeneratedSpec,
+    box_: &GeneratedBoxArgs,
+    fonts: &FontArgs,
+    who: &ActorArgs,
+) -> Result<(), CliError> {
+    let loaded = generator_fonts(fonts, spec)?;
+    let mut session = open_session(project)?;
+    let outcome = assemblash_server::generated::add(
+        &mut session,
+        spec,
+        loaded.font_set(),
+        box_.placement(),
+        &who.actor(),
+        who.expect_version,
+    )?;
+    println!("{}\t{}", outcome.layer, outcome.asset_hash);
+    Ok(())
+}
+
+/// The fonts a generated spec needs: explicit files and directories first,
+/// then the family from the store. With no font option at all, the default
+/// workspace's store, which is where the editor installs fonts.
+fn generator_fonts(args: &FontArgs, spec: &GeneratedSpec) -> Result<LoadedFonts, CliError> {
+    let Some(family) = spec.font_family() else {
+        return Ok(LoadedFonts::from_bytes([]));
+    };
+    let mut paths = args.font_files.clone();
+    for directory in &args.font_dirs {
+        paths.extend(font_files_in(directory)?);
+    }
+    let store = match &args.font_store {
+        Some(directory) => Some(directory.clone()),
+        None if args.names_nothing() => {
+            Some(assemblash_core::workspace::Workspace::open_default()?.fonts_dir())
+        }
+        None => None,
+    };
+    if let Some(directory) = store {
+        let store = FontStore::open(&directory)?;
+        for record in store.records() {
+            if record.family == family {
+                paths.push(store.file_path(&record.file));
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(LoadedFonts::from_files(paths)?)
+}
+
+fn read_text(path: &Path) -> Result<String, CliError> {
+    std::fs::read_to_string(path).map_err(|source| {
+        CliError::Storage(StorageError::Io {
+            operation: "reading",
+            path: path.to_path_buf(),
+            source,
+        })
+    })
+}
+
+/// Reads a spec file. A spec without `kind` gets the command's kind.
+fn read_spec(path: &Path, kind: &str) -> Result<GeneratedSpec, CliError> {
+    let mut value: serde_json::Value = serde_json::from_str(&read_text(path)?)
+        .map_err(|e| CliError::Usage(format!("{}: {e}", path.display())))?;
+    if let Some(object) = value.as_object_mut() {
+        let found = object
+            .entry("kind")
+            .or_insert_with(|| serde_json::Value::String(kind.to_owned()));
+        if found != kind {
+            return Err(CliError::Usage(format!(
+                "{}: kind is {found}, but this command adds a {kind}",
+                path.display()
+            )));
+        }
+    }
+    serde_json::from_value(value).map_err(|e| CliError::Usage(format!("{}: {e}", path.display())))
+}
+
+/// Reads a spec file that must name its own kind.
+fn read_spec_any(path: &Path) -> Result<GeneratedSpec, CliError> {
+    serde_json::from_str(&read_text(path)?)
+        .map_err(|e| CliError::Usage(format!("{}: {e}", path.display())))
+}
+
+fn generate_error(error: assemblash_export::generate::GenerateError) -> CliError {
+    assemblash_server::generated::generate_error(error).into()
 }
 
 fn print_created(outcome: &OpOutcome) {

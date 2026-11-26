@@ -1,6 +1,6 @@
 [package]
 name = "assemblash-export"
-description = "Deterministic export encoders: raster PDF, JPEG, lossless WebP"
+description = "Deterministic export encoders (raster PDF, JPEG, lossless WebP) and generators (charts, tables, QR codes)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,7 +17,16 @@ authors.workspace = true
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "webp"] }
 # Flate for the PDF streams. The same version the renderer already uses.
 miniz_oxide = "0.8.9"
+# QR code matrices for the QR generator. Integer arithmetic only, no
+# dependencies.
+qrcodegen = "1.8.0"
+# Chart, table and QR specs are recorded on the layer as JSON.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 sha2 = "0.11.0"
+# Glyph outlines for chart and table labels. The same version the renderer
+# reads faces with.
+skrifa = "0.44.0"
 thiserror = "2.0.19"
 
 [lints]

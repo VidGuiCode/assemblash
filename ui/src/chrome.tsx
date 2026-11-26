@@ -170,6 +170,8 @@ function AddPanel() {
         {icon("ph-cloud-arrow-up")}<strong data-i18n="uploads.dropFiles">Drop files here</strong><span data-i18n="uploads.orBrowse">or browse images and SVG</span>
       </Dropzone>
       <div id="upload-feedback" className="upload-feedback" aria-live="polite" />
+      <p className="hint" data-i18n="generated.uploadsHint">Make a chart or a table from CSV, or a QR code from text.</p>
+      <Button id="open-generated" className="wide-action" type="button" variant="default" styles={leadingButtonStyles}>{icon("ph-chart-bar")}<span data-i18n="generated.insertButton">Chart, table or QR code</span></Button>
     </section>
     <section className="add-section" id="add-template-section" hidden>
       <div className="section-title"><h3><span data-i18n="toolbar.templatesButton">Templates</span></h3></div>

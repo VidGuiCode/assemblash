@@ -448,6 +448,29 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   `400 malformedRequest`. Its MCP `export_document` ignores the new
   arguments and writes a PNG. Check the version before you ask for a PDF.
 
+## Charts, tables, and QR codes (1.15.0 and newer)
+
+- Make a generated layer with `add_chart_layer`, `add_table_layer`, or
+  `add_qr_layer` (MCP), `POST /api/projects/{id}/generated-layers` (HTTP), or
+  `assemblash add-chart`, `add-table`, `add-qr` (CLI). Give a JSON `spec`, or
+  CSV text for a chart or a table, or `data` for a QR code. The engine makes
+  sanitised SVG and adds an `svg` layer. One undo removes the layer.
+- Labels are outlines from an installed face. The spec names the family in
+  `fontFamily`, default Noto Sans. Call `list_fonts` first and name a family
+  that is installed. A character the face does not cover is refused with
+  `generatorMissingGlyph`. Do not retry with the same family.
+- The spec is recorded under `assemblash.chart`, `assemblash.table`, or
+  `assemblash.qr` on the layer. Read it from `get_document_state`. To change
+  the data, call `regenerate_layer` with a whole new spec of the same kind. To
+  change only the chart type, pass `chartType`. Do not edit the asset, and do
+  not replace the layer.
+- A table is a picture of text, not text layers. Change its spec to change
+  its text.
+- `set_layer_meta` writes one reserved `assemblash.` key on a layer, at most
+  64 KiB. `null` removes it. Use it only for your own structured notes; the
+  generator keys are written by the generator tools.
+- Full field list: `docs/charts-tables-and-qr.md`.
+
 ## MCP tools beyond the read/mutate set
 
 - `create_project` — `project`, `width`, `height`, and optional `background`
@@ -479,9 +502,11 @@ prints the whole array as JSON on stdout instead and leaves stderr quiet.
   default pack (a network action only on this call), `remove_font_family`
   removes one family, and `delete_project` / `rename_project` manage
   projects — a project another process holds is refused `projectLocked`,
-  never deleted or renamed past. The tool surface holds 55 tools. 1.14.0
-  adds the read-only `list_page_sets` and `get_page_set`. Before 1.14.0, the
-  surface held 53 tools.
+  never deleted or renamed past. The tool surface holds 60 tools. 1.15.0
+  adds `add_chart_layer`, `add_table_layer`, `add_qr_layer`,
+  `regenerate_layer`, and `set_layer_meta`. 1.14.0 added the read-only
+  `list_page_sets` and `get_page_set`. Before 1.14.0, the surface held 53
+  tools.
 - In the `insert_layer_tree` input schema and the `get_document_state` output
   schema, the `children` of a group is an untyped object. Each child has the
   same layer shape as an item of `layers`.

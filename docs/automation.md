@@ -54,7 +54,7 @@ A launch without arguments creates the workspace, starts the server, and opens t
 Builds need Rust 1.92 or newer:
 
 ```sh
-cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.14.0 assemblash-cli
+cargo install --git https://github.com/VidGuiCode/assemblash --tag v1.15.0 assemblash-cli
 ```
 
 The main commands:
@@ -286,11 +286,13 @@ In the `insert_layer_tree` input schema and the `get_document_state` output sche
 { "project": "cover", "format": "pdf", "pages": "deck:1,3", "name": "deck" }
 ```
 
+`add_chart_layer`, `add_table_layer`, and `add_qr_layer` make a generated layer from a spec, and `regenerate_layer` makes it again. The HTTP routes are `POST /api/projects/{id}/generated-layers` and `PUT /api/projects/{id}/generated-layers/{layer}`. See [charts-tables-and-qr.md](charts-tables-and-qr.md).
+
 `list_page_sets` and `get_page_set` only read. `get_page_set` returns the same JSON as `GET /api/page-sets/{name}`. A server started with `--project` has no page sets.
 
 A change to a text layer reports the same warnings immediately, in the `warnings` field of the result. An agent cannot see its own render. Thus the agent learns three things at once: the text does not fit its layer box, a word was split, or another layer covers the text.
 
-While an agent is connected, the editor shows "1 AI agent connected" in its status bar. The MCP server provides 55 tools.
+While an agent is connected, the editor shows "1 AI agent connected" in its status bar. The MCP server provides 60 tools.
 
 For agents that work in a checkout of this repository, the skill is `skills/assemblash/SKILL.md`. It explains the document-first workflow and the guarantees that an integration must keep.
 
