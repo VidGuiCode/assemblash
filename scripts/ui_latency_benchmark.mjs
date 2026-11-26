@@ -40,10 +40,18 @@ const browserPath = options.browser ?? process.env.ASSEMBLASH_TEST_BROWSER ?? [
 if (!browserPath) throw new Error("Set --browser to Chrome or Chromium");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+// The browser refuses an evaluation that it receives while the page navigates.
+// The login form submit starts a navigation, so the probe can get this refusal.
+const NAVIGATION_REFUSAL = /navigated or closed|Execution context was destroyed|Cannot find context/;
 async function until(probe, description, ms = 30000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
-    if (await probe()) return;
+    try {
+      if (await probe()) return;
+    } catch (error) {
+      // A refusal during a navigation is "not yet". Any other error stops the run.
+      if (!NAVIGATION_REFUSAL.test(error?.message ?? "")) throw error;
+    }
     await pause(25);
   }
   throw new Error(`Timeout: ${description}`);
