@@ -10,7 +10,7 @@ schema change is always noted explicitly.
 
 ## [Unreleased]
 
-## [1.15.0] — 2026-11-21
+## [1.15.0] — 2026-11-26
 
 **Charts, tables and QR codes as generated layers.**
 
