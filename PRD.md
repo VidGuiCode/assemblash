@@ -1,7 +1,7 @@
 # Assemblash Product Requirements Document
 
 **Product:** Assemblash  
-**Status:** **1.15.0 released 2026-11-21.**
+**Status:** **1.15.0 released 2026-11-26.**
 The document schema stays at `schemaVersion` 1. The operation API stays compatible with 1.0.
 A change that breaks either contract requires a MAJOR release and a migration.
 See [CHANGELOG.md](CHANGELOG.md) for implemented changes and compatibility limits.
