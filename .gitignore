@@ -94,6 +94,10 @@ env/
 .claude/settings.local.json
 .claude/shell-snapshots/
 .claude/todos/
+.claude/worktrees/
+.mimosa/
+.video_agent/
+.zcodeignore
 .codex/
 .cursor/
 .aider*
