@@ -7,6 +7,7 @@ import { join } from "node:path";
 const WAIT_MS = 5000;
 const COMMAND_MS = 15000;
 const STARTUP_MS = 30000;
+const NAVIGATION_REFUSAL = /navigated or closed|Execution context was destroyed|Cannot find context/;
 function withTimeout(promise, what, timeoutMs = WAIT_MS) {
   let timer;
   return Promise.race([
@@ -102,9 +103,19 @@ class CdpPage {
     return result.result.value;
   }
 
+  // A probe that arrives while the page navigates (a login redirect, a
+  // reload) is refused by the browser. That refusal means "not yet", not a
+  // failure: the next probe runs in the new document.
   async waitFor(expression, description, timeoutMs = WAIT_MS) {
     try {
-      await waitFor(() => this.evaluate(`Boolean(${expression})`), description, timeoutMs);
+      await waitFor(
+        () => this.evaluate(`Boolean(${expression})`).catch((error) => {
+          if (NAVIGATION_REFUSAL.test(error?.message ?? "")) return false;
+          throw error;
+        }),
+        description,
+        timeoutMs,
+      );
     } catch (error) {
       const page = await this.evaluate(`({
         url: location.href,
